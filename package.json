@@ -1,7 +1,7 @@
 {
   "name": "@openmouse/protocol",
   "version": "0.1.0",
-  "description": "Transport-independent gaming mouse protocol codecs used by OpenMouse.",
+  "description": "Gaming mouse protocol codecs and WebHID drivers used by OpenMouse.",
   "type": "module",
   "files": [
     "dist",
@@ -13,30 +13,88 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./atk": { "types": "./dist/atk/index.d.ts", "import": "./dist/atk/index.js" },
-    "./endgame-gear-we": { "types": "./dist/endgame-gear/wireless.d.ts", "import": "./dist/endgame-gear/wireless.js" },
-    "./endgame-gear-op1": { "types": "./dist/endgame-gear/op1.d.ts", "import": "./dist/endgame-gear/op1.js" },
-    "./finalmouse": { "types": "./dist/finalmouse/index.d.ts", "import": "./dist/finalmouse/index.js" },
-    "./keychron": { "types": "./dist/keychron/index.d.ts", "import": "./dist/keychron/index.js" },
-    "./lamzu": { "types": "./dist/lamzu/index.d.ts", "import": "./dist/lamzu/index.js" },
-    "./logitech": { "types": "./dist/logitech/index.d.ts", "import": "./dist/logitech/index.js" },
-    "./moddo": { "types": "./dist/moddo/index.d.ts", "import": "./dist/moddo/index.js" },
-    "./orbital": { "types": "./dist/orbital/index.d.ts", "import": "./dist/orbital/index.js" },
-    "./pulsar": { "types": "./dist/pulsar/index.d.ts", "import": "./dist/pulsar/index.js" },
-    "./razer": { "types": "./dist/razer/index.d.ts", "import": "./dist/razer/index.js" },
-    "./razer-devices": { "types": "./dist/razer/devices.d.ts", "import": "./dist/razer/devices.js" },
-    "./razer-v4": { "types": "./dist/razer/v4.d.ts", "import": "./dist/razer/v4.js" },
-    "./teevolution": { "types": "./dist/teevolution/index.d.ts", "import": "./dist/teevolution/index.js" },
-    "./vgn": { "types": "./dist/vgn/index.d.ts", "import": "./dist/vgn/index.js" },
-    "./wlmouse": { "types": "./dist/wlmouse/index.d.ts", "import": "./dist/wlmouse/index.js" }
+    "./atk": {
+      "types": "./dist/atk/index.d.ts",
+      "import": "./dist/atk/index.js"
+    },
+    "./endgame-gear-we": {
+      "types": "./dist/endgame-gear/wireless.d.ts",
+      "import": "./dist/endgame-gear/wireless.js"
+    },
+    "./endgame-gear-op1": {
+      "types": "./dist/endgame-gear/op1.d.ts",
+      "import": "./dist/endgame-gear/op1.js"
+    },
+    "./finalmouse": {
+      "types": "./dist/finalmouse/index.d.ts",
+      "import": "./dist/finalmouse/index.js"
+    },
+    "./keychron": {
+      "types": "./dist/keychron/index.d.ts",
+      "import": "./dist/keychron/index.js"
+    },
+    "./lamzu": {
+      "types": "./dist/lamzu/index.d.ts",
+      "import": "./dist/lamzu/index.js"
+    },
+    "./logitech": {
+      "types": "./dist/logitech/index.d.ts",
+      "import": "./dist/logitech/index.js"
+    },
+    "./moddo": {
+      "types": "./dist/moddo/index.d.ts",
+      "import": "./dist/moddo/index.js"
+    },
+    "./orbital": {
+      "types": "./dist/orbital/index.d.ts",
+      "import": "./dist/orbital/index.js"
+    },
+    "./pulsar": {
+      "types": "./dist/pulsar/index.d.ts",
+      "import": "./dist/pulsar/index.js"
+    },
+    "./razer": {
+      "types": "./dist/razer/index.d.ts",
+      "import": "./dist/razer/index.js"
+    },
+    "./razer-devices": {
+      "types": "./dist/razer/devices.d.ts",
+      "import": "./dist/razer/devices.js"
+    },
+    "./razer-v4": {
+      "types": "./dist/razer/v4.d.ts",
+      "import": "./dist/razer/v4.js"
+    },
+    "./teevolution": {
+      "types": "./dist/teevolution/index.d.ts",
+      "import": "./dist/teevolution/index.js"
+    },
+    "./vgn": {
+      "types": "./dist/vgn/index.d.ts",
+      "import": "./dist/vgn/index.js"
+    },
+    "./wlmouse": {
+      "types": "./dist/wlmouse/index.d.ts",
+      "import": "./dist/wlmouse/index.js"
+    },
+    "./drivers": {
+      "types": "./dist/drivers/index.d.ts",
+      "import": "./dist/drivers/index.js"
+    },
+    "./drivers/*": {
+      "types": "./dist/drivers/*.d.ts",
+      "import": "./dist/drivers/*.js"
+    }
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.json",
-    "check": "npm run build && npm pack --dry-run",
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "check": "npm run build && npm test && npm pack --dry-run",
     "prepare": "npm run build"
   },
   "devDependencies": {
+    "tsx": "^4.23.11",
     "typescript": "^5.8.3"
   },
   "engines": {
@@ -46,5 +104,7 @@
     "type": "git",
     "url": "git+https://github.com/OpenMouse-Project/mouse-protocol.git"
   },
-  "sideEffects": false
+  "sideEffects": [
+    "./dist/drivers/orbital/host-protocol.js"
+  ]
 }

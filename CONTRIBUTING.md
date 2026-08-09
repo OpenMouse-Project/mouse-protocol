@@ -1,9 +1,9 @@
 # Contributing to Mouse Protocol
 
 Thank you for helping make gaming mouse hardware more open. This repository
-contains the transport-independent protocol layer used by OpenMouse: packet
-layouts, commands, checksums, encoders, decoders, protocol value types, and
-device catalogs that describe wire-level capabilities.
+contains the protocol and WebHID driver layers used by OpenMouse: packet
+layouts, commands, checksums, encoders, decoders, protocol value types, device
+catalogs, discovery filters, and hardware-facing clients.
 
 ## Before you start
 
@@ -36,8 +36,8 @@ the npm package. Generated `dist/` files are not committed.
 
 ## What belongs here
 
-Code belongs in this repository when it can work without knowing how bytes are
-transported. Good examples include:
+The codec layer under the brand folders in `src/` must work without knowing how
+bytes are transported. Good examples include:
 
 - report IDs, packet sizes, commands, status values, and offsets;
 - checksums and packet framing;
@@ -45,12 +45,17 @@ transported. Good examples include:
 - conversions between wire values and protocol-level values;
 - product IDs and capabilities that determine which commands are valid.
 
-Keep these concerns in the consuming application instead:
+The WebHID driver layer under `src/drivers/` owns:
 
 - WebHID discovery and permissions;
 - opening devices and sending or receiving reports;
-- retries, delays, queues, and connection recovery;
-- application UI types, labels, notifications, or saved preferences.
+- retries, delays, queues, connection recovery, and read-back verification;
+- conversion from wire values into shared `MouseStatus` values;
+- the supported-device registry and browser request filters.
+
+Keep rendering, DOM access, application state, notifications, and saved UI
+preferences in the consuming application. A driver may provide declarative UI
+hints, but it must not render or query application elements.
 
 Protocol functions should be deterministic wherever possible. Prefer functions
 that accept bytes or plain values and return a new `Uint8Array`, object, or
@@ -75,6 +80,12 @@ NodeNext module resolution and publishes ECMAScript modules.
 Treat existing exports as a public API. Avoid renaming or changing their
 meaning without explaining the migration and updating all known consumers.
 
+For a WebHID driver, add the implementation under
+`src/drivers/<brand>/`, register it in `src/drivers/registry.ts`, and update
+`src/drivers/vendors.ts` when the browser picker needs a new filter. Drivers
+should use the public codec entry point for their brand rather than duplicating
+packet logic.
+
 ## Evidence and hardware verification
 
 Protocol changes should state where the information came from. Useful evidence
@@ -97,9 +108,14 @@ For write commands:
 
 ## Testing with OpenMouse
 
-Behavioral protocol tests currently live beside their OpenMouse drivers. Check
-out the `openmouse` and `mouse-protocol` repositories as siblings, then install
-your local protocol build into OpenMouse without changing its manifest:
+Codec and driver tests live beside their driver modules under `src/drivers/`.
+Add or update focused tests for known captured packets, invalid or truncated
+replies, supported value boundaries, encode/decode round trips, discovery
+filters, and read-back behavior.
+
+To verify the consuming application, check out the `openmouse` and
+`mouse-protocol` repositories as siblings, then install your local build into
+OpenMouse without changing its manifest:
 
 ```sh
 cd mouse-protocol
@@ -110,13 +126,9 @@ npm install --no-save --package-lock=false ../mouse-protocol
 npm run check
 ```
 
-Add or update focused tests in `openmouse/src/devices/<vendor>/`. Tests should
-cover known captured packets, invalid or truncated replies, supported value
-boundaries, and encode/decode round trips. A new product entry should also keep
-OpenMouse's registry overlap tests passing.
-
-Before submitting a protocol pull request, run both the package check and the
-OpenMouse check against your local package.
+Before submitting a driver pull request, run both the package check and the
+OpenMouse check against your local package. A new product entry must also keep
+the driver registry overlap tests passing.
 
 ## Pull requests
 

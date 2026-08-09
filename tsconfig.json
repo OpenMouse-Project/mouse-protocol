@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "rootDir": "src",
@@ -8,11 +9,35 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    "allowJs": true,
+    "checkJs": false,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@openmouse/protocol": ["./src/index.ts"],
+      "@openmouse/protocol/atk": ["./src/atk/index.ts"],
+      "@openmouse/protocol/endgame-gear-we": ["./src/endgame-gear/wireless.ts"],
+      "@openmouse/protocol/endgame-gear-op1": ["./src/endgame-gear/op1.ts"],
+      "@openmouse/protocol/finalmouse": ["./src/finalmouse/index.ts"],
+      "@openmouse/protocol/keychron": ["./src/keychron/index.ts"],
+      "@openmouse/protocol/lamzu": ["./src/lamzu/index.ts"],
+      "@openmouse/protocol/logitech": ["./src/logitech/index.ts"],
+      "@openmouse/protocol/moddo": ["./src/moddo/index.ts"],
+      "@openmouse/protocol/orbital": ["./src/orbital/index.ts"],
+      "@openmouse/protocol/pulsar": ["./src/pulsar/index.ts"],
+      "@openmouse/protocol/razer": ["./src/razer/index.ts"],
+      "@openmouse/protocol/razer-devices": ["./src/razer/devices.ts"],
+      "@openmouse/protocol/razer-v4": ["./src/razer/v4.ts"],
+      "@openmouse/protocol/teevolution": ["./src/teevolution/index.ts"],
+      "@openmouse/protocol/vgn": ["./src/vgn/index.ts"],
+      "@openmouse/protocol/wlmouse": ["./src/wlmouse/index.ts"]
+    }
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts"]
 }

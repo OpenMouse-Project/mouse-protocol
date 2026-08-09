@@ -3,14 +3,20 @@
 Transport-independent gaming mouse protocol codecs used by OpenMouse.
 
 The package owns packet layouts, command constants, checksums, encoders,
-decoders, protocol-specific value types, and device catalogs that are protocol
-facts. It deliberately has no dependency on WebHID, browser APIs, timers, or
-OpenMouse UI types, so browser, Node.js, and TypeScript projects can share it.
+decoders, protocol-specific value types, device catalogs, and the WebHID
+drivers used by OpenMouse. Pure codec entry points do not depend on WebHID, so
+browser, Node.js, and TypeScript projects can use them independently from the
+optional driver layer.
 
 ```ts
 import { buildFinalmouseReport } from "@openmouse/protocol/finalmouse";
 import { encodeRazerRequest } from "@openmouse/protocol/razer";
 import { RAZER_PRODUCTS } from "@openmouse/protocol/razer-devices";
+
+import {
+  createSupportedClient,
+  SUPPORTED_HID_FILTERS,
+} from "@openmouse/protocol/drivers";
 ```
 
 ## Development
@@ -21,8 +27,9 @@ npm run check
 ```
 
 The `prepare` script builds `dist` automatically when this package is installed
-directly from Git. WebHID discovery, connection management, retries, and
-conversion into application-facing mouse status remain in the OpenMouse app.
+directly from Git. Codec sources are grouped by brand under `src/`; WebHID
+drivers, discovery filters, the driver registry, and shared status types live
+under `src/drivers/`. OpenMouse retains application orchestration and UI code.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for protocol boundaries, hardware
 evidence requirements, local OpenMouse integration, and the pull-request
