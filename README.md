@@ -24,6 +24,10 @@ The `prepare` script builds `dist` automatically when this package is installed
 directly from Git. WebHID discovery, connection management, retries, and
 conversion into application-facing mouse status remain in the OpenMouse app.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for protocol boundaries, hardware
+evidence requirements, local OpenMouse integration, and the pull-request
+checklist.
+
 ## Protocol entry points
 
 | Brand | Import |

@@ -5,7 +5,8 @@
   "type": "module",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CONTRIBUTING.md"
   ],
   "exports": {
     ".": {
