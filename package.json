@@ -1,0 +1,48 @@
+{
+  "name": "@openmouse/protocol",
+  "version": "0.1.0",
+  "description": "Transport-independent gaming mouse protocol codecs used by OpenMouse.",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./atk": { "types": "./dist/atk.d.ts", "import": "./dist/atk.js" },
+    "./endgame-gear-we": { "types": "./dist/endgame-gear-we.d.ts", "import": "./dist/endgame-gear-we.js" },
+    "./endgame-gear-op1": { "types": "./dist/endgame-gear-op1.d.ts", "import": "./dist/endgame-gear-op1.js" },
+    "./finalmouse": { "types": "./dist/finalmouse.d.ts", "import": "./dist/finalmouse.js" },
+    "./keychron": { "types": "./dist/keychron.d.ts", "import": "./dist/keychron.js" },
+    "./lamzu": { "types": "./dist/lamzu.d.ts", "import": "./dist/lamzu.js" },
+    "./logitech": { "types": "./dist/logitech.d.ts", "import": "./dist/logitech.js" },
+    "./moddo": { "types": "./dist/moddo.d.ts", "import": "./dist/moddo.js" },
+    "./orbital": { "types": "./dist/orbital.d.ts", "import": "./dist/orbital.js" },
+    "./pulsar": { "types": "./dist/pulsar.d.ts", "import": "./dist/pulsar.js" },
+    "./razer": { "types": "./dist/razer.d.ts", "import": "./dist/razer.js" },
+    "./razer-devices": { "types": "./dist/razer-devices.d.ts", "import": "./dist/razer-devices.js" },
+    "./razer-v4": { "types": "./dist/razer-v4.d.ts", "import": "./dist/razer-v4.js" },
+    "./teevolution": { "types": "./dist/teevolution.d.ts", "import": "./dist/teevolution.js" },
+    "./vgn": { "types": "./dist/vgn.d.ts", "import": "./dist/vgn.js" },
+    "./wlmouse": { "types": "./dist/wlmouse.d.ts", "import": "./dist/wlmouse.js" }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run build && npm pack --dry-run",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenMouse-Project/mouse-protocol.git"
+  },
+  "sideEffects": false
+}
