@@ -149,6 +149,21 @@ export function eggNormalizeFeatureReport(
   expectedTotal: number,
   payloadLength: number,
 ): Uint8Array {
+  // Some OP1 8K descriptors expose both feature reports at the full 1040-byte
+  // config size. On Windows, command replies then retain their A0/A1 wire
+  // header as the first payload byte. Treat that byte as framing instead of
+  // prepending a duplicate report ID and shifting the status/version fields.
+  const hasWireHeader = raw.length === payloadLength
+    && raw.length >= 2
+    && (raw[0] === 0 || raw[0] === EGG_REPORT.config || raw[0] === EGG_REPORT.command)
+    && (raw[1] === 0x01 || raw[1] === 0x03);
+  if (hasWireHeader) {
+    const result = new Uint8Array(Math.max(expectedTotal, raw.length));
+    result.set(raw);
+    result[0] = reportId;
+    return result;
+  }
+
   let includesId: boolean;
   if (payloadLength > 0 && raw.length === payloadLength) includesId = false;
   else if (payloadLength > 0 && raw.length === payloadLength + 1 && raw[0] === reportId) includesId = true;

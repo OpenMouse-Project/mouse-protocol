@@ -93,6 +93,29 @@ test("firmware response normalization preserves an included report ID", () => {
   assert.equal(eggFormatFirmwareVersion(normalized), "V1.07");
 });
 
+test("oversized Windows command replies do not duplicate the wire header", () => {
+  const raw = new Uint8Array(1040);
+  raw[0] = 0xa1;
+  raw[1] = 0x01;
+  raw[17] = 0x24;
+  raw[18] = 0x01;
+
+  const normalized = eggNormalizeFeatureReport(raw, 0xa1, 64, 1040);
+  assert.equal(normalized.length, 1040);
+  assert.deepEqual(Array.from(normalized.slice(0, 3)), [0xa1, 0x01, 0x00]);
+  assert.equal(eggFormatFirmwareVersion(normalized), "V1.24");
+});
+
+test("oversized Windows busy replies retain their status byte", () => {
+  const raw = new Uint8Array(1040);
+  raw[0] = 0xa1;
+  raw[1] = 0x03;
+
+  const normalized = eggNormalizeFeatureReport(raw, 0xa1, 64, 1040);
+  assert.equal(normalized[0], 0xa1);
+  assert.equal(normalized[1], 0x03);
+});
+
 test("button control and mapping offsets follow the shifted physical layout", () => {
   assert.deepEqual(Array.from({ length: 7 }, (_, button) => eggButtonControlOffset(button)), [77, 84, 91, 98, 105, null, null]);
   assert.deepEqual(Array.from({ length: 7 }, (_, button) => eggButtonMappingOffset(button, false)), [null, 78, 85, 92, 99, 113, 120]);

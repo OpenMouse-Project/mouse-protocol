@@ -651,15 +651,6 @@ export class EggOp1HidClient {
   }
 
   private normalizeFeature(raw: Uint8Array, reportId: number, expectedTotal: number, payloadLength: number): Uint8Array {
-    if (expectedTotal === EGG_CONFIG_SIZE
-      && raw.length === payloadLength
-      && (raw[0] === 0 || raw[0] === EGG_REPORT.config || raw[0] === EGG_REPORT.command)
-      && (raw[1] === STATUS_OK || raw[1] === STATUS_BUSY)) {
-      const result = new Uint8Array(expectedTotal);
-      result.set(raw);
-      result[0] = reportId;
-      return result;
-    }
     return eggNormalizeFeatureReport(raw, reportId, expectedTotal, payloadLength);
   }
 
