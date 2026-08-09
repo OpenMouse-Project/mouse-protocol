@@ -186,3 +186,4 @@ export function vgnDecodeProfile(profile: Uint8Array): VgnProfile {
     performanceMode: boolean(VGN_ADDRESS.performanceMode),
   };
 }
+

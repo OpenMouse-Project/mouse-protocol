@@ -52,7 +52,7 @@ import {
   RAZER_TRANSACTION_ID_1F,
   RAZER_TRANSACTION_ID_3F,
   RAZER_TRANSACTION_ID_FF,
-} from "./razer.js";
+} from "./codec.js";
 
 /**
  * OpenRazer's transport families. They differ in response timing, control
@@ -502,3 +502,4 @@ export const RAZER_PRODUCTS: ReadonlyMap<number, RazerProduct> = new Map(
 
 /** Product ids for the WebHID picker filters in `../vendors.ts`. */
 export const RAZER_PRODUCT_IDS: readonly number[] = [...RAZER_PRODUCTS.keys()];
+

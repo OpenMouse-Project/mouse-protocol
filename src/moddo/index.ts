@@ -176,3 +176,4 @@ export function decodeModdoFirmware(payload: Uint8Array): ModdoFirmware {
     dongleConnected: dongle.present,
   };
 }
+

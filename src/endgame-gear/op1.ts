@@ -354,3 +354,4 @@ export function eggButtonMappingOffset(button: number, leftHanded: boolean): num
   const index = BUTTON_MAPPING_INDEX[button];
   return index === null || index === undefined ? null : EGG_OFFSET.firstButton + index * 7 + 1;
 }
+

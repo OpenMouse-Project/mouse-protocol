@@ -55,3 +55,4 @@ export function compaxDecodeSleep(payload: Uint8Array | null, disabledMinimum = 
 export function compaxDecodeFirmware(label: string, payload: Uint8Array | null): string {
   return !payload || payload.length < 4 ? `${label} firmware unavailable` : `${label} ${payload[2]}.${payload[3]}`;
 }
+

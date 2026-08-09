@@ -94,3 +94,4 @@ export function readUint32LE(data: Uint8Array, offset: number): number {
 export function uint32LE(value: number): Uint8Array {
   return new Uint8Array([value, value >>> 8, value >>> 16, value >>> 24]);
 }
+

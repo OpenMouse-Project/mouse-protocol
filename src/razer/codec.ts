@@ -541,3 +541,4 @@ export function decodeExtendedPollingRate(args: Uint8Array): number {
   if (!args[1]) throw new RazerProtocolError("The mouse reported an unknown polling rate.");
   return Math.round(8000 / args[1]);
 }
+

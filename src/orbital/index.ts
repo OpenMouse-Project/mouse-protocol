@@ -23,3 +23,4 @@ export function orbitalFinishPacket(packet: Uint8Array, routeToMouse = false): U
   result[ORBITAL_PACKET_SIZE - 1] = (0xa1 - (sum & 0xff)) & 0xff;
   return result;
 }
+

@@ -37,3 +37,4 @@ export function keychronDecodeFirmware(response: Uint8Array): string | null {
   const text = String.fromCharCode(...bytes);
   return text.startsWith("v") ? text : `v${text}`;
 }
+

@@ -121,3 +121,4 @@ function decodeAscii(payload: Uint8Array, length: number): string {
   if (length <= 0) return "";
   return new TextDecoder("ascii").decode(payload.subarray(0, Math.min(length, payload.length))).replace(/[\0 ]+$/, "");
 }
+

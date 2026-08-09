@@ -59,8 +59,9 @@ does so.
 
 ## Adding or changing a protocol
 
-1. Add or update a focused module under `src/`. Use the vendor name for a shared
-   protocol, or a model/family suffix when its wire format is distinct.
+1. Add or update a focused module under the brand's `src/<brand>/` folder. Put
+   genuinely shared wire framing under a protocol-family folder such as
+   `src/compx/`, then re-export it through each applicable brand entry point.
 2. Export new public APIs from a package subpath in `package.json`.
 3. Add the module namespace to `src/index.ts` when it should be available from
    the package root.

@@ -350,3 +350,4 @@ export function teevolutionSensorModeUi(options: {
   // 2000/4000 Hz wireless on PAW3950 uses corded/Ultra tracking.
   return { mode: "Ultra", editable: false, storedValue };
 }
+

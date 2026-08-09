@@ -275,3 +275,4 @@ export function wePatchScalar(mem: Uint8Array, addr: number, value: number): voi
 export function weIsValidCpi(cpi: number): boolean {
   return Number.isInteger(cpi) && cpi >= 50 && cpi <= 12800 && cpi % 50 === 0;
 }
+

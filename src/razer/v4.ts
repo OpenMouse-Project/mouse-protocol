@@ -53,3 +53,4 @@ export function decodeRazerV4PollingCode(code: number | undefined): number {
   if (!rate) throw new Error(`The Viper V4 Pro reported unknown polling code 0x${(code ?? 0).toString(16)}.`);
   return rate;
 }
+
