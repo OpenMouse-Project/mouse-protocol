@@ -129,7 +129,7 @@ export const EGG_OFFSET = {
   angleSnapping: 26,
   rippleControl: 27,
   motionSync: 28,
-  activeCpiStage: 29,
+  reserved29: 29,
   cpiLevels: 30,
   firstCpiSplit: 51,
   handedButton: 71,
@@ -223,6 +223,21 @@ export function eggReadUint16LE(bytes: Uint8Array, offset: number): number {
 export function eggWriteUint16LE(bytes: Uint8Array, offset: number, value: number): void {
   bytes[offset] = value & 0xff;
   bytes[offset + 1] = value >> 8;
+}
+
+/**
+ * The wired 8K configuration does not expose the CPI stage currently selected
+ * by the mouse. Apply a generic CPI change to every enabled stage so it takes
+ * effect regardless of the runtime stage selection.
+ */
+export function eggWriteEnabledCpiStages(bytes: Uint8Array, x: number, y: number): void {
+  const levels = Math.min(Math.max(bytes[EGG_OFFSET.cpiLevels], 1), 4);
+  for (let level = 0; level < levels; level += 1) {
+    const offset = EGG_OFFSET.firstCpiSplit + level * 5;
+    bytes[offset] = x === y ? 0 : 1;
+    eggWriteUint16LE(bytes, offset + 1, x);
+    eggWriteUint16LE(bytes, offset + 3, y);
+  }
 }
 
 export const EGG_BUTTON_ACTION_OPTIONS = [
@@ -354,4 +369,3 @@ export function eggButtonMappingOffset(button: number, leftHanded: boolean): num
   const index = BUTTON_MAPPING_INDEX[button];
   return index === null || index === undefined ? null : EGG_OFFSET.firstButton + index * 7 + 1;
 }
-

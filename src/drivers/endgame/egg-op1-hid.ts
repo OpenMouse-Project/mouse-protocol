@@ -23,6 +23,7 @@ import {
   eggNormalizeFeatureReport,
   eggProfileForPid,
   eggReadUint16LE,
+  eggWriteEnabledCpiStages,
   eggWriteUint16LE,
   type EggButtonAction,
   type EggDeviceProfile,
@@ -31,7 +32,6 @@ import {
 export interface EggOp1Status extends MouseStatus {
   eggCpiLevels: number;
   eggCpiStages: Array<{ x: number; y: number }>;
-  eggActiveCpiStage: number;
   eggCpiMin: number;
   eggCpiMax: number;
   eggCpiStepLow: number;
@@ -140,10 +140,11 @@ export class EggOp1HidClient {
   async readStatus(): Promise<EggOp1Status> {
     const config = await this.readConfig();
     const cpiLevels = Math.min(Math.max(config[EGG_OFFSET.cpiLevels], 1), 4);
-    const activeCpiStage = Math.min(config[EGG_OFFSET.activeCpiStage], cpiLevels - 1);
-    const activeOffset = EGG_OFFSET.firstCpiSplit + activeCpiStage * 5;
-    const dpi = eggReadUint16LE(config, activeOffset + 1);
-    const dpiY = eggReadUint16LE(config, activeOffset + 3);
+    // Firmware does not persist the currently selected runtime stage. Stage 1
+    // is the stable representative for the generic DPI readout; the complete
+    // stage list below remains authoritative for per-stage configuration.
+    const dpi = eggReadUint16LE(config, EGG_OFFSET.firstCpiSplit + 1);
+    const dpiY = eggReadUint16LE(config, EGG_OFFSET.firstCpiSplit + 3);
     if (!eggIsValidCpi(this.profile, dpi) || !eggIsValidCpi(this.profile, dpiY)) {
       throw new Error(`The mouse reported an unsupported X ${dpi} / Y ${dpiY} CPI value.`);
     }
@@ -178,7 +179,6 @@ export class EggOp1HidClient {
       leftSpdtMode: this.decodeSpdtMode(config[EGG_OFFSET.firstButton]),
       rightSpdtMode: this.decodeSpdtMode(config[EGG_OFFSET.firstButton + BUTTON_CONFIG_SIZE]),
       eggCpiLevels: cpiLevels,
-      eggActiveCpiStage: activeCpiStage,
       eggCpiMin: this.profile.cpiMin,
       eggCpiMax: this.profile.cpiMax,
       eggCpiStepLow: this.profile.cpiStepLow,
@@ -220,17 +220,18 @@ export class EggOp1HidClient {
   async setDpi(dpi: number): Promise<number> {
     this.assertCpi(dpi);
     const confirmed = await this.updateConfig((config) => {
-      const levels = Math.min(Math.max(config[EGG_OFFSET.cpiLevels], 1), 4);
-      const active = Math.min(config[EGG_OFFSET.activeCpiStage], levels - 1);
-      const offset = EGG_OFFSET.firstCpiSplit + active * 5;
-      config[offset] = 0;
-      eggWriteUint16LE(config, offset + 1, dpi);
-      eggWriteUint16LE(config, offset + 3, dpi);
+      eggWriteEnabledCpiStages(config, dpi, dpi);
     });
-    const active = Math.min(confirmed[EGG_OFFSET.activeCpiStage], confirmed[EGG_OFFSET.cpiLevels] - 1);
-    const confirmedDpi = eggReadUint16LE(confirmed, EGG_OFFSET.firstCpiSplit + active * 5 + 1);
-    if (confirmedDpi !== dpi) throw new Error(`The mouse kept ${confirmedDpi} CPI instead of ${dpi} CPI.`);
-    return confirmedDpi;
+    const levels = Math.min(Math.max(confirmed[EGG_OFFSET.cpiLevels], 1), 4);
+    for (let level = 0; level < levels; level += 1) {
+      const offset = EGG_OFFSET.firstCpiSplit + level * 5;
+      const confirmedX = eggReadUint16LE(confirmed, offset + 1);
+      const confirmedY = eggReadUint16LE(confirmed, offset + 3);
+      if (confirmedX !== dpi || confirmedY !== dpi) {
+        throw new Error(`The mouse kept CPI stage ${level + 1} at ${confirmedX}/${confirmedY} instead of ${dpi} CPI.`);
+      }
+    }
+    return dpi;
   }
 
   async setPollingRate(rate: number): Promise<number> {
@@ -345,18 +346,8 @@ export class EggOp1HidClient {
     if (!Number.isInteger(levels) || levels < 1 || levels > 4) throw new Error("The OP1/XM2 supports one to four CPI stages.");
     const confirmed = await this.updateConfig((config) => {
       config[EGG_OFFSET.cpiLevels] = levels;
-      if (config[EGG_OFFSET.activeCpiStage] >= levels) config[EGG_OFFSET.activeCpiStage] = levels - 1;
     });
     if (confirmed[EGG_OFFSET.cpiLevels] !== levels) throw new Error("The mouse did not confirm the CPI stage count.");
-  }
-
-  async setActiveCpiStage(level: number): Promise<void> {
-    const confirmed = await this.updateConfig((config) => {
-      const levels = Math.min(Math.max(config[EGG_OFFSET.cpiLevels], 1), 4);
-      if (!Number.isInteger(level) || level < 0 || level >= levels) throw new Error("Invalid active CPI stage.");
-      config[EGG_OFFSET.activeCpiStage] = level;
-    });
-    if (confirmed[EGG_OFFSET.activeCpiStage] !== level) throw new Error("The mouse did not confirm the active CPI stage.");
   }
 
   async setCpiStage(level: number, x: number, y: number): Promise<void> {
@@ -674,13 +665,11 @@ export class EggOp1HidClient {
 
   private isValidConfig(config: Uint8Array, rawLength: number): boolean {
     const stages = config[EGG_OFFSET.cpiLevels];
-    const active = config[EGG_OFFSET.activeCpiStage];
     const divider = config[EGG_OFFSET.pollingDivider];
     const cpi = eggReadUint16LE(config, EGG_OFFSET.firstCpiSplit + 1);
     return rawLength >= 131
       && config[1] === STATUS_OK
       && stages >= 1 && stages <= 4
-      && active <= 3
       && divider >= 1 && divider <= 255
       && eggIsValidCpi(this.profile, cpi);
   }

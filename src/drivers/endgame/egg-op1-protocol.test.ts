@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   EGG_DEVICE_PROFILES,
+  EGG_OFFSET,
   eggButtonControlOffset,
   eggButtonMappingOffset,
   eggClampCpi,
@@ -13,6 +14,8 @@ import {
   eggIsValidCpi,
   eggLodOptions,
   eggNormalizeFeatureReport,
+  eggReadUint16LE,
+  eggWriteEnabledCpiStages,
 } from "@openmouse/protocol/endgame-gear-op1";
 
 const op1 = EGG_DEVICE_PROFILES.get(0x1964)!;
@@ -39,6 +42,22 @@ test("CPI ranges and quantization follow each sensor generation", () => {
   assert.equal(eggIsValidCpi(op1v2, 1_605), false);
   assert.deepEqual(eggDpiOptions(op1v2).slice(0, 3), [10, 20, 30]);
   assert.deepEqual(eggDpiOptions(op1v2).slice(-3), [29_900, 29_950, 30_000]);
+});
+
+test("a generic CPI change updates every enabled stage without touching disabled stages", () => {
+  const config = new Uint8Array(80);
+  config[EGG_OFFSET.reserved29] = 0x02; // Not a runtime CPI-stage index.
+  config[EGG_OFFSET.cpiLevels] = 3;
+  eggWriteEnabledCpiStages(config, 3_200, 3_200);
+
+  for (let level = 0; level < 3; level += 1) {
+    const offset = EGG_OFFSET.firstCpiSplit + level * 5;
+    assert.equal(config[offset], 0);
+    assert.equal(eggReadUint16LE(config, offset + 1), 3_200);
+    assert.equal(eggReadUint16LE(config, offset + 3), 3_200);
+  }
+  assert.equal(eggReadUint16LE(config, EGG_OFFSET.firstCpiSplit + 3 * 5 + 1), 0);
+  assert.equal(config[EGG_OFFSET.reserved29], 0x02);
 });
 
 test("LOD options switch by device and glass mode", () => {
