@@ -23,8 +23,14 @@ export interface MouseUiHints {
   pollingReadOnly?: boolean;
   /** Hide Motion Sync / angle snap / ripple card. */
   hideProcessingCard?: boolean;
+  /** Hide angle snapping while leaving other processing controls available. */
+  hideAngleSnapping?: boolean;
+  /** Hide ripple control while leaving other processing controls available. */
+  hideRippleControl?: boolean;
   /** Hide the receiver signal-strength card when no command reports link quality. */
   hideSignalCard?: boolean;
+  /** Hide auto-sleep when this protocol generation does not expose it. */
+  hideSleepCard?: boolean;
   /**
    * Render the advanced settings section for a driver outside the brands that
    * open it by default. The section is the only place the signal, debounce,
@@ -81,7 +87,7 @@ export type MouseLightingMode =
   | "Breathing dual";
 
 export interface MouseStatus {
-  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "Lamzu" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE";
+  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "Lamzu" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso";
   name: string;
   /** Driver-supplied UI policy (optional; keeps control.ts brand-agnostic). */
   ui?: MouseUiHints;

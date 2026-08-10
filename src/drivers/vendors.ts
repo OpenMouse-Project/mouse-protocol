@@ -4,6 +4,14 @@ import {
   LOGITECH_DIRECT_PRODUCT_IDS,
 } from "@openmouse/protocol/logitech";
 import { RAZER_PRODUCT_IDS } from "@openmouse/protocol/razer-devices";
+import {
+  NINJUTSO_LEGACY_MOUSE_PRODUCT_IDS,
+  NINJUTSO_LEGACY_RECEIVER_PRODUCT_IDS,
+  NINJUTSO_LEGACY_VENDOR_ID,
+  NINJUTSO_MOUSE_PRODUCT_IDS,
+  NINJUTSO_RECEIVER_PRODUCT_IDS,
+  NINJUTSO_VENDOR_ID,
+} from "@openmouse/protocol/ninjutso";
 
 export const VENDOR_ID = {
   pulsar: 0x3710,
@@ -19,6 +27,8 @@ export const VENDOR_ID = {
   finalmouse: 0x361d,
   keychron: 0x3434,
   moddo: 0x2fe3,
+  ninjutsoLegacy: NINJUTSO_LEGACY_VENDOR_ID,
+  ninjutso: NINJUTSO_VENDOR_ID,
 } as const;
 
 // Keychron VIA raw HID. 0x0440 is Nape Pro wired; 0xd026/0xd029 are shared Link-KM receivers.
@@ -193,5 +203,9 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...RAZER_DEATHADDER_V2_FILTERS,
   ...EGG_WE_HID_FILTERS,
   ...MODDO_HID_FILTERS,
+  ...[...NINJUTSO_LEGACY_MOUSE_PRODUCT_IDS, ...NINJUTSO_LEGACY_RECEIVER_PRODUCT_IDS]
+    .map((productId) => ({ vendorId: NINJUTSO_LEGACY_VENDOR_ID, productId })),
+  ...[...NINJUTSO_MOUSE_PRODUCT_IDS, ...NINJUTSO_RECEIVER_PRODUCT_IDS]
+    .map((productId) => ({ vendorId: NINJUTSO_VENDOR_ID, productId })),
   ...LOGITECH_RECEIVER_FILTERS,
 ];

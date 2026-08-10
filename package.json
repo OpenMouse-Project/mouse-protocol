@@ -45,6 +45,10 @@
       "types": "./dist/moddo/index.d.ts",
       "import": "./dist/moddo/index.js"
     },
+    "./ninjutso": {
+      "types": "./dist/ninjutso/index.d.ts",
+      "import": "./dist/ninjutso/index.js"
+    },
     "./orbital": {
       "types": "./dist/orbital/index.d.ts",
       "import": "./dist/orbital/index.js"

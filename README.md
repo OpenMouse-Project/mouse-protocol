@@ -47,6 +47,7 @@ checklist.
 | Lamzu | `@openmouse/protocol/lamzu` |
 | Logitech | `@openmouse/protocol/logitech` |
 | moddoMOUSE | `@openmouse/protocol/moddo` |
+| Ninjutso | `@openmouse/protocol/ninjutso` |
 | Orbital | `@openmouse/protocol/orbital` |
 | Pulsar | `@openmouse/protocol/pulsar` |
 | Razer legacy/current | `@openmouse/protocol/razer` |
@@ -58,3 +59,8 @@ checklist.
 An exported protocol means OpenMouse implements that wire format. It does not
 claim every mouse from that brand works. When a catalog provides a `verified`
 field, use it to distinguish hardware-tested support from USB recognition.
+
+The Ninjutso catalog and packet layouts are derived from the JavaScript shipped
+by the official NinjaForce WebHID panel. They have automated transport and
+codec coverage, but are not marked as hardware-verified until tested on the
+corresponding Sora V2/V3 and TEN-family devices.
