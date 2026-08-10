@@ -76,6 +76,14 @@ export const LOGITECH_HAPTIC_EFFECTS = {
   enableConfirmation: 0x00,
 } as const;
 
+/*
+ * Note for a consuming application: the device does not buzz by itself when
+ * haptics are switched back on. Options+ plays enableConfirmation immediately
+ * after that write, and a user who has seen the vendor software notices its
+ * absence. Playing it is the application's job, not this driver's — it is
+ * feedback, not protocol.
+ */
+
 export interface LogitechHapticConfig {
   enabled: boolean;
   batterySaving: boolean;
