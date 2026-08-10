@@ -29,6 +29,17 @@ export {
   hasHidppShortCollection,
 } from "./bolt.ts";
 import {
+  LOGITECH_HAPTIC,
+  LOGITECH_HAPTIC_EFFECTS,
+  buildHapticConfigWrite,
+  decodeHapticConfig,
+  encodeHapticFlags,
+  isLogitechHapticEffect,
+  isLogitechHapticIntensity,
+  type LogitechHapticConfig,
+  type LogitechHapticFlag,
+} from "./haptics.ts";
+import {
   MODE_STATUS,
   buildModeStatusWriteMany,
   decodeModeStatus,
@@ -225,6 +236,7 @@ const FEATURE = {
   reportRate: 0x8060,
   onboardProfiles: 0x8100,
   analogButtons: 0x1b0c,
+  haptic: 0x19b0,
 } as const;
 
 interface ResolvedFeature {
@@ -596,6 +608,7 @@ export class LogitechHidppClient {
     const analogButtonTuning = analogButtonsFeature.index
       ? await this.readAnalogButtonTuning(analogButtonsFeature.index)
       : undefined;
+    const haptics = await this.readHapticConfig();
     const modeStatusFeature = await this.getFeature(FEATURE.modeStatus);
     const modeStatus = modeStatusFeature.index ? await this.readModeStatus(modeStatusFeature.index) : null;
     // One extra request; the layout it selects is worth surfacing in diagnostics.
@@ -662,6 +675,9 @@ export class LogitechHidppClient {
       // Surface Auto and LightForce Optical. Only expose that control bank when
       // the sensor positively reports the related live LOD capability; this is
       // deliberately conservative and avoids a product/model exception.
+      hapticIntensity: haptics?.intensity ?? null,
+      hapticEnabled: haptics?.enabled ?? null,
+      hapticBatterySaving: haptics?.batterySaving ?? null,
       gamingSurfaceMode: modeStatus === null || !hasLiveLiftOffControl
         ? null
         : decodeModeStatus(modeStatus, MODE_STATUS.gamingSurface),
@@ -1691,6 +1707,89 @@ export class LogitechHidppClient {
       await readChunk(length - 16);
     }
     return buffer;
+  }
+
+  /**
+   * Haptic configuration, or null on a device without feature 0x19B0. Only the
+   * MX Master 4 is known to carry it.
+   */
+  private async readHapticConfig(): Promise<LogitechHapticConfig | null> {
+    const feature = await this.getFeature(FEATURE.haptic);
+    if (!feature.index) return null;
+    const reply = await this.request(feature.index, LOGITECH_HAPTIC.get).catch(() => null);
+    return reply ? decodeHapticConfig(reply.slice(3)) : null;
+  }
+
+  /**
+   * Read-modify-write of the two-byte pair, then verify. Both fields share the
+   * write, so a caller changing one has to supply the other exactly as the
+   * device reports it, and bits 2-7 of the flag byte ride through untouched.
+   */
+  private async writeHapticConfig(change: {
+    flag?: { name: LogitechHapticFlag; on: boolean };
+    intensity?: number;
+  }): Promise<LogitechHapticConfig> {
+    const feature = await this.getFeature(FEATURE.haptic);
+    if (!feature.index) throw new Error("This mouse has no haptic feature.");
+
+    const current = decodeHapticConfig((await this.request(feature.index, LOGITECH_HAPTIC.get)).slice(3));
+    if (!current) throw new Error("The mouse gave no answer when its haptic settings were read.");
+
+    const flagByte = change.flag
+      ? encodeHapticFlags(current.flagByte, change.flag.name, change.flag.on)
+      : current.flagByte;
+    const intensity = change.intensity ?? current.intensity;
+
+    const reply = await this.request(
+      feature.index,
+      LOGITECH_HAPTIC.set,
+      ...buildHapticConfigWrite(flagByte, intensity),
+    );
+    const confirmed = decodeHapticConfig(reply.slice(3));
+    if (!confirmed) throw new Error("The mouse gave no answer to the haptic write.");
+    return confirmed;
+  }
+
+  /** Sets haptic strength, leaving the flag byte as the device reports it. */
+  async setHapticIntensity(intensity: number): Promise<number> {
+    if (!isLogitechHapticIntensity(intensity)) {
+      throw new Error("Haptic strength must be a whole number between 0 and 100.");
+    }
+    const confirmed = await this.writeHapticConfig({ intensity });
+    if (confirmed.intensity !== intensity) {
+      throw new Error(`The mouse kept a haptic strength of ${confirmed.intensity}.`);
+    }
+    return confirmed.intensity;
+  }
+
+  async setHapticEnabled(enabled: boolean): Promise<boolean> {
+    const confirmed = await this.writeHapticConfig({ flag: { name: "enabled", on: enabled } });
+    if (confirmed.enabled !== enabled) {
+      throw new Error(`The mouse kept haptics ${confirmed.enabled ? "on" : "off"}.`);
+    }
+    return confirmed.enabled;
+  }
+
+  async setHapticBatterySaving(enabled: boolean): Promise<boolean> {
+    const confirmed = await this.writeHapticConfig({ flag: { name: "batterySaving", on: enabled } });
+    if (confirmed.batterySaving !== enabled) {
+      throw new Error(`The mouse kept haptic battery saving ${confirmed.batterySaving ? "on" : "off"}.`);
+    }
+    return confirmed.batterySaving;
+  }
+
+  /**
+   * Fires the motor once at whatever strength is set. Nothing persists, so
+   * this is safe to use as feedback. The reply reports whether the motor was
+   * already running, which says nothing about the effect itself.
+   */
+  async playHapticEffect(effect: number = LOGITECH_HAPTIC_EFFECTS.strengthSample): Promise<void> {
+    if (!isLogitechHapticEffect(effect)) {
+      throw new Error(`This mouse has no haptic effect 0x${effect.toString(16)}.`);
+    }
+    const feature = await this.getFeature(FEATURE.haptic);
+    if (!feature.index) throw new Error("This mouse has no haptic feature.");
+    await this.request(feature.index, LOGITECH_HAPTIC.play, effect);
   }
 
   async setGamingSurfaceMode(mode: GamingSurfaceMode): Promise<GamingSurfaceMode> {

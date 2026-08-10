@@ -196,6 +196,12 @@ export interface MouseStatus {
     /** False until profile-content writes were applied and restored on hardware. */
     writable: boolean;
   } | null;
+  /** Logitech 0x19B0 haptic strength, 0-100. Null when the device has no haptics. */
+  hapticIntensity?: number | null;
+  /** Logitech 0x19B0 byte 0 bit 0 — haptic feedback on or off. */
+  hapticEnabled?: boolean | null;
+  /** Logitech 0x19B0 byte 0 bit 1 — the device's own haptic battery saver. */
+  hapticBatterySaving?: boolean | null;
   gamingSurfaceMode?: "On" | "Off" | "Auto" | null;
   lightforceSwitchMode?: "Hybrid" | "Optical" | null;
   /** Razer lighting zones. */

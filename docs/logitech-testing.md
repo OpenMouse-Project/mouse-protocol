@@ -10,7 +10,7 @@ Supported identifiers:
 - `046d:c54d`, `046d:c547` — Lightspeed receivers
 - `046d:c539` — HERO-era Lightspeed receiver
 - `046d:c53f`, `046d:c543` — Nano Lightspeed 1.1 / 1.2 receivers (G305)
-- `046d:c548` — Logi Bolt receiver (MX Master 3S and other Bolt mice)
+- `046d:c548` — Logi Bolt receiver (MX Master 3S, MX Master 4, and other Bolt mice)
 - `046d:c0a8` — PRO X 2 Superstrike (USB)
 - `046d:c07e` — G402 / G402 Hyperion Fury (wired)
 - `046d:c08f` — G403 HERO (wired)
@@ -141,3 +141,29 @@ It exposes Adjustable DPI `0x2201` and Unified Battery `0x1004`, and has no
    persists after a reload.
 5. If connect fails with "invalid command", the short collection alone was
    selected — reconnect and include usage `0x0002`.
+
+## MX Master 4 (Logi Bolt `046d:c548`, WPID `B042`)
+
+Same Bolt transport as the MX Master 3S: HID++ 2.0 feature calls use **long**
+reports on a pairing slot (slot 2 on the unit this was written against), not
+device index `0xFF`. Firmware `LD 04.00` / `RBM 27.00`.
+
+It is the only Logitech mouse known to carry Haptic `0x19B0`. It has no
+`0x2202`, `0x8060`/`0x8061`, `0x8100`, `0x1001` or `0x1F20`, so the polling,
+lift-off and onboard-profile paths stay inactive.
+
+1. Close Logi Options+. Authorize both Bolt HID++ collections if offered.
+2. Confirm the sidebar shows the Bolt receiver / MX Master 4, connection
+   **Wireless**, battery percentage, and DPI.
+3. Confirm haptic strength reads back as one of Subtle / Low / Medium / High.
+   A factory-default mouse reports Medium (60).
+4. Change the strength and confirm the mouse buzzes at the new setting, then
+   reload and confirm the value persisted.
+5. Turn haptic feedback off. Confirm the strength control goes inactive and
+   pressing the Actions Ring panel no longer buzzes. Turn it back on.
+6. Toggle haptic battery saving and confirm the strength setting is unchanged
+   — the two share one byte, so a write that loses the other field shows up
+   here.
+7. Cross-check against Logi Options+ by changing the strength preset **there**
+   and confirming OpenMouse reads the new value. Options+ caches its own view
+   and will not re-read a change made outside it, so verify in that direction.
