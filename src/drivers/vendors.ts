@@ -3,7 +3,7 @@ import {
   LOGITECH_BOLT_PRODUCT_IDS,
   LOGITECH_DIRECT_PRODUCT_IDS,
 } from "@openmouse/protocol/logitech";
-import { RAZER_PRODUCT_IDS } from "@openmouse/protocol/razer-devices";
+import { RAZER_PRODUCTS, RAZER_PRODUCT_IDS } from "@openmouse/protocol/razer-devices";
 import {
   NINJUTSO_LEGACY_MOUSE_PRODUCT_IDS,
   NINJUTSO_LEGACY_RECEIVER_PRODUCT_IDS,
@@ -103,9 +103,14 @@ const RAZER_NARROWED_PRODUCT_IDS: ReadonlySet<number> = new Set([
  * revision, so the whole device is requested and the picker offers each
  * interface: the driver rejects the ones that cannot answer, and a model whose
  * first entry never replies is added again on another entry.
+ *
+ * Products flagged `nativeOnly` in the registry are left out: their control
+ * channel is on a Chrome-protected collection, so no granted interface can
+ * ever answer and offering them just produces a dead picker entry.
  */
 export const RAZER_REGISTRY_FILTERS: HIDDeviceFilter[] = RAZER_PRODUCT_IDS
   .filter((productId) => !RAZER_NARROWED_PRODUCT_IDS.has(productId))
+  .filter((productId) => !RAZER_PRODUCTS.get(productId)?.nativeOnly)
   .map((productId) => ({ vendorId: VENDOR_ID.razer, productId }));
 
 // The DeathAdder V2 keeps the Essential family's split interface layout, so it

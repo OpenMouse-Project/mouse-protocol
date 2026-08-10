@@ -523,6 +523,26 @@ test("the DeathAdder V2 is accepted on either interface shape", () => {
   assert.equal(RazerHidClient.isSupported(vendor), true);
 });
 
+test("a nativeOnly model is never accepted, whatever the interface shape", () => {
+  // The DeathAdder V4 Pro 0x00be has its control channel on a collection the
+  // browser refuses to expose. A granted device may still enumerate through
+  // getDevices()/auto-reconnect, so isSupported must refuse it regardless.
+  // Arrange
+  const mouse = {
+    vendorId: 0x1532,
+    productId: 0x00be,
+    collections: [{ usagePage: 0x01, usage: 0x02, featureReports: [], children: [] }],
+  } as unknown as HIDDevice;
+  const vendor = {
+    ...mouse,
+    collections: [{ usagePage: 0xffc0, usage: 0x01, featureReports: [], children: [] }],
+  } as unknown as HIDDevice;
+
+  // Act / Assert
+  assert.equal(RazerHidClient.isSupported(mouse), false);
+  assert.equal(RazerHidClient.isSupported(vendor), false);
+});
+
 test("the DeathAdder V2 caps DPI at 20000", () => {
   // Arrange
   const { client } = fakeMouse({ tracking: 0, liftOff: 16, landing: 11, asymmetric: false }, { productId: 0x0084 });

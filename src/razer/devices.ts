@@ -111,6 +111,14 @@ export interface RazerProduct {
   asymmetricLiftOff: boolean;
   /** Confirmed against real hardware by this project. */
   verified: boolean;
+  /**
+   * The control channel sits on a collection Chrome classifies as a plain mouse
+   * and strips feature reports from, so WebHID can never reach it no matter how
+   * many interfaces are granted. The registry entry stays so the native HAL
+   * transport still has a config, but `../vendors.ts` must not offer the id in
+   * the WebHID picker.
+   */
+  nativeOnly?: boolean;
 }
 
 /** Everything a preset supplies. The transaction id is deliberately not here. */
@@ -415,7 +423,10 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
 
   // ---- viper-receiver -------------------------------------------------------
   [0x007a, { model: "Viper Ultimate (Wired)", ...VIPER_RECEIVER_WIRED }],
-  [0x007b, { model: "Viper Ultimate", ...VIPER_RECEIVER_WIRELESS }],
+  // Confirmed on hardware (PR #45): the dongle's Generic-Desktop-Mouse
+  // interface is Chrome-protected, so every collection is feat[none] and
+  // sendFeatureReport fails on any id. Native HAL only.
+  [0x007b, { model: "Viper Ultimate", ...VIPER_RECEIVER_WIRELESS, nativeOnly: true }],
   [0x007c, { model: "DeathAdder V2 Pro (Wired)", ...VIPER_RECEIVER_WIRED }],
   [0x007d, { model: "DeathAdder V2 Pro", ...VIPER_RECEIVER_WIRELESS }],
   [0x009e, { model: "Viper Mini Signature Edition (Wired)", ...VIPER_RECEIVER_WIRED, maxDpi: DPI_FOCUS_PRO }],
@@ -469,8 +480,11 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   // has measured it — see TESTING.md.
   [0x00b7, { model: "DeathAdder V3 Pro", ...MODERN_RECEIVER, highRatePolling: false, maxDpi: DPI_FOCUS_PRO }],
   [0x00b9, { model: "Basilisk V3 X HyperSpeed", ...LEGACY_RECEIVER, maxDpi: 18_000 }],
-  [0x00be, { model: "DeathAdder V4 Pro (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO_35K }],
-  [0x00bf, { model: "DeathAdder V4 Pro", ...HYPERPOLLING_RECEIVER }],
+  // The control channel is on a Chrome-protected collection: with Synapse fully
+  // stopped the diagnostics harness got "no feature report channel" on every
+  // interface, in both the wired and wireless roles. Native HAL only.
+  [0x00be, { model: "DeathAdder V4 Pro (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO_35K, nativeOnly: true }],
+  [0x00bf, { model: "DeathAdder V4 Pro", ...HYPERPOLLING_RECEIVER, nativeOnly: true }],
   [0x00c2, { model: "DeathAdder V3 Pro (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO }],
   [0x00c3, { model: "DeathAdder V3 Pro", ...MODERN_RECEIVER, maxDpi: DPI_FOCUS_PRO }],
   [0x00c4, { model: "DeathAdder V3 HyperSpeed (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO }],

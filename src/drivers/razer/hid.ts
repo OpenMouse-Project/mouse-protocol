@@ -116,6 +116,10 @@ export class RazerHidClient {
   static isSupported(device: HIDDevice): boolean {
     const product = RAZER_PRODUCTS.get(device.productId);
     if (device.vendorId !== VENDOR_ID.razer || !product) return false;
+    // A nativeOnly model's control channel sits on a collection the browser
+    // refuses to expose, so the WebHID driver must never claim it even when a
+    // previously granted device enumerates (auto-reconnect, shared grants).
+    if (product.nativeOnly) return false;
     return isMouseControlInterface(device)
       || (product.vendorControlInterface === true && hasVendorCollection(device));
   }
