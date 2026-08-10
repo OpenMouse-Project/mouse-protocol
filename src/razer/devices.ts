@@ -470,7 +470,10 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   [0x00a4, {
     model: "Mouse Dock Pro",
     ...MODERN_RECEIVER,
-    maxDpi: DPI_FOCUS_PRO_35K,
+    // Verified only with a Naga V2 Pro paired (Focus Pro 30k). A higher dock
+    // ceiling for 35k mice is untested through this path, so keep the observed
+    // sensor limit rather than advertising an unverified range.
+    maxDpi: DPI_FOCUS_PRO,
     probePollingRates: true,
     connectionLabel: "Mouse Dock Pro",
     // Conservative pre-probe defaults; `readPollingRateHz` replaces both once

@@ -25,9 +25,10 @@ Identifiers verified on hardware:
 
 Mouse Dock Pro uses the same 90-byte protocol as the paired mouse. It has no
 fixed polling list: if the paired mouse answers the extended polling command it
-offers up to 8000 Hz; otherwise it stays on the 1 kHz ladder (Naga V2 Pro). Quit
-Razer services before probing — they can return unrelated `0x0f/0x03` feature
-reports.
+offers up to 8000 Hz; otherwise it stays on the 1 kHz ladder (Naga V2 Pro). The
+DPI ceiling is pinned to the paired Naga V2 Pro (30000); a higher 35k dock path
+has not been hardware-tested. Quit Razer services before probing — they can
+return unrelated `0x0f/0x03` feature reports.
 
 Naga V2 Pro hardcodes 125/500/1000 Hz on both the cable and the stock receiver.
 

@@ -51,7 +51,7 @@ const VERIFIED_SINCE: ReadonlyArray<[number, VerifiedProfile]> = [
   [0x00b8, { model: "Viper V3 HyperSpeed", wireless: true, maxDpi: 30000, transactionId: RAZER_TRANSACTION_ID, rates: RATES_1K, highRate: false }],
   // Mouse Dock Pro with a Naga V2 Pro paired: settings passthrough on `0x1f`,
   // and polling rates discovered from which command the paired mouse answers.
-  [0x00a4, { model: "Mouse Dock Pro", wireless: true, maxDpi: 35000, transactionId: RAZER_TRANSACTION_ID, rates: RATES_1K, highRate: true }],
+  [0x00a4, { model: "Mouse Dock Pro", wireless: true, maxDpi: 30000, transactionId: RAZER_TRANSACTION_ID, rates: RATES_1K, highRate: true }],
   // Naga V2 Pro (firmware 1.3): fixed 1 kHz ladder on cable and stock receiver;
   // also the paired mouse used to verify Dock Pro passthrough.
   [0x00a7, { model: "Naga V2 Pro (Wired)", wireless: false, maxDpi: 30000, transactionId: RAZER_TRANSACTION_ID, rates: RATES_1K, highRate: false }],
