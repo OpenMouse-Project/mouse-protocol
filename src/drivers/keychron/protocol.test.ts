@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  KEYCHRON_NAPE_DPI_MAX,
+  KEYCHRON_NAPE_DPI_MIN,
+  KEYCHRON_NAPE_DPI_STEP,
   KEYCHRON_PACKET_LENGTH,
   KEYCHRON_POLLING_TABLE,
   keychronDecodeBattery,
@@ -9,6 +12,12 @@ import {
   keychronDecodePolling,
   keychronPacket,
 } from "@openmouse/protocol/keychron";
+
+test("Nape Pro DPI range is model-specific (50–4000 step 50)", () => {
+  assert.equal(KEYCHRON_NAPE_DPI_MIN, 50);
+  assert.equal(KEYCHRON_NAPE_DPI_MAX, 4000);
+  assert.equal(KEYCHRON_NAPE_DPI_STEP, 50);
+});
 
 test("packets are fixed 32-byte VIA raw HID reports", () => {
   const packet = keychronPacket([167, 36, 2]);

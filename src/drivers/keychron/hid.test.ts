@@ -34,7 +34,7 @@ class FakeHidDevice {
   readonly sent: Uint8Array[] = [];
 
   private listeners = new Map<string, (event: unknown) => void>();
-  private dpiStages = [400, 800, 1600, 2400, 3200];
+  private dpiStages = [400, 800, 1600, 2400, 4000];
   private dpiStage = 1;
   private customDpi = 800;
   private pollingIndex = 3; // 1000 Hz
@@ -190,11 +190,11 @@ test("support is limited to Nape Pro and Link-KM VIA raw HID collections", () =>
   assert.equal(KeychronHidClient.isSupported(device(0x0440, 0xff60, 1)), false);
 });
 
-test("DPI options follow the Nape Pro 50–3200 step-50 ladder", () => {
+test("DPI options follow the Nape Pro 50–4000 step-50 ladder", () => {
   const options = new KeychronHidClient(device(0x0440)).getDpiOptions();
   assert.equal(options[0], 50);
-  assert.equal(options.at(-1), 3200);
-  assert.equal(options.length, (3200 - 50) / 50 + 1);
+  assert.equal(options.at(-1), 4000);
+  assert.equal(options.length, (4000 - 50) / 50 + 1);
   assert.ok(options.every((dpi, index) => index === 0 || dpi - options[index - 1]! === 50));
 });
 
