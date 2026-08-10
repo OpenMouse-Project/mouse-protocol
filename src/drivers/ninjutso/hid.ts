@@ -230,14 +230,14 @@ export class NinjutsoHidClient {
     // shared NinjaForce UI probes it. Treat that as a missing capability rather
     // than preventing every supported setting from loading.
     const motion = await this.readCurrentOptional(NINJUTSO_COMMAND.motionSync);
-    const angle = await this.readCurrent(NINJUTSO_COMMAND.angleTuning);
-    const sleep = await this.readCurrent(NINJUTSO_COMMAND.sleepMinutes);
-    const firmware = await this.readCurrent(NINJUTSO_COMMAND.firmware, [0]);
+    const angle = await this.readCurrentOptional(NINJUTSO_COMMAND.angleTuning);
+    const sleep = await this.readCurrentOptional(NINJUTSO_COMMAND.sleepMinutes);
+    const firmware = await this.readCurrentOptional(NINJUTSO_COMMAND.firmware, [0]);
     const batteryPercent = Math.min(battery[0] ?? 0, 100);
-    const firmwareValues = [`Mouse ${this.decodeFirmware(firmware)}`];
+    const firmwareValues = firmware ? [`Mouse ${this.decodeFirmware(firmware)}`] : [];
     if (this.isWireless()) {
-      const receiverVersion = await this.readCurrent(NINJUTSO_COMMAND.firmware, [1]);
-      firmwareValues.push(`Receiver ${this.decodeFirmware(receiverVersion)}`);
+      const receiverVersion = await this.readCurrentOptional(NINJUTSO_COMMAND.firmware, [1]);
+      if (receiverVersion) firmwareValues.push(`Receiver ${this.decodeFirmware(receiverVersion)}`);
     }
     const pollingRateHz = ninjutsoDecodePollingRate(polling[0]!) ?? 1000;
     const supportedLiftOffDistances: LiftOffDistance[] = [...LOD_VALUES];
@@ -248,6 +248,7 @@ export class NinjutsoHidClient {
         family: "ninjutso",
         hideUnsupportedPollingRates: true,
         hideSignalCard: true,
+        hideSleepCard: sleep === null,
         hideMotionSync: motion === null,
         hideAngleSnapping: true,
         hideRippleControl: true,
@@ -266,8 +267,8 @@ export class NinjutsoHidClient {
       connectionDetail: this.isWireless() ? "2.4 GHz receiver · NinjaForce protocol" : "USB · NinjaForce protocol",
       motionSync: motion === null ? null : motion[0] === 1,
       debounceMs: null,
-      sleepTimeout: (sleep[0] ?? 0) * 60 || null,
-      angleTuning: this.signedByte(angle[0] ?? 0),
+      sleepTimeout: sleep === null ? null : (sleep[0] ?? 0) * 60 || null,
+      angleTuning: angle === null ? null : this.signedByte(angle[0] ?? 0),
       angleSnapping: null,
       rippleControl: null,
       liftOffDistance: this.decodeLod(lod[0]!),
@@ -378,7 +379,7 @@ export class NinjutsoHidClient {
     return this.effectiveProductId = response[1]! << 8 | response[0]!;
   }
 
-  private async readCurrent(command: number, args: readonly number[] = []): Promise<Uint8Array> {
+  private async readCurrent(command: number, args: readonly number[] = [], attempts = 4): Promise<Uint8Array> {
     const profileCommands = new Set<number>([
       NINJUTSO_COMMAND.activeDpiStage,
       NINJUTSO_COMMAND.dpi,
@@ -389,7 +390,7 @@ export class NinjutsoHidClient {
       NINJUTSO_COMMAND.sleepMinutes,
     ]);
     const request = ninjutsoBuildRequest(command, profileCommands.has(command) ? this.profile : 0, args);
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
       await this.device.sendFeatureReport(NINJUTSO_REPORT_ID, buffer(request));
       await delay(attempt === 0 ? 30 : 60);
       const response = await this.device.receiveFeatureReport(NINJUTSO_REPORT_ID);
@@ -401,7 +402,9 @@ export class NinjutsoHidClient {
 
   private async readCurrentOptional(command: number, args: readonly number[] = []): Promise<Uint8Array | null> {
     try {
-      return await this.readCurrent(command, args);
+      // Unsupported commands return a well-formed all-zero report immediately;
+      // retrying that response cannot make the capability appear.
+      return await this.readCurrent(command, args, 1);
     } catch (error) {
       if (error instanceof NinjutsoCommandTimeoutError) return null;
       throw error;

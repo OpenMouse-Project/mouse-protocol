@@ -88,12 +88,15 @@ test("reads current Sora V3 status using report-6 commands", async () => {
   assert.deepEqual(status.firmware, ["Mouse AE0F03"]);
 });
 
-test("loads Sora V3 settings when firmware does not answer Motion Sync", async () => {
-  const status = await new NinjutsoHidClient(fakeDevice(new Set([14])).device).readStatus();
+test("loads Sora V3 settings when optional commands are unsupported", async () => {
+  const status = await new NinjutsoHidClient(fakeDevice(new Set([10, 14, 21, 25])).device).readStatus();
   assert.equal(status.dpi, 1600);
   assert.equal(status.motionSync, null);
   assert.equal(status.ui?.hideMotionSync, true);
-  assert.equal(status.angleTuning, -5);
+  assert.equal(status.angleTuning, null);
+  assert.equal(status.sleepTimeout, null);
+  assert.equal(status.ui?.hideSleepCard, true);
+  assert.deepEqual(status.firmware, []);
 });
 
 test("writes current settings and confirms each one by reading it back", async () => {
