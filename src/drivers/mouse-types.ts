@@ -127,8 +127,9 @@ export interface MouseStatus {
   finalmouseTournamentScrollTimeoutMs?: number | null;
   signalStrength?: number | null;
   motionSync?: boolean | null;
-  /** NinjaForce DPI stages, where supported. */
+  /** On-device DPI stages, where supported (Teevolution, Ninjutso, …). */
   dpiStages?: number[];
+  /** Active DPI stage index into `dpiStages` (0-based). */
   activeDpiStage?: number;
   ninjutsoSystemMode?: "High Speed" | "Competitive" | "Ultra" | null;
   ninjutsoSystemModes?: Array<"High Speed" | "Competitive" | "Ultra">;

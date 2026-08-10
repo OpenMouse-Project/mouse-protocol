@@ -87,8 +87,12 @@ export const TEEVOLUTION_COMMAND = {
 /** Flash offsets used by Teevolink / Compx HUB for Terra Pro. */
 export const TEEVOLUTION_FLASH = {
   reportRate: 0,
+  /** Number of enabled DPI stages (1…dpiStageCount). */
+  maxDpiStage: 2,
+  /** Active DPI stage index (0-based). */
   currentDpi: 4,
   liftOffDistance: 10,
+  /** Base of 4-byte DPI stage records. */
   dpiValues: 12,
   dpiLightMode: 76,
   dpiLightBrightness: 78,
