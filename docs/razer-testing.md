@@ -25,8 +25,9 @@ Claimed but never connected:
 - `1532:006e` — DeathAdder Essential, wired
 - `1532:0071` — DeathAdder Essential White Edition, wired
 - `1532:0098` — DeathAdder Essential (2021), wired
-- 99 further products from the OpenRazer reference
 - `1532:0084` — DeathAdder V2, wired
+- `1532:00a3` — Cobra, wired (separate driver)
+- 98 further products from the OpenRazer reference
 
 These three shipped with the driver long before the registry existed and were
 listed here as supported, but the section below has always described them as not
@@ -312,8 +313,9 @@ What is deliberately **not** attempted on an untested model:
   `asymmetricLiftOff` is set, which only the four Viper V2/V3 Pro ids have. An
   untested mouse that answers class `0x0b` still gets the plain three-stop
   tracking control, which costs reads only.
-- Lighting, button mapping and macros, none of which this driver implements for
-  any model.
+- Lighting, button mapping and macros. The generic driver implements none of
+  them for any model — the only lighting controls anywhere in this project are
+  the dedicated Cobra and Viper Mini drivers.
 
 To promote a model to verified:
 
@@ -637,3 +639,37 @@ carries its speed level between them.
 
 The 8500 DPI ceiling comes from the openrazer daemon class. The DPI step
 granularity is assumed to be whole values, matching the V3 Pro driver.
+
+## Cobra (separate driver, not yet hardware-tested)
+
+The Cobra (`1532:00a3`) is driven by its own client in `cobra-hid.ts`, modelled
+on the Viper Mini driver. The protocol facts below are transcribed from
+openrazer's driver and daemon, not measured on this mouse yet — the same status
+as every other unverified product, with the same loud failure modes.
+
+| Read | Class / ID | Notes |
+| --- | --- | --- |
+| Firmware | `0x00` / `0x81` | transaction id `0xff` |
+| Serial | `0x00` / `0x82` | ASCII, null terminated; transaction id `0xff` |
+| DPI | `0x04` / `0x85` | no-store byte `0x00`, then big-endian X and Y |
+| Polling | `0x00` / `0x85` | divisor of 1000; wired only |
+
+| Write | Class / ID | Notes |
+| --- | --- | --- |
+| DPI | `0x04` / `0x05` | storage byte `0x01`, then big-endian X and Y |
+| Polling | `0x00` / `0x05` | divisor of 1000 |
+| Off / Static / Spectrum / Reactive / Breathing | `0x0f` / `0x02` | extended matrix effects, transaction id `0x1f` |
+
+Lighting reuses the same extended-matrix effect family (`0x0f`/`0x02`) as the
+Viper Mini, with the storage byte, the logo led (`0x04`), and the effect id in
+the first three argument bytes. Unlike the Viper Mini, whose effects all answer
+on `0x3f`, the Cobra's spectrum, static, reactive and none writes use `0x1f`.
+
+One anomaly in the reference is deliberately not followed: openrazer lists the
+Cobra's breathing writes on `0x3f`, inside a block of classic-matrix mice whose
+other effects also use `0x3f`. Every other Cobra effect answers on `0x1f`, so a
+single `0x1f` is used for breathing too. If breathing silently times out on
+hardware while the other effects work, that assumption is the first thing to
+revisit.
+
+Brightness is not implemented: this driver covers effects and colour only.

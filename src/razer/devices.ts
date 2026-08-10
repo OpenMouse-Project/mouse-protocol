@@ -43,9 +43,9 @@
  * - HyperPolling Wireless Dongle (`0x00b3`). It is a receiver, not a mouse;
  *   addressing the mouse paired to it needs dongle-specific commands that are
  *   not documented here.
- * - Viper Mini (`0x008a`) and Viper V4 Pro (`0x00e5`/`0x00e6`), which have
- *   their own drivers in this folder. Listing them here would give two drivers
- *   the same device.
+ * - Viper Mini (`0x008a`), Viper V4 Pro (`0x00e5`/`0x00e6`) and Cobra
+ *   (`0x00a3`), which have their own drivers in this folder. Listing them here
+ *   would give two drivers the same device.
  */
 
 import {
@@ -409,7 +409,6 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   // polling command cannot encode.
   [0x0091, { model: "Viper 8KHz", ...STANDARD, maxDpi: DPI_FOCUS, pollingRates: RATES_8K, highRatePolling: true }],
   [0x00a1, { model: "DeathAdder V2 Lite", ...STANDARD, maxDpi: 8500 }],
-  [0x00a3, { model: "Cobra", ...STANDARD, maxDpi: 8500 }],
   [0x00b2, { model: "DeathAdder V3", ...STANDARD, maxDpi: DPI_FOCUS_PRO }],
 
   // ---- index3: wired, control channel on USB interface 3 --------------------
