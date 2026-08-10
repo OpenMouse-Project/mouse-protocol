@@ -1,6 +1,6 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
-import { RATES_1K, RAZER_PRODUCTS, type RazerProduct } from "@openmouse/protocol/razer-devices";
+import { RATES_1K, RATES_8K, RAZER_PRODUCTS, type RazerProduct } from "@openmouse/protocol/razer-devices";
 import { openRazerDevice } from "./hid-open.ts";
 import {
   RAZER_LANDING_MAX,
@@ -106,6 +106,10 @@ export class RazerHidClient {
   // so nothing after the first read needs to ask the mouse again.
   private asymmetric: boolean | null = null;
   private asymmetricKnown = false;
+  /** Filled for dock passthrough after the first polling probe. */
+  private discoveredPollingRates: readonly number[] | null = null;
+  /** Which polling command the paired mouse answers; null until probed. */
+  private discoveredHighRatePolling: boolean | null = null;
 
   readonly device: HIDDevice;
 
@@ -138,6 +142,7 @@ export class RazerHidClient {
    * this is exactly `isWireless()`, which is what it used to read.
    */
   private usesHighRatePolling(): boolean {
+    if (this.discoveredHighRatePolling !== null) return this.discoveredHighRatePolling;
     return this.profile()?.highRatePolling ?? this.isWireless();
   }
 
@@ -153,6 +158,8 @@ export class RazerHidClient {
   async close(): Promise<void> {
     this.staticReads.clear();
     this.asymmetricKnown = false;
+    this.discoveredPollingRates = null;
+    this.discoveredHighRatePolling = null;
     if (this.device.opened) await this.device.close();
   }
 
@@ -173,7 +180,8 @@ export class RazerHidClient {
    * should not present it as the same thing as a tested mouse.
    */
   private connectionDetail(wireless: boolean): string {
-    const link = wireless ? "HyperSpeed receiver" : "Wired USB";
+    const link = this.profile()?.connectionLabel
+      ?? (wireless ? "HyperSpeed receiver" : "Wired USB");
     return this.profile()?.verified === false ? `${link} · untested model` : link;
   }
 
@@ -182,6 +190,7 @@ export class RazerHidClient {
   }
 
   getSupportedPollingRates(): number[] {
+    if (this.discoveredPollingRates) return [...this.discoveredPollingRates];
     return [...(this.profile()?.pollingRates ?? RATES_1K)];
   }
 
@@ -347,6 +356,10 @@ export class RazerHidClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
+    // Dock passthrough: discover the paired mouse's ladder before validating.
+    if (this.profile()?.probePollingRates === true && !this.discoveredPollingRates) {
+      await this.readPollingRateHz();
+    }
     if (!this.getSupportedPollingRates().includes(pollingRateHz)) {
       throw new Error(`This mouse does not support ${pollingRateHz.toLocaleString()} Hz on this connection.`);
     }
@@ -508,13 +521,27 @@ export class RazerHidClient {
    * Wired answers only the legacy command and the receiver only the extended
    * one, so ask for the expected one first and keep the other as a fallback.
    * Asking in the wrong order costs a failed exchange on every refresh.
+   *
+   * Mouse Dock Pro omits a fixed rate list (`probePollingRates`): if extended
+   * polling answers, the paired mouse can use the HyperPolling ladder;
+   * otherwise stay on the 1 kHz ladder (e.g. Naga V2 Pro).
    */
   private async readPollingRateHz(): Promise<number> {
-    const extended = [RAZER_READ.pollingRateExtended, decodeExtendedPollingRate] as const;
-    const legacy = [RAZER_READ.pollingRate, decodeLegacyPollingRate] as const;
-    for (const [command, decode] of this.usesHighRatePolling() ? [extended, legacy] : [legacy, extended]) {
+    const probe = this.profile()?.probePollingRates === true;
+    const extended = [RAZER_READ.pollingRateExtended, decodeExtendedPollingRate, true] as const;
+    const legacy = [RAZER_READ.pollingRate, decodeLegacyPollingRate, false] as const;
+    // Until a dock probe settles, prefer the product's declared encoding so the
+    // first try matches what verified HyperSpeed paths already expect.
+    const preferExtended = this.discoveredHighRatePolling ?? this.profile()?.highRatePolling ?? this.isWireless();
+    for (const [command, decode, isExtended] of preferExtended ? [extended, legacy] : [legacy, extended]) {
       const reply = await this.request(command).catch(() => null);
-      if (reply) return decode(reply);
+      if (!reply) continue;
+      const hz = decode(reply);
+      if (probe) {
+        this.discoveredHighRatePolling = isExtended;
+        this.discoveredPollingRates = isExtended ? RATES_8K : RATES_1K;
+      }
+      return hz;
     }
     throw new Error("The mouse did not report a polling rate.");
   }

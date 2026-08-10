@@ -13,12 +13,23 @@ picker. This is a system grant, not an app setting.
 
 Identifiers verified on hardware:
 
+- `1532:00a4` — Mouse Dock Pro (settings passthrough; verified with Naga V2 Pro)
 - `1532:00a5` — Viper V2 Pro, wired
 - `1532:00a6` — Viper V2 Pro, Stock receiver
+- `1532:00a7` — Naga V2 Pro, wired (firmware 1.3)
+- `1532:00a8` — Naga V2 Pro, stock HyperSpeed receiver
 - `1532:00c0` — Viper V3 Pro, wired
 - `1532:00c1` — Viper V3 Pro, HyperSpeed receiver
 - `1532:008a` — Viper Mini, wired (separate driver)
 - `1532:00b8` — Viper V3 HyperSpeed, stock HyperSpeed receiver
+
+Mouse Dock Pro uses the same 90-byte protocol as the paired mouse. It has no
+fixed polling list: if the paired mouse answers the extended polling command it
+offers up to 8000 Hz; otherwise it stays on the 1 kHz ladder (Naga V2 Pro). Quit
+Razer services before probing — they can return unrelated `0x0f/0x03` feature
+reports.
+
+Naga V2 Pro hardcodes 125/500/1000 Hz on both the cable and the stock receiver.
 
 Claimed but never connected:
 

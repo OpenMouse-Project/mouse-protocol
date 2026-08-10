@@ -49,6 +49,13 @@ const VERIFIED_SINCE: ReadonlyArray<[number, VerifiedProfile]> = [
   // command is refused as unsupported, and 125/500/1000 Hz each round-tripped
   // on the legacy one.
   [0x00b8, { model: "Viper V3 HyperSpeed", wireless: true, maxDpi: 30000, transactionId: RAZER_TRANSACTION_ID, rates: RATES_1K, highRate: false }],
+  // Mouse Dock Pro with a Naga V2 Pro paired: settings passthrough on `0x1f`,
+  // and polling rates discovered from which command the paired mouse answers.
+  [0x00a4, { model: "Mouse Dock Pro", wireless: true, maxDpi: 35000, transactionId: RAZER_TRANSACTION_ID, rates: RATES_1K, highRate: true }],
+  // Naga V2 Pro (firmware 1.3): fixed 1 kHz ladder on cable and stock receiver;
+  // also the paired mouse used to verify Dock Pro passthrough.
+  [0x00a7, { model: "Naga V2 Pro (Wired)", wireless: false, maxDpi: 30000, transactionId: RAZER_TRANSACTION_ID, rates: RATES_1K, highRate: false }],
+  [0x00a8, { model: "Naga V2 Pro", wireless: true, maxDpi: 30000, transactionId: RAZER_TRANSACTION_ID, rates: RATES_1K, highRate: true }],
 ];
 
 const VERIFIED = [...REFACTOR_BASELINE, ...VERIFIED_SINCE];
@@ -61,7 +68,7 @@ const VERIFIED = [...REFACTOR_BASELINE, ...VERIFIED_SINCE];
  * hardware-tested", so it is pinned like the others without claiming to be
  * verified.
  */
-const HARDWARE_VERIFIED: readonly number[] = [0x00a5, 0x00a6, 0x00c0, 0x00c1, 0x00b8];
+const HARDWARE_VERIFIED: readonly number[] = [0x00a4, 0x00a5, 0x00a6, 0x00a7, 0x00a8, 0x00c0, 0x00c1, 0x00b8];
 
 test("every pinned product keeps exactly the profile it was given", () => {
   // A silent change to any of these would only show up on hardware, which is
@@ -247,6 +254,9 @@ const EXPECTED_DIVERGENCE: ReadonlyMap<number, { ours: number; openRazer: number
   [0x006e, { ours: 0x3f, openRazer: 0xff, why: "predates the audit; untested either way" }],
   [0x0071, { ours: 0x3f, openRazer: 0xff, why: "predates the audit; untested either way" }],
   [0x0098, { ours: 0x3f, openRazer: 0xff, why: "predates the audit; untested either way" }],
+  // Not a mouse in OpenRazer's table; the dock answers on the paired mouse's
+  // generation id. Confirmed with a Naga V2 Pro.
+  [0x00a4, { ours: 0x1f, openRazer: 0xff, why: "hardware report with Naga V2 Pro: dock answers on 0x1f" }],
 ]);
 
 test("every transaction id matches OpenRazer, or is a divergence with a reason", () => {
@@ -320,6 +330,28 @@ test("only wireless-capable models are sent battery commands", () => {
   }
 });
 
+test("Mouse Dock Pro discovers the paired mouse's polling ladder", () => {
+  const dock = RAZER_PRODUCTS.get(0x00a4);
+  assert.ok(dock);
+  assert.equal(dock.probePollingRates, true);
+  assert.equal(dock.connectionLabel, "Mouse Dock Pro");
+  assert.equal(dock.verified, true);
+  // Pre-probe defaults only; the driver replaces both after the first read.
+  assert.deepEqual([...dock.pollingRates], [...RATES_1K]);
+  assert.equal(dock.highRatePolling, true);
+});
+
+test("Naga V2 Pro is hardware-verified on cable and stock receiver", () => {
+  const wired = RAZER_PRODUCTS.get(0x00a7);
+  const receiver = RAZER_PRODUCTS.get(0x00a8);
+  assert.equal(wired?.verified, true);
+  assert.equal(receiver?.verified, true);
+  assert.deepEqual([...(wired?.pollingRates ?? [])], [...RATES_1K]);
+  assert.deepEqual([...(receiver?.pollingRates ?? [])], [...RATES_1K]);
+  assert.equal(wired?.highRatePolling, false);
+  assert.equal(receiver?.highRatePolling, true);
+});
+
 test("the picker filter list covers every product in the registry", () => {
   // Built from the same map, so this guards the wiring rather than the data:
   // an id in the registry with no filter can never reach the driver.
@@ -334,7 +366,7 @@ test("the catch-all filter does not widen a filter that was deliberately narrowe
   const { RAZER_REGISTRY_FILTERS, SUPPORTED_HID_FILTERS, VENDOR_ID } = await import("../vendors.ts");
 
   const broad = new Set(RAZER_REGISTRY_FILTERS.map((filter) => filter.productId));
-  for (const productId of [0x00a5, 0x00a6, 0x00c0, 0x00c1, 0x006e, 0x0071, 0x0098]) {
+  for (const productId of [0x00a4, 0x00a5, 0x00a6, 0x00c0, 0x00c1, 0x006e, 0x0071, 0x0098]) {
     assert.equal(broad.has(productId), false, `0x${productId.toString(16)} is filtered twice`);
   }
   // Every registry id still reaches the picker, through one filter or another.
