@@ -338,10 +338,13 @@ test("the catch-all filter does not widen a filter that was deliberately narrowe
     assert.equal(broad.has(productId), false, `0x${productId.toString(16)} is filtered twice`);
   }
   // Every registry id still reaches the picker, through one filter or another.
+  // The one exception is a `nativeOnly` product, whose control channel WebHID
+  // can never expose and which must therefore stay out of the picker.
   const offered = SUPPORTED_HID_FILTERS
     .filter((filter) => filter.vendorId === VENDOR_ID.razer && filter.productId !== undefined)
     .map((filter) => filter.productId);
   for (const productId of RAZER_PRODUCT_IDS) {
+    if (RAZER_PRODUCTS.get(productId)?.nativeOnly) continue;
     assert.ok(offered.includes(productId), `0x${productId.toString(16)} is not offered in the picker`);
   }
 });
