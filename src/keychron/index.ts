@@ -38,3 +38,16 @@ export function keychronDecodeFirmware(response: Uint8Array): string | null {
   return text.startsWith("v") ? text : `v${text}`;
 }
 
+export function keychronDecodeBattery(
+  response: Uint8Array,
+): { percent: number; state: "Charging" | "Full" | "Discharging" } {
+  const percent = response[2] ?? 0xff;
+  const status = response[3] ?? 0;
+  const state = status === 1
+    ? "Charging"
+    : status === 2
+      ? "Full"
+      : "Discharging";
+  return { percent, state };
+}
+

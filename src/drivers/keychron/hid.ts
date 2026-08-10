@@ -9,6 +9,7 @@ import {
   KEYCHRON_RAW_USAGE_PAGE as RAW_USAGE_PAGE,
   KEYCHRON_REPORT_ID as REPORT_ID,
   KEYCHRON_VENDOR_ID,
+  keychronDecodeBattery,
   keychronDecodeFirmware,
   keychronDecodePolling,
   keychronPacket,
@@ -259,14 +260,7 @@ export class KeychronHidClient {
       (bytes) => bytes[0] === CMD.miscGroup && bytes[1] === NAPE.getBattery,
       [CMD.miscGroup, NAPE.getBattery],
     );
-    const percent = response[2] ?? 0xff;
-    const status = response[3] ?? 0;
-    const state: MouseStatus["batteryState"] = status === 1
-      ? "Charging"
-      : status === 2
-        ? "Full"
-        : "Discharging";
-    return { percent, state };
+    return keychronDecodeBattery(response);
   }
 
   private async getOrientationIndex(): Promise<number> {
