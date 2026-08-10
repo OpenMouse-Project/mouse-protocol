@@ -23,6 +23,8 @@ export interface MouseUiHints {
   pollingReadOnly?: boolean;
   /** Hide Motion Sync / angle snap / ripple card. */
   hideProcessingCard?: boolean;
+  /** Hide Motion Sync while leaving other processing controls available. */
+  hideMotionSync?: boolean;
   /** Hide angle snapping while leaving other processing controls available. */
   hideAngleSnapping?: boolean;
   /** Hide ripple control while leaving other processing controls available. */

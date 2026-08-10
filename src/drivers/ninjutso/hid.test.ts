@@ -4,7 +4,7 @@ import test from "node:test";
 import { NinjutsoHidClient } from "./hid.ts";
 import { NINJUTSO_VENDOR_ID } from "@openmouse/protocol/ninjutso";
 
-function fakeDevice() {
+function fakeDevice(ignoredCommands = new Set<number>()) {
   const sent: Array<{ reportId: number; payload: Uint8Array }> = [];
   let dpi = 1600;
   let polling = 4;
@@ -44,6 +44,7 @@ function fakeDevice() {
       const request = sent.findLast((entry) => entry.reportId === 6)!.payload;
       const command = request[0]!;
       const reply = new Uint8Array(15);
+      if (ignoredCommands.has(command)) return new DataView(reply.buffer);
       reply[1] = command;
       const values: Record<number, number[]> = {
         16: [1],
@@ -85,6 +86,14 @@ test("reads current Sora V3 status using report-6 commands", async () => {
   assert.equal(status.sleepTimeout, 300);
   assert.equal(status.angleTuning, -5);
   assert.deepEqual(status.firmware, ["Mouse AE0F03"]);
+});
+
+test("loads Sora V3 settings when firmware does not answer Motion Sync", async () => {
+  const status = await new NinjutsoHidClient(fakeDevice(new Set([14])).device).readStatus();
+  assert.equal(status.dpi, 1600);
+  assert.equal(status.motionSync, null);
+  assert.equal(status.ui?.hideMotionSync, true);
+  assert.equal(status.angleTuning, -5);
 });
 
 test("writes current settings and confirms each one by reading it back", async () => {

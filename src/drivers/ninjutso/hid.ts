@@ -36,6 +36,8 @@ const SLEEP_OPTIONS = Array.from({ length: 15 }, (_, index) => (index + 1) * 60)
 
 type LiftOffDistance = NonNullable<MouseStatus["liftOffDistance"]>;
 
+class NinjutsoCommandTimeoutError extends Error {}
+
 /**
  * NinjaForce-derived WebHID implementation for Sora V2/V3 and TEN-family mice.
  * Packet layouts are public and deterministic; hardware verification is still pending.
@@ -224,7 +226,10 @@ export class NinjutsoHidClient {
     const dpi = await this.readCurrent(NINJUTSO_COMMAND.dpi, [stage]);
     const polling = await this.readCurrent(NINJUTSO_COMMAND.pollingRate);
     const lod = await this.readCurrent(NINJUTSO_COMMAND.liftOffDistance);
-    const motion = await this.readCurrent(NINJUTSO_COMMAND.motionSync);
+    // Some Sora V3 firmware does not implement command 0x0e even though the
+    // shared NinjaForce UI probes it. Treat that as a missing capability rather
+    // than preventing every supported setting from loading.
+    const motion = await this.readCurrentOptional(NINJUTSO_COMMAND.motionSync);
     const angle = await this.readCurrent(NINJUTSO_COMMAND.angleTuning);
     const sleep = await this.readCurrent(NINJUTSO_COMMAND.sleepMinutes);
     const firmware = await this.readCurrent(NINJUTSO_COMMAND.firmware, [0]);
@@ -243,6 +248,7 @@ export class NinjutsoHidClient {
         family: "ninjutso",
         hideUnsupportedPollingRates: true,
         hideSignalCard: true,
+        hideMotionSync: motion === null,
         hideAngleSnapping: true,
         hideRippleControl: true,
         showAdvancedSection: true,
@@ -258,7 +264,7 @@ export class NinjutsoHidClient {
       activeProfile: this.profile,
       connectionType: this.isWireless() ? "Wireless" : "Wired",
       connectionDetail: this.isWireless() ? "2.4 GHz receiver · NinjaForce protocol" : "USB · NinjaForce protocol",
-      motionSync: motion[0] === 1,
+      motionSync: motion === null ? null : motion[0] === 1,
       debounceMs: null,
       sleepTimeout: (sleep[0] ?? 0) * 60 || null,
       angleTuning: this.signedByte(angle[0] ?? 0),
@@ -390,7 +396,16 @@ export class NinjutsoHidClient {
       const value = ninjutsoResponseValue(response, command);
       if (value) return value;
     }
-    throw new Error(`The Ninjutso mouse did not answer command 0x${command.toString(16)}.`);
+    throw new NinjutsoCommandTimeoutError(`The Ninjutso mouse did not answer command 0x${command.toString(16)}.`);
+  }
+
+  private async readCurrentOptional(command: number, args: readonly number[] = []): Promise<Uint8Array | null> {
+    try {
+      return await this.readCurrent(command, args);
+    } catch (error) {
+      if (error instanceof NinjutsoCommandTimeoutError) return null;
+      throw error;
+    }
   }
 
   private async sendCurrent(command: number, args: readonly number[]): Promise<void> {
