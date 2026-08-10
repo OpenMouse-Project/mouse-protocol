@@ -4,16 +4,26 @@ import test from "node:test";
 import { NinjutsoHidClient } from "./hid.ts";
 import { NINJUTSO_VENDOR_ID } from "@openmouse/protocol/ninjutso";
 
-function fakeDevice(ignoredCommands = new Set<number>()) {
+function fakeDevice(ignoredCommands = new Set<number>(), productId = 0xe010) {
   const sent: Array<{ reportId: number; payload: Uint8Array }> = [];
   let dpi = 1600;
   let polling = 4;
   let lod = 1;
   let motion = 1;
   let sleep = 5;
+  let stage = 1;
+  let system = 2;
+  let hyper = 1;
+  let slam = 1;
+  let optical = 0;
+  let lightState = 1;
+  let lightMode = 3;
+  let lightSpeed = 8;
+  let lightBrightness = 2;
+  let lightColor = [0xff, 0, 0x99];
   const device = {
     vendorId: NINJUTSO_VENDOR_ID,
-    productId: 0xe010,
+    productId,
     productName: "Ninjutso Sora V3",
     opened: true,
     collections: [{
@@ -39,6 +49,16 @@ function fakeDevice(ignoredCommands = new Set<number>()) {
       if (payload[0] === 7) lod = payload[7]!;
       if (payload[0] === 13) motion = payload[7]!;
       if (payload[0] === 24) sleep = payload[7]!;
+      if (payload[0] === 27) stage = payload[7]!;
+      if (payload[0] === 11) system = payload[7]!;
+      if (payload[0] === 22) hyper = payload[7]!;
+      if (payload[0] === 41) slam = payload[7]!;
+      if (payload[0] === 49) optical = payload[7]!;
+      if (payload[0] === 37) lightState = payload[7]!;
+      if (payload[0] === 31) lightMode = payload[7]!;
+      if (payload[0] === 39) lightSpeed = payload[7]!;
+      if (payload[0] === 47) lightBrightness = payload[7]!;
+      if (payload[0] === 33) lightColor = [...payload.slice(7, 10)];
     },
     receiveFeatureReport: async () => {
       const request = sent.findLast((entry) => entry.reportId === 6)!.payload;
@@ -51,13 +71,24 @@ function fakeDevice(ignoredCommands = new Set<number>()) {
         17: [1],
         18: [73],
         21: [3, 15, 174],
-        28: [1],
+        28: [stage],
+        30: [4],
         4: [dpi & 0xff, dpi >> 8, 0],
         6: [polling],
         8: [lod],
         10: [251],
         14: [motion],
+        12: [system],
+        23: [hyper],
+        42: [slam],
+        50: [optical],
         25: [sleep],
+        167: [0x10, 0xe0],
+        38: [lightState],
+        32: [lightMode],
+        40: [lightSpeed],
+        48: [lightBrightness],
+        34: lightColor,
       };
       reply.set(values[command] ?? [], 8);
       return new DataView(reply.buffer);
@@ -85,6 +116,12 @@ test("reads current Sora V3 status using report-6 commands", async () => {
   assert.equal(status.motionSync, true);
   assert.equal(status.sleepTimeout, 300);
   assert.equal(status.angleTuning, -5);
+  assert.deepEqual(status.dpiStages, [1600, 1600, 1600, 1600]);
+  assert.equal(status.activeDpiStage, 1);
+  assert.equal(status.ninjutsoSystemMode, "Ultra");
+  assert.equal(status.ninjutsoHyperClick, true);
+  assert.equal(status.ninjutsoOpticalEngine, "Standard");
+  assert.equal(status.ninjutsoSlamClick, "Medium");
   assert.deepEqual(status.firmware, ["Mouse AE0F03"]);
 });
 
@@ -107,8 +144,27 @@ test("writes current settings and confirms each one by reading it back", async (
   assert.equal(await client.setLiftOffDistance("High"), "High");
   assert.equal(await client.setMotionSync(false), false);
   assert.equal(await client.setSleepTimeout(600), 600);
+  assert.equal(await client.setNinjutsoSystemMode("Competitive"), "Competitive");
+  assert.equal(await client.setNinjutsoHyperClick(false), false);
+  assert.equal(await client.setNinjutsoOpticalEngine("Burst"), "Burst");
+  assert.equal(await client.setNinjutsoSlamClick("High"), "High");
+  assert.equal(await client.setNinjutsoActiveDpiStage(2), 2);
   assert.ok(sent.some(({ reportId, payload }) => reportId === 3 && payload[0] === 27));
   assert.ok(sent.some(({ reportId, payload }) => reportId === 3 && payload[0] === 28));
+});
+
+test("reads and writes Sora V3 receiver lighting", async () => {
+  const client = new NinjutsoHidClient(fakeDevice(new Set(), 0xeb02).device);
+  const status = await client.readStatus();
+  assert.deepEqual(status.lighting?.modes, ["Off", "Static", "Wave"]);
+  assert.equal(status.lighting?.mode, "Wave");
+  assert.equal(status.lighting?.brightness, 50);
+  assert.equal(status.lighting?.speed, 12);
+  assert.equal(status.lighting?.color, "#ff0099");
+  const lighting = await client.setLighting({ ...status.lighting!, mode: "Static", color: "#123456", brightness: 75 });
+  assert.equal(lighting.mode, "Static");
+  assert.equal(lighting.color, "#123456");
+  assert.equal(lighting.brightness, 75);
 });
 
 test("reads the legacy Sora V2 settings block and verifies its checksum", async () => {

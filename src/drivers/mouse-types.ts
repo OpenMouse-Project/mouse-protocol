@@ -75,6 +75,10 @@ export interface MouseLighting {
   speeds: readonly number[];
   /** Reactive speed currently selected. */
   speed: number | null;
+  /** Optional brightness percentage for zones that expose it. */
+  brightness?: number | null;
+  /** Brightness percentages the device accepts. */
+  brightnessLevels?: readonly number[];
   /** True when the mouse cannot report the effect back (Razer effect writes). */
   writeOnly?: boolean;
 }
@@ -82,6 +86,8 @@ export interface MouseLighting {
 export type MouseLightingMode =
   | "Off"
   | "Static"
+  | "Cycling"
+  | "Wave"
   | "Spectrum"
   | "Reactive"
   | "Breathing random"
@@ -121,6 +127,14 @@ export interface MouseStatus {
   finalmouseTournamentScrollTimeoutMs?: number | null;
   signalStrength?: number | null;
   motionSync?: boolean | null;
+  /** NinjaForce DPI stages, where supported. */
+  dpiStages?: number[];
+  activeDpiStage?: number;
+  ninjutsoSystemMode?: "High Speed" | "Competitive" | "Ultra" | null;
+  ninjutsoSystemModes?: Array<"High Speed" | "Competitive" | "Ultra">;
+  ninjutsoHyperClick?: boolean | null;
+  ninjutsoOpticalEngine?: "Standard" | "Burst" | null;
+  ninjutsoSlamClick?: "Low" | "Medium" | "High" | null;
   debounceMs?: number | null;
   sleepTimeout?: number | null;
   angleSnapping?: boolean | null;

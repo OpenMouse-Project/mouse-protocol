@@ -1,4 +1,4 @@
-import type { MouseStatus } from "../mouse-types.ts";
+import type { MouseLighting, MouseStatus } from "../mouse-types.ts";
 import {
   NINJUTSO_COMMAND,
   NINJUTSO_CONTROL_PAYLOAD_LENGTH,
@@ -33,6 +33,8 @@ const SORA_V2_3950_IDS = new Set<number>([0xae14, 0xae15, 0xae16]);
 const LEGACY_HIGH_RATE_RECEIVERS = new Set<number>([0xae8c, 0xae8a]);
 const LOD_VALUES = ["Low", "Medium", "High"] as const;
 const SLEEP_OPTIONS = Array.from({ length: 15 }, (_, index) => (index + 1) * 60);
+const SYSTEM_MODES = ["High Speed", "Competitive", "Ultra"] as const;
+const SLAM_CLICK_LEVELS = ["Low", "Medium", "High"] as const;
 
 type LiftOffDistance = NonNullable<MouseStatus["liftOffDistance"]>;
 
@@ -215,6 +217,115 @@ export class NinjutsoHidClient {
     });
   }
 
+  async setNinjutsoSystemMode(mode: NonNullable<MouseStatus["ninjutsoSystemMode"]>): Promise<typeof mode> {
+    return await this.run(async () => {
+      await this.open();
+      const direct = SORA_V3_IDS.has(await this.ensureEffectiveProductId());
+      const code = SYSTEM_MODES.indexOf(mode);
+      if (code < 0 || (!direct && code > 1)) throw new Error(`${this.displayName()} does not support ${mode} mode.`);
+      if (this.isLegacy()) {
+        await this.device.sendFeatureReport(NINJUTSO_LEGACY_REPORT_ID, buffer(ninjutsoLegacyRequest(23, this.profile, code + 1)));
+        const confirmed = SYSTEM_MODES[Math.max(0, ((await this.readLegacySettings()).data[21] ?? 1) - 1)] ?? "High Speed";
+        if (confirmed !== mode) throw new Error(`The mouse kept ${confirmed} mode instead of ${mode}.`);
+      } else {
+        await this.sendCurrent(NINJUTSO_COMMAND.setSystemMode, [code]);
+        const confirmed = SYSTEM_MODES[(await this.readCurrent(NINJUTSO_COMMAND.systemMode))[0]!] ?? "High Speed";
+        if (confirmed !== mode) throw new Error(`The mouse kept ${confirmed} mode instead of ${mode}.`);
+      }
+      this.patch({ ninjutsoSystemMode: mode });
+      return mode;
+    });
+  }
+
+  async setNinjutsoHyperClick(enabled: boolean): Promise<boolean> {
+    return await this.setCurrentOption("HyperClick", NINJUTSO_COMMAND.setHyperClick, NINJUTSO_COMMAND.hyperClick, enabled, "ninjutsoHyperClick");
+  }
+
+  async setNinjutsoOpticalEngine(mode: "Standard" | "Burst"): Promise<typeof mode> {
+    return await this.run(async () => {
+      await this.open();
+      if (this.isLegacy() || !SORA_V3_IDS.has(await this.ensureEffectiveProductId())) throw new Error("Optical Engine modes are only available on Sora V3.");
+      await this.sendCurrent(NINJUTSO_COMMAND.setOpticalEngine, [mode === "Burst" ? 1 : 0]);
+      const confirmed = (await this.readCurrent(NINJUTSO_COMMAND.opticalEngine))[0] === 1 ? "Burst" : "Standard";
+      if (confirmed !== mode) throw new Error(`The mouse kept ${confirmed} optical mode instead of ${mode}.`);
+      this.patch({ ninjutsoOpticalEngine: confirmed });
+      return confirmed;
+    });
+  }
+
+  async setNinjutsoSlamClick(level: NonNullable<MouseStatus["ninjutsoSlamClick"]>): Promise<typeof level> {
+    return await this.run(async () => {
+      await this.open();
+      const code = SLAM_CLICK_LEVELS.indexOf(level);
+      if (code < 0) throw new Error(`Unsupported Slam-Click level: ${level}.`);
+      if (this.isLegacy()) {
+        const request = ninjutsoLegacyRequest(36, this.profile, code);
+        request[6] = 1;
+        await this.device.sendFeatureReport(NINJUTSO_LEGACY_REPORT_ID, buffer(request));
+        const confirmed = SLAM_CLICK_LEVELS[(await this.readLegacySettings()).data[25]!] ?? "Medium";
+        if (confirmed !== level) throw new Error(`The mouse kept ${confirmed} Slam-Click instead of ${level}.`);
+      } else {
+        await this.sendCurrent(NINJUTSO_COMMAND.setSlamClick, [code]);
+        const confirmed = SLAM_CLICK_LEVELS[(await this.readCurrent(NINJUTSO_COMMAND.slamClick))[0]!] ?? "Medium";
+        if (confirmed !== level) throw new Error(`The mouse kept ${confirmed} Slam-Click instead of ${level}.`);
+      }
+      this.patch({ ninjutsoSlamClick: level });
+      return level;
+    });
+  }
+
+  async setNinjutsoActiveDpiStage(stage: number): Promise<number> {
+    return await this.run(async () => {
+      await this.open();
+      if (!Number.isInteger(stage) || stage < 0 || stage > 3) throw new Error("DPI stage must be between 1 and 4.");
+      if (this.isLegacy()) {
+        await this.device.sendFeatureReport(NINJUTSO_LEGACY_REPORT_ID, buffer(ninjutsoLegacyRequest(14, this.profile, stage)));
+        const settings = await this.readLegacySettings();
+        const confirmed = settings.data[20] ?? 0;
+        if (confirmed !== stage) throw new Error(`The mouse kept DPI stage ${confirmed + 1}.`);
+        const offset = 12 + stage * 2;
+        this.patch({ activeDpiStage: stage, dpi: ninjutsoLegacyDecodeDpi(settings.data[offset]!, settings.data[offset + 1]!) });
+      } else {
+        await this.sendCurrent(NINJUTSO_COMMAND.setActiveDpiStage, [stage]);
+        const confirmed = (await this.readCurrent(NINJUTSO_COMMAND.activeDpiStage))[0] ?? 0;
+        if (confirmed !== stage) throw new Error(`The mouse kept DPI stage ${confirmed + 1}.`);
+        const direct = SORA_V3_IDS.has(await this.ensureEffectiveProductId());
+        const dpi = await this.readCurrent(NINJUTSO_COMMAND.dpi, [stage]);
+        this.patch({ activeDpiStage: stage, dpi: ninjutsoDecodeDpi(dpi[0]!, dpi[1]!, dpi[2]!, direct) });
+      }
+      return stage;
+    });
+  }
+
+  async setLighting(lighting: MouseLighting): Promise<MouseLighting> {
+    return await this.run(async () => {
+      await this.open();
+      if (this.isLegacy() || !this.isWireless()) throw new Error("Receiver lighting is not available on this connection.");
+      const modeCodes: Partial<Record<MouseLighting["mode"] & string, number>> = { Static: 1, Cycling: 2, Wave: 3 };
+      if (lighting.mode === "Off") await this.sendCurrent(NINJUTSO_COMMAND.setLightingState, [0]);
+      else {
+        const mode = lighting.mode;
+        const code = mode ? modeCodes[mode] : undefined;
+        if (!code) throw new Error(`Unsupported receiver lighting mode: ${lighting.mode}.`);
+        await this.sendCurrent(NINJUTSO_COMMAND.setLightingState, [1]);
+        await this.sendCurrent(NINJUTSO_COMMAND.setLightingMode, [code]);
+        if (lighting.color && mode && lighting.colorModes.includes(mode)) {
+          await this.sendCurrent(NINJUTSO_COMMAND.setLightingColor, this.hexToRgb(lighting.color));
+        }
+        if (mode && lighting.reactiveModes.includes(mode) && lighting.speed !== null) {
+          await this.sendCurrent(NINJUTSO_COMMAND.setLightingSpeed, [20 - lighting.speed]);
+        }
+        if (lighting.brightness != null && lighting.brightnessLevels?.includes(lighting.brightness)) {
+          await this.sendCurrent(NINJUTSO_COMMAND.setLightingBrightness, [lighting.brightness / 25]);
+        }
+      }
+      const confirmed = await this.readCurrentLighting(SORA_V3_IDS.has(await this.ensureEffectiveProductId()));
+      if (!confirmed) throw new Error("The receiver did not confirm its lighting settings.");
+      this.patch({ lighting: confirmed });
+      return confirmed;
+    });
+  }
+
   private async readCurrentStatus(): Promise<MouseStatus> {
     const effective = await this.ensureEffectiveProductId();
     this.profile = (await this.readCurrent(NINJUTSO_COMMAND.profile))[0] || 1;
@@ -232,6 +343,19 @@ export class NinjutsoHidClient {
     const motion = await this.readCurrentOptional(NINJUTSO_COMMAND.motionSync);
     const angle = await this.readCurrentOptional(NINJUTSO_COMMAND.angleTuning);
     const sleep = await this.readCurrentOptional(NINJUTSO_COMMAND.sleepMinutes);
+    const stageCountReply = await this.readCurrentOptional(NINJUTSO_COMMAND.dpiStageCount);
+    const system = await this.readCurrentOptional(NINJUTSO_COMMAND.systemMode);
+    const hyper = await this.readCurrentOptional(NINJUTSO_COMMAND.hyperClick);
+    const slam = await this.readCurrentOptional(NINJUTSO_COMMAND.slamClick);
+    const optical = direct ? await this.readCurrentOptional(NINJUTSO_COMMAND.opticalEngine) : null;
+    const stageCount = Math.min(Math.max(stageCountReply?.[0] ?? 1, 1), 4);
+    const dpiStages: number[] = [];
+    for (let index = 0; index < stageCount; index++) {
+      const value = index === stage ? dpi : await this.readCurrentOptional(NINJUTSO_COMMAND.dpi, [index]);
+      if (!value) break;
+      dpiStages.push(ninjutsoDecodeDpi(value[0]!, value[1]!, value[2]!, direct));
+    }
+    const lighting = this.isWireless() ? await this.readCurrentLighting(direct) : null;
     const firmware = await this.readCurrentOptional(NINJUTSO_COMMAND.firmware, [0]);
     const batteryPercent = Math.min(battery[0] ?? 0, 100);
     const firmwareValues = firmware ? [`Mouse ${this.decodeFirmware(firmware)}`] : [];
@@ -260,12 +384,19 @@ export class NinjutsoHidClient {
       batteryPercent,
       batteryState: charging[0] ? "Charging" : "Discharging",
       dpi: ninjutsoDecodeDpi(dpi[0]!, dpi[1]!, dpi[2]!, direct),
+      dpiStages: dpiStages.length ? dpiStages : undefined,
+      activeDpiStage: stage,
       pollingRateHz,
       supportedPollingRates: [...NINJUTSO_POLLING_RATES],
       activeProfile: this.profile,
       connectionType: this.isWireless() ? "Wireless" : "Wired",
       connectionDetail: this.isWireless() ? "2.4 GHz receiver · NinjaForce protocol" : "USB · NinjaForce protocol",
       motionSync: motion === null ? null : motion[0] === 1,
+      ninjutsoSystemMode: system ? SYSTEM_MODES[system[0]!] ?? null : null,
+      ninjutsoSystemModes: system ? [...SYSTEM_MODES.slice(0, direct ? 3 : 2)] : undefined,
+      ninjutsoHyperClick: hyper ? hyper[0] === 1 : null,
+      ninjutsoOpticalEngine: optical ? optical[0] === 1 ? "Burst" : "Standard" : null,
+      ninjutsoSlamClick: slam ? SLAM_CLICK_LEVELS[slam[0]!] ?? null : null,
       debounceMs: null,
       sleepTimeout: sleep === null ? null : (sleep[0] ?? 0) * 60 || null,
       angleTuning: angle === null ? null : this.signedByte(angle[0] ?? 0),
@@ -273,6 +404,7 @@ export class NinjutsoHidClient {
       rippleControl: null,
       liftOffDistance: this.decodeLod(lod[0]!),
       supportedLiftOffDistances,
+      lighting: lighting ?? undefined,
       firmware: firmwareValues,
     };
   }
@@ -305,12 +437,17 @@ export class NinjutsoHidClient {
       batteryPercent: Math.min(data[7] ?? 0, 100),
       batteryState: this.isWireless() ? data[8] === 1 ? "Charging" : "Discharging" : "Unknown",
       dpi: ninjutsoLegacyDecodeDpi(data[dpiOffset]!, data[dpiOffset + 1]!),
+      dpiStages: Array.from({ length: stageCount }, (_, index) => ninjutsoLegacyDecodeDpi(data[12 + index * 2]!, data[13 + index * 2]!)),
+      activeDpiStage: stage,
       pollingRateHz: rate,
       supportedPollingRates: this.getSupportedPollingRates(),
       activeProfile: this.profile,
       connectionType: this.isWireless() ? "Wireless" : "Wired",
       connectionDetail: this.isWireless() ? "2.4 GHz receiver · Sora V2 protocol" : "USB · Sora V2 protocol",
       motionSync: data[23] === 1,
+      ninjutsoSystemMode: SYSTEM_MODES[Math.max(0, (data[21] ?? 1) - 1)] ?? "High Speed",
+      ninjutsoSystemModes: ["High Speed", "Competitive"],
+      ninjutsoSlamClick: SLAM_CLICK_LEVELS[data[25]!] ?? "Medium",
       debounceMs: null,
       sleepTimeout: null,
       angleTuning: supportsUltraLow ? this.signedByte(data[26] ?? 0) : null,
@@ -337,7 +474,9 @@ export class NinjutsoHidClient {
     const value = await this.readCurrent(NINJUTSO_COMMAND.dpi, [stage]);
     const confirmed = ninjutsoDecodeDpi(value[0]!, value[1]!, value[2]!, direct);
     if (confirmed !== dpi) throw new Error(`The mouse kept ${confirmed} DPI instead of ${dpi} DPI.`);
-    this.patch({ dpi: confirmed });
+    const dpiStages = this.lastStatus?.dpiStages?.slice();
+    if (dpiStages) dpiStages[stage] = confirmed;
+    this.patch({ dpi: confirmed, dpiStages });
     return confirmed;
   }
 
@@ -360,7 +499,9 @@ export class NinjutsoHidClient {
     const offset = 12 + stage * 2;
     const confirmed = ninjutsoLegacyDecodeDpi(confirmedSettings.data[offset]!, confirmedSettings.data[offset + 1]!);
     if (confirmed !== dpi) throw new Error(`The mouse kept ${confirmed} DPI instead of ${dpi} DPI.`);
-    this.patch({ dpi: confirmed });
+    const dpiStages = this.lastStatus?.dpiStages?.slice();
+    if (dpiStages) dpiStages[stage] = confirmed;
+    this.patch({ dpi: confirmed, dpiStages });
     return confirmed;
   }
 
@@ -382,12 +523,22 @@ export class NinjutsoHidClient {
   private async readCurrent(command: number, args: readonly number[] = [], attempts = 4): Promise<Uint8Array> {
     const profileCommands = new Set<number>([
       NINJUTSO_COMMAND.activeDpiStage,
+      NINJUTSO_COMMAND.dpiStageCount,
       NINJUTSO_COMMAND.dpi,
       NINJUTSO_COMMAND.pollingRate,
       NINJUTSO_COMMAND.liftOffDistance,
       NINJUTSO_COMMAND.angleTuning,
       NINJUTSO_COMMAND.motionSync,
+      NINJUTSO_COMMAND.systemMode,
+      NINJUTSO_COMMAND.hyperClick,
+      NINJUTSO_COMMAND.slamClick,
+      NINJUTSO_COMMAND.opticalEngine,
       NINJUTSO_COMMAND.sleepMinutes,
+      NINJUTSO_COMMAND.lightingMode,
+      NINJUTSO_COMMAND.lightingColor,
+      NINJUTSO_COMMAND.lightingState,
+      NINJUTSO_COMMAND.lightingSpeed,
+      NINJUTSO_COMMAND.lightingBrightness,
     ]);
     const request = ninjutsoBuildRequest(command, profileCommands.has(command) ? this.profile : 0, args);
     for (let attempt = 0; attempt < attempts; attempt++) {
@@ -413,6 +564,53 @@ export class NinjutsoHidClient {
 
   private async sendCurrent(command: number, args: readonly number[]): Promise<void> {
     await this.device.sendFeatureReport(NINJUTSO_REPORT_ID, buffer(ninjutsoBuildRequest(command, this.profile, args)));
+  }
+
+  private async setCurrentOption(label: string, write: number, read: number, enabled: boolean, key: "ninjutsoHyperClick"): Promise<boolean> {
+    return await this.run(async () => {
+      await this.open();
+      if (this.isLegacy()) throw new Error(`${label} is not available on Sora V2.`);
+      await this.sendCurrent(write, [enabled ? 1 : 0]);
+      const confirmed = (await this.readCurrent(read))[0] === 1;
+      if (confirmed !== enabled) throw new Error(`The mouse left ${label} ${confirmed ? "on" : "off"}.`);
+      this.patch({ [key]: confirmed });
+      return confirmed;
+    });
+  }
+
+  private async readCurrentLighting(direct: boolean): Promise<MouseLighting | null> {
+    const state = await this.readCurrentOptional(NINJUTSO_COMMAND.lightingState);
+    if (!state) return null;
+    const modeReply = await this.readCurrentOptional(NINJUTSO_COMMAND.lightingMode);
+    const speedReply = await this.readCurrentOptional(NINJUTSO_COMMAND.lightingSpeed);
+    const colorReply = await this.readCurrentOptional(NINJUTSO_COMMAND.lightingColor);
+    const brightnessReply = direct ? await this.readCurrentOptional(NINJUTSO_COMMAND.lightingBrightness) : null;
+    const modeMap = [null, "Static", "Cycling", "Wave"] as const;
+    const selected = state[0] === 0 ? "Off" : modeMap[modeReply?.[0] ?? 0] ?? "Static";
+    const effects = direct ? ["Off", "Static", "Wave"] as const : ["Off", "Static", "Cycling", "Wave"] as const;
+    return {
+      zone: "Receiver",
+      modes: effects,
+      mode: selected,
+      color: colorReply ? this.rgbToHex(colorReply[0]!, colorReply[1]!, colorReply[2]!) : null,
+      color2: null,
+      colorModes: ["Static"],
+      dualColorModes: [],
+      reactiveModes: ["Cycling", "Wave"],
+      speeds: Array.from({ length: 21 }, (_, index) => index),
+      speed: speedReply ? 20 - (speedReply[0] ?? 10) : null,
+      brightness: brightnessReply ? (brightnessReply[0] ?? 1) * 25 : null,
+      brightnessLevels: direct ? [25, 50, 75, 100] : [],
+    };
+  }
+
+  private rgbToHex(red: number, green: number, blue: number): string {
+    return `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+  }
+
+  private hexToRgb(value: string): number[] {
+    if (!/^#[0-9a-f]{6}$/i.test(value)) throw new Error("Lighting colour must be a six-digit hex colour.");
+    return [1, 3, 5].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
   }
 
   private async setControl(resume: boolean): Promise<void> {
