@@ -16,6 +16,7 @@ import {
 } from "@openmouse/protocol/razer";
 import { VIPER_MINI_PRODUCT_ID } from "./viper-mini-hid.ts";
 import { VIPER_V4_PRO_PRODUCTS } from "./viper-v4-pro-hid.ts";
+import { COBRA_PRODUCT_ID } from "./cobra-hid.ts";
 
 interface VerifiedProfile {
   model: string;
@@ -199,6 +200,7 @@ test("no product is claimed by both this registry and a dedicated Razer driver",
   // `driverFor` returns the first match in DEVICE_DRIVERS, so an overlap would
   // silently kill whichever driver is registered later.
   assert.equal(RAZER_PRODUCTS.has(VIPER_MINI_PRODUCT_ID), false);
+  assert.equal(RAZER_PRODUCTS.has(COBRA_PRODUCT_ID), false);
   for (const productId of VIPER_V4_PRO_PRODUCTS.keys()) {
     assert.equal(RAZER_PRODUCTS.has(productId), false, `0x${productId.toString(16)} also has a Viper V4 Pro driver`);
   }

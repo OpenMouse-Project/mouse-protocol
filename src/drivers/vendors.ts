@@ -88,6 +88,12 @@ export const RAZER_DEATHADDER_ESSENTIAL_FILTERS: HIDDeviceFilter[] = [0x006e, 0x
   (productId) => ({ vendorId: VENDOR_ID.razer, productId }),
 );
 
+// The Cobra's control interface layout has not been pinned down, so the whole
+// device is requested and the driver accepts whichever interface answers.
+export const RAZER_COBRA_FILTERS: HIDDeviceFilter[] = [0x00a3].map(
+  (productId) => ({ vendorId: VENDOR_ID.razer, productId }),
+);
+
 /**
  * Razer product ids whose control interface is known, and which therefore get a
  * narrower filter of their own above. Excluded from the catch-all below so a
@@ -203,6 +209,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.atk, usagePage: 0xff02, usage: 2 },
   ...RAZER_VIPER_V4_CONTROL_FILTERS,
   ...RAZER_DEATHADDER_ESSENTIAL_FILTERS,
+  ...RAZER_COBRA_FILTERS,
   ...KEYCHRON_HID_FILTERS,
   ...RAZER_REGISTRY_FILTERS,
   ...RAZER_DEATHADDER_V2_FILTERS,
