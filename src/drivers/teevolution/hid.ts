@@ -129,13 +129,13 @@ export class TeevolutionHidClient {
       const dongleVersion = await this.query(TEEVOLUTION_COMMAND.getDongleVersion).catch(() => null);
       const profile = await this.query(TEEVOLUTION_COMMAND.getCurrentConfig).catch(() => null);
       const rssi = await this.query(TEEVOLUTION_COMMAND.getRssi).catch(() => null);
-      const currentDpi = Math.min(
-        flash[TEEVOLUTION_FLASH.currentDpi] ?? 0,
-        info.profile.dpiStageCount - 1,
-      );
-      const dpi = teevolutionDecodeDpi(
-        flash.slice(TEEVOLUTION_FLASH.dpiValues + currentDpi * 4, TEEVOLUTION_FLASH.dpiValues + currentDpi * 4 + 4),
-      );
+      const stageCount = this.decodeDpiStageCount(flash[TEEVOLUTION_FLASH.maxDpiStage], info.profile);
+      const activeDpiStage = Math.min(flash[TEEVOLUTION_FLASH.currentDpi] ?? 0, stageCount - 1);
+      const dpiStages = Array.from({ length: stageCount }, (_, stage) => {
+        const offset = TEEVOLUTION_FLASH.dpiValues + stage * 4;
+        return teevolutionDecodeDpi(flash.slice(offset, offset + 4));
+      });
+      const dpi = dpiStages[activeDpiStage] ?? dpiStages[0] ?? 0;
       const battery = teevolutionParseBattery(batteryResponse);
       const pollingRateHz = teevolutionDecodePollingRate(flash[TEEVOLUTION_FLASH.reportRate] ?? 1);
       const sensorModeUi = teevolutionSensorModeUi({
@@ -150,10 +150,19 @@ export class TeevolutionHidClient {
           defaultDisplayName: info.profile.name,
           hideUnsupportedPollingRates: true,
           hideSignalCard: true,
+          dpiStageEditor: {
+            maxStages: info.profile.dpiStageCount,
+            countEditable: true,
+            minDpi: info.profile.dpi.min,
+            maxDpi: info.profile.dpi.max,
+            stepDpi: info.profile.dpi.standardStep,
+          },
         },
         batteryPercent: battery?.percent ?? null,
         batteryState: battery?.charging ? "Charging" : "Discharging",
         dpi,
+        dpiStages,
+        activeDpiStage,
         pollingRateHz,
         supportedPollingRates: info.profile.pollingRates.filter((rate) => rate <= info.maximumPollingRateHz),
         activeProfile: profile && profile[1] === 0 ? (profile[5] ?? 0) + 1 : null,
@@ -219,12 +228,91 @@ export class TeevolutionHidClient {
       throw new Error(`${dpi} DPI is not supported by the ${info.profile.name}.`);
     }
     return await this.withDeviceControl(async () => {
-      const currentDpi = (await this.readFlash(TEEVOLUTION_FLASH.currentDpi, 2))[0] ?? 0;
-      const address = TEEVOLUTION_FLASH.dpiValues
-        + Math.min(currentDpi, info.profile.dpiStageCount - 1) * 4;
-      await this.writeFlash(address, teevolutionEncodeDpi(dpi));
-      const confirmed = teevolutionDecodeDpi(await this.readFlash(address, 4));
-      if (confirmed !== dpi) throw new Error(`The mouse kept ${confirmed} DPI instead of ${dpi} DPI.`);
+      const stageCount = this.decodeDpiStageCount(
+        (await this.readFlash(TEEVOLUTION_FLASH.maxDpiStage, 2))[0],
+        info.profile,
+      );
+      const currentDpi = Math.min((await this.readFlash(TEEVOLUTION_FLASH.currentDpi, 2))[0] ?? 0, stageCount - 1);
+      return await this.writeDpiStageValue(currentDpi, dpi);
+    });
+  }
+
+  /** Selects the active DPI stage index (0-based), matching Teevolink Set_MS_CurrentDPI. */
+  async setActiveDpiStage(stage: number): Promise<number> {
+    const info = this.deviceInfo ?? await this.readDeviceInfo();
+    if (!Number.isInteger(stage) || stage < 0 || stage >= info.profile.dpiStageCount) {
+      throw new Error(`DPI stage must be between 1 and ${info.profile.dpiStageCount}.`);
+    }
+    return await this.withDeviceControl(async () => {
+      const stageCount = this.decodeDpiStageCount(
+        (await this.readFlash(TEEVOLUTION_FLASH.maxDpiStage, 2))[0],
+        info.profile,
+      );
+      if (stage >= stageCount) {
+        await this.writeCheckedByte(TEEVOLUTION_FLASH.maxDpiStage, stage + 1);
+        const enabled = this.decodeDpiStageCount(
+          (await this.readFlash(TEEVOLUTION_FLASH.maxDpiStage, 2))[0],
+          info.profile,
+        );
+        if (enabled <= stage) {
+          throw new Error(`The mouse kept ${enabled} DPI stages; stage ${stage + 1} is unavailable.`);
+        }
+      }
+      await this.writeCheckedByte(TEEVOLUTION_FLASH.currentDpi, stage);
+      const confirmed = (await this.readFlash(TEEVOLUTION_FLASH.currentDpi, 2))[0] ?? 0;
+      if (confirmed !== stage) throw new Error(`The mouse kept DPI stage ${confirmed + 1}.`);
+      return confirmed;
+    });
+  }
+
+  /** Writes one stage's DPI value without changing the active stage index. */
+  async setDpiStageValue(stage: number, dpi: number): Promise<number> {
+    const info = this.deviceInfo ?? await this.readDeviceInfo();
+    if (!teevolutionDpiOptions(info.profile).includes(dpi)) {
+      throw new Error(`${dpi} DPI is not supported by the ${info.profile.name}.`);
+    }
+    if (!Number.isInteger(stage) || stage < 0 || stage >= info.profile.dpiStageCount) {
+      throw new Error(`DPI stage must be between 1 and ${info.profile.dpiStageCount}.`);
+    }
+    return await this.withDeviceControl(async () => {
+      const stageCount = this.decodeDpiStageCount(
+        (await this.readFlash(TEEVOLUTION_FLASH.maxDpiStage, 2))[0],
+        info.profile,
+      );
+      // A staged count increase may not have been flashed yet; enable the slot
+      // before writing it so the UI can edit newly added stages immediately.
+      if (stage >= stageCount) {
+        await this.writeCheckedByte(TEEVOLUTION_FLASH.maxDpiStage, stage + 1);
+        const enabled = this.decodeDpiStageCount(
+          (await this.readFlash(TEEVOLUTION_FLASH.maxDpiStage, 2))[0],
+          info.profile,
+        );
+        if (enabled <= stage) {
+          throw new Error(`The mouse kept ${enabled} DPI stages; stage ${stage + 1} is unavailable.`);
+        }
+      }
+      return await this.writeDpiStageValue(stage, dpi);
+    });
+  }
+
+  /** Sets how many DPI stages are enabled (1…dpiStageCount), matching Teevolink Set_MS_MaxDPI. */
+  async setDpiStageCount(count: number): Promise<number> {
+    const info = this.deviceInfo ?? await this.readDeviceInfo();
+    const max = info.profile.dpiStageCount;
+    if (!Number.isInteger(count) || count < 1 || count > max) {
+      throw new Error(`This Teevolution model supports 1–${max} DPI stages.`);
+    }
+    return await this.withDeviceControl(async () => {
+      await this.writeCheckedByte(TEEVOLUTION_FLASH.maxDpiStage, count);
+      const confirmed = this.decodeDpiStageCount(
+        (await this.readFlash(TEEVOLUTION_FLASH.maxDpiStage, 2))[0],
+        info.profile,
+      );
+      if (confirmed !== count) throw new Error(`The mouse kept ${confirmed} DPI stages instead of ${count}.`);
+      const active = (await this.readFlash(TEEVOLUTION_FLASH.currentDpi, 2))[0] ?? 0;
+      if (active >= confirmed) {
+        await this.writeCheckedByte(TEEVOLUTION_FLASH.currentDpi, confirmed - 1);
+      }
       return confirmed;
     });
   }
@@ -370,6 +458,18 @@ export class TeevolutionHidClient {
       throw new Error("Read the Teevolution device identity before requesting model capabilities.");
     }
     return this.deviceInfo.profile;
+  }
+
+  private decodeDpiStageCount(raw: number | undefined, profile: TeevolutionDeviceProfile): number {
+    return Math.min(Math.max(raw ?? profile.dpiStageCount, 1), profile.dpiStageCount);
+  }
+
+  private async writeDpiStageValue(stage: number, dpi: number): Promise<number> {
+    const address = TEEVOLUTION_FLASH.dpiValues + stage * 4;
+    await this.writeFlash(address, teevolutionEncodeDpi(dpi));
+    const confirmed = teevolutionDecodeDpi(await this.readFlash(address, 4));
+    if (confirmed !== dpi) throw new Error(`The mouse kept ${confirmed} DPI instead of ${dpi} DPI.`);
+    return confirmed;
   }
 
   private async withDeviceControl<T>(operation: () => Promise<T>): Promise<T> {

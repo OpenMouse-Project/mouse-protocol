@@ -140,6 +140,9 @@ test("Terra Pro capabilities are selected by reported CID", () => {
   assert.equal(profile.name, "Terra Pro");
   assert.equal(profile.protocol, "compX-terra-v1");
   assert.equal(profile.dpiStageCount, 4);
+  assert.equal(TEEVOLUTION_FLASH.maxDpiStage, 2);
+  assert.equal(TEEVOLUTION_FLASH.currentDpi, 4);
+  assert.equal(TEEVOLUTION_FLASH.dpiValues, 12);
   assert.deepEqual(profile.pollingRates, [125, 250, 500, 1000, 2000, 4000, 8000]);
   assert.deepEqual(profile.liftOffDistances, ["Low", "Medium", "High"]);
   assert.deepEqual(profile.sensorModes, ["Eco", "High"]);
