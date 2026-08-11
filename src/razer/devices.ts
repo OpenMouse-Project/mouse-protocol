@@ -490,12 +490,17 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   // cannot be probed: a mouse without the feature answers `0x0b`/`0x85` with
   // status `0x02` and zeros, which decodes as a legitimate "Low".
   //
-  // The wireless row takes the 8 kHz ladder because OpenRazer's SE wireless
-  // class exposes it, but Razer's own specification reads "1000 Hz normally, up
-  // to 8000 Hz with HyperPolling Dongle". If this ships with a stock 1 kHz
-  // receiver the extended command will confirm by read-back and change nothing
-  // measurable, exactly as it did on `0x00b7` — so the rate needs measuring,
-  // not reading back, before this row is trusted. See docs/razer-testing.md.
+  // Polling: settled on hardware, and it went the other way from OpenRazer.
+  // `0x00df` first shipped here with the 8 kHz ladder because OpenRazer's SE
+  // wireless class exposes it. A capture on the stock HyperSpeed receiver has
+  // the extended read (`0x00`/`0xc0`) answered with status `0x05` — not
+  // supported — and the legacy read (`0x00`/`0x85`) answering a divisor of 1,
+  // i.e. 1000 Hz. An outright refusal, not a write that confirms and does
+  // nothing, so this needs no rate measurement to settle.
+  //
+  // Razer's own specification agrees: "1000 Hz normally, up to 8000 Hz with
+  // HyperPolling Dongle". The dongle is a different receiver and would enumerate
+  // as its own product id; this row describes the one in the box.
   [0x00de, {
     model: "Viper V3 Pro SE (Wired)",
     ...VIPER_RECEIVER_WIRED,
@@ -509,7 +514,8 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
     model: "Viper V3 Pro SE",
     ...VIPER_RECEIVER_WIRELESS,
     maxDpi: DPI_FOCUS_PRO_35K,
-    pollingRates: RATES_8K,
+    pollingRates: RATES_1K,
+    highRatePolling: false,
     vendorControlInterface: true,
   }],
 

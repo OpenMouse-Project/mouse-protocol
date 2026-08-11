@@ -376,24 +376,45 @@ What is *not* inherited from the V3 Pro, and why:
 | `liftOff` | `false` | Cannot be probed — a mouse without the feature answers `0x0b`/`0x85` with status `0x02` and zeros, which decodes as a legitimate "Low". |
 | `asymmetricLiftOff` | `false` | The mode probe is a *write*, and stays off until the command is confirmed on hardware. |
 
-Three things to measure, in priority order:
+### What a `0x00df` capture settled (firmware "Mouse 1.0", stock HyperSpeed receiver)
 
-1. **The wireless 8 kHz ladder.** `0x00df` carries `RATES_8K` because OpenRazer's
-   SE wireless class exposes it, but Razer's own specification reads "1000 Hz
-   normally, up to 8000 Hz with HyperPolling Dongle". If it ships with a stock
-   1 kHz receiver, the extended command will confirm by read-back and change
-   nothing measurable — the `0x00b7` failure exactly. **Measure the rate with
-   `pointerrawupdate`; do not trust the read-back.**
-2. **Which interface answers.** The reference's descriptor dump shows boot mouse
-   / boot keyboard / auxiliary, not the single Generic Desktop Mouse collection
-   the V3 Pro uses, and says only that the config path "may be exposed through
-   one of the non-pointer HID interfaces". Both entries therefore set
-   `vendorControlInterface: true` and stay out of the narrowed filter list in
-   `vendors.ts`, so the picker offers every interface. Record which one replies —
-   that earns a narrowed filter of its own.
-3. **Whether the wired PID answers at all.** The PR's WebHID smoke test
-   (battery `07/80`) succeeded only on `0x00df`. `0x00de` is untried in a
-   browser.
+**Polling — resolved, and against the reference.** The row shipped with
+`RATES_8K` because OpenRazer's SE wireless class exposes it. On hardware:
+
+| Read | Reply |
+| --- | --- |
+| extended `0x00`/`0xc0` | status `0x05` — **not supported** |
+| legacy `0x00`/`0x85` | status `0x02`, divisor `0x01` → 1000 Hz |
+
+That is an outright refusal rather than a write that confirms and does nothing,
+so unlike `0x00b7` it needed no rate measurement to settle. `0x00df` is now
+`RATES_1K` with `highRatePolling: false`. The 8 kHz ceiling belongs to the
+HyperPolling dongle, which is a separate receiver with its own product id — the
+panel had been offering four rates the receiver cannot reach.
+
+**Transaction id `0x1f` — confirmed.** Inferred from PR #2818 subclassing the
+Viper V3 Pro; every exchange in the capture used `0x1f` and was answered. A wrong
+id is silent, so this could not have read at all if it were wrong.
+
+**Control interface — confirmed as the plain mouse collection.** The reference's
+descriptor dump suggested the config path might be on a non-pointer interface.
+It is not: the driver opened `usage 0x1:2` and it answered. The other reads all
+returned sensible values — firmware `01 00` → 1.0, battery `00 FD` → 99%, DPI
+`06 40` → 1600, idle `03 84` → 900 s, low battery `0D` → 5%.
+
+Still open:
+
+1. **Every write.** The capture is reads only — no setting was changed, so
+   nothing here promotes the model to `verified`. That needs the numbered
+   checklist above: write DPI, polling and idle timeout, reload, confirm each
+   persisted.
+2. **The wired PID `0x00de`.** Untried in a browser; the PR's own smoke test
+   only ever covered `0x00df`.
+3. **Whether the narrowed filter is now worth adding.** `vendors.ts` still
+   requests the whole device for both ids, and `vendorControlInterface: true`
+   is still set. Now that `0x1:2` is known to answer on the wireless id, the
+   pair could join `RAZER_VIPER_V3_CONTROL_FILTERS` — but `0x00de` has not been
+   seen, and narrowing on one id's evidence is what this file exists to prevent.
 
 Not claimed, and not to be guessed: button remapping, Hypershift, macros and
 surface calibration. The SE has no Chroma, so no lighting control applies.

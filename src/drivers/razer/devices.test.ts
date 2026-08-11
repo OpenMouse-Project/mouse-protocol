@@ -160,14 +160,20 @@ test("the Viper V3 Pro SE pair matches the reference without inheriting the V3 P
     assert.equal(product?.asymmetricLiftOff, false);
   }
 
-  // Reference §14: the wired class exposes the 1 kHz ladder, the wireless one
-  // the full 8 kHz ladder.
+  // Both rows are on the legacy polling command. The wired one always was; the
+  // wireless one started on the 8 kHz ladder from OpenRazer's SE class until a
+  // capture on the stock HyperSpeed receiver answered the extended read with
+  // status 0x05 (not supported) and the legacy read with a divisor of 1.
+  //
+  // Do not restore RATES_8K here from the reference. The 8 kHz ceiling belongs
+  // to the HyperPolling dongle, which is a different receiver and a different
+  // product id.
   assert.deepEqual([...wired?.pollingRates ?? []], [...RATES_1K]);
-  assert.deepEqual([...wireless?.pollingRates ?? []], [...RATES_8K]);
+  assert.deepEqual([...wireless?.pollingRates ?? []], [...RATES_1K]);
   assert.equal(wired?.wireless, false);
   assert.equal(wireless?.wireless, true);
   assert.equal(wired?.highRatePolling, false);
-  assert.equal(wireless?.highRatePolling, true);
+  assert.equal(wireless?.highRatePolling, false);
 });
 
 test("no product asks for a rate its polling command cannot encode", () => {
