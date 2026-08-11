@@ -156,10 +156,19 @@ export class KeychronHidClient {
         hideProcessingCard: true,
         forceShowBattery: true,
         pollingNote: "Nape Pro exposes polling through Keychron's misc HID commands when the firmware allows it.",
+        dpiStageEditor: {
+          maxStages: DPI_STAGE_COUNT,
+          countEditable: false,
+          minDpi: DPI_MIN,
+          maxDpi: DPI_MAX,
+          stepDpi: DPI_STEP,
+        },
       },
       batteryPercent: battery && battery.percent <= 100 ? battery.percent : null,
       batteryState: battery ? battery.state : "Unknown",
       dpi,
+      dpiStages: stages.map((entry) => entry.value),
+      activeDpiStage: stage,
       pollingRateHz: polling?.rateHz ?? 1000,
       supportedPollingRates: polling?.supported ?? [1000],
       activeProfile: null,
@@ -176,15 +185,31 @@ export class KeychronHidClient {
     }
     await this.open();
     const stage = await this.getDpiStage();
-    // Launcher writes are fire-and-forget (no matching input report).
-    await this.write([CMD.miscGroup, NAPE.setDpiValue, stage & 0xff, dpi & 0xff, (dpi >> 8) & 0xff]);
-    await this.write([CMD.miscGroup, NAPE.setDpiStage, stage & 0xff]);
-    const confirmed = await this.getDpiValue(stage);
-    if (confirmed !== dpi) {
-      await this.write([CMD.miscGroup, NAPE.setCustomDpi, dpi & 0xff, (dpi >> 8) & 0xff]);
-      return await this.getCustomDpi().catch(async () => this.getDpiValue(await this.getDpiStage()));
+    return await this.writeDpiStageValue(stage, dpi);
+  }
+
+  /** Selects the active DPI stage index (0-based). */
+  async setActiveDpiStage(stage: number): Promise<number> {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= DPI_STAGE_COUNT) {
+      throw new Error(`DPI stage must be between 1 and ${DPI_STAGE_COUNT}.`);
     }
+    await this.open();
+    await this.write([CMD.miscGroup, NAPE.setDpiStage, stage & 0xff]);
+    const confirmed = await this.getDpiStage();
+    if (confirmed !== stage) throw new Error(`The mouse kept DPI stage ${confirmed + 1}.`);
     return confirmed;
+  }
+
+  /** Writes one stage's DPI value without requiring it to be active first. */
+  async setDpiStageValue(stage: number, dpi: number): Promise<number> {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= DPI_STAGE_COUNT) {
+      throw new Error(`DPI stage must be between 1 and ${DPI_STAGE_COUNT}.`);
+    }
+    if (dpi < DPI_MIN || dpi > DPI_MAX) {
+      throw new Error(`Nape Pro DPI must be between ${DPI_MIN} and ${DPI_MAX}.`);
+    }
+    await this.open();
+    return await this.writeDpiStageValue(stage, dpi);
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
@@ -253,6 +278,24 @@ export class KeychronHidClient {
       }
     }
     return values;
+  }
+
+  private async writeDpiStageValue(stage: number, dpi: number): Promise<number> {
+    // Launcher writes are fire-and-forget (no matching input report).
+    await this.write([CMD.miscGroup, NAPE.setDpiValue, stage & 0xff, dpi & 0xff, (dpi >> 8) & 0xff]);
+    const active = await this.getDpiStage();
+    if (active === stage) {
+      await this.write([CMD.miscGroup, NAPE.setDpiStage, stage & 0xff]);
+    }
+    const confirmed = await this.getDpiValue(stage);
+    if (confirmed !== dpi) {
+      if (active === stage) {
+        await this.write([CMD.miscGroup, NAPE.setCustomDpi, dpi & 0xff, (dpi >> 8) & 0xff]);
+        return await this.getCustomDpi().catch(async () => this.getDpiValue(stage));
+      }
+      throw new Error(`The mouse kept ${confirmed} DPI instead of ${dpi} DPI.`);
+    }
+    return confirmed;
   }
 
   private async getBattery(): Promise<{ percent: number; state: MouseStatus["batteryState"] }> {
