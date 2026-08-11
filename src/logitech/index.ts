@@ -24,13 +24,16 @@ export const BOLT_PAIRING_SLOTS = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06] as const;
  * receiver. They answer HID++ on device index 0xFF and keep their writable
  * settings in an onboard profile.
  *
+ * - 0xc07d — G502 / G502 Proteus Core (wired)
  * - 0xc07e — G402 / G402 Hyperion Fury (wired)
  * - 0xc08f — G403 HERO (wired)
+ * - 0xc095 — G502 X PLUS (USB cable)
+ * - 0xc099 — G502 X (wired)
  *
  * This module deliberately imports nothing, so both the driver and the WebHID
  * filters in ../vendors can read it without a cycle.
  */
-export const LOGITECH_DIRECT_PRODUCT_IDS = [0xc07e, 0xc08f] as const;
+export const LOGITECH_DIRECT_PRODUCT_IDS = [0xc07d, 0xc07e, 0xc08f, 0xc095, 0xc099] as const;
 
 /**
  * Logi Bolt receivers. Unlike Lightspeed, device HID++ 2.0 rides long reports
@@ -205,4 +208,3 @@ export class OnboardOnlyError extends Error {
     this.profileFormatId = profileFormatId;
   }
 }
-

@@ -15,6 +15,9 @@ Supported identifiers:
 - `046d:c07e` — G402 / G402 Hyperion Fury (wired)
 - `046d:c08f` — G403 HERO (wired)
 - `046d:c08b` — G502 HERO (wired)
+- `046d:c07d` — G502 / G502 Proteus Core (wired)
+- `046d:c095` — G502 X PLUS (USB cable; wireless identity `4099` uses its Lightspeed receiver)
+- `046d:c099` — G502 X (wired)
 
 For Logi Bolt, authorize **both** HID++ collections when the picker offers them
 (`usagePage 0xff00`, `usage 0x0001` and `usage 0x0002`). Device feature traffic
