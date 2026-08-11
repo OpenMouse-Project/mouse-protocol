@@ -1,3 +1,5 @@
+export * from "./haptics.js";
+
 // HID++ reserves software ID 0 for device-originated notifications. Using a
 // nonzero ID keeps command replies distinct from asynchronous mouse events.
 const SOFTWARE_ID = 0x05;

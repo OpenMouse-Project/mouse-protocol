@@ -15,7 +15,7 @@ import {
   isLogitechHapticEffect,
   isLogitechHapticIntensity,
   type LogitechHapticPreset,
-} from "./haptics.ts";
+} from "./haptics.js";
 
 /** Config pairs read from an MX Master 4 while toggling Logi Options+. */
 const CAPTURES: ReadonlyArray<[number[], { enabled: boolean; batterySaving: boolean; intensity: number }]> = [

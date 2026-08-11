@@ -10,6 +10,15 @@ import {
   resolveBoltReportDevice,
 } from "./bolt.ts";
 import {
+  LOGITECH_HAPTIC,
+  LOGITECH_HAPTIC_EFFECTS,
+  buildHapticConfigWrite,
+  decodeHapticConfig,
+  encodeHapticFlags,
+  isLogitechHapticEffect,
+  isLogitechHapticIntensity,
+  type LogitechHapticConfig,
+  type LogitechHapticFlag,
   DEVICE_INDEX_DIRECT,
   decodeBatteryLevelState,
   decodeReportRateBitmap,
@@ -28,17 +37,6 @@ export {
   hasHidppLongCollection,
   hasHidppShortCollection,
 } from "./bolt.ts";
-import {
-  LOGITECH_HAPTIC,
-  LOGITECH_HAPTIC_EFFECTS,
-  buildHapticConfigWrite,
-  decodeHapticConfig,
-  encodeHapticFlags,
-  isLogitechHapticEffect,
-  isLogitechHapticIntensity,
-  type LogitechHapticConfig,
-  type LogitechHapticFlag,
-} from "./haptics.ts";
 import {
   MODE_STATUS,
   buildModeStatusWriteMany,
