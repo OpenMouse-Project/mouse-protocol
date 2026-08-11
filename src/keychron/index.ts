@@ -15,6 +15,10 @@ export const KEYCHRON_NAPE_COMMAND = {
 } as const;
 export const KEYCHRON_MISC_COMMAND = { getPolling: 13, setPolling: 14 } as const;
 export const KEYCHRON_POLLING_TABLE = [8000, 4000, 2000, 1000, 500, 250, 125] as const;
+/** Nape Pro only — observed on firmware v1.2.6-ZK (stage 5 stores 4000). Other Keychron mice should define their own ranges. */
+export const KEYCHRON_NAPE_DPI_MIN = 50;
+export const KEYCHRON_NAPE_DPI_MAX = 4000;
+export const KEYCHRON_NAPE_DPI_STEP = 50;
 
 export function keychronPacket(command: readonly number[]): Uint8Array<ArrayBuffer> {
   const packet = new Uint8Array(KEYCHRON_PACKET_LENGTH);
@@ -36,5 +40,18 @@ export function keychronDecodeFirmware(response: Uint8Array): string | null {
   if (!bytes.length) return null;
   const text = String.fromCharCode(...bytes);
   return text.startsWith("v") ? text : `v${text}`;
+}
+
+export function keychronDecodeBattery(
+  response: Uint8Array,
+): { percent: number; state: "Charging" | "Full" | "Discharging" } {
+  const percent = response[2] ?? 0xff;
+  const status = response[3] ?? 0;
+  const state = status === 1
+    ? "Charging"
+    : status === 2
+      ? "Full"
+      : "Discharging";
+  return { percent, state };
 }
 
