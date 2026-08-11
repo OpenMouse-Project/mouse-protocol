@@ -409,7 +409,6 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   // polling command cannot encode.
   [0x0091, { model: "Viper 8KHz", ...STANDARD, maxDpi: DPI_FOCUS, pollingRates: RATES_8K, highRatePolling: true }],
   [0x00a1, { model: "DeathAdder V2 Lite", ...STANDARD, maxDpi: 8500 }],
-  [0x00a3, { model: "Cobra", ...STANDARD, maxDpi: 8500 }],
   // Hardware report: the legacy read `00/85` comes back with status 0x05 (not
   // supported) and the extended read `00/c0` answers 8000/4, so the mouse was
   // already sitting at 2000 Hz while this row still offered a 1000 Hz ceiling.
@@ -526,4 +525,3 @@ export const RAZER_PRODUCTS: ReadonlyMap<number, RazerProduct> = new Map(
 
 /** Product ids for the WebHID picker filters in `../vendors.ts`. */
 export const RAZER_PRODUCT_IDS: readonly number[] = [...RAZER_PRODUCTS.keys()];
-
