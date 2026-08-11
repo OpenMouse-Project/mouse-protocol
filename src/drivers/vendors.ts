@@ -12,6 +12,11 @@ import {
   NINJUTSO_RECEIVER_PRODUCT_IDS,
   NINJUTSO_VENDOR_ID,
 } from "@openmouse/protocol/ninjutso";
+import {
+  ZAUNKOENIG_PRODUCT_IDS,
+  ZAUNKOENIG_USAGE_PAGE,
+  ZAUNKOENIG_VENDOR_ID,
+} from "@openmouse/protocol/zaunkoenig";
 
 export const VENDOR_ID = {
   pulsar: 0x3710,
@@ -29,6 +34,7 @@ export const VENDOR_ID = {
   moddo: 0x2fe3,
   ninjutsoLegacy: NINJUTSO_LEGACY_VENDOR_ID,
   ninjutso: NINJUTSO_VENDOR_ID,
+  zaunkoenig: ZAUNKOENIG_VENDOR_ID,
 } as const;
 
 // Keychron VIA raw HID. 0x0440 is Nape Pro wired; 0xd026/0xd029 are shared Link-KM receivers.
@@ -197,6 +203,11 @@ export const WLMOUSE_MAX_POLLING_HZ: ReadonlyMap<number, number> = new Map([
 ]);
 
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
+  ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
+    vendorId: ZAUNKOENIG_VENDOR_ID,
+    productId,
+    usagePage: ZAUNKOENIG_USAGE_PAGE,
+  })),
   { vendorId: VENDOR_ID.finalmouse, productId: 0x0100, usagePage: 0xff00, usage: 0x0001 },
   { vendorId: VENDOR_ID.pulsar },
   { vendorId: VENDOR_ID.endgameGear },
