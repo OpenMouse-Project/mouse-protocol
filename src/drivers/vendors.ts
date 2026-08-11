@@ -46,10 +46,14 @@ export const MODDO_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.moddo, usagePage: 0xff, usage: 0x02 },
 ];
 
-// Viper V2/V3 Pro expose their control channel as a Generic Desktop Mouse
-// collection. Limit this broad collection filter to known PIDs so it cannot
-// also surface unrelated Razer keyboards or the Viper V4 Pro's ordinary
-// boot-mouse interfaces.
+// Viper V2/V3 Pro and Mouse Dock Pro expose their control channel as a Generic
+// Desktop Mouse collection. Limit this broad collection filter to known PIDs so
+// it cannot also surface unrelated Razer keyboards or the Viper V4 Pro's
+// ordinary boot-mouse interfaces.
+export const RAZER_MOUSE_DOCK_PRO_CONTROL_FILTERS: HIDDeviceFilter[] = [0x00a4].map(
+  (productId) => ({ vendorId: VENDOR_ID.razer, productId, usagePage: 0x01, usage: 0x02 }),
+);
+
 export const RAZER_VIPER_V2_CONTROL_FILTERS: HIDDeviceFilter[] = [0x00a5, 0x00a6].map(
   (productId) => ({ vendorId: VENDOR_ID.razer, productId, usagePage: 0x01, usage: 0x02 }),
 );
@@ -100,7 +104,7 @@ export const RAZER_COBRA_FILTERS: HIDDeviceFilter[] = [0x00a3].map(
  * broad filter cannot quietly widen one that was deliberately narrowed.
  */
 const RAZER_NARROWED_PRODUCT_IDS: ReadonlySet<number> = new Set([
-  0x00a5, 0x00a6, 0x00c0, 0x00c1, 0x006e, 0x0071, 0x0098, 0x0084,
+  0x00a4, 0x00a5, 0x00a6, 0x00c0, 0x00c1, 0x006e, 0x0071, 0x0098, 0x0084,
 ]);
 
 /**
@@ -200,6 +204,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.lamzu },
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   ...TEEVOLUTION_PRODUCT_IDS.map((productId) => ({ vendorId: VENDOR_ID.teevolution, productId })),
+  ...RAZER_MOUSE_DOCK_PRO_CONTROL_FILTERS,
   ...RAZER_VIPER_V2_CONTROL_FILTERS,
   ...RAZER_VIPER_V3_CONTROL_FILTERS,
   ...RAZER_VIPER_MINI_CONTROL_FILTERS,
