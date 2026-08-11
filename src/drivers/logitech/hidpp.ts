@@ -768,6 +768,11 @@ export class LogitechHidppClient {
     }
     this.listeningDevices.clear();
     this.ioDevice = null;
+    // A device can come back on a different slot, or be a different mouse
+    // entirely, so nothing read this session survives the disconnect.
+    this.hostStateCache = undefined;
+    this.friendlyNameCache = undefined;
+    this.wheelCapabilityCache = undefined;
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
@@ -1821,12 +1826,16 @@ export class LogitechHidppClient {
     const wheel = await this.getFeature(FEATURE.hiresWheel);
     let hiResScroll: boolean | null = null;
     let invertScroll: boolean | null = null;
-    let supportsInvertScroll = false;
+    let supportsInvertScroll = this.wheelCapabilityCache?.supportsInvertScroll ?? false;
     let wheelRatchetEngaged: boolean | null = null;
     if (wheel.index) {
-      const capabilityReply = await this.request(wheel.index, LOGITECH_HIRES_WHEEL.capabilities).catch(() => null);
-      const capabilities = capabilityReply ? decodeHiresWheelCapabilities(capabilityReply.slice(3)) : null;
-      supportsInvertScroll = capabilities?.supportsInvert ?? false;
+      // Whether the wheel can invert is a property of the hardware, so it is
+      // read once rather than on every refresh.
+      if (this.wheelCapabilityCache === undefined) {
+        const capabilityReply = await this.request(wheel.index, LOGITECH_HIRES_WHEEL.capabilities).catch(() => null);
+        const capabilities = capabilityReply ? decodeHiresWheelCapabilities(capabilityReply.slice(3)) : null;
+        supportsInvertScroll = capabilities?.supportsInvert ?? false;
+      }
 
       const modeReply = await this.request(wheel.index, LOGITECH_HIRES_WHEEL.get).catch(() => null);
       if (modeReply) {
@@ -1840,6 +1849,11 @@ export class LogitechHidppClient {
     }
 
     const thumb = await this.readThumbWheelState();
+    // Seeded once both halves have been read, so a refresh never asks again.
+    this.wheelCapabilityCache ??= {
+      supportsInvertScroll,
+      supportsThumbWheelInvert: thumb.supportsThumbWheelInvert,
+    };
 
     return {
       wheelMode: ratchet?.mode ?? null,
@@ -1859,8 +1873,11 @@ export class LogitechHidppClient {
     const feature = await this.getFeature(FEATURE.thumbWheel);
     if (!feature.index) return { thumbWheelInverted: null, supportsThumbWheelInvert: false };
 
-    const info = await this.request(feature.index, LOGITECH_THUMB_WHEEL.info).catch(() => null);
-    const supports = info ? decodeThumbWheelSupportsInvert(info.slice(3)) === true : false;
+    let supports = this.wheelCapabilityCache?.supportsThumbWheelInvert ?? false;
+    if (this.wheelCapabilityCache === undefined) {
+      const info = await this.request(feature.index, LOGITECH_THUMB_WHEEL.info).catch(() => null);
+      supports = info ? decodeThumbWheelSupportsInvert(info.slice(3)) === true : false;
+    }
     const status = await this.request(feature.index, LOGITECH_THUMB_WHEEL.get).catch(() => null);
     const decoded = status ? decodeThumbWheelStatus(status.slice(3)) : null;
     return { thumbWheelInverted: decoded?.inverted ?? null, supportsThumbWheelInvert: supports };
@@ -1964,13 +1981,15 @@ export class LogitechHidppClient {
 
   /** The editable name, or null on a device without feature 0x0007. */
   private async readFriendlyName(): Promise<{ name: string; maxLength: number } | null> {
+    if (this.friendlyNameCache !== undefined) return this.friendlyNameCache;
+
     const feature = await this.getFeature(FEATURE.friendlyName);
-    if (!feature.index) return null;
+    if (!feature.index) return (this.friendlyNameCache = null);
 
     const header = await this.request(feature.index, LOGITECH_FRIENDLY_NAME.lengths).catch(() => null);
     const lengths = header ? decodeFriendlyNameLengths(header.slice(3)) : null;
     if (!lengths) return null;
-    if (lengths.length === 0) return { name: "", maxLength: lengths.maxLength };
+    if (lengths.length === 0) return (this.friendlyNameCache = { name: "", maxLength: lengths.maxLength });
 
     const characters: number[] = [];
     while (characters.length < lengths.length) {
@@ -1979,7 +1998,7 @@ export class LogitechHidppClient {
       if (decoded.length === 0) break;
       characters.push(...decoded);
     }
-    return { name: decodeFriendlyNameText(characters), maxLength: lengths.maxLength };
+    return (this.friendlyNameCache = { name: decodeFriendlyNameText(characters), maxLength: lengths.maxLength });
   }
 
   /**
@@ -2004,6 +2023,9 @@ export class LogitechHidppClient {
 
     await this.requestLong(feature.index, LOGITECH_FRIENDLY_NAME.set, buildFriendlyNameWrite(name));
 
+    // The confirmation has to reach the mouse, not the value from before this
+    // write — a cache answering here would confirm nothing at all.
+    this.friendlyNameCache = undefined;
     const confirmed = await this.readFriendlyName();
     if (confirmed?.name !== name.trim()) {
       throw new Error(`The mouse kept the name "${confirmed?.name ?? ""}".`);
@@ -2020,11 +2042,15 @@ export class LogitechHidppClient {
     info: LogitechHostsInfo;
     paired: boolean[];
   } | null> {
+    if (this.hostStateCache !== undefined) return this.hostStateCache;
+
     const feature = await this.getFeature(FEATURE.hostsInfo);
-    if (!feature.index) return null;
+    if (!feature.index) return (this.hostStateCache = null);
 
     const reply = await this.request(feature.index, LOGITECH_HOSTS.info).catch(() => null);
     const info = reply ? decodeHostsInfo(reply.slice(3)) : null;
+    // A failed read is left uncached so the next refresh tries again, rather
+    // than a transient timeout hiding the control for the whole session.
     if (!info) return null;
 
     const paired: boolean[] = [];
@@ -2034,7 +2060,7 @@ export class LogitechHidppClient {
       // switchable — this has to fail towards refusing the switch.
       paired.push(entry ? decodeHostPaired(entry.slice(3)) === true : false);
     }
-    return { info, paired };
+    return (this.hostStateCache = { info, paired });
   }
 
   /**
@@ -2338,6 +2364,22 @@ export class LogitechHidppClient {
     }
     return confirmed;
   }
+
+  /**
+   * Values that cannot change while a connection is open. Easy-Switch is the
+   * clearest case: the slot count is fixed and the current slot changing IS
+   * the connection ending, because that is what switching host does. The
+   * friendly name only moves when something renames it, and this client drops
+   * the entry after its own write.
+   *
+   * Re-reading these was costing six round-trips of radio every refresh, on
+   * top of a feature lookup per read. On a wireless mouse that is enough for
+   * some reads to time out, which surfaces as controls vanishing and coming
+   * back a few seconds later.
+   */
+  private hostStateCache: { info: LogitechHostsInfo; paired: boolean[] } | null | undefined;
+  private friendlyNameCache: { name: string; maxLength: number } | null | undefined;
+  private wheelCapabilityCache: { supportsInvertScroll: boolean; supportsThumbWheelInvert: boolean } | undefined;
 
   private async getFeature(featureId: number): Promise<FeatureInfo> {
     const reply = await this.request(0x00, 0x00, featureId >> 8, featureId & 0xff);
