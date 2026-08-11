@@ -127,6 +127,21 @@ test("the DeathAdder V3 Pro receiver writes polling on the legacy command", () =
   }
 });
 
+test("the wired DeathAdder V3 writes polling on the extended command", () => {
+  // Reported on hardware: the legacy read `00/85` answered with status 0x05
+  // (not supported) and the extended read `00/c0` answered 8000/4, so the mouse
+  // was running at 2000 Hz while this row still capped the picker at 1000.
+  const wired = RAZER_PRODUCTS.get(0x00b2);
+  assert.equal(wired?.wireless, false);
+  assert.equal(wired?.highRatePolling, true);
+  // The rate the hardware was found at has to survive the round trip, or the
+  // picker offers a value the mouse is already sitting at and cannot be set to.
+  assert.ok(wired?.pollingRates.includes(2000));
+  for (const rate of wired?.pollingRates ?? []) {
+    assert.doesNotThrow(() => razerSetExtendedPollingCommand(rate));
+  }
+});
+
 test("no product asks for a rate its polling command cannot encode", () => {
   // `highRatePolling` picks the encoding and `pollingRates` picks the values
   // offered; they are set independently, so nothing stops a product asking for
