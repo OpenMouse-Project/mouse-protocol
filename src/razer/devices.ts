@@ -190,6 +190,12 @@ const TRANSACTION_1F: readonly number[] = [
   0x00b4, 0x00b6, 0x00b7, 0x00b8, 0x00b9, 0x00be, 0x00bf, 0x00c0, 0x00c1,
   0x00c2, 0x00c3, 0x00c4, 0x00c5, 0x00c7, 0x00c8, 0x00cb, 0x00cc, 0x00cd,
   0x00d0, 0x00d1, 0x00d3, 0x00d4, 0x00d6, 0x00d7,
+  // Viper V3 Pro SE. OpenRazer PR #2818 subclasses the Viper V3 Pro classes,
+  // and the transaction id is a property of those classes — so the id comes
+  // from the same source as `0x00c0`/`0x00c1` above rather than from the family
+  // name. The SE reference separately mentions `0xff`, but only for the
+  // HyperPolling dongle indicator command, which this driver does not send.
+  0x00de, 0x00df,
 ];
 
 /**
@@ -446,6 +452,7 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
 
   // ---- viper-receiver -------------------------------------------------------
   [0x007a, { model: "Viper Ultimate (Wired)", ...VIPER_RECEIVER_WIRED }],
+
   // Confirmed on hardware (PR #45): the dongle's Generic-Desktop-Mouse
   // interface is Chrome-protected, so every collection is feat[none] and
   // sendFeatureReport fails on any id. Native HAL only.
@@ -471,6 +478,40 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   // will show a permanent "Low" and refuse every level; that is the thing to
   // check before trusting it.
   [0x00b8, { model: "Viper V3 HyperSpeed", ...VIPER_RECEIVER_WIRELESS, highRatePolling: false, liftOff: true, maxDpi: DPI_FOCUS_PRO, verified: true }],
+
+  // Viper V3 Pro SE (`RZ01-0455`). OpenRazer PR #2818 implements it by
+  // subclassing the Viper V3 Pro rather than writing a new codec, so the packet
+  // format, the DPI pair and the extended polling commands are the same ones
+  // `0x00c0`/`0x00c1` already use.
+  //
+  // Two things are deliberately not inherited from that pair. `verified` stays
+  // false — nothing has connected one here, and the V3 Pro's flag was earned by
+  // a hardware report on its own product ids. `liftOff` stays false because it
+  // cannot be probed: a mouse without the feature answers `0x0b`/`0x85` with
+  // status `0x02` and zeros, which decodes as a legitimate "Low".
+  //
+  // The wireless row takes the 8 kHz ladder because OpenRazer's SE wireless
+  // class exposes it, but Razer's own specification reads "1000 Hz normally, up
+  // to 8000 Hz with HyperPolling Dongle". If this ships with a stock 1 kHz
+  // receiver the extended command will confirm by read-back and change nothing
+  // measurable, exactly as it did on `0x00b7` — so the rate needs measuring,
+  // not reading back, before this row is trusted. See docs/razer-testing.md.
+  [0x00de, {
+    model: "Viper V3 Pro SE (Wired)",
+    ...VIPER_RECEIVER_WIRED,
+    maxDpi: DPI_FOCUS_PRO_35K,
+    // Which interface carries the control channel has not been established for
+    // this model, so accept the vendor-defined shape as well as the plain
+    // mouse one and let the exchange itself reject what cannot answer.
+    vendorControlInterface: true,
+  }],
+  [0x00df, {
+    model: "Viper V3 Pro SE",
+    ...VIPER_RECEIVER_WIRELESS,
+    maxDpi: DPI_FOCUS_PRO_35K,
+    pollingRates: RATES_8K,
+    vendorControlInterface: true,
+  }],
 
   // ---- new-receiver ---------------------------------------------------------
   // Dock, not a mouse: settings pass through to whichever mouse is paired.

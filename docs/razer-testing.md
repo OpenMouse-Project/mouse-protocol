@@ -358,6 +358,46 @@ The picker offers every interface instead, so the right one has to be found by
 trying them. If none answers, that is worth recording — it would mean these need
 a native helper rather than a driver fix.
 
+### Viper V3 Pro SE (`1532:00de` wired, `1532:00df` wireless) — added from the reference, never connected
+
+Added from `RAZER_VIPER_V3_PRO_SE_DEVELOPER_REFERENCE.md`, which is itself built
+on OpenRazer PR **#2818** — a pull request, not merged driver source. That is
+weaker provenance than the rest of the table and the entries should be read that
+way. The PR implements the SE by subclassing the Viper V3 Pro classes, so the
+packet format, DPI pair (`04/05`, `04/85`), extended polling pair (`00/40`,
+`00/c0`) and transaction id `0x1f` all come from `0x00c0`/`0x00c1` at the source
+rather than from a family-name guess.
+
+What is *not* inherited from the V3 Pro, and why:
+
+| Field | SE | Reason |
+| --- | --- | --- |
+| `verified` | `false` | The V3 Pro's flag was earned by a hardware report on its own product ids. |
+| `liftOff` | `false` | Cannot be probed — a mouse without the feature answers `0x0b`/`0x85` with status `0x02` and zeros, which decodes as a legitimate "Low". |
+| `asymmetricLiftOff` | `false` | The mode probe is a *write*, and stays off until the command is confirmed on hardware. |
+
+Three things to measure, in priority order:
+
+1. **The wireless 8 kHz ladder.** `0x00df` carries `RATES_8K` because OpenRazer's
+   SE wireless class exposes it, but Razer's own specification reads "1000 Hz
+   normally, up to 8000 Hz with HyperPolling Dongle". If it ships with a stock
+   1 kHz receiver, the extended command will confirm by read-back and change
+   nothing measurable — the `0x00b7` failure exactly. **Measure the rate with
+   `pointerrawupdate`; do not trust the read-back.**
+2. **Which interface answers.** The reference's descriptor dump shows boot mouse
+   / boot keyboard / auxiliary, not the single Generic Desktop Mouse collection
+   the V3 Pro uses, and says only that the config path "may be exposed through
+   one of the non-pointer HID interfaces". Both entries therefore set
+   `vendorControlInterface: true` and stay out of the narrowed filter list in
+   `vendors.ts`, so the picker offers every interface. Record which one replies —
+   that earns a narrowed filter of its own.
+3. **Whether the wired PID answers at all.** The PR's WebHID smoke test
+   (battery `07/80`) succeeded only on `0x00df`. `0x00de` is untried in a
+   browser.
+
+Not claimed, and not to be guessed: button remapping, Hypershift, macros and
+surface calibration. The SE has no Chroma, so no lighting control applies.
+
 ## Models Chrome may not be able to reach at all
 
 Reported on the Viper Ultimate dongle: **every** collection came back
