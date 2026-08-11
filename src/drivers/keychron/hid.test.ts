@@ -204,6 +204,10 @@ test("reads wired Nape Pro status from Launcher misc commands", async () => {
   assert.equal(status.brand, "Keychron");
   assert.equal(status.name, "Nape Pro");
   assert.equal(status.dpi, 800);
+  assert.deepEqual(status.dpiStages, [400, 800, 1600, 2400, 4000]);
+  assert.equal(status.activeDpiStage, 1);
+  assert.equal(status.ui?.dpiStageEditor?.maxStages, 5);
+  assert.equal(status.ui?.dpiStageEditor?.countEditable, false);
   assert.equal(status.pollingRateHz, 1000);
   assert.deepEqual(status.supportedPollingRates, [500, 1000, 2000, 4000, 8000]);
   assert.equal(status.batteryPercent, 76);
@@ -220,10 +224,17 @@ test("writes DPI and polling then confirms them by reading back", async () => {
   const fake = new FakeHidDevice();
   const client = new KeychronHidClient(fake as unknown as HIDDevice);
   assert.equal(await client.setDpi(1600), 1600);
+  assert.equal(await client.setDpiStageValue(0, 500), 500);
+  assert.equal(await client.setActiveDpiStage(2), 2);
   assert.equal(await client.setPollingRate(2000), 2000);
   assert.ok(fake.sent.some((packet) =>
     packet[0] === CMD.miscGroup && packet[1] === NAPE.setDpiValue
     && ((packet[3] ?? 0) | ((packet[4] ?? 0) << 8)) === 1600));
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === NAPE.setDpiValue
+    && packet[2] === 0 && ((packet[3] ?? 0) | ((packet[4] ?? 0) << 8)) === 500));
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === NAPE.setDpiStage && packet[2] === 2));
   assert.ok(fake.sent.some((packet) =>
     packet[0] === CMD.miscGroup && packet[1] === MISC.setPolling
     && packet[2] === KEYCHRON_POLLING_TABLE.indexOf(2000)));

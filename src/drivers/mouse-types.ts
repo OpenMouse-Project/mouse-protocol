@@ -46,6 +46,20 @@ export interface MouseUiHints {
   pollingNote?: string;
   /** Sidebar name before first status read. */
   defaultDisplayName?: string;
+  /**
+   * Simple multi-stage DPI editor in the Sensitivity card (single-axis stages).
+   * Distinct from Logitech onboard slots and Endgame CPI tiles. When set with
+   * `dpiStages` on the status, the shared stage list is shown.
+   */
+  dpiStageEditor?: {
+    /** Highest number of stages the mouse can enable. */
+    maxStages: number;
+    /** When false, stage count is fixed and the count picker is hidden. */
+    countEditable?: boolean;
+    minDpi: number;
+    maxDpi: number;
+    stepDpi: number;
+  };
 }
 
 /**

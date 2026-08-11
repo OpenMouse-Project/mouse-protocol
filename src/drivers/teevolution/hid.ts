@@ -150,6 +150,13 @@ export class TeevolutionHidClient {
           defaultDisplayName: info.profile.name,
           hideUnsupportedPollingRates: true,
           hideSignalCard: true,
+          dpiStageEditor: {
+            maxStages: info.profile.dpiStageCount,
+            countEditable: true,
+            minDpi: info.profile.dpi.min,
+            maxDpi: info.profile.dpi.max,
+            stepDpi: info.profile.dpi.standardStep,
+          },
         },
         batteryPercent: battery?.percent ?? null,
         batteryState: battery?.charging ? "Charging" : "Discharging",
