@@ -1946,16 +1946,20 @@ export class LogitechHidppClient {
     const status = decodeThumbWheelStatus((await this.request(feature.index, LOGITECH_THUMB_WHEEL.get)).slice(3));
     if (!status) throw new Error("The mouse gave no answer when its thumb wheel was read.");
 
-    const reply = await this.request(
-      feature.index,
-      LOGITECH_THUMB_WHEEL.set,
-      ...buildThumbWheelWrite(status, inverted),
-    );
-    const confirmed = decodeThumbWheelStatus(reply.slice(3));
-    if (confirmed?.inverted !== inverted) {
+    await this.request(feature.index, LOGITECH_THUMB_WHEEL.set, ...buildThumbWheelWrite(status, inverted));
+
+    /*
+     * Confirmed by re-reading rather than from the write's own reply. Unlike
+     * 0x2111, 0x2121 and 0x19B0, this feature does not echo the values it was
+     * given — its reply reads as all zeros, which made a write of "not
+     * inverted" appear to succeed and "inverted" appear to fail while both
+     * had actually taken effect.
+     */
+    const after = decodeThumbWheelStatus((await this.request(feature.index, LOGITECH_THUMB_WHEEL.get)).slice(3));
+    if (after?.inverted !== inverted) {
       throw new Error("The mouse kept its previous thumb-wheel direction.");
     }
-    return confirmed.inverted;
+    return after.inverted;
   }
 
   /** The editable name, or null on a device without feature 0x0007. */
