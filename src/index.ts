@@ -15,3 +15,4 @@ export * as razerV4 from "./razer/v4.js";
 export * as teevolution from "./teevolution/index.js";
 export * as vgn from "./vgn/index.js";
 export * as wlmouse from "./wlmouse/index.js";
+export * as zaunkoenig from "./zaunkoenig/index.js";

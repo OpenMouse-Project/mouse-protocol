@@ -74,6 +74,8 @@ const READ = {
   separateAxes: { target: TARGET.mouse, page: PAGE.profile, command: 0x8d, length: 0x02, args: [PROFILE] },
   angleSnapping: { target: TARGET.mouse, page: PAGE.profile, command: 0x84, length: 0x02, args: [PROFILE] },
   motionSync: { target: TARGET.mouse, page: PAGE.profile, command: 0x89, length: 0x02, args: [PROFILE] },
+  competitiveMode: { target: TARGET.mouse, page: PAGE.profile, command: 0x93, length: 0x02, args: [PROFILE] },
+  hyperMode: { target: TARGET.mouse, page: PAGE.profile, command: 0x8b, length: 0x02, args: [PROFILE] },
   rippleControl: { target: TARGET.mouse, page: PAGE.profile, command: 0x8a, length: 0x02, args: [PROFILE] },
 } as const satisfies Record<string, LamzuRequest>;
 
@@ -85,6 +87,8 @@ const WRITE = {
   debounce: 0x08,
   angleSnapping: 0x04,
   motionSync: 0x09,
+  competitiveMode: 0x13,
+  hyperMode: 0x0b,
   rippleControl: 0x0a,
 } as const;
 
@@ -171,7 +175,11 @@ export class LamzuHidClient {
 
   displayName(): string {
     const known = this.profile();
-    return known ? `Lamzu ${known.model}` : this.device.productName || "Lamzu";
+    return known ? `${this.deviceBrand()} ${known.model}` : this.device.productName || "Lamzu";
+  }
+
+  deviceBrand(): MouseStatus["brand"] {
+    return this.profile()?.brand ?? "Lamzu";
   }
 
   maxDpi(): number {
@@ -223,14 +231,16 @@ export class LamzuHidClient {
     const activeProfile = await this.request(READ.activeProfile).catch(() => null);
     const angleSnapping = await this.request(READ.angleSnapping).catch(() => null);
     const motionSync = await this.request(READ.motionSync).catch(() => null);
+    const competitiveMode = await this.request(READ.competitiveMode).catch(() => null);
+    const hyperMode = await this.request(READ.hyperMode).catch(() => null);
     const rippleControl = await this.request(READ.rippleControl).catch(() => null);
     const stage = stages[activeStage];
     if (!stage) throw new Error("The mouse did not report any DPI stages.");
     return this.lastStatus = {
-      brand: "Lamzu",
+      brand: this.deviceBrand(),
       name: this.displayName(),
       ui: {
-        family: "lamzu",
+        family: this.profile()?.uiFamily ?? "lamzu",
         hideUnsupportedPollingRates: true,
         forceShowBattery: true,
       },
@@ -244,6 +254,8 @@ export class LamzuHidClient {
       activeProfile: activeProfile ? activeProfile[0] : null,
       angleSnapping: angleSnapping ? angleSnapping[1] === 1 : null,
       motionSync: motionSync ? motionSync[1] === 1 : null,
+      performanceMode: competitiveMode ? competitiveMode[1] === 1 : null,
+      hyperMode: hyperMode ? hyperMode[1] === 1 : null,
       rippleControl: rippleControl ? rippleControl[1] === 1 : null,
       connectionType: wireless ? "Wireless" : "Wired",
       connectionDetail: wireless ? "2.4 GHz receiver" : "Wired USB",
@@ -301,6 +313,14 @@ export class LamzuHidClient {
     return await this.setFlag(WRITE.motionSync, READ.motionSync, enabled, "motionSync", "Motion Sync");
   }
 
+  async setPerformanceMode(enabled: boolean): Promise<boolean> {
+    return await this.setFlag(WRITE.competitiveMode, READ.competitiveMode, enabled, "performanceMode", "competitive mode");
+  }
+
+  async setHyperMode(enabled: boolean): Promise<boolean> {
+    return await this.setFlag(WRITE.hyperMode, READ.hyperMode, enabled, "hyperMode", "Hyper mode");
+  }
+
   async setRippleControl(enabled: boolean): Promise<boolean> {
     return await this.setFlag(WRITE.rippleControl, READ.rippleControl, enabled, "rippleControl", "ripple control");
   }
@@ -309,7 +329,7 @@ export class LamzuHidClient {
     command: number,
     read: LamzuRequest,
     enabled: boolean,
-    field: "angleSnapping" | "motionSync" | "rippleControl",
+    field: "angleSnapping" | "motionSync" | "performanceMode" | "hyperMode" | "rippleControl",
     label: string,
   ): Promise<boolean> {
     await this.write(PAGE.profile, command, [enabled ? 1 : 0]);
@@ -392,7 +412,10 @@ export class LamzuHidClient {
 
   private async exchange(spec: LamzuRequest): Promise<Uint8Array> {
     await this.open();
-    const packet = compaxEncodeRequest(spec);
+    const request = spec.target === TARGET.mouse
+      ? { ...spec, target: this.profile()?.mouseTarget ?? TARGET.mouse }
+      : spec;
+    const packet = compaxEncodeRequest(request);
     await this.device.sendFeatureReport(REPORT_ID, packet);
 
     const attempts = spec.attempts ?? RESPONSE_ATTEMPTS;

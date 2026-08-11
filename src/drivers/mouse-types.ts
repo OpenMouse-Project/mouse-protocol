@@ -95,7 +95,7 @@ export type MouseLightingMode =
   | "Breathing dual";
 
 export interface MouseStatus {
-  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "Lamzu" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso";
+  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "Lamzu" | "CRDRAKO" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig";
   name: string;
   /** Driver-supplied UI policy (optional; keeps control.ts brand-agnostic). */
   ui?: MouseUiHints;
@@ -121,6 +121,10 @@ export interface MouseStatus {
   transportIds?: Record<string, string>;
   connectionType?: "Wired" | "Wireless";
   connectionDetail?: string;
+  /** Zaunkoenig exposes the USB link mode as part of its packed configuration. */
+  usbSpeed?: "Full" | "High";
+  /** Physical button which sends the primary/left-click action. */
+  primaryButton?: "Left" | "Right";
   dongleLedEnabled?: boolean | null;
   finalmouseDongleLedMode?: number | null;
   finalmouseTournamentScrollMode?: number | null;
@@ -149,6 +153,7 @@ export interface MouseStatus {
   eggMulticlickFilters?: number[];
   eggButtonMappings?: string[];
   performanceMode?: boolean | null;
+  hyperMode?: boolean | null;
   sensorMode?: "Eco" | "High" | "Ultra" | null;
   sensorModeStored?: 0 | 1 | null;
   sensorModeEditable?: boolean | null;

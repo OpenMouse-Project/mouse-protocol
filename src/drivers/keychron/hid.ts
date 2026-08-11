@@ -3,12 +3,16 @@ import {
   KEYCHRON_COMMAND as CMD,
   KEYCHRON_MISC_COMMAND as MISC,
   KEYCHRON_NAPE_COMMAND as NAPE,
+  KEYCHRON_NAPE_DPI_MAX as DPI_MAX,
+  KEYCHRON_NAPE_DPI_MIN as DPI_MIN,
+  KEYCHRON_NAPE_DPI_STEP as DPI_STEP,
   KEYCHRON_POLLING_TABLE as POLLING_TABLE,
   KEYCHRON_PRODUCTS as PRODUCTS,
   KEYCHRON_RAW_USAGE as RAW_USAGE,
   KEYCHRON_RAW_USAGE_PAGE as RAW_USAGE_PAGE,
   KEYCHRON_REPORT_ID as REPORT_ID,
   KEYCHRON_VENDOR_ID,
+  keychronDecodeBattery,
   keychronDecodeFirmware,
   keychronDecodePolling,
   keychronPacket,
@@ -16,9 +20,6 @@ import {
 const QUERY_TIMEOUT_MS = 1200;
 
 const DPI_STAGE_COUNT = 5;
-const DPI_MIN = 50;
-const DPI_MAX = 3200;
-const DPI_STEP = 50;
 const ORIENTATION_STEPS = 8;
 const NAPE_DISPLAY_NAME = "Nape Pro";
 const PRODUCT_IDS = new Set<number>(PRODUCTS.keys());
@@ -259,14 +260,7 @@ export class KeychronHidClient {
       (bytes) => bytes[0] === CMD.miscGroup && bytes[1] === NAPE.getBattery,
       [CMD.miscGroup, NAPE.getBattery],
     );
-    const percent = response[2] ?? 0xff;
-    const status = response[3] ?? 0;
-    const state: MouseStatus["batteryState"] = status === 1
-      ? "Charging"
-      : status === 2
-        ? "Full"
-        : "Discharging";
-    return { percent, state };
+    return keychronDecodeBattery(response);
   }
 
   private async getOrientationIndex(): Promise<number> {

@@ -12,6 +12,11 @@ import {
   NINJUTSO_RECEIVER_PRODUCT_IDS,
   NINJUTSO_VENDOR_ID,
 } from "@openmouse/protocol/ninjutso";
+import {
+  ZAUNKOENIG_PRODUCT_IDS,
+  ZAUNKOENIG_USAGE_PAGE,
+  ZAUNKOENIG_VENDOR_ID,
+} from "@openmouse/protocol/zaunkoenig";
 
 export const VENDOR_ID = {
   pulsar: 0x3710,
@@ -29,6 +34,7 @@ export const VENDOR_ID = {
   moddo: 0x2fe3,
   ninjutsoLegacy: NINJUTSO_LEGACY_VENDOR_ID,
   ninjutso: NINJUTSO_VENDOR_ID,
+  zaunkoenig: ZAUNKOENIG_VENDOR_ID,
 } as const;
 
 // Keychron VIA raw HID. 0x0440 is Nape Pro wired; 0xd026/0xd029 are shared Link-KM receivers.
@@ -46,10 +52,14 @@ export const MODDO_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.moddo, usagePage: 0xff, usage: 0x02 },
 ];
 
-// Viper V2/V3 Pro expose their control channel as a Generic Desktop Mouse
-// collection. Limit this broad collection filter to known PIDs so it cannot
-// also surface unrelated Razer keyboards or the Viper V4 Pro's ordinary
-// boot-mouse interfaces.
+// Viper V2/V3 Pro and Mouse Dock Pro expose their control channel as a Generic
+// Desktop Mouse collection. Limit this broad collection filter to known PIDs so
+// it cannot also surface unrelated Razer keyboards or the Viper V4 Pro's
+// ordinary boot-mouse interfaces.
+export const RAZER_MOUSE_DOCK_PRO_CONTROL_FILTERS: HIDDeviceFilter[] = [0x00a4].map(
+  (productId) => ({ vendorId: VENDOR_ID.razer, productId, usagePage: 0x01, usage: 0x02 }),
+);
+
 export const RAZER_VIPER_V2_CONTROL_FILTERS: HIDDeviceFilter[] = [0x00a5, 0x00a6].map(
   (productId) => ({ vendorId: VENDOR_ID.razer, productId, usagePage: 0x01, usage: 0x02 }),
 );
@@ -100,7 +110,7 @@ export const RAZER_COBRA_FILTERS: HIDDeviceFilter[] = [0x00a3].map(
  * broad filter cannot quietly widen one that was deliberately narrowed.
  */
 const RAZER_NARROWED_PRODUCT_IDS: ReadonlySet<number> = new Set([
-  0x00a5, 0x00a6, 0x00c0, 0x00c1, 0x006e, 0x0071, 0x0098, 0x0084,
+  0x00a4, 0x00a5, 0x00a6, 0x00c0, 0x00c1, 0x006e, 0x0071, 0x0098, 0x0084,
 ]);
 
 /**
@@ -193,6 +203,11 @@ export const WLMOUSE_MAX_POLLING_HZ: ReadonlyMap<number, number> = new Map([
 ]);
 
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
+  ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
+    vendorId: ZAUNKOENIG_VENDOR_ID,
+    productId,
+    usagePage: ZAUNKOENIG_USAGE_PAGE,
+  })),
   { vendorId: VENDOR_ID.finalmouse, productId: 0x0100, usagePage: 0xff00, usage: 0x0001 },
   { vendorId: VENDOR_ID.pulsar },
   { vendorId: VENDOR_ID.endgameGear },
@@ -200,6 +215,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.lamzu },
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   ...TEEVOLUTION_PRODUCT_IDS.map((productId) => ({ vendorId: VENDOR_ID.teevolution, productId })),
+  ...RAZER_MOUSE_DOCK_PRO_CONTROL_FILTERS,
   ...RAZER_VIPER_V2_CONTROL_FILTERS,
   ...RAZER_VIPER_V3_CONTROL_FILTERS,
   ...RAZER_VIPER_MINI_CONTROL_FILTERS,

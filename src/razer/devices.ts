@@ -10,7 +10,7 @@
  *
  * The product list and the transport grouping come from OpenRazer's public
  * supported-device table and mouse driver (see
- * `OPENRAZER_ALL_MICE_DEVELOPER_REFERENCE.md`). Only the seven entries marked
+ * `OPENRAZER_ALL_MICE_DEVELOPER_REFERENCE.md`). Only the entries marked
  * `verified: true` have been exercised against real hardware by this project —
  * everything else is transcribed protocol facts, not a tested driver.
  *
@@ -119,6 +119,18 @@ export interface RazerProduct {
    * the WebHID picker.
    */
   nativeOnly?: boolean;
+  /**
+   * Polling rates and which command encodes them follow the paired mouse, not a
+   * fixed list for this product id. The driver probes which command answers and
+   * offers the matching 1 kHz or 8 kHz ladder. `pollingRates` / `highRatePolling`
+   * are then only the pre-probe defaults. Mouse Dock Pro is the only case.
+   */
+  probePollingRates?: boolean;
+  /**
+   * Link label used instead of "HyperSpeed receiver" / "Wired USB" — for docks
+   * that are neither.
+   */
+  connectionLabel?: string;
 }
 
 /** Everything a preset supplies. The transaction id is deliberately not here. */
@@ -172,7 +184,9 @@ const TRANSACTION_3F: readonly number[] = [
 const TRANSACTION_1F: readonly number[] = [
   0x0062, 0x006c, 0x0077, 0x0080, 0x0085, 0x0086, 0x0088, 0x008d, 0x008f,
   0x0090, 0x0094, 0x0096, 0x0099, 0x009a, 0x009c, 0x009e, 0x009f, 0x00a1,
-  0x00a5, 0x00a6, 0x00a7, 0x00a8, 0x00aa, 0x00ab, 0x00af, 0x00b0, 0x00b2,
+  // Mouse Dock Pro is not in OpenRazer's mouse table; hardware with a Naga V2
+  // Pro paired answers on `0x1f` like that generation's mice.
+  0x00a4, 0x00a5, 0x00a6, 0x00a7, 0x00a8, 0x00aa, 0x00ab, 0x00af, 0x00b0, 0x00b2,
   0x00b4, 0x00b6, 0x00b7, 0x00b8, 0x00b9, 0x00be, 0x00bf, 0x00c0, 0x00c1,
   0x00c2, 0x00c3, 0x00c4, 0x00c5, 0x00c7, 0x00c8, 0x00cb, 0x00cc, 0x00cd,
   0x00d0, 0x00d1, 0x00d3, 0x00d4, 0x00d6, 0x00d7,
@@ -459,6 +473,24 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   [0x00b8, { model: "Viper V3 HyperSpeed", ...VIPER_RECEIVER_WIRELESS, highRatePolling: false, liftOff: true, maxDpi: DPI_FOCUS_PRO, verified: true }],
 
   // ---- new-receiver ---------------------------------------------------------
+  // Dock, not a mouse: settings pass through to whichever mouse is paired.
+  // Polling rates are discovered per session — a Naga stays on the 1 kHz ladder,
+  // while a HyperPolling-capable mouse unlocks the 8 kHz one.
+  [0x00a4, {
+    model: "Mouse Dock Pro",
+    ...MODERN_RECEIVER,
+    // Verified only with a Naga V2 Pro paired (Focus Pro 30k). A higher dock
+    // ceiling for 35k mice is untested through this path, so keep the observed
+    // sensor limit rather than advertising an unverified range.
+    maxDpi: DPI_FOCUS_PRO,
+    probePollingRates: true,
+    connectionLabel: "Mouse Dock Pro",
+    // Conservative pre-probe defaults; `readPollingRateHz` replaces both once
+    // it knows which command the paired mouse answers.
+    pollingRates: RATES_1K,
+    highRatePolling: true,
+    verified: true,
+  }],
   [0x006f, { model: "Lancehead Wireless", ...LEGACY_RECEIVER, maxDpi: DPI_CHROMA }],
   [0x0070, { model: "Lancehead Wireless (Wired)", ...MODERN_WIRED, maxDpi: DPI_CHROMA }],
   [0x0072, { model: "Mamba Wireless", ...LEGACY_RECEIVER, maxDpi: DPI_CHROMA }],
@@ -472,8 +504,8 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   [0x0090, { model: "Naga Pro", ...LEGACY_RECEIVER }],
   [0x009a, { model: "Pro Click Mini", ...LEGACY_RECEIVER, maxDpi: 12_000 }],
   [0x009c, { model: "DeathAdder V2 X HyperSpeed", ...LEGACY_RECEIVER, maxDpi: 14_000 }],
-  [0x00a7, { model: "Naga V2 Pro (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO }],
-  [0x00a8, { model: "Naga V2 Pro", ...MODERN_RECEIVER, maxDpi: DPI_FOCUS_PRO }],
+  [0x00a7, { model: "Naga V2 Pro (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO, verified: true }],
+  [0x00a8, { model: "Naga V2 Pro", ...MODERN_RECEIVER, maxDpi: DPI_FOCUS_PRO, verified: true }],
   [0x00aa, { model: "Basilisk V3 Pro (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO }],
   [0x00ab, { model: "Basilisk V3 Pro", ...MODERN_RECEIVER, maxDpi: DPI_FOCUS_PRO }],
   [0x00af, { model: "Cobra Pro (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO }],

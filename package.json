@@ -81,6 +81,10 @@
       "types": "./dist/wlmouse/index.d.ts",
       "import": "./dist/wlmouse/index.js"
     },
+    "./zaunkoenig": {
+      "types": "./dist/zaunkoenig/index.d.ts",
+      "import": "./dist/zaunkoenig/index.js"
+    },
     "./drivers": {
       "types": "./dist/drivers/index.d.ts",
       "import": "./dist/drivers/index.js"

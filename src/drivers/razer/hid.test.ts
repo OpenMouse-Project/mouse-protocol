@@ -569,3 +569,67 @@ test("the DeathAdder V2 DPI write uses the legacy transaction id and no-store by
   assert.equal(confirm[1], 0x3f);
   assert.equal(confirm[8], 0x00);
 });
+
+/**
+ * Dock passthrough that answers only one polling command, the way a paired
+ * mouse that lacks (or has) HyperPolling does.
+ */
+function fakeDock(options: { extended: boolean }) {
+  let pending = new Uint8Array(RAZER_PACKET_LENGTH);
+  const device = {
+    vendorId: 0x1532,
+    productId: 0x00a4,
+    productName: "Razer Mouse Dock Pro",
+    opened: true,
+    collections: [{ usagePage: 0x01, usage: 0x02, children: [], featureReports: [], inputReports: [], outputReports: [] }],
+    open: async () => {},
+    close: async () => {},
+    sendFeatureReport: async (_reportId: number, data: Uint8Array) => {
+      const [commandClass, commandId] = [data[6], data[7]];
+      const answer = (dataSize: number, args: number[]) =>
+        replyPacket(commandClass, commandId, dataSize, args, RAZER_STATUS.ok);
+      if (commandClass === 0x00 && commandId === 0x81) pending = answer(0x02, [1, 3]);
+      else if (commandClass === 0x00 && commandId === 0x82) pending = answer(0x16, []);
+      else if (commandClass === 0x07 && commandId === 0x80) pending = answer(0x02, [0x00, 0x80]);
+      else if (commandClass === 0x07 && commandId === 0x84) pending = answer(0x02, [0x00, 0x00]);
+      else if (commandClass === 0x07 && commandId === 0x83) pending = answer(0x02, [0x00, 5]);
+      else if (commandClass === 0x07 && commandId === 0x81) pending = answer(0x02, [0x4d, 0x00]);
+      else if (commandClass === 0x04 && commandId === 0x85) pending = answer(0x07, [0x01, 0x06, 0x40, 0x06, 0x40]);
+      else if (commandClass === 0x00 && commandId === 0xc0) {
+        pending = options.extended
+          ? answer(0x02, [0x00, 8])
+          : replyPacket(commandClass, commandId, data[5], [], RAZER_STATUS.unsupported);
+      } else if (commandClass === 0x00 && commandId === 0x85) {
+        pending = options.extended
+          ? replyPacket(commandClass, commandId, data[5], [], RAZER_STATUS.unsupported)
+          : answer(0x01, [1]);
+      } else if (commandClass === 0x0b) {
+        pending = replyPacket(commandClass, commandId, data[5], [], RAZER_STATUS.unsupported);
+      } else {
+        pending = replyPacket(commandClass, commandId, data[5], [], RAZER_STATUS.unsupported);
+      }
+    },
+    receiveFeatureReport: async () => new DataView(pending.buffer.slice(0)),
+  } as unknown as HIDDevice;
+  return new RazerHidClient(device);
+}
+
+test("Mouse Dock Pro with a 1 kHz mouse stays on the legacy polling ladder", async () => {
+  const { RATES_1K } = await import("@openmouse/protocol/razer-devices");
+  const client = fakeDock({ extended: false });
+  const status = await client.readStatus();
+  assert.equal(status.connectionDetail, "Mouse Dock Pro");
+  assert.equal(status.pollingRateHz, 1000);
+  assert.deepEqual(status.supportedPollingRates, [...RATES_1K]);
+});
+
+test("Mouse Dock Pro with a HyperPolling mouse unlocks the 8 kHz ladder", async () => {
+  const { RATES_8K } = await import("@openmouse/protocol/razer-devices");
+  const client = fakeDock({ extended: true });
+  const status = await client.readStatus();
+  assert.equal(status.connectionDetail, "Mouse Dock Pro");
+  // Extended divisor of 8000 with value 8 → 1000 Hz reported, but the ladder
+  // still opens to 8 kHz because the command itself answered.
+  assert.equal(status.pollingRateHz, 1000);
+  assert.deepEqual(status.supportedPollingRates, [...RATES_8K]);
+});
