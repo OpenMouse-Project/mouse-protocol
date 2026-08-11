@@ -1,4 +1,7 @@
+export * from "./friendly-name.js";
 export * from "./haptics.js";
+export * from "./hosts.js";
+export * from "./wheel.js";
 
 // HID++ reserves software ID 0 for device-originated notifications. Using a
 // nonzero ID keeps command replies distinct from asynchronous mouse events.

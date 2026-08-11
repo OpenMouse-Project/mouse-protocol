@@ -10,8 +10,36 @@ import {
   resolveBoltReportDevice,
 } from "./bolt.ts";
 import {
+  LOGITECH_CHANGE_HOST,
+  LOGITECH_FRIENDLY_NAME,
   LOGITECH_HAPTIC,
   LOGITECH_HAPTIC_EFFECTS,
+  LOGITECH_HIRES_WHEEL,
+  LOGITECH_HIRES_WHEEL_BIT,
+  LOGITECH_HOSTS,
+  LOGITECH_SMART_SHIFT,
+  LOGITECH_SMART_SHIFT_OFF,
+  LOGITECH_THUMB_WHEEL,
+  buildFriendlyNameWrite,
+  buildRatchetControlWrite,
+  buildThumbWheelWrite,
+  decodeHiresWheelCapabilities,
+  decodeHiresWheelMode,
+  decodeRatchetControl,
+  decodeThumbWheelStatus,
+  decodeThumbWheelSupportsInvert,
+  encodeHiresWheelMode,
+  type LogitechRatchetControl,
+  type LogitechWheelMode,
+  buildHostSwitchWrite,
+  decodeFriendlyNameChunk,
+  decodeFriendlyNameLengths,
+  decodeFriendlyNameText,
+  decodeHostPaired,
+  decodeHostsInfo,
+  rejectFriendlyName,
+  rejectHostSwitch,
+  type LogitechHostsInfo,
   buildHapticConfigWrite,
   decodeHapticConfig,
   encodeHapticFlags,
@@ -217,6 +245,12 @@ export function hasLiftOffControl(legacyDpi: boolean, lodByte: number | null): b
 const SHORT_REPORT_ID = 0x10;
 const LONG_REPORT_ID = 0x11;
 const REQUEST_TIMEOUT_MS = 6000;
+/**
+ * A host switch succeeds by disconnecting, so the usual request timeout would
+ * spend six seconds waiting for an answer that cannot arrive before concluding
+ * the command worked. Long enough for a device that stays to acknowledge.
+ */
+const HOST_SWITCH_ACK_TIMEOUT_MS = 1500;
 const FEATURE = {
   deviceName: 0x0005,
   firmware: 0x0003,
@@ -235,6 +269,12 @@ const FEATURE = {
   onboardProfiles: 0x8100,
   analogButtons: 0x1b0c,
   haptic: 0x19b0,
+  smartShift: 0x2111,
+  hiresWheel: 0x2121,
+  thumbWheel: 0x2150,
+  friendlyName: 0x0007,
+  hostsInfo: 0x1815,
+  changeHost: 0x1814,
 } as const;
 
 interface ResolvedFeature {
@@ -607,6 +647,9 @@ export class LogitechHidppClient {
       ? await this.readAnalogButtonTuning(analogButtonsFeature.index)
       : undefined;
     const haptics = await this.readHapticConfig();
+    const friendly = await this.readFriendlyName();
+    const hosts = await this.readHostState();
+    const wheel = await this.readWheelState();
     const modeStatusFeature = await this.getFeature(FEATURE.modeStatus);
     const modeStatus = modeStatusFeature.index ? await this.readModeStatus(modeStatusFeature.index) : null;
     // One extra request; the layout it selects is worth surfacing in diagnostics.
@@ -673,6 +716,12 @@ export class LogitechHidppClient {
       // Surface Auto and LightForce Optical. Only expose that control bank when
       // the sensor positively reports the related live LOD capability; this is
       // deliberately conservative and avoids a product/model exception.
+      ...wheel,
+      friendlyName: friendly?.name ?? null,
+      friendlyNameMaxLength: friendly?.maxLength ?? null,
+      hostCount: hosts?.info.hostCount ?? null,
+      currentHost: hosts?.info.currentHost ?? null,
+      hostSlotsPaired: hosts?.paired ?? null,
       hapticIntensity: haptics?.intensity ?? null,
       hapticEnabled: haptics?.enabled ?? null,
       hapticBatterySaving: haptics?.batterySaving ?? null,
@@ -1746,6 +1795,292 @@ export class LogitechHidppClient {
     const confirmed = decodeHapticConfig(reply.slice(3));
     if (!confirmed) throw new Error("The mouse gave no answer to the haptic write.");
     return confirmed;
+  }
+
+  /**
+   * Scroll-wheel state across 0x2111, 0x2121 and 0x2150. Every field stays
+   * absent rather than guessed when its feature is missing, so a mouse
+   * without a thumb wheel does not get a control that can only fail.
+   */
+  private async readWheelState(): Promise<{
+    wheelMode: LogitechWheelMode | null;
+    smartShiftThreshold: number | null;
+    hiResScroll: boolean | null;
+    invertScroll: boolean | null;
+    supportsInvertScroll: boolean;
+    wheelRatchetEngaged: boolean | null;
+    thumbWheelInverted: boolean | null;
+    supportsThumbWheelInvert: boolean;
+  }> {
+    const smartShift = await this.getFeature(FEATURE.smartShift);
+    const ratchetReply = smartShift.index
+      ? await this.request(smartShift.index, LOGITECH_SMART_SHIFT.get).catch(() => null)
+      : null;
+    const ratchet = ratchetReply ? decodeRatchetControl(ratchetReply.slice(3)) : null;
+
+    const wheel = await this.getFeature(FEATURE.hiresWheel);
+    let hiResScroll: boolean | null = null;
+    let invertScroll: boolean | null = null;
+    let supportsInvertScroll = false;
+    let wheelRatchetEngaged: boolean | null = null;
+    if (wheel.index) {
+      const capabilityReply = await this.request(wheel.index, LOGITECH_HIRES_WHEEL.capabilities).catch(() => null);
+      const capabilities = capabilityReply ? decodeHiresWheelCapabilities(capabilityReply.slice(3)) : null;
+      supportsInvertScroll = capabilities?.supportsInvert ?? false;
+
+      const modeReply = await this.request(wheel.index, LOGITECH_HIRES_WHEEL.get).catch(() => null);
+      if (modeReply) {
+        const mode = decodeHiresWheelMode(modeReply[3] ?? 0);
+        hiResScroll = mode.hiRes;
+        invertScroll = supportsInvertScroll ? mode.inverted : null;
+      }
+
+      const stateReply = await this.request(wheel.index, LOGITECH_HIRES_WHEEL.ratchetState).catch(() => null);
+      wheelRatchetEngaged = stateReply ? (stateReply[3] ?? 0) === 1 : null;
+    }
+
+    const thumb = await this.readThumbWheelState();
+
+    return {
+      wheelMode: ratchet?.mode ?? null,
+      smartShiftThreshold: ratchet?.threshold ?? null,
+      hiResScroll,
+      invertScroll,
+      supportsInvertScroll,
+      wheelRatchetEngaged,
+      ...thumb,
+    };
+  }
+
+  private async readThumbWheelState(): Promise<{
+    thumbWheelInverted: boolean | null;
+    supportsThumbWheelInvert: boolean;
+  }> {
+    const feature = await this.getFeature(FEATURE.thumbWheel);
+    if (!feature.index) return { thumbWheelInverted: null, supportsThumbWheelInvert: false };
+
+    const info = await this.request(feature.index, LOGITECH_THUMB_WHEEL.info).catch(() => null);
+    const supports = info ? decodeThumbWheelSupportsInvert(info.slice(3)) === true : false;
+    const status = await this.request(feature.index, LOGITECH_THUMB_WHEEL.get).catch(() => null);
+    const decoded = status ? decodeThumbWheelStatus(status.slice(3)) : null;
+    return { thumbWheelInverted: decoded?.inverted ?? null, supportsThumbWheelInvert: supports };
+  }
+
+  /** 0x2111 carries all three bytes, so each setter changes only its field. */
+  private async writeRatchetControl(
+    change: { mode?: LogitechWheelMode; threshold?: number },
+  ): Promise<LogitechRatchetControl> {
+    const feature = await this.getFeature(FEATURE.smartShift);
+    if (!feature.index) throw new Error("This mouse has no SmartShift feature.");
+
+    const current = decodeRatchetControl((await this.request(feature.index, LOGITECH_SMART_SHIFT.get)).slice(3));
+    if (!current) throw new Error("The mouse gave no answer when its wheel settings were read.");
+
+    const reply = await this.request(
+      feature.index,
+      LOGITECH_SMART_SHIFT.set,
+      ...buildRatchetControlWrite(current, change),
+    );
+    const confirmed = decodeRatchetControl(reply.slice(3));
+    if (!confirmed) throw new Error("The mouse gave no answer to the wheel write.");
+    return confirmed;
+  }
+
+  async setWheelMode(mode: LogitechWheelMode): Promise<LogitechWheelMode> {
+    const confirmed = await this.writeRatchetControl({ mode });
+    if (confirmed.mode !== mode) throw new Error(`The mouse kept the wheel in ${confirmed.mode} mode.`);
+    return mode;
+  }
+
+  /** Passing null disables SmartShift; the ratchet mode is preserved either way. */
+  async setSmartShiftThreshold(threshold: number | null): Promise<number> {
+    const value = threshold === null ? LOGITECH_SMART_SHIFT_OFF : Math.round(threshold);
+    if (!Number.isInteger(value) || value < 0 || value > 0xff) {
+      throw new Error("A SmartShift threshold must be a whole number between 0 and 255.");
+    }
+    const confirmed = await this.writeRatchetControl({ threshold: value });
+    if (confirmed.threshold !== value) {
+      throw new Error(`The mouse kept a SmartShift threshold of ${confirmed.threshold}.`);
+    }
+    return confirmed.threshold;
+  }
+
+  /**
+   * Flips one bit of the 0x2121 mode byte. Diversion is read and carried
+   * through: setting it routes the wheel to HID++ and stops it scrolling, and
+   * clearing it would take that away from whatever set it.
+   */
+  private async writeWheelModeBit(bit: number, on: boolean): Promise<number> {
+    const feature = await this.getFeature(FEATURE.hiresWheel);
+    if (!feature.index) throw new Error("This mouse has no hi-resolution wheel feature.");
+
+    const current = (await this.request(feature.index, LOGITECH_HIRES_WHEEL.get))[3] ?? 0;
+    const reply = await this.request(
+      feature.index,
+      LOGITECH_HIRES_WHEEL.set,
+      encodeHiresWheelMode(current, bit, on),
+    );
+    return reply[3] ?? 0;
+  }
+
+  async setHiResScroll(enabled: boolean): Promise<boolean> {
+    const mode = decodeHiresWheelMode(await this.writeWheelModeBit(LOGITECH_HIRES_WHEEL_BIT.hiRes, enabled));
+    if (mode.hiRes !== enabled) throw new Error("The mouse kept its previous scrolling mode.");
+    return mode.hiRes;
+  }
+
+  async setInvertScroll(inverted: boolean): Promise<boolean> {
+    const mode = decodeHiresWheelMode(await this.writeWheelModeBit(LOGITECH_HIRES_WHEEL_BIT.invert, inverted));
+    if (mode.inverted !== inverted) throw new Error("The mouse kept its previous scroll direction.");
+    return mode.inverted;
+  }
+
+  /**
+   * Inverts the thumb wheel. Logi Options+ sets the diversion bit to implement
+   * horizontal scrolling, so it is read and preserved rather than rewritten.
+   */
+  async setThumbWheelInverted(inverted: boolean): Promise<boolean> {
+    const feature = await this.getFeature(FEATURE.thumbWheel);
+    if (!feature.index) throw new Error("This mouse has no thumb wheel.");
+
+    const status = decodeThumbWheelStatus((await this.request(feature.index, LOGITECH_THUMB_WHEEL.get)).slice(3));
+    if (!status) throw new Error("The mouse gave no answer when its thumb wheel was read.");
+
+    const reply = await this.request(
+      feature.index,
+      LOGITECH_THUMB_WHEEL.set,
+      ...buildThumbWheelWrite(status, inverted),
+    );
+    const confirmed = decodeThumbWheelStatus(reply.slice(3));
+    if (confirmed?.inverted !== inverted) {
+      throw new Error("The mouse kept its previous thumb-wheel direction.");
+    }
+    return confirmed.inverted;
+  }
+
+  /** The editable name, or null on a device without feature 0x0007. */
+  private async readFriendlyName(): Promise<{ name: string; maxLength: number } | null> {
+    const feature = await this.getFeature(FEATURE.friendlyName);
+    if (!feature.index) return null;
+
+    const header = await this.request(feature.index, LOGITECH_FRIENDLY_NAME.lengths).catch(() => null);
+    const lengths = header ? decodeFriendlyNameLengths(header.slice(3)) : null;
+    if (!lengths) return null;
+    if (lengths.length === 0) return { name: "", maxLength: lengths.maxLength };
+
+    const characters: number[] = [];
+    while (characters.length < lengths.length) {
+      const chunk = await this.request(feature.index, LOGITECH_FRIENDLY_NAME.get, characters.length);
+      const decoded = decodeFriendlyNameChunk(chunk.slice(3), lengths.length - characters.length);
+      if (decoded.length === 0) break;
+      characters.push(...decoded);
+    }
+    return { name: decodeFriendlyNameText(characters), maxLength: lengths.maxLength };
+  }
+
+  /**
+   * Renames the device, then reads the name back. The read-back is not
+   * ceremony: firmware that acknowledges a write and quietly keeps its old
+   * value would otherwise look like a successful rename.
+   */
+  async setFriendlyName(name: string): Promise<string> {
+    const feature = await this.getFeature(FEATURE.friendlyName);
+    if (!feature.index) throw new Error("This mouse cannot be renamed.");
+
+    const header = await this.request(feature.index, LOGITECH_FRIENDLY_NAME.lengths);
+    const lengths = decodeFriendlyNameLengths(header.slice(3));
+    if (!lengths) throw new Error("This mouse did not report how long a name it accepts.");
+
+    const rejection = rejectFriendlyName(name, lengths.maxLength);
+    if (rejection === "empty") throw new Error("A name cannot be empty.");
+    if (rejection === "non-ascii") throw new Error("A name may only contain plain ASCII characters.");
+    if (rejection !== null) {
+      throw new Error(`This mouse allows at most ${lengths.maxLength} characters.`);
+    }
+
+    await this.requestLong(feature.index, LOGITECH_FRIENDLY_NAME.set, buildFriendlyNameWrite(name));
+
+    const confirmed = await this.readFriendlyName();
+    if (confirmed?.name !== name.trim()) {
+      throw new Error(`The mouse kept the name "${confirmed?.name ?? ""}".`);
+    }
+    return confirmed.name;
+  }
+
+  /**
+   * Easy-Switch slots, or null without feature 0x1815. Slot indices are
+   * zero-based here as they are on the wire; the button under the mouse counts
+   * from one, so anything user-facing has to add one.
+   */
+  private async readHostState(): Promise<{
+    info: LogitechHostsInfo;
+    paired: boolean[];
+  } | null> {
+    const feature = await this.getFeature(FEATURE.hostsInfo);
+    if (!feature.index) return null;
+
+    const reply = await this.request(feature.index, LOGITECH_HOSTS.info).catch(() => null);
+    const info = reply ? decodeHostsInfo(reply.slice(3)) : null;
+    if (!info) return null;
+
+    const paired: boolean[] = [];
+    for (let slot = 0; slot < info.hostCount; slot += 1) {
+      const entry = await this.request(feature.index, LOGITECH_HOSTS.host, slot).catch(() => null);
+      // A slot that will not describe itself counts as empty, never as
+      // switchable — this has to fail towards refusing the switch.
+      paired.push(entry ? decodeHostPaired(entry.slice(3)) === true : false);
+    }
+    return { info, paired };
+  }
+
+  /**
+   * Asks the mouse to move to another Easy-Switch slot.
+   *
+   * Named for what it can prove. A successful switch disconnects this host, so
+   * there is no state left to read back and no way to confirm the mouse
+   * arrived — disconnection IS the expected success path, not a failure.
+   * Resolving means the command reached the device: either it acknowledged, or
+   * it left before an acknowledgement could be observed and the report was
+   * accepted by the transport.
+   *
+   * An empty slot is refused outright. Switching there leaves the mouse
+   * unreachable until someone presses the button on its underside.
+   */
+  async requestHostSwitch(slot: number): Promise<void> {
+    const state = await this.readHostState();
+    const rejection = rejectHostSwitch(slot, state?.info ?? null, state?.paired ?? []);
+    if (rejection === "no-hosts") throw new Error("This mouse does not report Easy-Switch hosts.");
+    if (rejection === "already-current") throw new Error("The mouse is already on that computer.");
+    if (rejection === "empty-slot") {
+      throw new Error(
+        `Computer ${slot + 1} has nothing paired to it. Switching there would leave the mouse `
+        + "unreachable until you press the button underneath it.",
+      );
+    }
+    if (rejection !== null) {
+      throw new Error(`Computer ${slot + 1} is not one of this mouse's slots.`);
+    }
+
+    const feature = await this.getFeature(FEATURE.changeHost);
+    if (!feature.index) throw new Error("This mouse has no 0x1814 CHANGE HOST feature.");
+
+    try {
+      await this.requestWithOptions(
+        feature.index,
+        LOGITECH_CHANGE_HOST.set,
+        buildHostSwitchWrite(slot),
+        { timeoutMs: HOST_SWITCH_ACK_TIMEOUT_MS },
+      );
+    } catch (error) {
+      // The mouse leaving mid-request is the command working. Only a failure
+      // to hand the report to the transport means it never got there.
+      // A timeout here is the mouse having gone: the report reached the
+      // transport and no answer can arrive from a device that is no longer
+      // this host's. Anything else — a refusal, or sendReport failing — means
+      // the command did not take effect and must surface.
+      if (error instanceof HidppTimeoutError) return;
+      throw error;
+    }
   }
 
   /** Sets haptic strength, leaving the flag byte as the device reports it. */

@@ -197,6 +197,34 @@ export interface MouseStatus {
     writable: boolean;
   } | null;
   /** Logitech 0x19B0 haptic strength, 0-100. Null when the device has no haptics. */
+  /**
+   * Logitech 0x2111 byte 0 — the wheel's ratchet mode, the same thing the
+   * button behind the wheel toggles. Not SmartShift on/off.
+   */
+  wheelMode?: "Freespin" | "Ratchet" | null;
+  /**
+   * Logitech 0x2111 byte 1. 255 disables SmartShift; any lower value enables
+   * it and sets how gentle a flick releases the ratchet.
+   */
+  smartShiftThreshold?: number | null;
+  /** Logitech 0x2121 — high-resolution (smooth) scrolling. */
+  hiResScroll?: boolean | null;
+  invertScroll?: boolean | null;
+  supportsInvertScroll?: boolean;
+  /** Live read of whether the wheel is currently ratcheted. */
+  wheelRatchetEngaged?: boolean | null;
+  /** Logitech 0x2150 — the horizontal thumb wheel. */
+  thumbWheelInverted?: boolean | null;
+  supportsThumbWheelInvert?: boolean;
+  /** Logitech 0x0007 — the editable name, distinct from the fixed device name. */
+  friendlyName?: string | null;
+  friendlyNameMaxLength?: number | null;
+  /** Logitech 0x1815 — Easy-Switch slot count, or null without the feature. */
+  hostCount?: number | null;
+  /** Zero-based active slot; the button under the mouse counts from one. */
+  currentHost?: number | null;
+  /** One entry per slot, true when a computer is paired to it. */
+  hostSlotsPaired?: boolean[] | null;
   hapticIntensity?: number | null;
   /** Logitech 0x19B0 byte 0 bit 0 — haptic feedback on or off. */
   hapticEnabled?: boolean | null;
