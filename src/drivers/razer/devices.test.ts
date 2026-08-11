@@ -142,6 +142,40 @@ test("the wired DeathAdder V3 writes polling on the extended command", () => {
   }
 });
 
+test("the Viper V3 Pro SE pair matches the reference without inheriting the V3 Pro's evidence", () => {
+  const wired = RAZER_PRODUCTS.get(0x00de);
+  const wireless = RAZER_PRODUCTS.get(0x00df);
+
+  // The SE is a protocol variant, so it shares the V3 Pro's transport, sensor
+  // ceiling and transaction id.
+  for (const product of [wired, wireless]) {
+    assert.equal(product?.transport, "viper-receiver");
+    assert.equal(product?.maxDpi, 35_000);
+    assert.equal(product?.hasBattery, true);
+    // Neither has been connected, so neither may claim the V3 Pro's flags: the
+    // lift-off read cannot distinguish "no feature" from "Low", and `verified`
+    // gates the "untested model" label and the strict battery read.
+    assert.equal(product?.verified, false);
+    assert.equal(product?.liftOff, false);
+    assert.equal(product?.asymmetricLiftOff, false);
+  }
+
+  // Both rows are on the legacy polling command. The wired one always was; the
+  // wireless one started on the 8 kHz ladder from OpenRazer's SE class until a
+  // capture on the stock HyperSpeed receiver answered the extended read with
+  // status 0x05 (not supported) and the legacy read with a divisor of 1.
+  //
+  // Do not restore RATES_8K here from the reference. The 8 kHz ceiling belongs
+  // to the HyperPolling dongle, which is a different receiver and a different
+  // product id.
+  assert.deepEqual([...wired?.pollingRates ?? []], [...RATES_1K]);
+  assert.deepEqual([...wireless?.pollingRates ?? []], [...RATES_1K]);
+  assert.equal(wired?.wireless, false);
+  assert.equal(wireless?.wireless, true);
+  assert.equal(wired?.highRatePolling, false);
+  assert.equal(wireless?.highRatePolling, false);
+});
+
 test("no product asks for a rate its polling command cannot encode", () => {
   // `highRatePolling` picks the encoding and `pollingRates` picks the values
   // offered; they are set independently, so nothing stops a product asking for
@@ -261,6 +295,12 @@ const OPENRAZER_TRANSACTION_IDS: ReadonlyMap<number, number> = new Map([
     0x00b4, 0x00b6, 0x00b7, 0x00b8, 0x00b9, 0x00be, 0x00bf, 0x00c0, 0x00c1,
     0x00c2, 0x00c3, 0x00c4, 0x00c5, 0x00c7, 0x00c8, 0x00cb, 0x00cc, 0x00cd,
     0x00d0, 0x00d1, 0x00d3, 0x00d4, 0x00d6, 0x00d7,
+    // Viper V3 Pro SE. Read from PR #2818 rather than the merged driver: its
+    // classes subclass the Viper V3 Pro ones, and the transaction id is a class
+    // property, so the SE inherits `0x1f` from `0x00c0`/`0x00c1` at the source.
+    // Not a divergence — but a pending PR is weaker provenance than the rest of
+    // this table, and still no substitute for connecting one.
+    0x00de, 0x00df,
   ].map((id) => [id, 0x1f] as const),
 ]);
 
