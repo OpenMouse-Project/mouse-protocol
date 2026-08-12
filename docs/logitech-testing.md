@@ -19,6 +19,12 @@ Supported identifiers:
 - `046d:c095` — G502 X PLUS (USB cable; wireless identity `4099` uses its Lightspeed receiver)
 - `046d:c099` — G502 X (wired)
 
+G502 X-family firmware advertises lift-off support through extended DPI
+feature `0x2202`; gaming-surface and Lightforce modes use `0x8090`. The G502 X
+PLUS additionally advertises RGB zones and effects through `0x8071`. OpenMouse
+enumerates those capabilities at runtime rather than enabling them by product
+name, and releases software RGB control when the device is closed.
+
 For Logi Bolt, authorize **both** HID++ collections when the picker offers them
 (`usagePage 0xff00`, `usage 0x0001` and `usage 0x0002`). Device feature traffic
 uses the long-report collection (`usage 0x0002`). Close Logi Options+ first —

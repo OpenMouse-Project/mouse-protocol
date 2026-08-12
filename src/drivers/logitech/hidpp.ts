@@ -1,4 +1,4 @@
-import type { MouseStatus } from "../mouse-types.ts";
+import type { MouseLighting, MouseStatus } from "../mouse-types.ts";
 import { LOGITECH_RECEIVER_PRODUCT_IDS } from "../vendors.ts";
 import {
   BOLT_INDEX_PROBE_TIMEOUT_MS,
@@ -101,6 +101,11 @@ import {
   type OnboardProfile,
   type ProfileFormatCapabilities,
 } from "./onboard-profiles.ts";
+import {
+  encodeLogitechRgbEffect,
+  logitechRgbLighting,
+  type LogitechRgbZone,
+} from "./rgb-effects.ts";
 
 export type { OnboardProfile };
 
@@ -262,6 +267,7 @@ const FEATURE = {
   extendedDpi: 0x2202,
   extendedReportRate: 0x8061,
   modeStatus: 0x8090,
+  rgbEffects: 0x8071,
   // Legacy features used by HERO-era mice (e.g. G502 HERO / LIGHTSPEED,
   // Proteus). Queried only when the extended equivalents are absent.
   adjustableDpi: 0x2201,
@@ -367,6 +373,10 @@ export class LogitechHidppClient {
   /** Lift-off levels this device advertised; the single source of truth for both UI and validation. */
   private lodCapabilities: ProfileFormatCapabilities = capabilitiesForFormat(null);
   private supportedLods: Array<NonNullable<LogitechMouseStatus["liftOffDistance"]>> = ["Medium", "High"];
+  private rgbZone: LogitechRgbZone | null = null;
+  private rgbLighting: MouseLighting | null = null;
+  private rgbClaimed = false;
+  private rgbOriginalMode: "Onboard" | "Host" | "Unknown" = "Unknown";
   private readonly rateChangeWaiters: Array<{ rate: number; resolve: () => void; reject: (reason: Error) => void }> = [];
   /**
    * Device used for HID++ feature sendReport. On Bolt this is the long-report
@@ -626,9 +636,10 @@ export class LogitechHidppClient {
     const dpiState = dpiFeature.legacy
       ? await this.readLegacyDpi(dpiFeature.index)
       : await this.readDpi(dpiFeature.index);
-    const supportsSeparateDpiAxes = dpiFeature.legacy
-      ? false
+    const dpiCapabilities = dpiFeature.legacy
+      ? { separateAxes: false, liftOff: false }
       : await this.readDpiCapabilities(dpiFeature.index);
+    const supportsSeparateDpiAxes = dpiCapabilities.separateAxes;
     // Productivity Bolt mice (MX Master 3S) expose DPI and battery but no
     // 0x8060/0x8061 report-rate feature. Skip rather than throwing.
     const supportedPollingRates = reportRateFeature.index
@@ -642,6 +653,7 @@ export class LogitechHidppClient {
         : await this.readPollingRate(reportRateFeature.index)
       : 0;
     const profileState = await this.readProfileState(profilesFeature.index);
+    this.rgbOriginalMode = profileState.deviceMode;
     const firmware = await this.readFirmware(firmwareFeature.index);
     const analogButtonTuning = analogButtonsFeature.index
       ? await this.readAnalogButtonTuning(analogButtonsFeature.index)
@@ -662,6 +674,15 @@ export class LogitechHidppClient {
     // the same format gets the same limits without being named here.
     this.profileFormatId = onboardProfileFormat?.id ?? null;
     this.lodCapabilities = capabilitiesForFormat(onboardProfileFormat?.id);
+    if (dpiCapabilities.liftOff && ![7, 8].includes(onboardProfileFormat?.id ?? -1)) {
+      // Solaar's 0x2202 definition for G502 X-family firmware advertises LOD
+      // independently of profile format and numbers Low/Medium/High from zero.
+      this.lodCapabilities = {
+        ...this.lodCapabilities,
+        supportedLods: ["Low", "Medium", "High"],
+        lodEncoding: { Low: 0, Medium: 1, High: 2 },
+      };
+    }
     this.supportedLods = [...this.lodCapabilities.supportedLods];
     const wired = isWiredHidppConnection(this.device.productId, identity.transportIds, this.isDirectConnect);
     this.wiredConnection = wired;
@@ -673,7 +694,9 @@ export class LogitechHidppClient {
       && describeProfileFormat(this.profileFormatId).writable
       && capabilitiesForFormat(this.profileFormatId).reportRates !== null;
     const liftOffDistance = decodeLiftOffLevel(dpiState.lod, this.lodCapabilities);
-    const hasLiveLiftOffControl = supportsLiveLiftOffControl(dpiFeature.legacy, liftOffDistance);
+    const hasLiveLiftOffControl = !dpiFeature.legacy && dpiCapabilities.liftOff;
+    const rgbFeature = await this.getFeature(FEATURE.rgbEffects);
+    const lighting = rgbFeature.index ? await this.readRgbLighting(rgbFeature.index) : null;
     const rateLimits = this.lodCapabilities.reportRates;
     const connectionRateCeiling = rateLimits
       ? (wired ? rateLimits.wiredMaxHz : rateLimits.wirelessMaxHz)
@@ -731,6 +754,7 @@ export class LogitechHidppClient {
       lightforceSwitchMode: modeStatus === null || !hasLiveLiftOffControl
         ? null
         : decodeModeStatus(modeStatus, MODE_STATUS.lightforce),
+      lighting: lighting ?? undefined,
       // Some profile formats have different wired and wireless ceilings. The
       // active transport comes from HID++ identity rather than a USB PID.
       pollingRateHz: connectionRateCeiling ? Math.min(pollingRateHz, connectionRateCeiling) : pollingRateHz,
@@ -760,6 +784,12 @@ export class LogitechHidppClient {
   }
 
   async close(): Promise<void> {
+    if (this.rgbClaimed) {
+      const rgb = await this.getFeature(FEATURE.rgbEffects).catch(() => ({ index: 0, version: 0 }));
+      if (rgb.index) await this.request(rgb.index, 0x50, 0x01, 0x00, 0x00).catch(() => undefined);
+      if (this.rgbOriginalMode === "Onboard") await this.setOnboardMode("Onboard").catch(() => undefined);
+      this.rgbClaimed = false;
+    }
     for (const device of this.listeningDevices) {
       device.removeEventListener("inputreport", this.onInputReport);
       if (device.opened) {
@@ -773,6 +803,29 @@ export class LogitechHidppClient {
     this.hostStateCache = undefined;
     this.friendlyNameCache = undefined;
     this.wheelCapabilityCache = undefined;
+    this.rgbZone = null;
+    this.rgbLighting = null;
+  }
+
+  async setLighting(lighting: MouseLighting): Promise<MouseLighting> {
+    const feature = await this.getFeature(FEATURE.rgbEffects);
+    if (!feature.index) throw new Error("This mouse does not expose RGB Effects controls.");
+    if (!this.rgbZone) await this.readRgbLighting(feature.index);
+    if (!this.rgbZone || lighting.zone !== this.rgbLighting?.zone) {
+      throw new Error(`This mouse has no \"${lighting.zone}\" lighting zone.`);
+    }
+    const payload = encodeLogitechRgbEffect(this.rgbZone, lighting);
+    if (!payload) throw new Error("That RGB effect was not advertised by this mouse.");
+    if (!this.rgbClaimed) {
+      const profiles = await this.getFeature(FEATURE.onboardProfiles);
+      if (profiles.index) await this.setOnboardMode("Host");
+      // Solaar SetSWControl(set=1, software mode=3, monitor NVConfig=4).
+      await this.request(feature.index, 0x50, 0x01, 0x03, 0x04);
+      this.rgbClaimed = true;
+    }
+    await this.requestLong(feature.index, 0x10, payload);
+    this.rgbLighting = { ...lighting };
+    return this.rgbLighting;
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
@@ -2516,10 +2569,39 @@ export class LogitechHidppClient {
     return { maxActuation, maxRapidTrigger, maxHaptics, buttons };
   }
 
-  private async readDpiCapabilities(featureIndex: number): Promise<boolean> {
-    if (!featureIndex) return false;
+  private async readDpiCapabilities(featureIndex: number): Promise<{ separateAxes: boolean; liftOff: boolean }> {
+    if (!featureIndex) return { separateAxes: false, liftOff: false };
     const reply = await this.request(featureIndex, 0x10, 0x00);
-    return ((reply[5] ?? 0) & 0x01) !== 0;
+    const flags = reply[5] ?? 0;
+    return { separateAxes: (flags & 0x01) !== 0, liftOff: (flags & 0x02) !== 0 };
+  }
+
+  private async readRgbLighting(featureIndex: number): Promise<MouseLighting | null> {
+    if (this.rgbZone) return this.rgbLighting;
+    const info = await this.request(featureIndex, 0x00, 0xff, 0xff, 0x00).catch(() => null);
+    const zoneCount = Math.min(info?.[5] ?? 0, 8);
+    if (zoneCount === 0) return null;
+    // OpenMouse currently presents one lighting card. G502 X PLUS advertises
+    // its light strip as one combined cluster, so use the first advertised
+    // cluster and enumerate only effects the firmware says it accepts.
+    const zoneReply = await this.request(featureIndex, 0x00, 0x00, 0xff, 0x00);
+    const effectCount = Math.min(zoneReply[6] ?? 0, 32);
+    const zone: LogitechRgbZone = {
+      index: zoneReply[3] ?? 0,
+      location: ((zoneReply[4] ?? 0) << 8) | (zoneReply[5] ?? 0),
+      effects: [],
+    };
+    for (let effectIndex = 0; effectIndex < effectCount; effectIndex += 1) {
+      const effect = await this.request(featureIndex, 0x00, zone.index, effectIndex, 0x00);
+      zone.effects.push({
+        index: effect[4] ?? effectIndex,
+        id: ((effect[5] ?? 0) << 8) | (effect[6] ?? 0),
+        period: ((effect[9] ?? 0) << 8) | (effect[10] ?? 0),
+      });
+    }
+    this.rgbZone = zone;
+    this.rgbLighting = logitechRgbLighting(zone);
+    return this.rgbLighting;
   }
 
   private async readDpiConfiguration(featureIndex: number): Promise<DpiConfiguration> {
