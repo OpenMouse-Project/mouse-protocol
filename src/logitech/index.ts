@@ -1,3 +1,4 @@
+export * from "./controls.js";
 export * from "./friendly-name.js";
 export * from "./haptics.js";
 export * from "./hosts.js";
