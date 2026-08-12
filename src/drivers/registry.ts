@@ -1,4 +1,5 @@
 import { AtkHidClient } from "./atk/hid.ts";
+import { AttackSharkHidClient } from "./attackshark/hid.ts";
 import { EggOp1HidClient } from "./endgame/egg-op1-hid.ts";
 import { eggWeCreate, eggWeIsSupported, eggWeSupportScore, isEggWeClient, type EggWeHidClient } from "./endgame/egg-we-control.ts";
 import { FinalmouseHidClient } from "./finalmouse/hid.ts";
@@ -21,7 +22,7 @@ import { WLMouseHidClient } from "./wlmouse/hid.ts";
 import { ZaunkoenigHidClient } from "./zaunkoenig/hid.ts";
 
 export type PulsarClient = PulsarHidClient | PulsarProHidClient;
-export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient | KeychronHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient;
+export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient | KeychronHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | AttackSharkHidClient;
 
 export interface DeviceDriver {
   brand: string;
@@ -50,6 +51,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Razer", supports: (device) => RazerViperMiniHidClient.isSupported(device), create: (device) => new RazerViperMiniHidClient(device), score: () => 6 },
   { brand: "Razer", supports: (device) => RazerViperHidClient.isSupported(device), create: (device) => new RazerViperHidClient(device), score: () => 6 },
   { brand: "ATK", supports: (device) => AtkHidClient.isSupported(device), create: (device) => new AtkHidClient(device), score: () => 5 },
+  { brand: "Attack Shark", supports: (device) => AttackSharkHidClient.isSupported(device), create: (device) => new AttackSharkHidClient(device), score: () => 5 },
   { brand: "Razer", supports: (device) => RazerViperV4ProHidClient.isSupported(device), create: (device) => new RazerViperV4ProHidClient(device), score: () => 7 },
   { brand: "Keychron", supports: (device) => KeychronHidClient.isSupported(device), create: (device) => new KeychronHidClient(device), score: () => 6 },
 ];
