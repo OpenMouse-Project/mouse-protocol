@@ -39,6 +39,7 @@ class FakeHidDevice {
   private customDpi = 800;
   private pollingIndex = 3; // 1000 Hz
   private pollingMask = 0b0001_1111; // 8K…500
+  private sleepSeconds = 600;
   private batteryPercent = 76;
   private batteryStatus = 0;
   private orientation = 2; // 90°
@@ -152,6 +153,18 @@ class FakeHidDevice {
     }
     if (sub === MISC.setPolling) {
       this.pollingIndex = request[2] ?? this.pollingIndex;
+      return;
+    }
+    if (sub === MISC.getSleep) {
+      reply[5] = this.sleepSeconds & 0xff;
+      reply[6] = (this.sleepSeconds >> 8) & 0xff;
+      this.emit(reply);
+      return;
+    }
+    if (sub === MISC.setSleep) {
+      this.sleepSeconds = (request[4] ?? 0) | ((request[5] ?? 0) << 8);
+      reply[2] = 0;
+      this.emit(reply);
     }
   }
 
@@ -217,16 +230,19 @@ test("reads wired Nape Pro status from Launcher misc commands", async () => {
   assert.match(status.connectionDetail ?? "", /90° orientation/);
   assert.equal(status.ui?.family, "keychron-nape");
   assert.equal(status.ui?.hideProcessingCard, true);
+  assert.equal(status.ui?.showAdvancedSection, true);
+  assert.equal(status.sleepTimeout, 600);
   assert.equal(status.liftOffDistance, null);
 });
 
-test("writes DPI and polling then confirms them by reading back", async () => {
+test("writes DPI, polling, and sleep then confirms them by reading back", async () => {
   const fake = new FakeHidDevice();
   const client = new KeychronHidClient(fake as unknown as HIDDevice);
   assert.equal(await client.setDpi(1600), 1600);
   assert.equal(await client.setDpiStageValue(0, 500), 500);
   assert.equal(await client.setActiveDpiStage(2), 2);
   assert.equal(await client.setPollingRate(2000), 2000);
+  assert.equal(await client.setSleepTimeout(120), 120);
   assert.ok(fake.sent.some((packet) =>
     packet[0] === CMD.miscGroup && packet[1] === NAPE.setDpiValue
     && ((packet[3] ?? 0) | ((packet[4] ?? 0) << 8)) === 1600));
@@ -238,6 +254,22 @@ test("writes DPI and polling then confirms them by reading back", async () => {
   assert.ok(fake.sent.some((packet) =>
     packet[0] === CMD.miscGroup && packet[1] === MISC.setPolling
     && packet[2] === KEYCHRON_POLLING_TABLE.indexOf(2000)));
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === MISC.setSleep
+    && ((packet[4] ?? 0) | ((packet[5] ?? 0) << 8)) === 120));
+});
+
+test("sleep options stay inside the Launcher 1 minute–12:59:59 range", () => {
+  const options = new KeychronHidClient(device(0x0440)).getSleepOptions();
+  assert.ok(options.length > 0);
+  assert.ok(options.every((seconds) => seconds >= 60 && seconds <= 12 * 3600 + 59 * 60 + 59));
+  assert.equal(options[0], 60);
+});
+
+test("rejects sleep timeouts outside the Launcher range", async () => {
+  const client = new KeychronHidClient(new FakeHidDevice() as unknown as HIDDevice);
+  await assert.rejects(() => client.setSleepTimeout(59), /1 minute/);
+  await assert.rejects(() => client.setSleepTimeout(12 * 3600 + 59 * 60 + 60), /12:59:59/);
 });
 
 test("rejects receiver paths that are not paired to a Nape Pro", async () => {

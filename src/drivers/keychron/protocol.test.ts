@@ -5,11 +5,15 @@ import {
   KEYCHRON_NAPE_DPI_MAX,
   KEYCHRON_NAPE_DPI_MIN,
   KEYCHRON_NAPE_DPI_STEP,
+  KEYCHRON_NAPE_SLEEP_MAX_SECONDS,
+  KEYCHRON_NAPE_SLEEP_MIN_SECONDS,
   KEYCHRON_PACKET_LENGTH,
   KEYCHRON_POLLING_TABLE,
   keychronDecodeBattery,
   keychronDecodeFirmware,
   keychronDecodePolling,
+  keychronDecodeSleepTimeout,
+  keychronEncodeSleepTimeout,
   keychronPacket,
 } from "@openmouse/protocol/keychron";
 
@@ -71,4 +75,17 @@ test("battery decodes percent and charge state", () => {
     percent: 100,
     state: "Full",
   });
+});
+
+test("sleep decodes little-endian seconds from the Get_Sleep reply layout", () => {
+  assert.equal(keychronDecodeSleepTimeout(new Uint8Array([167, 11, 0, 0, 0, 0x3d, 0])), 61);
+  assert.equal(keychronDecodeSleepTimeout(new Uint8Array([167, 11, 0, 0, 0, 0x78, 0])), 120);
+  assert.equal(keychronDecodeSleepTimeout(new Uint8Array([167, 11, 0, 0, 0, 0xcf, 0xb6])), 46799);
+  assert.equal(KEYCHRON_NAPE_SLEEP_MIN_SECONDS, 60);
+  assert.equal(KEYCHRON_NAPE_SLEEP_MAX_SECONDS, 12 * 3600 + 59 * 60 + 59);
+});
+
+test("sleep encodes the trackball Set_Sleep payload (sleep LE at bytes 4–5)", () => {
+  assert.deepEqual(keychronEncodeSleepTimeout(61), [167, 12, 0, 0, 0x3d, 0, 0, 0]);
+  assert.deepEqual(keychronEncodeSleepTimeout(43200), [167, 12, 0, 0, 0xc0, 0xa8, 0, 0]);
 });
