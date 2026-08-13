@@ -274,6 +274,7 @@ const FEATURE = {
   extendedReportRate: 0x8061,
   modeStatus: 0x8090,
   rgbEffects: 0x8071,
+  perKeyLightingV2: 0x8081,
   colorLedEffects: 0x8070,
   // Legacy features used by HERO-era mice (e.g. G502 HERO / LIGHTSPEED,
   // Proteus). Queried only when the extended equivalents are absent.
@@ -705,9 +706,12 @@ export class LogitechHidppClient {
     const hasLiveLiftOffControl = !dpiFeature.legacy && dpiCapabilities.liftOff;
     const rgbFeature = await this.getFeature(FEATURE.rgbEffects);
     const colorLedFeature = await this.getFeature(FEATURE.colorLedEffects);
-    const lightingZones = rgbFeature.index
+    const effectZones = rgbFeature.index
       ? [await this.readRgbLighting(rgbFeature.index)].filter((zone): zone is MouseLighting => zone !== null)
       : colorLedFeature.index ? await this.readColorLedLighting(colorLedFeature.index) : [];
+    const perLedFeature = await this.getFeature(FEATURE.perKeyLightingV2);
+    const perLedZones = perLedFeature.index ? await this.readPerLedLighting(perLedFeature.index, name) : [];
+    const lightingZones = [...effectZones, ...perLedZones];
     const lighting = lightingZones[0] ?? null;
     const rateLimits = this.lodCapabilities.reportRates;
     const connectionRateCeiling = rateLimits
@@ -822,6 +826,20 @@ export class LogitechHidppClient {
   }
 
   async setLighting(lighting: MouseLighting): Promise<MouseLighting> {
+    if (lighting.hardwareZoneId !== undefined) {
+      const feature = await this.getFeature(FEATURE.perKeyLightingV2);
+      if (!feature.index) throw new Error("This mouse does not expose per-LED lighting controls.");
+      const color = Number.parseInt((lighting.color ?? "#000000").slice(1), 16);
+      const enabledColor = lighting.mode === "Off" ? 0 : color;
+      await this.requestLong(feature.index, 0x10, [
+        lighting.hardwareZoneId,
+        (enabledColor >> 16) & 0xff,
+        (enabledColor >> 8) & 0xff,
+        enabledColor & 0xff,
+      ]);
+      await this.request(feature.index, 0x70, 0x00);
+      return { ...lighting, mode: lighting.mode === "Off" ? "Off" : "Static", writeOnly: true };
+    }
     const colorFeature = await this.getFeature(FEATURE.colorLedEffects);
     const colorZone = this.colorLedZones.find((zone) => (logitechColorLedLighting(zone)?.zone) === lighting.zone);
     if (colorFeature.index && colorZone) {
@@ -2666,6 +2684,37 @@ export class LogitechHidppClient {
     this.rgbZone = zone;
     this.rgbLighting = logitechRgbLighting(zone);
     return this.rgbLighting;
+  }
+
+  private async readPerLedLighting(featureIndex: number, deviceName: string): Promise<MouseLighting[]> {
+    // 0x8081 exposes a 256-bit zone bitmap across three pages, but deliberately
+    // provides no color readback. Keep it scoped to the known mouse layout;
+    // keyboards sharing this feature need a keyboard-shaped editor.
+    if (!deviceName.toUpperCase().includes("G502 X")) return [];
+    const bitmap: number[] = [];
+    for (let page = 0; page < 3; page += 1) {
+      const reply = await this.request(featureIndex, 0x00, 0x00, 0x00, page);
+      bitmap.push(...reply.slice(5));
+    }
+    const ids: number[] = [];
+    for (let id = 1; id < Math.min(255, bitmap.length * 8); id += 1) {
+      if (((bitmap[id >> 3] ?? 0) & (1 << (id & 7))) !== 0) ids.push(id);
+    }
+    return ids.map((id) => ({
+      zone: `LED ${id}`,
+      group: "Lightstrip",
+      hardwareZoneId: id,
+      modes: ["Off", "Static"],
+      mode: "Static",
+      color: "#7c5cff",
+      color2: null,
+      colorModes: ["Static"],
+      dualColorModes: [],
+      reactiveModes: [],
+      speeds: [],
+      speed: null,
+      writeOnly: true,
+    }));
   }
 
   private async readDpiConfiguration(featureIndex: number): Promise<DpiConfiguration> {
