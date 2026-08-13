@@ -1440,6 +1440,9 @@ export class LogitechHidppClient {
         throw new Error("The mouse did not store the profile as written.");
       }
     } catch (error) {
+      // The profile sector is the pointer to the macro. Restore it first so an
+      // interrupted commit cannot leave a corrupt or half-linked assignment.
+      await this.writeProfileSector(featureIndex, sector, profile).catch(() => undefined);
       for (const backup of macroBackups) {
         await this.writeProfileSector(featureIndex, backup.sector, backup.bytes).catch(() => undefined);
       }
