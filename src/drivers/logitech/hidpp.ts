@@ -85,6 +85,8 @@ import {
   dpiStageCapabilitiesForOptions,
   encodeDpiStages,
   encodeButtonAssignment,
+  encodeMacroButtonAssignment,
+  encodeMacroSector,
   encodeProfileName,
   encodeReportRate,
   factoryProfileForFormat,
@@ -92,6 +94,7 @@ import {
   type DpiStagePlan,
   type LogitechButtonAction,
   type LogitechButtonBinding,
+  type LogitechMacroStep,
   layoutForFormat,
   parseDirectory,
   parseProfilesInfo,
@@ -1307,11 +1310,56 @@ export class LogitechHidppClient {
     reportRateWiredHz?: number | null;
     name?: string | null;
     buttonAssignments?: Array<{ layer: "primary" | "g-shift"; button: number; binding: LogitechButtonAction | LogitechButtonBinding }>;
+    buttonMacros?: Array<{ layer: "primary" | "g-shift"; button: number; steps: LogitechMacroStep[] }>;
     /** Defaults to the running profile when omitted. */
     sector?: number;
   }): Promise<void> {
     const { featureIndex, sector, sectorSize, formatId, profile } = await this.openActiveProfile(values.sector);
     let updated: Uint8Array = profile.slice();
+    const macroBackups: Array<{ sector: number; bytes: Uint8Array }> = [];
+
+    for (const macro of values.buttonMacros ?? []) {
+      const info = parseProfilesInfo(await this.request(featureIndex, PROFILE_FN.getInfo));
+      if (info.macroFormatId === 0) throw new Error("This mouse does not advertise onboard macro storage.");
+      const directoryBytes = await this.readProfileSector(featureIndex, 0, Math.min(sectorSize, 64));
+      const profileSectors = new Set(parseDirectory(directoryBytes).map((entry) => entry.sector));
+      const referenced = new Set<number>();
+      for (const profileSector of profileSectors) {
+        const raw = await this.readProfileSector(featureIndex, profileSector, sectorSize);
+        const decoded = decodeOnboardProfile(raw, formatId, { sector: profileSector, enabled: true }, false);
+        for (const assignment of [...decoded.buttonAssignments, ...decoded.gShiftAssignments]) {
+          if (assignment.raw[0] === 0x00 && assignment.raw[2] > 0) referenced.add(assignment.raw[2]);
+        }
+      }
+      const currentAssignments = macro.layer === "primary"
+        ? decodeOnboardProfile(updated, formatId, { sector, enabled: true }, false).buttonAssignments
+        : decodeOnboardProfile(updated, formatId, { sector, enabled: true }, false).gShiftAssignments;
+      const currentMacro = currentAssignments[macro.button]?.raw;
+      let macroSector = currentMacro?.[0] === 0x00 ? currentMacro[2] : undefined;
+      if (!macroSector) {
+        for (let candidate = info.profileCount + 1; candidate < info.sectorCount; candidate += 1) {
+          if (profileSectors.has(candidate) || referenced.has(candidate)) continue;
+          const bytes = await this.readProfileSector(featureIndex, candidate, sectorSize);
+          if (bytes.every((byte) => byte === 0xff) || bytes.every((byte, index) => byte === 0xff || (index === bytes.length - 1 && byte === 0x00))) {
+            macroSector = candidate;
+            break;
+          }
+        }
+      }
+      if (!macroSector) throw new Error("No free onboard macro sector is available.");
+      const backup = await this.readProfileSector(featureIndex, macroSector, sectorSize);
+      const encoded = encodeMacroSector(sectorSize, macro.steps);
+      try {
+        await this.writeProfileSector(featureIndex, macroSector, encoded);
+        const confirmed = await this.readProfileSector(featureIndex, macroSector, sectorSize);
+        if (!confirmed.every((byte, index) => byte === encoded[index])) throw new Error("The mouse did not store the macro as written.");
+        macroBackups.push({ sector: macroSector, bytes: backup });
+        updated = encodeMacroButtonAssignment(updated, formatId, macro.layer, macro.button, macroSector);
+      } catch (error) {
+        await this.writeProfileSector(featureIndex, macroSector, backup).catch(() => undefined);
+        throw error;
+      }
+    }
 
     if (values.bunnyHoppingMs !== null && values.bunnyHoppingMs !== undefined) {
       const invalid = validateBunnyHoppingMs(values.bunnyHoppingMs);
@@ -1385,10 +1433,17 @@ export class LogitechHidppClient {
     // and the write cycle can be skipped entirely.
     if (updated.every((byte, index) => byte === profile[index])) return;
 
-    await this.writeProfileSector(featureIndex, sector, updated);
-    const confirmed = await this.readProfileSector(featureIndex, sector, sectorSize);
-    if (!confirmed.every((byte, index) => byte === updated[index])) {
-      throw new Error("The mouse did not store the profile as written.");
+    try {
+      await this.writeProfileSector(featureIndex, sector, updated);
+      const confirmed = await this.readProfileSector(featureIndex, sector, sectorSize);
+      if (!confirmed.every((byte, index) => byte === updated[index])) {
+        throw new Error("The mouse did not store the profile as written.");
+      }
+    } catch (error) {
+      for (const backup of macroBackups) {
+        await this.writeProfileSector(featureIndex, backup.sector, backup.bytes).catch(() => undefined);
+      }
+      throw error;
     }
   }
 

@@ -18,6 +18,8 @@ import {
   dpiStageCapabilitiesForOptions,
   encodeDpiStages,
   encodeButtonAssignment,
+  encodeMacroButtonAssignment,
+  encodeMacroSector,
   encodeProfileName,
   encodeReportRate,
   factoryProfileForFormat,
@@ -263,10 +265,26 @@ test("parses getOnboardProfilesInfo", () => {
   assert.deepEqual(parseProfilesInfo(INFO_REPLY), {
     memoryModelId: 1,
     profileFormatId: 7,
+    macroFormatId: 1,
     profileCount: 5,
+    buttonCount: 5,
     sectorCount: 16,
     sectorSize: 255,
   });
+});
+
+test("encodes an onboard keyboard macro and links it to a button", () => {
+  const macro = encodeMacroSector(36, [
+    { key: 0x0e, modifiers: 0x03, delayMs: 0 },
+    { key: 0x2c, modifiers: 0, delayMs: 250 },
+  ]);
+  assert.deepEqual([...macro.slice(0, 24)], [
+    0x43, 0x01, 0, 0x43, 0x02, 0, 0x43, 0, 0x0e, 0x44, 0, 0x0e,
+    0x44, 0x02, 0, 0x44, 0x01, 0, 0x40, 0, 250, 0x43, 0, 0x2c,
+  ]);
+  const linked = encodeMacroButtonAssignment(G502_SECTORS[0], 2, "primary", 5, 9);
+  assert.deepEqual([...linked.slice(0x20 + 20, 0x20 + 24)], [0, 5, 9, 0]);
+  assert.equal(profileCrc(linked), storedCrc(linked));
 });
 
 test("parses the profile directory and its enabled flags", () => {
@@ -455,14 +473,18 @@ test("parses the captured G502 format-2 geometry and directory", () => {
   assert.deepEqual(parseProfilesInfo(G502_INFO_REPLY), {
     memoryModelId: 1,
     profileFormatId: 2,
+    macroFormatId: 1,
     profileCount: 3,
+    buttonCount: 11,
     sectorCount: 16,
     sectorSize: 256,
   });
   assert.deepEqual(parseProfilesInfo(G502_HERO_INFO_REPLY), {
     memoryModelId: 1,
     profileFormatId: 2,
+    macroFormatId: 1,
     profileCount: 5,
+    buttonCount: 11,
     sectorCount: 16,
     sectorSize: 256,
   });
@@ -555,7 +577,9 @@ test("parses the captured G502 LIGHTSPEED format-3 geometry and directory", () =
   assert.deepEqual(parseProfilesInfo(G502_LIGHTSPEED_INFO_REPLY), {
     memoryModelId: 1,
     profileFormatId: 3,
+    macroFormatId: 1,
     profileCount: 5,
+    buttonCount: 11,
     sectorCount: 16,
     sectorSize: 255,
   });
@@ -624,7 +648,9 @@ test("parses the captured G102 LIGHTSYNC format-4 geometry and directory", () =>
   assert.deepEqual(parseProfilesInfo(G102_LIGHTSYNC_INFO_REPLY), {
     memoryModelId: 1,
     profileFormatId: 4,
+    macroFormatId: 1,
     profileCount: 1,
+    buttonCount: 6,
     sectorCount: 16,
     sectorSize: 255,
   });

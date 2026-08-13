@@ -296,7 +296,9 @@ export function decodeLiftOffLevel(
 export interface OnboardProfilesInfo {
   memoryModelId: number;
   profileFormatId: number;
+  macroFormatId: number;
   profileCount: number;
+  buttonCount: number;
   sectorCount: number;
   sectorSize: number;
 }
@@ -354,6 +356,59 @@ export type LogitechButtonBinding =
   | { kind: "action"; action: LogitechButtonAction }
   | { kind: "keyboard"; key: number; modifiers: number }
   | { kind: "consumer"; usage: number };
+
+export interface LogitechMacroStep {
+  key: number;
+  modifiers: number;
+  /** Pause before this chord, in milliseconds. */
+  delayMs: number;
+}
+
+/** Encodes the HID++ macro format used by G502 onboard-memory sectors. */
+export function encodeMacroSector(sectorSize: number, steps: readonly LogitechMacroStep[]): Uint8Array {
+  if (!Number.isInteger(sectorSize) || sectorSize < 6 || !steps.length) {
+    throw new Error("The macro sector geometry or sequence is invalid.");
+  }
+  const records: number[][] = [];
+  for (const [index, step] of steps.entries()) {
+    if (!Number.isInteger(step.key) || step.key < 1 || step.key > 0xff
+      || !Number.isInteger(step.modifiers) || step.modifiers < 0 || step.modifiers > 0xff
+      || !Number.isInteger(step.delayMs) || step.delayMs < 0 || step.delayMs > 0xffff) {
+      throw new Error("The macro contains an invalid key, modifier, or delay.");
+    }
+    if (index > 0 && step.delayMs > 0) records.push([0x40, step.delayMs >> 8, step.delayMs & 0xff]);
+    const modifiers = Array.from({ length: 8 }, (_, bit) => 1 << bit)
+      .filter((bit) => (step.modifiers & bit) !== 0);
+    for (const modifier of modifiers) records.push([0x43, modifier, 0x00]);
+    records.push([0x43, 0x00, step.key], [0x44, 0x00, step.key]);
+    for (const modifier of modifiers.reverse()) records.push([0x44, modifier, 0x00]);
+  }
+  records.push([0xff, 0xff, 0xff]);
+  if (records.length * 3 > sectorSize) throw new Error("That sequence is too long for one onboard macro sector.");
+  const result = new Uint8Array(sectorSize).fill(0xff);
+  records.forEach((record, index) => result.set(record, index * 3));
+  return result;
+}
+
+export function encodeMacroButtonAssignment(
+  profile: Uint8Array,
+  profileFormatId: number,
+  layer: "primary" | "g-shift",
+  button: number,
+  macroSector: number,
+): Uint8Array {
+  if (!Number.isInteger(macroSector) || macroSector < 1 || macroSector > 0xff) {
+    throw new Error("The macro sector cannot be represented by this profile format.");
+  }
+  const name = layer === "primary" ? "button_functions" : "g_shift_function";
+  const component = componentsForFormat(profileFormatId).find((candidate) => candidate.name === name);
+  if (!component || !Number.isInteger(button) || button < 0 || button >= component.size / 4) {
+    throw new Error("That button is outside this profile format's assignment table.");
+  }
+  const result = profile.slice();
+  result.set([0x00, button & 0xff, macroSector, 0x00], component.offset + button * 4);
+  return applyCrc(result);
+}
 
 export const LOGITECH_BUTTON_ACTIONS: readonly LogitechButtonAction[] = [
   "Disabled", "Left click", "Right click", "Middle click", "Back", "Forward",
@@ -531,7 +586,9 @@ export function parseProfilesInfo(reply: Uint8Array): OnboardProfilesInfo {
   return {
     memoryModelId: reply[3] ?? 0,
     profileFormatId: reply[4] ?? 0,
+    macroFormatId: reply[5] ?? 0,
     profileCount: reply[6] ?? 0,
+    buttonCount: reply[8] ?? 0,
     sectorCount: reply[9] ?? 0,
     sectorSize: ((reply[10] ?? 0) << 8) | (reply[11] ?? 0),
   };
