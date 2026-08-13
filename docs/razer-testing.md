@@ -570,6 +570,34 @@ and a 500 Hz write measured 499 Hz through `pointerrawupdate`.
 The cable is limited to 1000 Hz on this model, which is also the ceiling the
 legacy encoding can express, so no HyperPolling command is missing there.
 
+## Asymmetric lift-off on firmware 1.14
+
+The asymmetric pair write (`0x0b`/`0x05`) is armed by the unlock
+`0x0b`/`0x0b` `00 04 04 01` — the value Synapse sent on firmware 1.12. Firmware
+1.14 still accepts it; the Aug 12 capture that failed with status `0x03` did not
+reproduce on a fresh run with the same bytes, so it was transient or state-related
+rather than a firmware renumbering.
+
+A standalone WebHID sweep over the sensor-setting table on 1.14 (HyperSpeed
+receiver) returned:
+
+| Unlock `0x0b/0x0b` | Pair write |
+| --- | --- |
+| `00 04 04 01` (current code) | `0x02` OK |
+| `00 04 04 00` (canonical asymmetric cal) | `0x02` OK |
+| `00 04 02 00` / `02 01` / `02 02` (fixed asymmetric) | `0x03` |
+| `00 04 06 00` (self-cal) | `0x03` |
+| `00 04 03 00` (symmetric cal), `00 04 01 00` (symmetric level) | `0x03` |
+
+The calib-mode-on step (`0x0b`/`0x03` `00 04 01`) before the unlock is not
+required on this firmware. Both `04 01` and `04 00` arm the pair write with or
+without it, and the fixed/self-cal setting values never do.
+
+The code keeps `04 01`: it is verified on both 1.12 and 1.14, whereas `04 00`
+is verified only on 1.14. The canonical table entry (`04 00` = asymmetric Razer
+calibration) matching would be a cosmetic change with an unverified 1.12
+regression risk, so it stays as shipped.
+
 ## Changing the polling rate reconfigures the link
 
 Switching the receiver to 8,000 Hz briefly reconfigures the wireless link, and
