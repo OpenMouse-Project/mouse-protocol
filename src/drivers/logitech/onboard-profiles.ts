@@ -350,6 +350,11 @@ export interface OnboardButtonAssignment {
   raw: readonly number[];
 }
 
+export type LogitechButtonBinding =
+  | { kind: "action"; action: LogitechButtonAction }
+  | { kind: "keyboard"; key: number; modifiers: number }
+  | { kind: "consumer"; usage: number };
+
 export const LOGITECH_BUTTON_ACTIONS: readonly LogitechButtonAction[] = [
   "Disabled", "Left click", "Right click", "Middle click", "Back", "Forward",
   "Tilt left", "Tilt right", "Next DPI", "Previous DPI", "Cycle DPI", "Default DPI",
@@ -394,15 +399,23 @@ export function encodeButtonAssignment(
   profileFormatId: number,
   layer: "primary" | "g-shift",
   button: number,
-  action: LogitechButtonAction,
+  binding: LogitechButtonAction | LogitechButtonBinding,
 ): Uint8Array {
   const name = layer === "primary" ? "button_functions" : "g_shift_function";
   const component = componentsForFormat(profileFormatId).find((candidate) => candidate.name === name);
   if (!component || !Number.isInteger(button) || button < 0 || button >= component.size / 4) {
     throw new Error("That button is outside this profile format's assignment table.");
   }
+  const normalized: LogitechButtonBinding = typeof binding === "string"
+    ? { kind: "action", action: binding }
+    : binding;
+  const record = normalized.kind === "action"
+    ? ACTION_RECORDS[normalized.action]
+    : normalized.kind === "keyboard"
+      ? [0x80, 0x02, normalized.modifiers & 0xff, normalized.key & 0xff]
+      : [0x80, 0x03, (normalized.usage >> 8) & 0xff, normalized.usage & 0xff];
   const result = sector.slice();
-  result.set(ACTION_RECORDS[action], component.offset + button * 4);
+  result.set(record, component.offset + button * 4);
   return applyCrc(result);
 }
 

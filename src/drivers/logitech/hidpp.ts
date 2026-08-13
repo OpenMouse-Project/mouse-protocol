@@ -91,6 +91,7 @@ import {
   validateDpiStagePlan,
   type DpiStagePlan,
   type LogitechButtonAction,
+  type LogitechButtonBinding,
   layoutForFormat,
   parseDirectory,
   parseProfilesInfo,
@@ -1271,7 +1272,7 @@ export class LogitechHidppClient {
     reportRateWirelessHz?: number | null;
     reportRateWiredHz?: number | null;
     name?: string | null;
-    buttonAssignments?: Array<{ layer: "primary" | "g-shift"; button: number; action: LogitechButtonAction }>;
+    buttonAssignments?: Array<{ layer: "primary" | "g-shift"; button: number; binding: LogitechButtonAction | LogitechButtonBinding }>;
     /** Defaults to the running profile when omitted. */
     sector?: number;
   }): Promise<void> {
@@ -1342,7 +1343,7 @@ export class LogitechHidppClient {
       updated = encodeProfileName(updated, formatId, values.name);
     }
     for (const assignment of values.buttonAssignments ?? []) {
-      updated = encodeButtonAssignment(updated, formatId, assignment.layer, assignment.button, assignment.action);
+      updated = encodeButtonAssignment(updated, formatId, assignment.layer, assignment.button, assignment.binding);
     }
 
     applyCrc(updated);

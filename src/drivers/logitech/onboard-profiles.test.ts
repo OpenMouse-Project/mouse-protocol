@@ -1073,3 +1073,11 @@ test("G502 normal and G-Shift button assignments round-trip without touching oth
   assert.deepEqual([...shifted.slice(0x20, 0x20 + 5 * 4)], [...G502_SECTORS[0].slice(0x20, 0x20 + 5 * 4)]);
   assert.equal(decoded.crcValid, true);
 });
+
+test("G502 keyboard shortcuts and consumer keys use direct four-byte HID bindings", () => {
+  const keyboard = encodeButtonAssignment(G502_SECTORS[0], 2, "primary", 5, { kind: "keyboard", modifiers: 0x03, key: 0x0e });
+  assert.deepEqual([...keyboard.slice(0x20 + 5 * 4, 0x20 + 6 * 4)], [0x80, 0x02, 0x03, 0x0e]);
+  const media = encodeButtonAssignment(keyboard, 2, "g-shift", 5, { kind: "consumer", usage: 0x00cd });
+  assert.deepEqual([...media.slice(0x60 + 5 * 4, 0x60 + 6 * 4)], [0x80, 0x03, 0x00, 0xcd]);
+  assert.equal(profileCrc(media), storedCrc(media));
+});
