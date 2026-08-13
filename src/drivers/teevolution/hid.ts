@@ -122,79 +122,78 @@ export class TeevolutionHidClient {
 
   async readStatus(): Promise<MouseStatus> {
     const info = this.deviceInfo ?? await this.readDeviceInfo();
-    return await this.withDeviceControl(async () => {
-      const flash = await this.readFlash(TEEVOLUTION_FLASH.reportRate, TEEVOLUTION_FLASH.sensorMode + 2);
-      const batteryResponse = await this.query(TEEVOLUTION_COMMAND.batteryLevel);
-      const deviceVersion = await this.query(TEEVOLUTION_COMMAND.readVersionId);
-      const dongleVersion = await this.query(TEEVOLUTION_COMMAND.getDongleVersion).catch(() => null);
-      const profile = await this.query(TEEVOLUTION_COMMAND.getCurrentConfig).catch(() => null);
-      const rssi = await this.query(TEEVOLUTION_COMMAND.getRssi).catch(() => null);
-      const stageCount = this.decodeDpiStageCount(flash[TEEVOLUTION_FLASH.maxDpiStage], info.profile);
-      const activeDpiStage = Math.min(flash[TEEVOLUTION_FLASH.currentDpi] ?? 0, stageCount - 1);
-      const dpiStages = Array.from({ length: stageCount }, (_, stage) => {
-        const offset = TEEVOLUTION_FLASH.dpiValues + stage * 4;
-        return teevolutionDecodeDpi(flash.slice(offset, offset + 4));
-      });
-      const dpi = dpiStages[activeDpiStage] ?? dpiStages[0] ?? 0;
-      const battery = teevolutionParseBattery(batteryResponse);
-      const pollingRateHz = teevolutionDecodePollingRate(flash[TEEVOLUTION_FLASH.reportRate] ?? 1);
-      const sensorModeUi = teevolutionSensorModeUi({
-        storedMode: flash[TEEVOLUTION_FLASH.sensorMode] ?? 0,
-        pollingRateHz,
-        connection: info.connection,
-      });
-      return {
-        brand: "Teevolution",
-        name: this.displayName(info),
-        ui: {
-          defaultDisplayName: info.profile.name,
-          hideUnsupportedPollingRates: true,
-          hideSignalCard: true,
-          dpiStageEditor: {
-            maxStages: info.profile.dpiStageCount,
-            countEditable: true,
-            minDpi: info.profile.dpi.min,
-            maxDpi: info.profile.dpi.max,
-            stepDpi: info.profile.dpi.standardStep,
-          },
-        },
-        batteryPercent: battery?.percent ?? null,
-        batteryState: battery?.charging ? "Charging" : "Discharging",
-        dpi,
-        dpiStages,
-        activeDpiStage,
-        pollingRateHz,
-        supportedPollingRates: info.profile.pollingRates.filter((rate) => rate <= info.maximumPollingRateHz),
-        activeProfile: profile && profile[1] === 0 ? (profile[5] ?? 0) + 1 : null,
-        connectionType: info.connection,
-        connectionDetail: `CID ${info.cid} · MID ${info.mid} · Type ${info.type}`,
-        signalStrength: rssi && rssi[1] === 0 ? Math.min(rssi[5] ?? 0, 4) : null,
-        dpiLedMode: teevolutionDecodeDpiLightMode(
-          flash[TEEVOLUTION_FLASH.dpiLightMode] ?? 1,
-          flash[TEEVOLUTION_FLASH.dpiLightState] ?? 0,
-        ),
-        dpiLedBrightness: teevolutionDecodeDpiLightBrightness(
-          flash[TEEVOLUTION_FLASH.dpiLightBrightness] ?? 0x80,
-        ),
-        dpiLedSpeed: Math.min(Math.max(flash[TEEVOLUTION_FLASH.dpiLightSpeed] ?? 3, 1), 5),
-        debounceMs: flash[TEEVOLUTION_FLASH.debounceTime] ?? null,
-        motionSync: flash[TEEVOLUTION_FLASH.motionSync] === 1,
-        sleepTimeout: flash[TEEVOLUTION_FLASH.sleepTime] ?? null,
-        angleSnapping: flash[TEEVOLUTION_FLASH.angleSnapping] === 1,
-        rippleControl: flash[TEEVOLUTION_FLASH.rippleControl] === 1,
-        performanceMode: flash[TEEVOLUTION_FLASH.performanceState] === 1,
-        performanceDuration: flash[TEEVOLUTION_FLASH.performanceTime] ?? null,
-        sensorMode: sensorModeUi.mode,
-        sensorModeStored: sensorModeUi.storedValue,
-        sensorModeEditable: sensorModeUi.editable,
-        liftOffDistance: teevolutionDecodeLiftOff(flash[TEEVOLUTION_FLASH.liftOffDistance] ?? -1),
-        supportedLiftOffDistances: [...info.profile.liftOffDistances],
-        firmware: [
-          this.decodeVersionOptional("Mouse", deviceVersion) ?? "Mouse firmware unavailable",
-          this.decodeVersionOptional("Dongle", dongleVersion) ?? "Dongle firmware unavailable",
-        ],
-      };
+    await this.requireMouseOnline();
+    const flash = await this.readFlash(TEEVOLUTION_FLASH.reportRate, TEEVOLUTION_FLASH.sensorMode + 2);
+    const batteryResponse = await this.query(TEEVOLUTION_COMMAND.batteryLevel);
+    const deviceVersion = await this.query(TEEVOLUTION_COMMAND.readVersionId);
+    const dongleVersion = await this.query(TEEVOLUTION_COMMAND.getDongleVersion).catch(() => null);
+    const profile = await this.query(TEEVOLUTION_COMMAND.getCurrentConfig).catch(() => null);
+    const rssi = await this.query(TEEVOLUTION_COMMAND.getRssi).catch(() => null);
+    const stageCount = this.decodeDpiStageCount(flash[TEEVOLUTION_FLASH.maxDpiStage], info.profile);
+    const activeDpiStage = Math.min(flash[TEEVOLUTION_FLASH.currentDpi] ?? 0, stageCount - 1);
+    const dpiStages = Array.from({ length: stageCount }, (_, stage) => {
+      const offset = TEEVOLUTION_FLASH.dpiValues + stage * 4;
+      return teevolutionDecodeDpi(flash.slice(offset, offset + 4));
     });
+    const dpi = dpiStages[activeDpiStage] ?? dpiStages[0] ?? 0;
+    const battery = teevolutionParseBattery(batteryResponse);
+    const pollingRateHz = teevolutionDecodePollingRate(flash[TEEVOLUTION_FLASH.reportRate] ?? 1);
+    const sensorModeUi = teevolutionSensorModeUi({
+      storedMode: flash[TEEVOLUTION_FLASH.sensorMode] ?? 0,
+      pollingRateHz,
+      connection: info.connection,
+    });
+    return {
+      brand: "Teevolution",
+      name: this.displayName(info),
+      ui: {
+        defaultDisplayName: info.profile.name,
+        hideUnsupportedPollingRates: true,
+        hideSignalCard: true,
+        dpiStageEditor: {
+          maxStages: info.profile.dpiStageCount,
+          countEditable: true,
+          minDpi: info.profile.dpi.min,
+          maxDpi: info.profile.dpi.max,
+          stepDpi: info.profile.dpi.standardStep,
+        },
+      },
+      batteryPercent: battery?.percent ?? null,
+      batteryState: battery?.charging ? "Charging" : "Discharging",
+      dpi,
+      dpiStages,
+      activeDpiStage,
+      pollingRateHz,
+      supportedPollingRates: info.profile.pollingRates.filter((rate) => rate <= info.maximumPollingRateHz),
+      activeProfile: profile && profile[1] === 0 ? (profile[5] ?? 0) + 1 : null,
+      connectionType: info.connection,
+      connectionDetail: `CID ${info.cid} · MID ${info.mid} · Type ${info.type}`,
+      signalStrength: rssi && rssi[1] === 0 ? Math.min(rssi[5] ?? 0, 4) : null,
+      dpiLedMode: teevolutionDecodeDpiLightMode(
+        flash[TEEVOLUTION_FLASH.dpiLightMode] ?? 1,
+        flash[TEEVOLUTION_FLASH.dpiLightState] ?? 0,
+      ),
+      dpiLedBrightness: teevolutionDecodeDpiLightBrightness(
+        flash[TEEVOLUTION_FLASH.dpiLightBrightness] ?? 0x80,
+      ),
+      dpiLedSpeed: Math.min(Math.max(flash[TEEVOLUTION_FLASH.dpiLightSpeed] ?? 3, 1), 5),
+      debounceMs: flash[TEEVOLUTION_FLASH.debounceTime] ?? null,
+      motionSync: flash[TEEVOLUTION_FLASH.motionSync] === 1,
+      sleepTimeout: flash[TEEVOLUTION_FLASH.sleepTime] ?? null,
+      angleSnapping: flash[TEEVOLUTION_FLASH.angleSnapping] === 1,
+      rippleControl: flash[TEEVOLUTION_FLASH.rippleControl] === 1,
+      performanceMode: flash[TEEVOLUTION_FLASH.performanceState] === 1,
+      performanceDuration: flash[TEEVOLUTION_FLASH.performanceTime] ?? null,
+      sensorMode: sensorModeUi.mode,
+      sensorModeStored: sensorModeUi.storedValue,
+      sensorModeEditable: sensorModeUi.editable,
+      liftOffDistance: teevolutionDecodeLiftOff(flash[TEEVOLUTION_FLASH.liftOffDistance] ?? -1),
+      supportedLiftOffDistances: [...info.profile.liftOffDistances],
+      firmware: [
+        this.decodeVersionOptional("Mouse", deviceVersion) ?? "Mouse firmware unavailable",
+        this.decodeVersionOptional("Dongle", dongleVersion) ?? "Dongle firmware unavailable",
+      ],
+    };
   }
 
   getDpiOptions(): number[] {
@@ -481,16 +480,34 @@ export class TeevolutionHidClient {
     }
   }
 
+  /** Teevolink Fa(): cmd 0x03 with [5] left 0, then require the mouse-present flag. */
+  private async requireMouseOnline(): Promise<void> {
+    const response = await this.exchangeDeviceOnline(false, "online check");
+    if (response[5] !== 1) {
+      throw new Error("The Teevolution mouse is offline. Move it or click a button, then retry.");
+    }
+  }
+
   private async setDeviceOnline(enabled: boolean): Promise<void> {
+    const response = await this.exchangeDeviceOnline(
+      enabled,
+      enabled ? "host-control entry" : "host-control exit",
+    );
+    if (enabled && response[5] !== 1) {
+      throw new Error("The Teevolution mouse is offline. Move it or click a button, then retry.");
+    }
+  }
+
+  private async exchangeDeviceOnline(enabled: boolean, operation: string): Promise<Uint8Array> {
     let response: Uint8Array | null = null;
     for (let attempt = 0; attempt < 20; attempt += 1) {
       response = await this.exchange(teevolutionBuildOnlinePayload(enabled));
-      this.assertAccepted(response, enabled ? "host-control entry" : "host-control exit");
+      this.assertAccepted(response, operation);
       if (response[9] !== 1) break;
       await new Promise<void>((resolve) => window.setTimeout(resolve, 10));
     }
     if (!response || response[9] === 1) throw new Error("The Teevolution receiver stayed busy.");
-    if (enabled && response[5] !== 1) throw new Error("The Teevolution mouse is offline. Move it or click a button, then retry.");
+    return response;
   }
 
   private async readFlash(address: number, length: number): Promise<Uint8Array> {

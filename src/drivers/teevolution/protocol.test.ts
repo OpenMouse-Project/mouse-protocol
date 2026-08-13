@@ -31,14 +31,16 @@ test("host-control and battery commands match Compx report-8 checksums", () => {
   // Arrange — same framing Teevolink uses on report ID 0x08
   const requests = [
     teevolutionBuildOnlinePayload(true),
+    teevolutionBuildOnlinePayload(false),
     teevolutionBuildSimplePayload(0x04),
     teevolutionBuildReadPayload(0x00a0, 10),
   ];
 
   // Act / Assert
   assert.deepEqual([...requests[0]!], [0x03, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x49]);
-  assert.deepEqual([...requests[1]!], [0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x49]);
-  assert.deepEqual([...requests[2]!], [0x08, 0, 0, 0xa0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x9b]);
+  assert.deepEqual([...requests[1]!], [0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4a]);
+  assert.deepEqual([...requests[2]!], [0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x49]);
+  assert.deepEqual([...requests[3]!], [0x08, 0, 0, 0xa0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x9b]);
   assert.equal(TEEVOLUTION_REPORT_ID, 0x08);
 });
 
