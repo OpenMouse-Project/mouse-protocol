@@ -829,6 +829,22 @@ export class LogitechHidppClient {
     if (lighting.hardwareZoneId !== undefined) {
       const feature = await this.getFeature(FEATURE.perKeyLightingV2);
       if (!feature.index) throw new Error("This mouse does not expose per-LED lighting controls.");
+      const effects = await this.getFeature(FEATURE.rgbEffects);
+      if (effects.index && !this.rgbClaimed) {
+        const profiles = await this.getFeature(FEATURE.onboardProfiles);
+        if (profiles.index) await this.setOnboardMode("Host");
+        await this.request(effects.index, 0x50, 0x01, 0x03, 0x04);
+        if (!this.rgbZone) await this.readRgbLighting(effects.index);
+        // Disable the autonomous effect engine before painting individual
+        // cells. This is the G502 X PLUS prep sequence tested by Solaar.
+        await this.requestLong(effects.index, 0x10, [
+          0xff,
+          this.rgbZone?.effects.length ?? 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0x01,
+        ]);
+        this.rgbClaimed = true;
+      }
       const color = Number.parseInt((lighting.color ?? "#000000").slice(1), 16);
       const enabledColor = lighting.mode === "Off" ? 0 : color;
       await this.requestLong(feature.index, 0x10, [
