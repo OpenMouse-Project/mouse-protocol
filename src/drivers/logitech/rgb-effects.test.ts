@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { encodeLogitechRgbEffect, logitechRgbLighting, type LogitechRgbZone } from "./rgb-effects.ts";
+import { encodeLogitechColorLedEffect, encodeLogitechRgbEffect, logitechColorLedLighting, logitechRgbLighting, type LogitechColorLedZone, type LogitechRgbZone } from "./rgb-effects.ts";
 
 const zone: LogitechRgbZone = {
   index: 0,
@@ -27,4 +27,14 @@ test("encodes the Solaar 0x8071 SetEffectByIndex payload", () => {
     mode: "Static",
     color: "#123456",
   }), [0, 1, 0x12, 0x34, 0x56, 0x02, 0, 0, 0, 0, 0, 0, 1]);
+});
+
+test("decodes and writes an independent G502 0x8070 logo zone", () => {
+  const colorZone: LogitechColorLedZone = { ...zone, location: 2, readable: true };
+  const lighting = logitechColorLedLighting(colorZone, [1, 0x12, 0x34, 0x56, 0x02, 0, 0, 0, 0, 0, 0])!;
+  assert.equal(lighting.zone, "Logo");
+  assert.equal(lighting.mode, "Static");
+  assert.equal(lighting.color, "#123456");
+  assert.equal(lighting.writeOnly, false);
+  assert.deepEqual(encodeLogitechColorLedEffect(colorZone, lighting), [0, 1, 0x12, 0x34, 0x56, 0, 0, 0, 0, 0, 0, 0]);
 });

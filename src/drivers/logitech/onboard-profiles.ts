@@ -331,9 +331,79 @@ export interface OnboardProfile {
    * three confirmed on hardware; 0xff is unwritten flash and decodes as null.
    */
   bunnyHoppingMs: number | null;
+  buttonAssignments: OnboardButtonAssignment[];
+  gShiftAssignments: OnboardButtonAssignment[];
   crcValid: boolean;
   /** Raw sector, kept so captures can diff before/after a vendor-app change. */
   raw: Uint8Array;
+}
+
+export type LogitechButtonAction =
+  | "Disabled" | "Left click" | "Right click" | "Middle click" | "Back" | "Forward"
+  | "Tilt left" | "Tilt right" | "Next DPI" | "Previous DPI" | "Cycle DPI"
+  | "Default DPI" | "DPI Shift" | "Next profile" | "Previous profile"
+  | "Cycle profiles" | "G-Shift" | "Battery indicator";
+
+export interface OnboardButtonAssignment {
+  button: number;
+  action: LogitechButtonAction | "Custom";
+  raw: readonly number[];
+}
+
+export const LOGITECH_BUTTON_ACTIONS: readonly LogitechButtonAction[] = [
+  "Disabled", "Left click", "Right click", "Middle click", "Back", "Forward",
+  "Tilt left", "Tilt right", "Next DPI", "Previous DPI", "Cycle DPI", "Default DPI",
+  "DPI Shift", "Next profile", "Previous profile", "Cycle profiles", "G-Shift", "Battery indicator",
+];
+
+const ACTION_RECORDS: Readonly<Record<LogitechButtonAction, readonly number[]>> = {
+  Disabled: [0xff, 0xff, 0xff, 0xff],
+  "Left click": [0x80, 0x01, 0x00, 0x01],
+  "Right click": [0x80, 0x01, 0x00, 0x02],
+  "Middle click": [0x80, 0x01, 0x00, 0x04],
+  Back: [0x80, 0x01, 0x00, 0x08],
+  Forward: [0x80, 0x01, 0x00, 0x10],
+  "Tilt left": [0x90, 0x01, 0x00, 0x00],
+  "Tilt right": [0x90, 0x02, 0x00, 0x00],
+  "Next DPI": [0x90, 0x03, 0x00, 0x00],
+  "Previous DPI": [0x90, 0x04, 0x00, 0x00],
+  "Cycle DPI": [0x90, 0x05, 0x00, 0x00],
+  "Default DPI": [0x90, 0x06, 0x00, 0x00],
+  "DPI Shift": [0x90, 0x07, 0x00, 0x00],
+  "Next profile": [0x90, 0x08, 0x00, 0x00],
+  "Previous profile": [0x90, 0x09, 0x00, 0x00],
+  "Cycle profiles": [0x90, 0x0a, 0x00, 0x00],
+  "G-Shift": [0x90, 0x0b, 0x00, 0x00],
+  "Battery indicator": [0x90, 0x0c, 0x00, 0x00],
+};
+
+function decodeButtonAssignments(bytes: Uint8Array, component: ComponentSpec): OnboardButtonAssignment[] {
+  const result: OnboardButtonAssignment[] = [];
+  for (let button = 0; button < component.size / 4; button += 1) {
+    const raw = [...bytes.slice(component.offset + button * 4, component.offset + button * 4 + 4)];
+    if (raw.length < 4) break;
+    const action = (Object.entries(ACTION_RECORDS) as Array<[LogitechButtonAction, readonly number[]]>)
+      .find(([, record]) => record.every((value, index) => value === raw[index]))?.[0] ?? "Custom";
+    result.push({ button, action, raw });
+  }
+  return result;
+}
+
+export function encodeButtonAssignment(
+  sector: Uint8Array,
+  profileFormatId: number,
+  layer: "primary" | "g-shift",
+  button: number,
+  action: LogitechButtonAction,
+): Uint8Array {
+  const name = layer === "primary" ? "button_functions" : "g_shift_function";
+  const component = componentsForFormat(profileFormatId).find((candidate) => candidate.name === name);
+  if (!component || !Number.isInteger(button) || button < 0 || button >= component.size / 4) {
+    throw new Error("That button is outside this profile format's assignment table.");
+  }
+  const result = sector.slice();
+  result.set(ACTION_RECORDS[action], component.offset + button * 4);
+  return applyCrc(result);
 }
 
 /** Report-rate bytes index this table, matching 0x8061's ordering. */
@@ -986,6 +1056,9 @@ export function decodeOnboardProfile(
     ? { stages: [], defaultIndex: null }
     : legacyLayout ? decodeLegacyDpi(bytes, layout.dpi) : decodeDpi(bytes, layout.dpi);
   const angleSnappingByte = bytes[layout.angleSnapping];
+  const components = componentsForFormat(profileFormatId);
+  const buttons = components.find((component) => component.name === "button_functions")!;
+  const gShift = components.find((component) => component.name === "g_shift_function")!;
 
   return {
     sector: entry.sector,
@@ -1012,6 +1085,8 @@ export function decodeOnboardProfile(
       ? null
       : readUint16LE(bytes, layout.powerOffTimeout),
     bunnyHoppingMs: decodeBunnyHoppingMs(bytes, layout.bunnyHopping),
+    buttonAssignments: decodeButtonAssignments(bytes, buttons),
+    gShiftAssignments: decodeButtonAssignments(bytes, gShift),
     crcValid: bytes.length > 2 && profileCrc(bytes) === storedCrc(bytes),
     raw: bytes,
   };

@@ -12,6 +12,39 @@ export interface LogitechRgbZone {
   effects: LogitechRgbEffect[];
 }
 
+export interface LogitechColorLedZone extends LogitechRgbZone {
+  readable: boolean;
+}
+
+const ZONE_NAMES: Readonly<Record<number, string>> = {
+  1: "Primary", 2: "Logo", 3: "Left side", 4: "Right side", 5: "Combined",
+  6: "Primary 1", 7: "Primary 2", 8: "Primary 3", 9: "Primary 4", 10: "Primary 5", 11: "Primary 6",
+};
+
+export function logitechColorLedLighting(zone: LogitechColorLedZone, raw?: readonly number[]): MouseLighting | null {
+  const lighting = logitechRgbLighting(zone);
+  if (!lighting) return null;
+  const effectId = raw?.[0];
+  const mode = effectId === undefined ? null : logitechRgbMode(effectId);
+  const color = raw && (mode === "Static" || mode === "Breathing single")
+    ? `#${raw.slice(1, 4).map((value) => value.toString(16).padStart(2, "0")).join("")}`
+    : lighting.color;
+  const speed = raw && mode === "Cycling" ? ((raw[6] ?? 0) << 8) | (raw[7] ?? 0)
+    : raw && mode === "Breathing single" ? ((raw[4] ?? 0) << 8) | (raw[5] ?? 0)
+      : lighting.speed;
+  return { ...lighting, zone: ZONE_NAMES[zone.location] ?? `Zone ${zone.index + 1}`, mode, color, speed, writeOnly: !zone.readable };
+}
+
+export function encodeLogitechColorLedEffect(zone: LogitechColorLedZone, lighting: MouseLighting): number[] | null {
+  const encoded = encodeLogitechRgbEffect(zone, lighting);
+  if (!encoded) return null;
+  const result = [encoded[0], encoded[1], ...encoded.slice(2, 12)];
+  // 0x8070's byte 4 is the ramp/form field. Zero selects the device default;
+  // 0x8071 uses value 2 here for its fixed-effect variant.
+  if (lighting.mode === "Static") result[5] = 0;
+  return result;
+}
+
 const EFFECT_MODES: Readonly<Record<number, MouseLightingMode>> = {
   0x00: "Off",
   0x01: "Static",

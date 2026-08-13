@@ -249,5 +249,7 @@ export interface MouseStatus {
   lightforceSwitchMode?: "Hybrid" | "Optical" | null;
   /** Razer lighting zones. */
   lighting?: MouseLighting;
+  /** Independently addressable lighting zones. `lighting` remains the first zone for compatibility. */
+  lightingZones?: MouseLighting[];
   firmware: string[];
 }

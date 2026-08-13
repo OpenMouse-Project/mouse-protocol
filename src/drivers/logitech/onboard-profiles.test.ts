@@ -17,6 +17,7 @@ import {
   describeProfileFormat,
   dpiStageCapabilitiesForOptions,
   encodeDpiStages,
+  encodeButtonAssignment,
   encodeProfileName,
   encodeReportRate,
   factoryProfileForFormat,
@@ -1061,4 +1062,14 @@ test("a corrupted byte invalidates the CRC", () => {
   const tampered = SECTOR_3.slice();
   tampered[0x04] ^= 0xff;
   assert.equal(decodeOnboardProfile(tampered, 7, { sector: 3, enabled: true }, true).crcValid, false);
+});
+
+test("G502 normal and G-Shift button assignments round-trip without touching other records", () => {
+  const normal = encodeButtonAssignment(G502_SECTORS[0], 2, "primary", 5, "DPI Shift");
+  const shifted = encodeButtonAssignment(normal, 2, "g-shift", 5, "Cycle profiles");
+  const decoded = decodeOnboardProfile(shifted, 2, { sector: 1, enabled: true }, false);
+  assert.equal(decoded.buttonAssignments[5]?.action, "DPI Shift");
+  assert.equal(decoded.gShiftAssignments[5]?.action, "Cycle profiles");
+  assert.deepEqual([...shifted.slice(0x20, 0x20 + 5 * 4)], [...G502_SECTORS[0].slice(0x20, 0x20 + 5 * 4)]);
+  assert.equal(decoded.crcValid, true);
 });

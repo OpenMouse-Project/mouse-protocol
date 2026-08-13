@@ -84,11 +84,13 @@ import {
   describeProfileFormat,
   dpiStageCapabilitiesForOptions,
   encodeDpiStages,
+  encodeButtonAssignment,
   encodeProfileName,
   encodeReportRate,
   factoryProfileForFormat,
   validateDpiStagePlan,
   type DpiStagePlan,
+  type LogitechButtonAction,
   layoutForFormat,
   parseDirectory,
   parseProfilesInfo,
@@ -103,7 +105,10 @@ import {
 } from "./onboard-profiles.ts";
 import {
   encodeLogitechRgbEffect,
+  encodeLogitechColorLedEffect,
+  logitechColorLedLighting,
   logitechRgbLighting,
+  type LogitechColorLedZone,
   type LogitechRgbZone,
 } from "./rgb-effects.ts";
 
@@ -268,6 +273,7 @@ const FEATURE = {
   extendedReportRate: 0x8061,
   modeStatus: 0x8090,
   rgbEffects: 0x8071,
+  colorLedEffects: 0x8070,
   // Legacy features used by HERO-era mice (e.g. G502 HERO / LIGHTSPEED,
   // Proteus). Queried only when the extended equivalents are absent.
   adjustableDpi: 0x2201,
@@ -374,6 +380,7 @@ export class LogitechHidppClient {
   private lodCapabilities: ProfileFormatCapabilities = capabilitiesForFormat(null);
   private supportedLods: Array<NonNullable<LogitechMouseStatus["liftOffDistance"]>> = ["Medium", "High"];
   private rgbZone: LogitechRgbZone | null = null;
+  private colorLedZones: LogitechColorLedZone[] = [];
   private rgbLighting: MouseLighting | null = null;
   private rgbClaimed = false;
   private rgbOriginalMode: "Onboard" | "Host" | "Unknown" = "Unknown";
@@ -696,7 +703,11 @@ export class LogitechHidppClient {
     const liftOffDistance = decodeLiftOffLevel(dpiState.lod, this.lodCapabilities);
     const hasLiveLiftOffControl = !dpiFeature.legacy && dpiCapabilities.liftOff;
     const rgbFeature = await this.getFeature(FEATURE.rgbEffects);
-    const lighting = rgbFeature.index ? await this.readRgbLighting(rgbFeature.index) : null;
+    const colorLedFeature = await this.getFeature(FEATURE.colorLedEffects);
+    const lightingZones = rgbFeature.index
+      ? [await this.readRgbLighting(rgbFeature.index)].filter((zone): zone is MouseLighting => zone !== null)
+      : colorLedFeature.index ? await this.readColorLedLighting(colorLedFeature.index) : [];
+    const lighting = lightingZones[0] ?? null;
     const rateLimits = this.lodCapabilities.reportRates;
     const connectionRateCeiling = rateLimits
       ? (wired ? rateLimits.wiredMaxHz : rateLimits.wirelessMaxHz)
@@ -755,6 +766,7 @@ export class LogitechHidppClient {
         ? null
         : decodeModeStatus(modeStatus, MODE_STATUS.lightforce),
       lighting: lighting ?? undefined,
+      lightingZones: lightingZones.length ? lightingZones : undefined,
       // Some profile formats have different wired and wireless ceilings. The
       // active transport comes from HID++ identity rather than a USB PID.
       pollingRateHz: connectionRateCeiling ? Math.min(pollingRateHz, connectionRateCeiling) : pollingRateHz,
@@ -804,10 +816,19 @@ export class LogitechHidppClient {
     this.friendlyNameCache = undefined;
     this.wheelCapabilityCache = undefined;
     this.rgbZone = null;
+    this.colorLedZones = [];
     this.rgbLighting = null;
   }
 
   async setLighting(lighting: MouseLighting): Promise<MouseLighting> {
+    const colorFeature = await this.getFeature(FEATURE.colorLedEffects);
+    const colorZone = this.colorLedZones.find((zone) => (logitechColorLedLighting(zone)?.zone) === lighting.zone);
+    if (colorFeature.index && colorZone) {
+      const payload = encodeLogitechColorLedEffect(colorZone, lighting);
+      if (!payload) throw new Error("That lighting effect was not advertised for this zone.");
+      await this.requestLong(colorFeature.index, 0x30, payload);
+      return { ...lighting, writeOnly: !colorZone.readable };
+    }
     const feature = await this.getFeature(FEATURE.rgbEffects);
     if (!feature.index) throw new Error("This mouse does not expose RGB Effects controls.");
     if (!this.rgbZone) await this.readRgbLighting(feature.index);
@@ -826,6 +847,37 @@ export class LogitechHidppClient {
     await this.requestLong(feature.index, 0x10, payload);
     this.rgbLighting = { ...lighting };
     return this.rgbLighting;
+  }
+
+  private async readColorLedLighting(featureIndex: number): Promise<MouseLighting[]> {
+    const info = await this.request(featureIndex, 0x00);
+    const count = Math.min(info[3] ?? 0, 8);
+    const readable = ((((info[6] ?? 0) << 8) | (info[7] ?? 0)) & 1) !== 0;
+    this.colorLedZones = [];
+    const lighting: MouseLighting[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const zoneReply = await this.request(featureIndex, 0x10, index, 0xff, 0x00);
+      const zone: LogitechColorLedZone = {
+        index,
+        location: ((zoneReply[4] ?? 0) << 8) | (zoneReply[5] ?? 0),
+        readable,
+        effects: [],
+      };
+      const effectCount = Math.min(zoneReply[6] ?? 0, 32);
+      for (let effectIndex = 0; effectIndex < effectCount; effectIndex += 1) {
+        const effect = await this.request(featureIndex, 0x20, index, effectIndex, 0x00);
+        zone.effects.push({
+          index: effect[4] ?? effectIndex,
+          id: ((effect[5] ?? 0) << 8) | (effect[6] ?? 0),
+          period: ((effect[9] ?? 0) << 8) | (effect[10] ?? 0),
+        });
+      }
+      this.colorLedZones.push(zone);
+      const current = readable ? await this.request(featureIndex, 0xe0, index).catch(() => null) : null;
+      const mapped = logitechColorLedLighting(zone, current ? [...current.slice(4, 15)] : undefined);
+      if (mapped) lighting.push(mapped);
+    }
+    return lighting;
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
@@ -1219,6 +1271,7 @@ export class LogitechHidppClient {
     reportRateWirelessHz?: number | null;
     reportRateWiredHz?: number | null;
     name?: string | null;
+    buttonAssignments?: Array<{ layer: "primary" | "g-shift"; button: number; action: LogitechButtonAction }>;
     /** Defaults to the running profile when omitted. */
     sector?: number;
   }): Promise<void> {
@@ -1287,6 +1340,9 @@ export class LogitechHidppClient {
 
     if (values.name !== null && values.name !== undefined) {
       updated = encodeProfileName(updated, formatId, values.name);
+    }
+    for (const assignment of values.buttonAssignments ?? []) {
+      updated = encodeButtonAssignment(updated, formatId, assignment.layer, assignment.button, assignment.action);
     }
 
     applyCrc(updated);
@@ -1621,7 +1677,9 @@ export class LogitechHidppClient {
     const feature = await this.getFeature(FEATURE.onboardProfiles);
     if (!feature.index) return [];
 
-    const info = parseProfilesInfo(await this.request(feature.index, PROFILE_FN.getInfo));
+    const infoReply = await this.request(feature.index, PROFILE_FN.getInfo);
+    const info = parseProfilesInfo(infoReply);
+    const buttonCount = Math.min(infoReply[8] ?? 0, 16);
     if (!info.profileFormatId) return [];
 
     const active = await this.request(feature.index, PROFILE_FN.getCurrentProfile);
@@ -1632,7 +1690,12 @@ export class LogitechHidppClient {
     const profiles: OnboardProfile[] = [];
     for (const entry of directory) {
       const bytes = await this.readProfileSector(feature.index, entry.sector, sectorSize);
-      profiles.push(decodeOnboardProfile(bytes, info.profileFormatId, entry, entry.sector === currentSector));
+      const profile = decodeOnboardProfile(bytes, info.profileFormatId, entry, entry.sector === currentSector);
+      if (buttonCount > 0) {
+        profile.buttonAssignments = profile.buttonAssignments.slice(0, buttonCount);
+        profile.gShiftAssignments = profile.gShiftAssignments.slice(0, buttonCount);
+      }
+      profiles.push(profile);
     }
     return profiles;
   }

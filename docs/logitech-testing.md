@@ -85,8 +85,10 @@ with seven 256-byte sectors, so none of the G402's profile offsets apply to it.
    working after OpenMouse writes a DPI value.
 7. Reload the page and confirm the DPI written in step 4 is still reported.
 
-RGB lighting (`0x8070`, logo and wheel zones) is deliberately not implemented —
-the write packet is unverified and the panel has no Logitech lighting controls.
+RGB lighting (`0x8070`) is enumerated at runtime. Each advertised zone gets its
+own control (the G502 family commonly reports logo and side/DPI zones), its
+current effect is read when supported, and writes use the zone's advertised
+effect index. Confirm each zone changes independently and reloads correctly.
 
 Persistent polling-rate changes write the profile sector and are implemented for
 format 2 (LOGAN); DPI-stage changes still are not (the v1 format has no stage
@@ -103,6 +105,8 @@ legacy `0x2201` DPI and `0x8060` report rate, profile format 2 (LOGAN).
    rate — this is the fix for "cannot click the 1 kHz polling rate option".
 2. Confirm the rate actually changed in the OS (e.g. a mouse-rate tester), not
    just in the profile read-back, so the reload-on-write behaviour is understood.
+3. Open a stored profile and change normal and G-Shift assignments. Confirm the
+   physical button follows each layer and that unrelated assignments survive.
 
 ## G309 LIGHTSPEED (receiver-attached, Model ID `B03C40B10000`)
 
