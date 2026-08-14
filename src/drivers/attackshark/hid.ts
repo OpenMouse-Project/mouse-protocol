@@ -38,12 +38,7 @@ const POLLING_RATES_1D57: ReadonlyArray<readonly [number, number]> = [
   [0x01, 1000],
 ];
 
-// DPI: feature report 0x04 (R1) / 0x03 (X11), 50-55 bytes.
-// Read via 0xa0 init sequence; write confirmed on both models.
-const DPI_REPORT_ID_R1 = 0x04;
-const DPI_REPORT_ID_X11 = 0x03;
 const DPI_READ_REPORT_ID = 0xa0;
-const DPI_PACKET_LENGTH = 52; // excluding report-ID byte
 
 // Battery arrives as input report with this 4-byte signature; byte 4 = %.
 const BATTERY_SIGNATURE = [0x03, 0x55, 0x40, 0x01];
