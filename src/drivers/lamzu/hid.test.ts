@@ -88,9 +88,11 @@ test("CRDRAKO KO-ONE receiver addresses the mouse as target 0x02", async () => {
   assert.ok(mouseRequests.every((packet) => packet[2] === 0x02));
 });
 
-function fakeR5Ultra(productId: 0x0046 | 0x0047, busyBatteryReplies = 0) {
+function fakeR5Ultra(productId: 0x0046 | 0x0047, busyBatteryReplies = 0, activeProfile = 1) {
   const sent: Uint8Array[] = [];
   let batterySends = 0;
+  let liftOff = 0x01;
+  let debounce = 0x00;
   const device = {
     vendorId: LAMZU_VENDOR_ID,
     productId,
@@ -113,6 +115,8 @@ function fakeR5Ultra(productId: 0x0046 | 0x0047, busyBatteryReplies = 0) {
       const page = request[4]!;
       const command = request[5]!;
       const reply = new Uint8Array(64);
+      if (page === 0x01 && command === 0x08) liftOff = request[7]!;
+      if (page === 0x00 && command === 0x08) debounce = request[7]!;
       if (page === 0x00 && command === 0x83) {
         batterySends += 1;
         if (batterySends <= busyBatteryReplies) {
@@ -122,15 +126,21 @@ function fakeR5Ultra(productId: 0x0046 | 0x0047, busyBatteryReplies = 0) {
           return new DataView(reply.buffer);
         }
       }
-      const payload = page === 0x01 && command === 0x81
-        ? [0x01, 0x01, 0x06, 0x40, 0x06, 0x40]
-        : page === 0x01 && command === 0x80
-          ? [0x01, 0x80]
-          : page === 0x00 && command === 0x83
-            ? [0x00, 0x64]
-            : page === 0x00 && command === 0x81
-              ? [0x00, 0x00, 0x01, 0x02]
-              : [0x01, 0x01];
+      const payload = page === 0x00 && command === 0x85
+        ? [activeProfile, 0x00]
+        : page === 0x01 && command === 0x88
+          ? [0x01, liftOff]
+          : page === 0x00 && command === 0x88
+            ? [0x01, debounce]
+            : page === 0x01 && command === 0x81
+              ? [0x01, 0x01, 0x06, 0x40, 0x06, 0x40]
+              : page === 0x01 && command === 0x80
+                ? [0x01, 0x80]
+                : page === 0x00 && command === 0x83
+                  ? [0x00, 0x64]
+                  : page === 0x00 && command === 0x81
+                    ? [0x00, 0x00, 0x01, 0x02]
+                    : [0x01, 0x01];
       reply[0] = 0xa1;
       reply[3] = payload.length;
       reply[4] = page;
@@ -176,6 +186,28 @@ test("a busy status keeps retrying instead of failing", async () => {
   const status = await new LamzuHidClient(device).readStatus();
   assert.equal(status.batteryPercent, 100);
   assert.ok(batterySends() > 2, `expected the battery request to be re-sent, saw ${batterySends()}`);
+});
+
+test("the Attack Shark R5 Ultra addresses the reported active profile", async () => {
+  const { device, sent } = fakeR5Ultra(0x0047, 0, 2);
+  const client = new LamzuHidClient(device);
+
+  const status = await client.readStatus();
+  assert.equal(status.activeProfile, 2);
+
+  await client.setPollingRate(8000);
+  await client.setLiftOffDistance("Low");
+  await client.setPerformanceMode(true);
+  await client.setDpi(1600);
+  await client.setDebounceTime(4);
+
+  const isProfileScoped = (packet: Uint8Array): boolean =>
+    packet[4] === 0x01 || (packet[4] === 0x00 && (packet[5] === 0x87 || packet[5] === 0x88));
+  const scoped = sent.filter(isProfileScoped);
+  assert.ok(scoped.length > 0, "expected profile-scoped commands");
+  assert.ok(scoped.every((packet) => packet[6] === 0x02),
+    `expected every profile-scoped command to address profile 2, saw:\n`
+    + scoped.map((packet) => [...packet.slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join(" ")).join("\n"));
 });
 
 test("the catalog offers the wired and wireless R5 Ultra", () => {
