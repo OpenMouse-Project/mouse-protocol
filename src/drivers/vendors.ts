@@ -23,6 +23,7 @@ export const VENDOR_ID = {
   endgameGear: 0x3367,
   wlmouse: 0x36a7,
   lamzu: 0x373e,
+  attackshark: 0x373e,
   logitech: 0x046d,
   orbital: 0x1915,
   razer: 0x1532,
@@ -212,6 +213,9 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.pulsar },
   { vendorId: VENDOR_ID.endgameGear },
   { vendorId: VENDOR_ID.wlmouse },
+  // 0x373e is the shared CompX ODM vendor id behind Lamzu, CRDRAKO, and
+  // Attack Shark. The broad filter surfaces all of them; each driver rejects
+  // interfaces that lack the feature-report-0 control channel.
   { vendorId: VENDOR_ID.lamzu },
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   ...TEEVOLUTION_PRODUCT_IDS.map((productId) => ({ vendorId: VENDOR_ID.teevolution, productId })),
