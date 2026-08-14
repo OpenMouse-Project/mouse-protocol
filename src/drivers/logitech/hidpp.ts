@@ -12,6 +12,17 @@ import {
 import {
   LOGITECH_CHANGE_HOST,
   LOGITECH_FRIENDLY_NAME,
+  LOGITECH_KEY_FLAG,
+  LOGITECH_REPROG_CONTROLS,
+  buildControlDiversionClearWrite,
+  buildControlRemapWrite,
+  decodeControlInfo,
+  decodeControlReporting,
+  logitechControlName,
+  logitechTaskName,
+  remappableControlTargets,
+  type LogitechControlInfo,
+  type LogitechReprogrammableControl,
   LOGITECH_HAPTIC,
   LOGITECH_HAPTIC_EFFECTS,
   LOGITECH_HIRES_WHEEL,
@@ -292,6 +303,7 @@ const FEATURE = {
   friendlyName: 0x0007,
   hostsInfo: 0x1815,
   changeHost: 0x1814,
+  reprogControls: 0x1b04,
 } as const;
 
 interface ResolvedFeature {
@@ -821,6 +833,7 @@ export class LogitechHidppClient {
     // A device can come back on a different slot, or be a different mouse
     // entirely, so nothing read this session survives the disconnect.
     this.hostStateCache = undefined;
+    this.controlInfoCache = undefined;
     this.friendlyNameCache = undefined;
     this.wheelCapabilityCache = undefined;
     this.rgbZone = null;
@@ -2322,6 +2335,139 @@ export class LogitechHidppClient {
     }
   }
 
+  /**
+   * Reads every reprogrammable control, what it currently does, and where it
+   * may legally be pointed.
+   *
+   * Two round-trips per control, which is why this is not part of readStatus:
+   * on an MX Master 4 that is eighteen more exchanges, enough on a wireless
+   * link to start timing other reads out. Call it on connect and after a
+   * write, not on a poll.
+   *
+   * The control table itself never changes for a given device, so it is read
+   * once per connection; only the reporting is re-read.
+   */
+  async readButtons(): Promise<LogitechReprogrammableControl[]> {
+    const feature = await this.getFeature(FEATURE.reprogControls);
+    if (!feature.index) return [];
+
+    if (this.controlInfoCache === undefined) {
+      const count = (await this.request(feature.index, LOGITECH_REPROG_CONTROLS.count))[3] ?? 0;
+      const infos: LogitechControlInfo[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const reply = await this.request(feature.index, LOGITECH_REPROG_CONTROLS.info, index);
+        const info = decodeControlInfo(reply.slice(3));
+        // A control that will not describe itself is dropped rather than
+        // guessed at: without its group mask there is no way to know what it
+        // may be remapped to, and offering a target the firmware refuses is
+        // worse than not offering the control at all.
+        if (info) infos.push(info);
+      }
+      this.controlInfoCache = infos;
+    }
+    const infos = this.controlInfoCache;
+
+    const controls: LogitechReprogrammableControl[] = [];
+    for (const info of infos) {
+      const reply = await this.request(
+        feature.index,
+        LOGITECH_REPROG_CONTROLS.reporting,
+        info.controlId >> 8,
+        info.controlId & 0xff,
+      );
+      const reporting = decodeControlReporting(reply.slice(3));
+      if (!reporting) continue;
+      controls.push({
+        ...info,
+        ...reporting,
+        name: logitechControlName(info.controlId),
+        taskName: logitechTaskName(info.taskId),
+        reprogrammable: (info.flags & LOGITECH_KEY_FLAG.reprogrammable) !== 0,
+        virtual: (info.flags & LOGITECH_KEY_FLAG.virtual) !== 0,
+        remappableTo: remappableControlTargets(info, infos),
+      });
+    }
+    return controls;
+  }
+
+  /**
+   * Points one button at another control's action.
+   *
+   * The device is asked what is legal before anything is written, and the
+   * result is read back afterwards — firmware that acknowledges a remap and
+   * keeps its old mapping would otherwise look like a success.
+   */
+  async setButtonMapping(
+    controlId: number,
+    targetControlId: number,
+  ): Promise<LogitechReprogrammableControl[]> {
+    const feature = await this.getFeature(FEATURE.reprogControls);
+    if (!feature.index) throw new Error("This mouse does not expose reprogrammable controls.");
+
+    const before = await this.readButtons();
+    const control = before.find((candidate) => candidate.controlId === controlId);
+    if (!control) throw new Error("That control is not present on this mouse.");
+    if (!control.reprogrammable || !control.remappableTo.includes(targetControlId)) {
+      throw new Error(`${control.name} cannot be remapped to ${logitechControlName(targetControlId)}.`);
+    }
+
+    await this.requestLong(
+      feature.index,
+      LOGITECH_REPROG_CONTROLS.setReporting,
+      buildControlRemapWrite(controlId, targetControlId),
+    );
+
+    const after = await this.readButtons();
+    const confirmed = after.find((candidate) => candidate.controlId === controlId);
+    if (confirmed?.mappedTo !== targetControlId) {
+      throw new Error(
+        `The mouse kept ${control.name} pointing at `
+        + `${logitechControlName(confirmed?.mappedTo ?? 0)}.`,
+      );
+    }
+    return after;
+  }
+
+  /**
+   * Hands every diverted button back to the hardware.
+   *
+   * A diverted button sends HID++ notifications instead of acting, which is
+   * how a vendor application implements behaviours of its own. Logi Options+
+   * uses the temporary flag and the mouse clears that itself once Options+
+   * stops — but the persistent flag survives, so a button left that way stays
+   * dead until something clears it. That something has to exist somewhere.
+   */
+  async clearButtonDiversion(): Promise<LogitechReprogrammableControl[]> {
+    const feature = await this.getFeature(FEATURE.reprogControls);
+    if (!feature.index) throw new Error("This mouse does not expose reprogrammable controls.");
+
+    const before = await this.readButtons();
+    const diverted = before.filter((control) => control.diverted);
+    if (!diverted.length) return before;
+
+    for (const control of diverted) {
+      await this.requestLong(
+        feature.index,
+        LOGITECH_REPROG_CONTROLS.setReporting,
+        buildControlDiversionClearWrite(control.controlId),
+      );
+    }
+
+    const after = await this.readButtons();
+    const stuck = after.filter((control) => control.diverted);
+    if (stuck.length) {
+      throw new Error(`The mouse kept ${stuck.map((control) => control.name).join(", ")} diverted.`);
+    }
+    // Clearing a diversion must not have disturbed where a button points.
+    for (const control of before) {
+      const now = after.find((candidate) => candidate.controlId === control.controlId);
+      if (now && now.mappedTo !== control.mappedTo) {
+        throw new Error(`Restoring ${control.name} unexpectedly changed what it does.`);
+      }
+    }
+    return after;
+  }
+
   /** Sets haptic strength, leaving the flag byte as the device reports it. */
   async setHapticIntensity(intensity: number): Promise<number> {
     if (!isLogitechHapticIntensity(intensity)) {
@@ -2587,6 +2733,7 @@ export class LogitechHidppClient {
    * back a few seconds later.
    */
   private hostStateCache: { info: LogitechHostsInfo; paired: boolean[] } | null | undefined;
+  private controlInfoCache: LogitechControlInfo[] | undefined;
   private friendlyNameCache: { name: string; maxLength: number } | null | undefined;
   private wheelCapabilityCache: { supportsInvertScroll: boolean; supportsThumbWheelInvert: boolean } | undefined;
 
