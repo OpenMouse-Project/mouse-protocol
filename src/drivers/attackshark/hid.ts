@@ -123,6 +123,10 @@ export class AttackSharkHidClient {
     return [];
   }
 
+  getDpiOptions(): number[] {
+    return [];
+  }
+
   async readStatus(): Promise<MouseStatus> {
     await this.open();
 
