@@ -2,7 +2,7 @@
 export const COMPX_REPORT_ID = 0;
 export const COMPX_PACKET_LENGTH = 64;
 export const COMPX_HEADER_LENGTH = 6;
-export const COMPX_STATUS = { request: 0x00, pending: 0xa0, ok: 0xa1, unsupported: 0xa2 } as const;
+export const COMPX_STATUS = { request: 0x00, pending: 0xa0, ok: 0xa1, unsupported: 0xa2, busy: 0xa3 } as const;
 export type CompaxLiftOffDistance = "Low" | "Medium" | "High";
 export interface CompaxDpiStage { x: number; y: number }
 export interface CompaxRequest {

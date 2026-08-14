@@ -426,7 +426,7 @@ export class LamzuHidClient {
         const length = Math.min(reply[3], PACKET_LENGTH - HEADER_LENGTH);
         return reply.slice(HEADER_LENGTH, HEADER_LENGTH + length);
       }
-      if (reply[0] !== STATUS.pending && reply[0] !== STATUS.ok) {
+      if (reply[0] !== STATUS.pending && reply[0] !== STATUS.busy && reply[0] !== STATUS.ok) {
         throw new Error(this.describe(spec, `returned an unexpected status 0x${reply[0].toString(16)}`));
       }
       await this.delay(attempt < QUICK_ATTEMPTS ? RESPONSE_DELAY_MS : WAKE_DELAY_MS);

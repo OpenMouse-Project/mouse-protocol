@@ -44,7 +44,7 @@ checklist.
 | Endgame Gear wireless | `@openmouse/protocol/endgame-gear-we` |
 | Finalmouse | `@openmouse/protocol/finalmouse` |
 | Keychron | `@openmouse/protocol/keychron` |
-| Lamzu | `@openmouse/protocol/lamzu` |
+| Lamzu / CRDRAKO / Attack Shark | `@openmouse/protocol/lamzu` |
 | Logitech | `@openmouse/protocol/logitech` |
 | moddoMOUSE | `@openmouse/protocol/moddo` |
 | Ninjutso | `@openmouse/protocol/ninjutso` |
