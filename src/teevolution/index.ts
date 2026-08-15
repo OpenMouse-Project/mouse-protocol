@@ -1,5 +1,11 @@
 export const TEEVOLUTION_REPORT_ID = 0x08;
 export const TEEVOLUTION_PACKET_LENGTH = 16;
+/** RapidSync 8K LCD clock — separate HID collection from Compx report 8. */
+export const TEEVOLUTION_LCD_REPORT_ID = 0x0a;
+export const TEEVOLUTION_LCD_PACKET_LENGTH = 40;
+export const TEEVOLUTION_LCD_USAGE_PAGE = 0xff08;
+export const TEEVOLUTION_LCD_USAGE = 0x02;
+export const TEEVOLUTION_LCD_SET_TIME = 0x0010;
 export const TEEVOLUTION_MAX_CHUNK = 10;
 export const TEEVOLUTION_DPI_MAX = 42000;
 export const TEEVOLUTION_PRODUCT_IDS = new Set([0xf520, 0xf523, 0xf5bb, 0xf522]);
@@ -353,5 +359,38 @@ export function teevolutionSensorModeUi(options: {
   }
   // 2000/4000 Hz wireless on PAW3950 uses corded/Ultra tracking.
   return { mode: "Ultra", editable: false, storedValue };
+}
+
+/**
+ * Teevolink Generate_CRC for RapidSync LCD writes: last byte is
+ * `(0x55 - sum(packet[0..len-2])) & 0xff`, including the report-id byte.
+ */
+export function teevolutionLcdChecksum(packet: Uint8Array | readonly number[]): number {
+  if (packet.length < 2) throw new Error("Teevolution LCD packets need a checksum byte.");
+  let sum = 0;
+  for (let index = 0; index < packet.length - 1; index += 1) sum += packet[index]! & 0xff;
+  return (0x55 - (sum & 0xff)) & 0xff;
+}
+
+/**
+ * 40-byte RapidSync set-time write, including report id 0x0A as byte 0.
+ * DateTime layout matches Teevolink GetCurrentTimer_Tick (year big-endian,
+ * Sunday = 0). WebHID sendReport uses bytes 1…39.
+ */
+export function teevolutionBuildLcdTimePacket(now: Date): Uint8Array {
+  const packet = new Uint8Array(TEEVOLUTION_LCD_PACKET_LENGTH);
+  packet[0] = TEEVOLUTION_LCD_REPORT_ID;
+  packet[1] = TEEVOLUTION_LCD_SET_TIME >> 8;
+  packet[2] = TEEVOLUTION_LCD_SET_TIME & 0xff;
+  packet[3] = (now.getFullYear() >> 8) & 0xff;
+  packet[4] = now.getFullYear() & 0xff;
+  packet[5] = now.getMonth() + 1;
+  packet[6] = now.getDate();
+  packet[7] = now.getHours();
+  packet[8] = now.getMinutes();
+  packet[9] = now.getSeconds();
+  packet[10] = now.getDay();
+  packet[TEEVOLUTION_LCD_PACKET_LENGTH - 1] = teevolutionLcdChecksum(packet);
+  return packet;
 }
 
