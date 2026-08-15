@@ -348,8 +348,10 @@ needs new transport work rather than a table row:
   driver could only ever time out on them.
 - **Orochi V2 Bluetooth `0x0095`** — a Bluetooth HID path is not the USB control
   channel and must not be assumed to take the same reports.
-- **HyperPolling Wireless Dongle `0x00b3`** — a receiver rather than a mouse.
-  Reaching the mouse paired to it needs dongle-specific commands.
+- **HyperPolling Wireless Dongle `0x00b3`** is now present as an unverified
+  receiver transport. OpenRazer's two-step extended polling write is
+  implemented, but its WebHID collection shape and real 8 kHz application still
+  need an OpenMouse hardware capture before the entry can be marked verified.
 
 The `index3` models (Naga X `0x0096`, Basilisk V3 `0x0099`, Basilisk V3 35K
 `0x00cb`) are the least certain of those that *are* claimed: OpenRazer reaches

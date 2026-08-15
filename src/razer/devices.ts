@@ -40,9 +40,6 @@
  *   this driver could only ever time out on them.
  * - Orochi V2 Bluetooth (`0x0095`). A Bluetooth HID path is not the USB
  *   control channel and must not be assumed to take the same reports.
- * - HyperPolling Wireless Dongle (`0x00b3`). It is a receiver, not a mouse;
- *   addressing the mouse paired to it needs dongle-specific commands that are
- *   not documented here.
  * - Viper Mini (`0x008a`), Viper V4 Pro (`0x00e5`/`0x00e6`) and Cobra
  *   (`0x00a3`), which have their own drivers in this folder. Listing them here
  *   would give two drivers the same device.
@@ -87,6 +84,13 @@ export interface RazerProduct {
    * the older HyperSpeed receivers are wireless and only answer the legacy one.
    */
   highRatePolling: boolean;
+  /**
+   * Some early HyperPolling devices commit an extended polling change with a
+   * second write: selector `0x01` on a different transaction id. OpenRazer
+   * does this for the standalone HyperPolling dongle after the ordinary
+   * selector-`0x00` write. Omitted for devices that need only one write.
+   */
+  extendedPollingCommitTransactionId?: number;
   /**
    * The mouse implements the class `0x0b` tracking distance.
    *
@@ -186,7 +190,7 @@ const TRANSACTION_1F: readonly number[] = [
   0x0090, 0x0094, 0x0096, 0x0099, 0x009a, 0x009c, 0x009e, 0x009f, 0x00a1,
   // Mouse Dock Pro is not in OpenRazer's mouse table; hardware with a Naga V2
   // Pro paired answers on `0x1f` like that generation's mice.
-  0x00a4, 0x00a5, 0x00a6, 0x00a7, 0x00a8, 0x00aa, 0x00ab, 0x00af, 0x00b0, 0x00b2,
+  0x00a4, 0x00a5, 0x00a6, 0x00a7, 0x00a8, 0x00aa, 0x00ab, 0x00af, 0x00b0, 0x00b2, 0x00b3,
   0x00b4, 0x00b6, 0x00b7, 0x00b8, 0x00b9, 0x00be, 0x00bf, 0x00c0, 0x00c1,
   0x00c2, 0x00c3, 0x00c4, 0x00c5, 0x00c7, 0x00c8, 0x00cb, 0x00cc, 0x00cd,
   0x00d0, 0x00d1, 0x00d3, 0x00d4, 0x00d6, 0x00d7,
@@ -440,6 +444,20 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
     maxDpi: DPI_FOCUS_PRO,
     pollingRates: RATES_8K,
     highRatePolling: true,
+  }],
+  // Standalone HyperPolling Wireless Dongle. OpenRazer reads extended polling
+  // with transaction 0x1f and commits a change with two writes: selector 0x00
+  // on 0x1f, then selector 0x01 on 0xff. Settings are forwarded to the paired
+  // mouse, so expose the Focus Pro ceiling used by the DeathAdder V3 Pro while
+  // leaving the entry unverified until OpenMouse hardware captures it.
+  [0x00b3, {
+    model: "HyperPolling Wireless Dongle",
+    ...HYPERPOLLING_RECEIVER,
+    transport: "viper-receiver",
+    maxDpi: DPI_FOCUS_PRO,
+    vendorControlInterface: true,
+    extendedPollingCommitTransactionId: RAZER_TRANSACTION_ID_FF,
+    connectionLabel: "HyperPolling Wireless Dongle",
   }],
   // ---- index3: wired, control channel on USB interface 3 --------------------
   [0x0096, { model: "Naga X", ...INDEX3, maxDpi: 18_000 }],
