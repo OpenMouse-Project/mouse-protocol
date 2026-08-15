@@ -51,35 +51,30 @@ export function pulsarEncodePollingRate(rate: number): number {
   return encoded;
 }
 
-export function pulsarDecodeDpi(data: Uint8Array): number {
+export function pulsarDecodeDpi(data: Uint8Array): number | null {
+  if (data.length < 4) return null;
+  const low = data[0] ?? 0;
+  const duplicate = data[1] ?? 0;
   const flags = data[2] ?? 0;
-  const raw = (data[0] ?? 0) + (((flags & 0x0c) >> 2) << 8);
-  let dpi = (raw + 1) * 10;
-  if ((flags & 0x02) !== 0) dpi = dpi * 5 + 10000;
-  if ((flags & 0x01) !== 0) dpi *= 2;
-  return dpi;
+  const checksum = data[3] ?? 0;
+  if (low !== duplicate || ((low + duplicate + flags + checksum) & 0xff) !== 0x55) return null;
+  return ((((flags >> 2) & 0x03) << 8) + low + 1) * 50;
 }
 
 export function pulsarEncodeDpi(dpi: number): Uint8Array {
-  let raw: number;
-  let dpiEx: number;
-  if (dpi >= 30100) { raw = (dpi / 2 - 10050) / 50; dpiEx = 0x33; }
-  else if (dpi >= 10050) { raw = (dpi - 10050) / 50; dpiEx = 0x22; }
-  else { raw = dpi / 10 - 1; dpiEx = 0; }
-  const high = raw >> 8;
-  const result = new Uint8Array(4);
-  result[0] = raw;
-  result[1] = raw;
-  result[2] = (high << 2) | (high << 6) | dpiEx | (dpiEx << 4);
-  result[3] = pulsarDataChecksum(result.slice(0, 3));
-  return result;
+  if (!Number.isInteger(dpi) || dpi < 50 || dpi > 26000 || dpi % 50 !== 0) {
+    throw new Error("Pulsar DPI must be 50–26,000 in 50 DPI steps.");
+  }
+  const encoded = dpi / 50 - 1;
+  const low = encoded & 0xff;
+  const high = (encoded >> 8) & 0x03;
+  const flags = (high << 2) | (high << 6);
+  return new Uint8Array([low, low, flags, (0x55 - low - low - flags) & 0xff]);
 }
 
 export function pulsarDpiOptions(): number[] {
   const options: number[] = [];
-  for (let dpi = 10; dpi <= 10000; dpi += 10) options.push(dpi);
-  for (let dpi = 10050; dpi <= 30000; dpi += 50) options.push(dpi);
-  for (let dpi = 30100; dpi <= 32000; dpi += 100) options.push(dpi);
+  for (let dpi = 50; dpi <= 26000; dpi += 50) options.push(dpi);
   return options;
 }
 

@@ -23,6 +23,7 @@ const CLAIMED_VGN_PRODUCT_IDS: ReadonlySet<number> = new Set([
   0xf520, 0xf523, 0xf5bb, 0xf522, // Teevolution (Terra Pro family)
   0xfb56, 0xfb57, // VGN Dragonfly F2 Master+
 ]);
+const PULSAR_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
 
 export interface PulsarReport {
   timestamp: number;
@@ -129,15 +130,17 @@ export class PulsarHidClient {
         : null;
       const rssi = await this.query(COMMAND.getRssi).catch(() => null);
       const currentDpi = Math.min(flash[FLASH.currentDpi] ?? 0, 7);
-      const dpi = pulsarDecodeDpi(flash.slice(FLASH.dpiValues + currentDpi * 4, FLASH.dpiValues + currentDpi * 4 + 4));
+      const dpi = pulsarDecodeDpi(flash.slice(FLASH.dpiValues + currentDpi * 4, FLASH.dpiValues + currentDpi * 4 + 4)) ?? 800;
       const lodValue = flash[FLASH.liftOffDistance];
       return {
         brand: "Pulsar",
         name: info.cid === 0x57 && info.mid === 0x04 ? "Pulsar X2 CrazyLight" : (this.device.productName || "Pulsar Mouse"),
+        ui: { family: "pulsar", hideUnsupportedPollingRates: true },
         batteryPercent: battery[5] <= 100 ? battery[5] : null,
         batteryState: battery[6] === 1 ? "Charging" : "Discharging",
         dpi,
         pollingRateHz: pulsarDecodePollingRate(flash[FLASH.reportRate]),
+        supportedPollingRates: PULSAR_POLLING_RATES.filter((rate) => rate <= info.maximumPollingRateHz),
         activeProfile: profile && profile[1] === 0 ? (profile[5] ?? 0) + 1 : null,
         connectionDetail: `CID 0x${info.cid.toString(16).toUpperCase().padStart(2, "0")} · MID 0x${info.mid.toString(16).toUpperCase().padStart(2, "0")} · Dongle type ${info.dongleType}`,
         dongleLedEnabled: dongleLed?.enabled ?? null,
@@ -162,6 +165,10 @@ export class PulsarHidClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
+    const info = this.deviceInfo ?? await this.readDeviceInfo();
+    if (pollingRateHz > info.maximumPollingRateHz) {
+      throw new Error(`This connection supports at most ${info.maximumPollingRateHz} Hz.`);
+    }
     const encoded = pulsarEncodePollingRate(pollingRateHz);
     return await this.withDeviceControl(async () => {
       await this.writeCheckedByte(FLASH.reportRate, encoded);
@@ -178,7 +185,7 @@ export class PulsarHidClient {
       const address = FLASH.dpiValues + Math.min(currentDpi, 7) * 4;
       await this.writeFlash(address, pulsarEncodeDpi(dpi));
       const confirmed = pulsarDecodeDpi(await this.readFlash(address, 4));
-      if (confirmed !== dpi) throw new Error(`The mouse kept ${confirmed} DPI instead of ${dpi} DPI.`);
+      if (confirmed !== dpi) throw new Error(`The mouse kept ${confirmed ?? "an unknown DPI"} instead of ${dpi} DPI.`);
       return confirmed;
     });
   }
