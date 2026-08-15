@@ -223,6 +223,10 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.finalmouse, productId: 0x0100, usagePage: 0xff00, usage: 0x0001 },
   { vendorId: VENDOR_ID.pulsar },
   ...PULSAR_XS1_HID_FILTERS,
+  // The Pulsar 4K Wireless Receiver enumerates under the shared Teevolution/VGN
+  // vendor id with a Pulsar-specific product id, so the broad VID-only filter
+  // keeps it visible in the picker; the driver disambiguates by product id.
+  { vendorId: VENDOR_ID.vgn },
   { vendorId: VENDOR_ID.endgameGear },
   { vendorId: VENDOR_ID.wlmouse },
   // 0x373e is the shared CompX ODM vendor id behind Lamzu, CRDRAKO, and

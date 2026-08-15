@@ -13,6 +13,17 @@ import {
   pulsarPacketChecksum,
 } from "@openmouse/protocol/pulsar";
 
+// The Pulsar 4K Wireless Receiver is sold as a Pulsar product but enumerates
+// under the shared Teevolution/VGN vendor id (0x3554) and speaks the same
+// report-8 16-byte protocol as Pulsar receivers. VID 0x3554 is also used by
+// the Teevolution and VGN drivers, so only product ids those drivers have not
+// already claimed are accepted here.
+const VGN_VENDOR_ID = 0x3554;
+const CLAIMED_VGN_PRODUCT_IDS: ReadonlySet<number> = new Set([
+  0xf520, 0xf523, 0xf5bb, 0xf522, // Teevolution (Terra Pro family)
+  0xfb56, 0xfb57, // VGN Dragonfly F2 Master+
+]);
+
 export interface PulsarReport {
   timestamp: number;
   reportId: number;
@@ -56,7 +67,9 @@ export class PulsarHidClient {
   }
 
   static isSupported(device: HIDDevice): boolean {
-    return device.vendorId === PULSAR_VENDOR_ID
+    const vendorSupported = device.vendorId === PULSAR_VENDOR_ID
+      || (device.vendorId === VGN_VENDOR_ID && !CLAIMED_VGN_PRODUCT_IDS.has(device.productId));
+    return vendorSupported
       && device.collections.some((collection) =>
         collection.inputReports.length === 1
         && collection.outputReports.length === 1
