@@ -363,9 +363,18 @@ export class RazerHidClient {
     if (!this.getSupportedPollingRates().includes(pollingRateHz)) {
       throw new Error(`This mouse does not support ${pollingRateHz.toLocaleString()} Hz on this connection.`);
     }
-    await this.request(this.usesHighRatePolling()
+    const highRate = this.usesHighRatePolling();
+    await this.request(highRate
       ? razerSetExtendedPollingCommand(pollingRateHz)
       : razerSetLegacyPollingCommand(pollingRateHz));
+    const commitTransactionId = highRate
+      ? this.profile()?.extendedPollingCommitTransactionId
+      : undefined;
+    if (commitTransactionId !== undefined) {
+      const commit = razerSetExtendedPollingCommand(pollingRateHz);
+      commit.args = [0x01, commit.args?.[1] ?? 0x00];
+      await this.request(commit, commitTransactionId);
+    }
     // Changing the rate briefly reconfigures the wireless link, and exchanges
     // sent into that window come back corrupt or unanswered — the Viper V4 Pro
     // driver documents the same pause. Let it settle before the read-back; any
@@ -555,15 +564,18 @@ export class RazerHidClient {
     return started;
   }
 
-  private async request(command: RazerCommand): Promise<Uint8Array> {
-    const run = this.queue.then(() => this.exchange(command), () => this.exchange(command));
+  private async request(command: RazerCommand, transactionId?: number): Promise<Uint8Array> {
+    const run = this.queue.then(
+      () => this.exchange(command, transactionId),
+      () => this.exchange(command, transactionId),
+    );
     this.queue = run.catch(() => undefined);
     return await run;
   }
 
-  private async exchange(command: RazerCommand): Promise<Uint8Array> {
+  private async exchange(command: RazerCommand, transactionIdOverride?: number): Promise<Uint8Array> {
     await this.open();
-    const transactionId = this.profile()?.transactionId ?? RAZER_TRANSACTION_ID;
+    const transactionId = transactionIdOverride ?? this.profile()?.transactionId ?? RAZER_TRANSACTION_ID;
     const request = encodeRazerRequest(command, transactionId);
     // A busy status means the mouse will answer this same request later, so the
     // reads keep going without a re-send. A corrupt reply means the exchange

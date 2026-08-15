@@ -142,6 +142,16 @@ test("the wired DeathAdder V3 writes polling on the extended command", () => {
   }
 });
 
+test("the standalone HyperPolling dongle exposes 8 kHz and its two-step commit", () => {
+  const dongle = RAZER_PRODUCTS.get(0x00b3);
+  assert.equal(dongle?.model, "HyperPolling Wireless Dongle");
+  assert.equal(dongle?.wireless, true);
+  assert.equal(dongle?.highRatePolling, true);
+  assert.deepEqual([...dongle?.pollingRates ?? []], [...RATES_8K]);
+  assert.equal(dongle?.transactionId, RAZER_TRANSACTION_ID);
+  assert.equal(dongle?.extendedPollingCommitTransactionId, RAZER_TRANSACTION_ID_FF);
+});
+
 test("the Viper V3 Pro SE pair matches the reference without inheriting the V3 Pro's evidence", () => {
   const wired = RAZER_PRODUCTS.get(0x00de);
   const wireless = RAZER_PRODUCTS.get(0x00df);
@@ -249,10 +259,8 @@ test("no product is claimed by both this registry and a dedicated Razer driver",
 
 test("families that cannot work over this transport are left out", () => {
   // Orochi 2011 and the two DeathAdder 3.5G ids predate the 90-byte report and
-  // need direct USB control writes; 0x0095 is a Bluetooth path, and 0x00b3 is a
-  // dongle rather than a mouse. Listing any of them would produce a device that
-  // connects and then times out.
-  for (const productId of [0x0013, 0x0016, 0x0029, 0x0095, 0x00b3]) {
+  // need direct USB control writes, while 0x0095 is a Bluetooth path.
+  for (const productId of [0x0013, 0x0016, 0x0029, 0x0095]) {
     assert.equal(RAZER_PRODUCTS.has(productId), false, `0x${productId.toString(16)} cannot be driven by this transport`);
   }
 });
@@ -292,7 +300,7 @@ const OPENRAZER_TRANSACTION_IDS: ReadonlyMap<number, number> = new Map([
     0x0062, 0x006c, 0x0077, 0x0080, 0x0085, 0x0086, 0x0088, 0x008d, 0x008f,
     0x0090, 0x0094, 0x0096, 0x0099, 0x009a, 0x009c, 0x009e, 0x009f, 0x00a1,
     0x00a5, 0x00a6, 0x00a7, 0x00a8, 0x00aa, 0x00ab, 0x00af, 0x00b0, 0x00b2,
-    0x00b4, 0x00b6, 0x00b7, 0x00b8, 0x00b9, 0x00be, 0x00bf, 0x00c0, 0x00c1,
+    0x00b3, 0x00b4, 0x00b6, 0x00b7, 0x00b8, 0x00b9, 0x00be, 0x00bf, 0x00c0, 0x00c1,
     0x00c2, 0x00c3, 0x00c4, 0x00c5, 0x00c7, 0x00c8, 0x00cb, 0x00cc, 0x00cd,
     0x00d0, 0x00d1, 0x00d3, 0x00d4, 0x00d6, 0x00d7,
     // Viper V3 Pro SE. Read from PR #2818 rather than the merged driver: its

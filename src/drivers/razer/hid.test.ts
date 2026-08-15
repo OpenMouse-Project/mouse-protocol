@@ -56,6 +56,7 @@ function fakeMouse(state: FakeLiftOff, options: FakeOptions = {}) {
   let pending = new Uint8Array(RAZER_PACKET_LENGTH);
   let corruptRemaining = options.corruptSends ?? 0;
   let dpi = options.dpi ?? [1600, 1600];
+  let pollingDivisor = 8;
   const device = {
     vendorId: 0x1532,
     productId: options.productId ?? 0x00c1,
@@ -78,6 +79,13 @@ function fakeMouse(state: FakeLiftOff, options: FakeOptions = {}) {
       if (dpiWrite && !options.ignoreWrites) dpi = [(data[9] << 8) | data[10], (data[11] << 8) | data[12]];
       if (dpiWrite || dpiRead) {
         pending = replyPacket(commandClass, commandId, data[5], [data[8], (dpi[0] >> 8) & 0xff, dpi[0] & 0xff, (dpi[1] >> 8) & 0xff, dpi[1] & 0xff, 0, 0], RAZER_STATUS.ok);
+        return;
+      }
+      const pollingWrite = commandClass === 0x00 && commandId === 0x40;
+      const pollingRead = commandClass === 0x00 && commandId === 0xc0;
+      if (pollingWrite) pollingDivisor = data[9];
+      if (pollingWrite || pollingRead) {
+        pending = replyPacket(commandClass, commandId, data[5], [data[8], pollingDivisor], RAZER_STATUS.ok);
         return;
       }
       // Matched on class as well as id: polling shares both ids on class 0x00,
@@ -632,4 +640,19 @@ test("Mouse Dock Pro with a HyperPolling mouse unlocks the 8 kHz ladder", async 
   // still opens to 8 kHz because the command itself answered.
   assert.equal(status.pollingRateHz, 1000);
   assert.deepEqual(status.supportedPollingRates, [...RATES_8K]);
+});
+
+test("HyperPolling dongle commits an 8 kHz change through both selectors", async () => {
+  const { client, sent } = fakeMouse(
+    { tracking: 0, liftOff: 2, landing: 1, asymmetric: false },
+    { productId: 0x00b3 },
+  );
+
+  await client.setPollingRate(8000);
+
+  assert.equal(sent.length, 3);
+  const [write, commit, confirm] = sent;
+  assert.deepEqual([write[1], write[6], write[7], write[8], write[9]], [0x1f, 0x00, 0x40, 0x00, 0x01]);
+  assert.deepEqual([commit[1], commit[6], commit[7], commit[8], commit[9]], [0xff, 0x00, 0x40, 0x01, 0x01]);
+  assert.deepEqual([confirm[1], confirm[6], confirm[7]], [0x1f, 0x00, 0xc0]);
 });
