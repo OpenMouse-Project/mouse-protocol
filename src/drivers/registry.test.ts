@@ -162,7 +162,7 @@ test("every product id offered in the picker has a driver", () => {
   );
 });
 
-const WITHOUT_TESTS = new Set(["lamzu", "pulsar"]);
+const WITHOUT_TESTS = new Set(["lamzu"]);
 
 function deviceDirectories(): string[] {
   return readdirSync(DEVICES_DIR, { withFileTypes: true })

@@ -3,11 +3,15 @@ import { VENDOR_ID } from "../vendors.ts";
 import { RATES_1K, RATES_8K, RAZER_PRODUCTS, type RazerProduct } from "@openmouse/protocol/razer-devices";
 import { openRazerDevice } from "./hid-open.ts";
 import {
+  RAZER_BUTTON_CONTROLS,
+  RAZER_BUTTON_CONTROL_LABEL,
   RAZER_LANDING_MAX,
   RAZER_LANDING_MIN,
   RAZER_LIFT_OFF_MAX,
   RAZER_LIFT_OFF_MIN,
   RAZER_READ,
+  RAZER_TOGGLE_CONTROLS,
+  RAZER_TOGGLE_CONTROL_INFO,
   RAZER_REPORT_ID,
   RAZER_STORAGE,
   RAZER_STATUS,
@@ -27,6 +31,12 @@ import {
   decodeSleepTimeout,
   encodeRazerRequest,
   isRazerGetter,
+  razerDecodeButtonMapping,
+  razerDecodeToggleControl,
+  razerReadButtonMappingCommand,
+  razerReadToggleControlCommand,
+  razerSetButtonMappingCommand,
+  razerSetToggleControlCommand,
   razerReadDpiCommand,
   razerSetDpiCommand,
   razerSetExtendedPollingCommand,
@@ -37,8 +47,11 @@ import {
   razerEnableAsymmetricLiftOffCommand,
   razerSetLowPowerThresholdCommand,
   razerSetSleepTimeoutCommand,
+  type RazerButtonControl,
+  type RazerButtonMapping,
   type RazerCommand,
   type RazerLiftOff,
+  type RazerToggleControl,
   type RazerTrackingDistance,
 } from "@openmouse/protocol/razer";
 
@@ -106,6 +119,15 @@ export class RazerHidClient {
   // so nothing after the first read needs to ask the mouse again.
   private asymmetric: boolean | null = null;
   private asymmetricKnown = false;
+
+  // Same reasoning as asymmetric/asymmetricKnown: read once per connection
+  // rather than on every background refresh. Button-mapping writes use their
+  // own transaction id (RAZER_BUTTON_TRANSACTION_ID) and are confirmed by an
+  // immediate read-back in setButtonMapping — polling this command class on a
+  // timer would put an unrelated read between a write and its own verify-read
+  // for no benefit, since nothing changes these but setButtonMapping itself.
+  private buttonMappings: Record<string, string> | null = null;
+  private buttonMappingsKnown = false;
   /** Filled for dock passthrough after the first polling probe. */
   private discoveredPollingRates: readonly number[] | null = null;
   /** Which polling command the paired mouse answers; null until probed. */
@@ -158,6 +180,7 @@ export class RazerHidClient {
   async close(): Promise<void> {
     this.staticReads.clear();
     this.asymmetricKnown = false;
+    this.buttonMappingsKnown = false;
     this.discoveredPollingRates = null;
     this.discoveredHighRatePolling = null;
     if (this.device.opened) await this.device.close();
@@ -243,6 +266,7 @@ export class RazerHidClient {
     const lowPower = hasBattery ? await this.request(RAZER_READ.lowPowerThreshold).catch(() => null) : null;
     const dpi = decodeDpi(await this.request(razerReadDpiCommand(this.dpiStorageByte())));
     const pollingRateHz = await this.readPollingRateHz();
+    const buttonMappings = await this.currentButtonMappings();
     // Asked of the product, not of the mouse. A model without lift-off can
     // still answer this read — the Basilisk X HyperSpeed returns status 0x02
     // with an all-zero payload, which decodes as a perfectly ordinary "Low" —
@@ -267,9 +291,9 @@ export class RazerHidClient {
         // shares with sleep is opened below, so it would otherwise appear as a
         // permanent "signal is unavailable" placeholder.
         hideSignalCard: true,
-        // Auto sleep is the only card this driver puts in that section, so the
-        // section opens only when the mouse actually answered the sleep read.
-        showAdvancedSection: sleep !== null,
+        // Auto sleep and button mappings are what this driver puts in that
+        // section, so it opens only when at least one of them answered.
+        showAdvancedSection: sleep !== null || buttonMappings !== null,
         forceShowBattery: battery ? true : undefined,
         defaultDisplayName: this.profile()?.model,
       },
@@ -299,8 +323,91 @@ export class RazerHidClient {
           landingRange: { min: RAZER_LANDING_MIN, max: RAZER_LANDING_MAX },
         }
         : null,
+      razerButtonMappings: buttonMappings ?? undefined,
       firmware: [`Mouse ${decodeFirmwareVersion(firmware)}`],
     };
+  }
+
+  /**
+   * Every shipped control's current state, keyed by control name — the four
+   * cross-assignable `RazerButtonControl`s and the three two-state
+   * `RazerToggleControl`s share one dict, since the view layer reads each
+   * family by iterating its own fixed control list (`RAZER_BUTTON_CONTROLS` /
+   * `RAZER_TOGGLE_CONTROLS`), and the two lists share no control names. Null
+   * on a model that has not been confirmed to support this write at all. A
+   * control whose reply this driver cannot decode is omitted rather than
+   * guessed at.
+   */
+  async readButtonMappings(): Promise<Record<string, string> | null> {
+    if (this.profile()?.buttonMapping !== true) return null;
+    const mappings: Record<string, string> = {};
+    await Promise.all([
+      ...RAZER_BUTTON_CONTROLS.map(async (control) => {
+        const reply = await this.request(razerReadButtonMappingCommand(control)).catch(() => null);
+        const mapping = reply ? razerDecodeButtonMapping(reply) : null;
+        if (mapping) mappings[control] = mapping;
+      }),
+      ...RAZER_TOGGLE_CONTROLS.map(async (control) => {
+        const reply = await this.request(razerReadToggleControlCommand(control)).catch(() => null);
+        const state = reply ? razerDecodeToggleControl(control, reply) : null;
+        if (state) mappings[control] = state;
+      }),
+    ]);
+    // Every control failing means the transport does not answer class 0x02 at
+    // all — the cable (0x00c0) has never been tested against it, only the
+    // receiver. Collapse that to null so the card is hidden outright rather
+    // than rendered empty, the same way readLiftOff degrades.
+    return Object.keys(mappings).length > 0 ? mappings : null;
+  }
+
+  /** Probes once, then trusts what setButtonMapping leaves behind. */
+  private async currentButtonMappings(): Promise<Record<string, string> | null> {
+    if (!this.buttonMappingsKnown) {
+      this.buttonMappings = await this.readButtonMappings();
+      this.buttonMappingsKnown = true;
+    }
+    return this.buttonMappings;
+  }
+
+  /**
+   * Sets one control's mapping and confirms it by reading the same control
+   * back — not a formality here: this write silently no-ops under the driver's
+   * default transaction id, so a status-only check would have shipped a
+   * control that looked correct and did nothing. See
+   * `RAZER_BUTTON_TRANSACTION_ID`.
+   */
+  async setButtonMapping(control: RazerButtonControl, mapping: RazerButtonMapping): Promise<RazerButtonMapping> {
+    await this.request(razerSetButtonMappingCommand(control, mapping));
+    const reply = await this.request(razerReadButtonMappingCommand(control));
+    const confirmed = razerDecodeButtonMapping(reply);
+    if (confirmed !== mapping) {
+      throw new Error(
+        `The mouse kept ${confirmed ?? "an unrecognised mapping"} for ${RAZER_BUTTON_CONTROL_LABEL[control]} instead of ${mapping}.`,
+      );
+    }
+    this.buttonMappings = { ...this.buttonMappings, [control]: confirmed };
+    this.buttonMappingsKnown = true;
+    return confirmed;
+  }
+
+  /**
+   * Sets a two-state control (Scroll Up/Down, the bottom sensitivity button)
+   * and confirms it the same way `setButtonMapping` does — read-back after
+   * write, not status alone. `label` must be the control's own enabled label
+   * or "Disabled"; `razerSetToggleControlCommand` throws otherwise.
+   */
+  async setToggleControl(control: RazerToggleControl, label: string): Promise<string> {
+    await this.request(razerSetToggleControlCommand(control, label));
+    const reply = await this.request(razerReadToggleControlCommand(control));
+    const confirmed = razerDecodeToggleControl(control, reply);
+    if (confirmed !== label) {
+      throw new Error(
+        `The mouse kept ${confirmed ?? "an unrecognised state"} for ${RAZER_TOGGLE_CONTROL_INFO[control].label} instead of ${label}.`,
+      );
+    }
+    this.buttonMappings = { ...this.buttonMappings, [control]: confirmed };
+    this.buttonMappingsKnown = true;
+    return confirmed;
   }
 
   async setDpi(dpi: number, dpiY: number = dpi): Promise<number> {
@@ -575,7 +682,13 @@ export class RazerHidClient {
 
   private async exchange(command: RazerCommand, transactionIdOverride?: number): Promise<Uint8Array> {
     await this.open();
-    const transactionId = transactionIdOverride ?? this.profile()?.transactionId ?? RAZER_TRANSACTION_ID;
+    // A command may pin its own transaction id — the class `0x02` button write
+    // silently no-ops under the shared one. An explicit call-site override
+    // still wins over both.
+    const transactionId = transactionIdOverride
+      ?? command.transactionId
+      ?? this.profile()?.transactionId
+      ?? RAZER_TRANSACTION_ID;
     const request = encodeRazerRequest(command, transactionId);
     // A busy status means the mouse will answer this same request later, so the
     // reads keep going without a re-send. A corrupt reply means the exchange
