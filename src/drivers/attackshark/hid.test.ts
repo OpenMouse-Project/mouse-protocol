@@ -47,16 +47,50 @@ function x11Entry(productId: number, collections: Array<[number, number]>): HIDD
   } as unknown as HIDDevice;
 }
 
-test("real X11 entries expose no feature reports and are refused", () => {
-  const entries = [
+test("X11 boot entries are refused; the composite status entry is claimed", () => {
+  const refused = [
     x11Entry(0xfa60, [[0x01, 0x06]]),
     x11Entry(0xfa60, [[0x01, 0x06]]),
     x11Entry(0xfa60, [[0x01, 0x02]]),
-    x11Entry(0xfa60, [[0x01, 0x80], [0x0c, 0x01], [0x0a, 0x00], [0x0b, 0x00]]),
   ];
-  for (const entry of entries) {
+  for (const entry of refused) {
     assert.equal(AttackSharkHidClient.isSupported(entry), false);
   }
+  const composite = x11Entry(0xfa60, [[0x01, 0x80], [0x0c, 0x01], [0x0a, 0x00], [0x0b, 0x00]]);
+  assert.equal(AttackSharkHidClient.isSupported(composite), true);
+  // An unknown 0x1d57 PID with the same shape stays refused: the read-only
+  // claim is scoped to units whose battery stream is documented.
+  const unknownPid = x11Entry(0x1234, [[0x01, 0x80], [0x0c, 0x01]]);
+  assert.equal(AttackSharkHidClient.isSupported(unknownPid), false);
+});
+
+test("X11 read-only client reports battery from input reports and refuses writes", async () => {
+  const listeners = new Map<string, (event: unknown) => void>();
+  const composite = {
+    ...x11Entry(0xfa60, [[0x01, 0x80], [0x0c, 0x01], [0x0a, 0x00], [0x0b, 0x00]]),
+    opened: false,
+    open() { (this as { opened: boolean }).opened = true; return Promise.resolve(); },
+    close() { (this as { opened: boolean }).opened = false; return Promise.resolve(); },
+    addEventListener(type: string, handler: (event: unknown) => void) { listeners.set(type, handler); },
+    removeEventListener(type: string) { listeners.delete(type); },
+  } as unknown as HIDDevice;
+
+  const client = new AttackSharkHidClient(composite);
+  const before = await client.readStatus();
+  assert.equal(before.name, "Attack Shark X11");
+  assert.equal(before.ui?.settingsReady, false);
+  assert.equal(before.ui?.forceShowBattery, true);
+  assert.equal(before.batteryPercent, null);
+  assert.equal(before.connectionType, "Wireless");
+
+  // Raw packet 03 55 40 01 50: WebHID moves the leading 0x03 into reportId.
+  const payload = new Uint8Array([0x55, 0x40, 0x01, 0x50]);
+  listeners.get("inputreport")?.({ reportId: 0x03, data: new DataView(payload.buffer) });
+  const after = await client.readStatus();
+  assert.equal(after.batteryPercent, 80);
+  assert.equal(after.batteryState, "Discharging");
+
+  await assert.rejects(() => client.setPollingRate(1000), /native Attack Shark X11 driver/);
 });
 
 test("X11-family grants get a native-only explanation, other refusals do not", () => {
