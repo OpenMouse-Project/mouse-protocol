@@ -17,6 +17,10 @@ import {
   ZAUNKOENIG_USAGE_PAGE,
   ZAUNKOENIG_VENDOR_ID,
 } from "@openmouse/protocol/zaunkoenig";
+import {
+  TEEVOLUTION_LCD_USAGE,
+  TEEVOLUTION_LCD_USAGE_PAGE,
+} from "@openmouse/protocol/teevolution";
 
 export const VENDOR_ID = {
   pulsar: 0x3710,
@@ -221,6 +225,12 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.lamzu },
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   ...TEEVOLUTION_PRODUCT_IDS.map((productId) => ({ vendorId: VENDOR_ID.teevolution, productId })),
+  ...TEEVOLUTION_PRODUCT_IDS.map((productId) => ({
+    vendorId: VENDOR_ID.teevolution,
+    productId,
+    usagePage: TEEVOLUTION_LCD_USAGE_PAGE,
+    usage: TEEVOLUTION_LCD_USAGE,
+  })),
   ...RAZER_MOUSE_DOCK_PRO_CONTROL_FILTERS,
   ...RAZER_VIPER_V2_CONTROL_FILTERS,
   ...RAZER_VIPER_V3_CONTROL_FILTERS,
