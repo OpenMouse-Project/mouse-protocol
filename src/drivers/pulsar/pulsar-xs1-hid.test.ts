@@ -129,7 +129,7 @@ test("reads the X3 status from the feature interface", async () => {
   const status = await client.readStatus();
 
   assert.equal(status.brand, "Pulsar");
-  assert.equal(status.name, "Pulsar X3 Medium 1K Dongle");
+  assert.equal(status.name, "Pulsar X3 M");
   assert.equal(status.connectionType, "Wireless");
   assert.equal(status.connectionDetail, "XS-1 feature-report interface");
   assert.equal(status.dpi, 1600);
