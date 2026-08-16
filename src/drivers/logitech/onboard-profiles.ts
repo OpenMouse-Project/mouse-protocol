@@ -54,7 +54,7 @@ const PROFILE_FORMAT_NAMES: Record<number, string> = {
  * release — see docs/logitech-onboard-profiles.md.
  */
 const VERIFIED_FORMATS = new Set([2, 3, 4, 7]);
-const WRITABLE_FORMATS = new Set([2, 4, 7]);
+const WRITABLE_FORMATS = new Set([2, 3, 4, 7]);
 const PROFILE_WRITE_PROBE_FORMATS = new Set([2, 3, 4]);
 const FACTORY_RESET_FORMATS = new Set([7]);
 
@@ -203,6 +203,17 @@ const FORMAT_CAPABILITIES: Record<number, ProfileFormatCapabilities> = {
     supportedLods: [],
     lodEncoding: LOD_ENCODING,
     dpiStages: { maxStages: 5, minDpi: 100, maxDpi: 25600, stepDpi: 50 },
+    reportRates: { wirelessMaxHz: 1000, wiredMaxHz: 1000 },
+    maxNameLength: PROFILE_NAME_MAX_CHARS,
+    bunnyHop: false,
+  },
+  // A G703 on format 3 reported four of five scalar slots, 50-12000 DPI in
+  // steps of 50, and 125/250/500/1000 Hz. Name, default-slot DPI, and wired
+  // rate writes were applied, confirmed live, and restored.
+  3: {
+    supportedLods: [],
+    lodEncoding: LOD_ENCODING,
+    dpiStages: { maxStages: 5, minDpi: 50, maxDpi: 12000, stepDpi: 50 },
     reportRates: { wirelessMaxHz: 1000, wiredMaxHz: 1000 },
     maxNameLength: PROFILE_NAME_MAX_CHARS,
     bunnyHop: false,

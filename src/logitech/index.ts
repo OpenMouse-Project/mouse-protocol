@@ -37,6 +37,7 @@ export const BOLT_PAIRING_SLOTS = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06] as const;
  *
  * G Pro / G502 / G403 HERO generation (HID++ 2.0, DPI feature 0x2202):
  * - 0xc085 — G Pro (wired, 2017)
+ * - 0xc087 — G703 (wired)
  * - 0xc08b — G502 HERO (wired)
  * - 0xc08c — G Pro Hero (wired)
  * - 0xc08e — G903 HERO (wired)
@@ -55,8 +56,8 @@ export const LOGITECH_DIRECT_PRODUCT_IDS = [
   0xc084, 0xc089, 0xc092,
   // G303 / G402 generation
   0xc07d, 0xc07e, 0xc080,
-  // G Pro / G502 / G403 HERO generation
-  0xc085, 0xc08b, 0xc08c, 0xc08e, 0xc08f,
+  // G Pro / G502 / G403 HERO / G703 generation
+  0xc085, 0xc087, 0xc08b, 0xc08c, 0xc08e, 0xc08f,
   // G Pro X Superlight generation
   0xc094,
   // G502 X generation
