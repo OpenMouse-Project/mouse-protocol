@@ -8,11 +8,15 @@ export const KEYCHRON_PRODUCTS = new Map<number, { name: string; receiver?: bool
   [0xd026, { name: "Keychron Link-KM", receiver: true }],
   [0xd029, { name: "Keychron Link-KM Type C", receiver: true }],
 ]);
-export const KEYCHRON_COMMAND = { firmwareVersion: 161, miscGroup: 167 } as const;
+export const KEYCHRON_COMMAND = { firmwareVersion: 161, getCurrentLayer: 163, miscGroup: 167 } as const;
+/** Standard VIA opcodes used by Nape for keymap metadata (not the 0xA7 misc group). */
+export const KEYCHRON_VIA_COMMAND = { getLayerCount: 17 } as const;
 export const KEYCHRON_NAPE_COMMAND = {
   getOrientation: 32, getDpiStage: 33, setDpiStage: 34, setDpiValue: 35,
-  getDpiValue: 36, getBattery: 49, getCustomDpi: 54, setCustomDpi: 55,
+  getDpiValue: 36, setLayer: 45, getBattery: 49, getCustomDpi: 54, setCustomDpi: 55,
 } as const;
+/** Nape Pro exposes eight user layers (1–8); VIA may report a spare slot above that. */
+export const KEYCHRON_NAPE_LAYER_COUNT = 8;
 export const KEYCHRON_MISC_COMMAND = {
   getSleep: 11,
   setSleep: 12,
@@ -80,5 +84,19 @@ export function keychronEncodeSleepTimeout(seconds: number): number[] {
     0,
     0,
   ];
+}
+
+export function keychronDecodeLayerCount(response: Uint8Array): number {
+  return response[1] ?? 0;
+}
+
+export function keychronDecodeCurrentLayer(response: Uint8Array): number {
+  const reported = response[1] ?? 1;
+  if (reported < 1) return 1;
+  return Math.min(reported, KEYCHRON_NAPE_LAYER_COUNT);
+}
+
+export function keychronEncodeSetLayer(layer: number): number[] {
+  return [KEYCHRON_COMMAND.miscGroup, KEYCHRON_NAPE_COMMAND.setLayer, layer & 0xff];
 }
 

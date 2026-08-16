@@ -11,18 +11,21 @@ const {
   KEYCHRON_NAPE_COMMAND,
   KEYCHRON_PACKET_LENGTH,
   KEYCHRON_POLLING_TABLE,
+  KEYCHRON_VIA_COMMAND,
 } = await import("@openmouse/protocol/keychron");
 const { VENDOR_ID } = await import("../vendors.ts");
 
 const CMD = KEYCHRON_COMMAND;
 const MISC = KEYCHRON_MISC_COMMAND;
 const NAPE = KEYCHRON_NAPE_COMMAND;
+const VIA = KEYCHRON_VIA_COMMAND;
 
 type FakeOptions = {
   productId?: number;
   productName?: string;
   /** Force orientation/DPI values that fail Nape Pro receiver verification. */
   incompatibleReceiver?: boolean;
+  layerCount?: number;
 };
 
 class FakeHidDevice {
@@ -44,6 +47,8 @@ class FakeHidDevice {
   private batteryStatus = 0;
   private orientation = 2; // 90°
   private firmware = "1.0.4";
+  private layerCount = 8;
+  private currentLayer = 1;
 
   constructor(options: FakeOptions = {}) {
     this.productId = options.productId ?? 0x0440;
@@ -56,6 +61,7 @@ class FakeHidDevice {
       inputReports: [{ reportId: 0, items: [{ reportCount: 32, reportSize: 8 }] }],
       outputReports: [{ reportId: 0, items: [{ reportCount: 32, reportSize: 8 }] }],
     }] as unknown as HIDCollectionInfo[];
+    this.layerCount = options.layerCount ?? 8;
     if (options.incompatibleReceiver) {
       this.orientation = 0xff;
       this.dpiStages = [40, 40, 40, 40, 40];
@@ -93,6 +99,20 @@ class FakeHidDevice {
       for (let index = 0; index < this.firmware.length; index += 1) {
         reply[1 + index] = this.firmware.charCodeAt(index);
       }
+      this.emit(reply);
+      return;
+    }
+
+    if (command === VIA.getLayerCount) {
+      reply[0] = VIA.getLayerCount;
+      reply[1] = this.layerCount;
+      this.emit(reply);
+      return;
+    }
+
+    if (command === CMD.getCurrentLayer) {
+      reply[0] = CMD.getCurrentLayer;
+      reply[1] = this.currentLayer;
       this.emit(reply);
       return;
     }
@@ -165,6 +185,11 @@ class FakeHidDevice {
       this.sleepSeconds = (request[4] ?? 0) | ((request[5] ?? 0) << 8);
       reply[2] = 0;
       this.emit(reply);
+      return;
+    }
+    if (sub === NAPE.setLayer) {
+      this.currentLayer = request[2] ?? this.currentLayer;
+      this.emit(reply);
     }
   }
 
@@ -232,6 +257,9 @@ test("reads wired Nape Pro status from Launcher misc commands", async () => {
   assert.equal(status.ui?.hideProcessingCard, true);
   assert.equal(status.ui?.showAdvancedSection, true);
   assert.equal(status.sleepTimeout, 600);
+  assert.equal(status.keychronLayer, 1);
+  assert.equal(status.keychronLayerCount, 8);
+  assert.match(status.connectionDetail ?? "", /Layer 1/);
   assert.equal(status.liftOffDistance, null);
 });
 
@@ -282,6 +310,25 @@ test("rejects receiver paths that are not paired to a Nape Pro", async () => {
     () => new KeychronHidClient(fake as unknown as HIDDevice).open(),
     /not paired to a Nape Pro/,
   );
+});
+
+test("switches the active VIA layer and confirms it by reading back", async () => {
+  const fake = new FakeHidDevice();
+  const client = new KeychronHidClient(fake as unknown as HIDDevice);
+  assert.equal(await client.setLayer(3), 3);
+  const status = await client.readStatus();
+  assert.equal(status.keychronLayer, 3);
+  assert.equal(status.keychronLayerCount, 8);
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === NAPE.setLayer && packet[2] === 3));
+  await assert.rejects(() => client.setLayer(0), /between 1 and 8/);
+  await assert.rejects(() => client.setLayer(9), /between 1 and 8/);
+});
+
+test("Nape Pro user layers stay at 1–8 even when VIA reports a spare slot", async () => {
+  const fake = new FakeHidDevice({ layerCount: 9 });
+  const status = await new KeychronHidClient(fake as unknown as HIDDevice).readStatus();
+  assert.equal(status.keychronLayerCount, 8);
 });
 
 test("unsupported sensor controls stay unavailable on this protocol", async () => {

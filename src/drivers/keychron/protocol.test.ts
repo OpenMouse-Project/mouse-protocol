@@ -7,12 +7,17 @@ import {
   KEYCHRON_NAPE_DPI_STEP,
   KEYCHRON_NAPE_SLEEP_MAX_SECONDS,
   KEYCHRON_NAPE_SLEEP_MIN_SECONDS,
+  KEYCHRON_NAPE_LAYER_COUNT,
   KEYCHRON_PACKET_LENGTH,
   KEYCHRON_POLLING_TABLE,
+  KEYCHRON_VIA_COMMAND,
   keychronDecodeBattery,
+  keychronDecodeCurrentLayer,
   keychronDecodeFirmware,
+  keychronDecodeLayerCount,
   keychronDecodePolling,
   keychronDecodeSleepTimeout,
+  keychronEncodeSetLayer,
   keychronEncodeSleepTimeout,
   keychronPacket,
 } from "@openmouse/protocol/keychron";
@@ -88,4 +93,17 @@ test("sleep decodes little-endian seconds from the Get_Sleep reply layout", () =
 test("sleep encodes the trackball Set_Sleep payload (sleep LE at bytes 4–5)", () => {
   assert.deepEqual(keychronEncodeSleepTimeout(61), [167, 12, 0, 0, 0x3d, 0, 0, 0]);
   assert.deepEqual(keychronEncodeSleepTimeout(43200), [167, 12, 0, 0, 0xc0, 0xa8, 0, 0]);
+});
+
+test("VIA layer count and current-layer get/set use 1–8", () => {
+  assert.equal(KEYCHRON_VIA_COMMAND.getLayerCount, 17);
+  assert.equal(KEYCHRON_NAPE_LAYER_COUNT, 8);
+  assert.equal(keychronDecodeLayerCount(new Uint8Array([17, 8])), 8);
+  assert.equal(keychronDecodeCurrentLayer(new Uint8Array([163, 1])), 1);
+  assert.equal(keychronDecodeCurrentLayer(new Uint8Array([163, 3])), 3);
+  assert.equal(keychronDecodeCurrentLayer(new Uint8Array([163, 8])), 8);
+  assert.equal(keychronDecodeCurrentLayer(new Uint8Array([163, 0])), 1);
+  assert.deepEqual(keychronEncodeSetLayer(1), [167, 45, 1]);
+  assert.deepEqual(keychronEncodeSetLayer(2), [167, 45, 2]);
+  assert.deepEqual(keychronEncodeSetLayer(8), [167, 45, 8]);
 });

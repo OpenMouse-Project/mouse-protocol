@@ -6,6 +6,7 @@ import {
   KEYCHRON_NAPE_DPI_MAX as DPI_MAX,
   KEYCHRON_NAPE_DPI_MIN as DPI_MIN,
   KEYCHRON_NAPE_DPI_STEP as DPI_STEP,
+  KEYCHRON_NAPE_LAYER_COUNT as LAYER_COUNT,
   KEYCHRON_NAPE_SLEEP_MAX_SECONDS as SLEEP_MAX,
   KEYCHRON_NAPE_SLEEP_MIN_SECONDS as SLEEP_MIN,
   KEYCHRON_NAPE_SLEEP_OPTIONS as SLEEP_OPTIONS,
@@ -15,10 +16,14 @@ import {
   KEYCHRON_RAW_USAGE_PAGE as RAW_USAGE_PAGE,
   KEYCHRON_REPORT_ID as REPORT_ID,
   KEYCHRON_VENDOR_ID,
+  KEYCHRON_VIA_COMMAND as VIA,
   keychronDecodeBattery,
+  keychronDecodeCurrentLayer,
   keychronDecodeFirmware,
+  keychronDecodeLayerCount,
   keychronDecodePolling,
   keychronDecodeSleepTimeout,
+  keychronEncodeSetLayer,
   keychronEncodeSleepTimeout,
   keychronPacket,
 } from "@openmouse/protocol/keychron";
@@ -145,6 +150,7 @@ export class KeychronHidClient {
     const polling = await this.getPolling().catch(() => null);
     const orientation = await this.getOrientation().catch(() => null);
     const sleepTimeout = await this.getSleepTimeout().catch(() => null);
+    const layers = await this.readLayers().catch(() => null);
     const active = stages.find((entry) => entry.index === stage) ?? stages[0];
     const dpi = active?.value ?? 800;
     const product = PRODUCTS.get(this.device.productId);
@@ -156,6 +162,7 @@ export class KeychronHidClient {
       viaReceiver ? `2.4 GHz (${product?.name ?? "receiver"})` : "Wired USB",
       orientation !== null ? `${orientation}\u00b0 orientation` : null,
       `DPI stage ${stage + 1}/${DPI_STAGE_COUNT}`,
+      layers ? `Layer ${layers.current}` : null,
     ].filter(Boolean).join(" · ");
 
     return {
@@ -189,6 +196,8 @@ export class KeychronHidClient {
       liftOffDistance: null,
       supportedLiftOffDistances: [],
       sleepTimeout,
+      keychronLayer: layers?.current,
+      keychronLayerCount: layers?.count,
       firmware: [firmware ?? "Firmware unavailable"],
     };
   }
@@ -282,6 +291,24 @@ export class KeychronHidClient {
 
   async setPerformanceMode(_enabled: boolean): Promise<never> {
     throw new Error("Performance mode is not exposed by the Nape Pro Launcher protocol.");
+  }
+
+  /** Selects the active user layer (1–8). */
+  async setLayer(layer: number): Promise<number> {
+    await this.open();
+    const count = await this.usableLayerCount();
+    if (!Number.isInteger(layer) || layer < 1 || layer > count) {
+      throw new Error(`Layer must be between 1 and ${count}.`);
+    }
+    await this.query(
+      (bytes) => bytes[0] === CMD.miscGroup && bytes[1] === NAPE.setLayer,
+      keychronEncodeSetLayer(layer),
+    );
+    const confirmed = await this.getCurrentLayer();
+    if (confirmed !== layer) {
+      throw new Error(`The mouse kept layer ${confirmed} instead of layer ${layer}.`);
+    }
+    return confirmed;
   }
 
   private async getDpiStage(): Promise<number> {
@@ -382,6 +409,35 @@ export class KeychronHidClient {
       [CMD.firmwareVersion],
     );
     return keychronDecodeFirmware(response);
+  }
+
+  private async readLayers(): Promise<{ count: number; current: number } | null> {
+    const count = await this.usableLayerCount();
+    if (count < 1) return null;
+    const current = Math.min(Math.max(await this.getCurrentLayer(), 1), count);
+    return { count, current };
+  }
+
+  private async usableLayerCount(): Promise<number> {
+    const reported = await this.getLayerCount();
+    if (reported < 1) return 0;
+    return Math.min(reported, LAYER_COUNT);
+  }
+
+  private async getLayerCount(): Promise<number> {
+    const response = await this.query(
+      (bytes) => bytes[0] === VIA.getLayerCount,
+      [VIA.getLayerCount],
+    );
+    return keychronDecodeLayerCount(response);
+  }
+
+  private async getCurrentLayer(): Promise<number> {
+    const response = await this.query(
+      (bytes) => bytes[0] === CMD.getCurrentLayer,
+      [CMD.getCurrentLayer],
+    );
+    return keychronDecodeCurrentLayer(response);
   }
 
   private async write(command: number[]): Promise<void> {
