@@ -127,6 +127,20 @@ export const RAZER_WRITE = {
    * Silently rejects `RAZER_TRANSACTION_ID` — see `RAZER_BUTTON_TRANSACTION_ID`.
    * `razerSetButtonMappingCommand` and `razerSetToggleControlCommand` are the
    * only places that should build this.
+   *
+   * **Stored in device memory, not volatile.** Confirmed on a Viper V3 Pro
+   * (`0x00c1`): Mouse Button 4 was disabled, the host application closed, the
+   * mouse powered off at its switch for 10 seconds and powered back on. The
+   * button was still dead on reconnect and the read reported Disabled, with
+   * Synapse never running. So a caller does not need to re-apply mappings
+   * after a power cycle, and a user's change survives independently of any
+   * host software.
+   *
+   * The leading argument byte is always `0x01` here. On this device `0x01` is
+   * also `RAZER_STORAGE`, the persistent store DPI writes through, which makes
+   * a storage selector the obvious reading — but that byte has never been
+   * varied on this command, so it is recorded as an unknown rather than
+   * assigned that meaning.
    */
   buttonMapping: {
     commandClass: 0x02,
