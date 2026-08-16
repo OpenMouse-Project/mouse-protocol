@@ -11,6 +11,15 @@ import { LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
 // PIDs change between firmware revisions, so detection is collection-based,
 // not PID-based. For 0x373e we exclude known Lamzu PIDs.
 //
+// Real X11 hardware (0x1d57, wired 0xfa55 and wireless 0xfa60) exposes NO
+// feature reports to the browser on any of its four HID entries: its config
+// channel lives on keyboard/system-control collections, which Chromium
+// always protects (reports hidden from the page, transfers refused), and
+// Windows additionally rejects SET_REPORT for report ids a collection does
+// not declare. This is why the reference X11 drivers are native USB apps.
+// The collection gate below therefore correctly refuses these units; the
+// X11-family helper further down turns that refusal into a real explanation.
+//
 // Protocol source: xb-bx/attack-shark-r1-driver (Odin)
 //                  HarukaYamamoto0/attack-shark-x11-driver (TypeScript)
 //                  Research credit: viix0dev
@@ -53,6 +62,36 @@ function hasFeatureReports(collection: HIDCollectionInfo): boolean {
 function hasVendorControl(collection: HIDCollectionInfo): boolean {
   if (collection.usagePage === 0xffff && collection.featureReports.length > 0) return true;
   return collection.children.some(hasVendorControl);
+}
+
+// ── X11 family (native-only in practice) ─────────────────────────────────
+
+// Documented 0x1d57 PIDs: wired X11, wireless X11 receiver, R1.
+const X11_FAMILY_PIDS: ReadonlySet<number> = new Set([0xfa55, 0xfa60, 0xfa61]);
+
+const X11_FAMILY_NAMES: ReadonlyMap<number, string> = new Map([
+  [0xfa55, "Attack Shark X11 (wired)"],
+  [0xfa60, "Attack Shark X11 (wireless receiver)"],
+  [0xfa61, "Attack Shark R1"],
+]);
+
+/**
+ * If the granted devices include an X11-family unit that no driver could
+ * claim, explain why instead of letting the generic "not a control
+ * interface" error blame the picker choice: the config channel sits on
+ * browser-protected collections, so no selectable entry can ever answer.
+ * Returns null when no X11-family device is present.
+ */
+export function attackSharkNativeOnlyMessage(devices: HIDDevice[]): string | null {
+  const unit = devices.find(
+    (device) => device.vendorId === VID_1D57 && X11_FAMILY_PIDS.has(device.productId),
+  );
+  if (!unit) return null;
+  const name = X11_FAMILY_NAMES.get(unit.productId) ?? "Attack Shark X11";
+  return `The ${name} cannot be configured in the browser: its settings channel `
+    + "sits on keyboard/system HID collections that Chrome always protects, so no "
+    + "entry in the picker can carry its commands. Configuring this mouse needs a "
+    + "native desktop driver (e.g. the open-source Attack Shark X11 driver).";
 }
 
 // ── Protocol family detection ─────────────────────────────────────────────
