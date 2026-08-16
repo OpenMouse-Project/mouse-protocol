@@ -53,7 +53,9 @@ const POLLING_RATES_1D57: ReadonlyArray<readonly [number, number]> = [
 const DPI_READ_REPORT_ID = 0xa0;
 
 // Battery arrives as input report with this 4-byte signature; byte 4 = %.
+// The leading 0x03 is the HID report id of the battery packet.
 const BATTERY_SIGNATURE = [0x03, 0x55, 0x40, 0x01];
+const BATTERY_REPORT_ID = BATTERY_SIGNATURE[0];
 
 // ── Collection helpers ─────────────────────────────────────────────────────
 
@@ -65,6 +67,11 @@ function hasFeatureReports(collection: HIDCollectionInfo): boolean {
 function hasVendorControl(collection: HIDCollectionInfo): boolean {
   if (collection.usagePage === 0xffff && collection.featureReports.length > 0) return true;
   return collection.children.some(hasVendorControl);
+}
+
+function declaresInputReport(collection: HIDCollectionInfo, reportId: number): boolean {
+  if (collection.inputReports.some((report) => report.reportId === reportId)) return true;
+  return collection.children.some((child) => declaresInputReport(child, reportId));
 }
 
 // ── X11 family (config is native-only; battery is readable) ──────────────
@@ -246,9 +253,17 @@ export class AttackSharkHidClient {
         settingsReady: this.family === "1d57",
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
-        // Wireless X11-family units push battery on their own; keep the
-        // column visible while the first packet is still on its way.
-        forceShowBattery: this.family === "1d57-x11" && this.isWireless(),
+        // Wireless X11-family units push battery on their own — but only
+        // show the column when the battery report is actually visible to
+        // the browser. On known units it is declared under the protected
+        // system-control collection, so Chrome hides it and the packet can
+        // never arrive; an always-empty battery column would just confuse.
+        forceShowBattery: this.family === "1d57-x11"
+          && this.isWireless()
+          && this.device.collections.some((collection) => declaresInputReport(collection, BATTERY_REPORT_ID)),
+        statusNote: this.family === "1d57-x11"
+          ? "Status only: this mouse's settings channel is not reachable from a browser and needs a native driver."
+          : undefined,
       },
       batteryPercent: this.batteryPercent,
       batteryState: this.batteryPercent !== null ? "Discharging" : "Unknown",

@@ -66,8 +66,11 @@ test("X11 boot entries are refused; the composite status entry is claimed", () =
 
 test("X11 read-only client reports battery from input reports and refuses writes", async () => {
   const listeners = new Map<string, (event: unknown) => void>();
+  const base = x11Entry(0xfa60, [[0x01, 0x80], [0x0c, 0x01]]);
+  // A unit whose battery report (id 0x03) is visible on the consumer collection.
+  (base.collections[1] as { inputReports: unknown[] }).inputReports = [{ reportId: 0x03, items: [] }];
   const composite = {
-    ...x11Entry(0xfa60, [[0x01, 0x80], [0x0c, 0x01], [0x0a, 0x00], [0x0b, 0x00]]),
+    ...base,
     opened: false,
     open() { (this as { opened: boolean }).opened = true; return Promise.resolve(); },
     close() { (this as { opened: boolean }).opened = false; return Promise.resolve(); },
@@ -80,6 +83,7 @@ test("X11 read-only client reports battery from input reports and refuses writes
   assert.equal(before.name, "Attack Shark X11");
   assert.equal(before.ui?.settingsReady, false);
   assert.equal(before.ui?.forceShowBattery, true);
+  assert.match(before.ui?.statusNote ?? "", /needs a native driver/);
   assert.equal(before.batteryPercent, null);
   assert.equal(before.connectionType, "Wireless");
 
@@ -91,6 +95,24 @@ test("X11 read-only client reports battery from input reports and refuses writes
   assert.equal(after.batteryState, "Discharging");
 
   await assert.rejects(() => client.setPollingRate(1000), /native Attack Shark X11 driver/);
+});
+
+test("X11 units whose battery report is hidden do not advertise a battery column", async () => {
+  // Real receivers declare the battery report under the protected
+  // system-control collection, which Chrome hides — collections then show
+  // no input report 0x03 at all (openmouse-1d57-fa60 diagnostics).
+  const composite = {
+    ...x11Entry(0xfa60, [[0x01, 0x80], [0x0c, 0x01]]),
+    opened: true,
+    open: () => Promise.resolve(),
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  } as unknown as HIDDevice;
+  (composite.collections[1] as { inputReports: unknown[] }).inputReports = [{ reportId: 0x02, items: [] }];
+
+  const client = new AttackSharkHidClient(composite);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.forceShowBattery, false);
 });
 
 test("X11-family grants get a native-only explanation, other refusals do not", () => {
