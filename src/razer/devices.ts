@@ -72,6 +72,15 @@ export interface RazerProduct {
   transactionId: number;
   /** Battery commands only exist on models that have a cell. */
   hasBattery: boolean;
+  /**
+   * Class `0x02` button mapping (`RAZER_READ`/`RAZER_WRITE.buttonMapping`) has
+   * only ever been exercised on the Viper V3 Pro. Other Razer mice may well use
+   * a different class or a different control-index scheme, so nothing is
+   * offered to them until it has been checked on hardware. Gates both
+   * `RazerButtonControl` and `RazerToggleControl` — same command, same
+   * per-model risk, no reason to split them.
+   */
+  buttonMapping?: boolean;
   /** Also accept a vendor-defined collection as the control interface. */
   vendorControlInterface?: boolean;
   /** DPI storage selector; some generations use the no-store command form. */
@@ -377,7 +386,12 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   [0x00a5, { model: "Viper V2 Pro", wireless: false, highRatePolling: false, ...VIPER_V2_PRO }],
   [0x00a6, { model: "Viper V2 Pro", wireless: true, highRatePolling: true, ...VIPER_V2_PRO }],
   [0x00c0, { model: "Viper V3 Pro", wireless: false, pollingRates: RATES_1K, highRatePolling: false, ...VIPER_V3_PRO }],
-  [0x00c1, { model: "Viper V3 Pro", wireless: true, pollingRates: RATES_8K, highRatePolling: true, ...VIPER_V3_PRO }],
+  // `buttonMapping` is set here rather than on the shared `VIPER_V3_PRO`
+  // preset because class 0x02 has only ever been exercised over the receiver.
+  // The cable (0x00c0) is the same mouse and very likely answers the same way,
+  // but that has not been checked, and a shared protocol family is not
+  // evidence for a specific product id and connection path.
+  [0x00c1, { model: "Viper V3 Pro", wireless: true, pollingRates: RATES_8K, highRatePolling: true, ...VIPER_V3_PRO, buttonMapping: true }],
   [0x006e, { model: "DeathAdder Essential", ...DEATHADDER_ESSENTIAL }],
   [0x0071, { model: "DeathAdder Essential White Edition", ...DEATHADDER_ESSENTIAL }],
   [0x0098, { model: "DeathAdder Essential (2021)", ...DEATHADDER_ESSENTIAL }],

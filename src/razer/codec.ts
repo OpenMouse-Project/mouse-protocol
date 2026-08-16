@@ -34,6 +34,18 @@ export const RAZER_TRANSACTION_ID_1F = 0x1f;
  */
 export const RAZER_TRANSACTION_ID = RAZER_TRANSACTION_ID_1F;
 
+/**
+ * The button-mapping write (class `0x02`) is the one command on this mouse
+ * that rejects `RAZER_TRANSACTION_ID` silently: status `0x02` (ok), the
+ * read-back even changes, but the physical button keeps its old function.
+ * Confirmed on hardware by writing a plain mouse-button action, pressing the
+ * button, and finding it unchanged with `0x1f` and correct with any other id
+ * (`0x02` and `0x10` both round-tripped and worked physically). Every other
+ * write on this mouse uses `0x1f` without issue, so this is specific to class
+ * `0x02` rather than a general transport quirk.
+ */
+export const RAZER_BUTTON_TRANSACTION_ID = 0x10;
+
 const ARGS_OFFSET = 8;
 const CHECKSUM_INDEX = 88;
 const CHECKSUM_FIRST = 2;
@@ -55,6 +67,8 @@ export interface RazerCommand {
   commandId: number;
   dataSize: number;
   args?: readonly number[];
+  /** Overrides the per-product transaction id for this command alone. See `RAZER_BUTTON_TRANSACTION_ID`. */
+  transactionId?: number;
 }
 
 /**
@@ -82,6 +96,15 @@ export const RAZER_READ = {
   pollingRate: { commandClass: 0x00, commandId: 0x85, dataSize: 0x01 },
   pollingRateExtended: { commandClass: 0x00, commandId: 0xc0, dataSize: 0x02, args: [0x00] },
   liftOff: { commandClass: 0x0b, commandId: 0x85, dataSize: 0x05 },
+  /**
+   * One control's button mapping. `args` is `[0x01, controlIndex, layer]`.
+   * `controlIndex` reliably selects the right control — confirmed by reading
+   * several controls back to back and always getting that control's own data.
+   * `layer` is not honored the same way: requesting Hypershift (`0x01`) for a
+   * control whose Standard mapping was just read back returned the Standard
+   * value again. Only Standard-layer reads are trusted.
+   */
+  buttonMapping: { commandClass: 0x02, commandId: 0x8c, dataSize: 0x0a },
 } as const satisfies Record<string, RazerCommand>;
 
 /**
@@ -100,6 +123,17 @@ export const RAZER_WRITE = {
   sensorSetting: { commandClass: 0x0b, commandId: 0x0b, dataSize: 0x04 },
   sleepTimeout: { commandClass: 0x07, commandId: 0x03, dataSize: 0x02 },
   lowPowerThreshold: { commandClass: 0x07, commandId: 0x01, dataSize: 0x02 },
+  /**
+   * Silently rejects `RAZER_TRANSACTION_ID` — see `RAZER_BUTTON_TRANSACTION_ID`.
+   * `razerSetButtonMappingCommand` and `razerSetToggleControlCommand` are the
+   * only places that should build this.
+   */
+  buttonMapping: {
+    commandClass: 0x02,
+    commandId: 0x0c,
+    dataSize: 0x0a,
+    transactionId: RAZER_BUTTON_TRANSACTION_ID,
+  },
 } as const satisfies Record<string, Omit<RazerCommand, "args">>;
 
 export function razerSetDpiCommand(x: number, y: number, storageByte: number = RAZER_STORAGE): RazerCommand {
@@ -542,3 +576,189 @@ export function decodeExtendedPollingRate(args: Uint8Array): number {
   return Math.round(8000 / args[1]);
 }
 
+
+/**
+ * The four controls the button-mapping write has been confirmed against, on
+ * the Viper V3 Pro's Standard layer. Left Click and Right Click use standard
+ * USB HID button numbering (1, 2), confirmed physically rather than assumed —
+ * writing Mouse Button 4's slot with each index and pressing it produced a
+ * real left-click and right-click. Mouse Button 4/5 matched their Synapse
+ * names directly. Cross-assignable among each other, plus Disabled.
+ *
+ * Scroll Up, Scroll Down and the bottom sensitivity button ship too, but as a
+ * separate, narrower kind of control — see `RazerToggleControl`. Scroll Click
+ * and Hypershift remain unshipped: Scroll Click's index is known but this
+ * driver's own write to it has only been physically checked against the wrong
+ * action, and Hypershift's read does not honour a requested layer at all.
+ */
+export type RazerButtonControl = "leftClick" | "rightClick" | "mouse4" | "mouse5";
+
+export const RAZER_BUTTON_CONTROLS: readonly RazerButtonControl[] = ["leftClick", "rightClick", "mouse4", "mouse5"];
+
+const RAZER_BUTTON_CONTROL_INDEX: Record<RazerButtonControl, number> = {
+  leftClick: 0x01,
+  rightClick: 0x02,
+  mouse4: 0x04,
+  mouse5: 0x05,
+};
+
+/** Every mapping the panel can offer: each control's own action, plus Disabled. */
+export const RAZER_BUTTON_MAPPINGS = ["Left Click", "Right Click", "Mouse Button 4", "Mouse Button 5", "Disabled"] as const;
+export type RazerButtonMapping = (typeof RAZER_BUTTON_MAPPINGS)[number];
+
+// Each control's own label doubles as the mapping that plays its native
+// action, so the type carries that: "leftClick"'s label is also a valid
+// RazerButtonMapping, not just display text.
+export const RAZER_BUTTON_CONTROL_LABEL: Record<RazerButtonControl, RazerButtonMapping> = {
+  leftClick: "Left Click",
+  rightClick: "Right Click",
+  mouse4: "Mouse Button 4",
+  mouse5: "Mouse Button 5",
+};
+
+const RAZER_MAPPING_CONTROL: Partial<Record<RazerButtonMapping, RazerButtonControl>> = Object.fromEntries(
+  RAZER_BUTTON_CONTROLS.map((control) => [RAZER_BUTTON_CONTROL_LABEL[control], control]),
+);
+
+/**
+ * Encodes a mapping into the write's trailing `[type, len, value]`.
+ * `type=0x01, len=0x01, value=<control index>` makes the target control
+ * perform *that* index's action — confirmed cross-control on hardware, not
+ * just identity: Mouse Button 4 written with Right Click's index physically
+ * right-clicked. `type=0x00` is Disabled.
+ */
+function razerEncodeButtonMapping(mapping: RazerButtonMapping): readonly [number, number, number] {
+  if (mapping === "Disabled") return [0x00, 0x00, 0x00];
+  const control = RAZER_MAPPING_CONTROL[mapping];
+  if (!control) throw new RazerProtocolError(`"${mapping}" is not a button mapping this driver can send.`);
+  return [0x01, 0x01, RAZER_BUTTON_CONTROL_INDEX[control]];
+}
+
+/**
+ * Decodes a button-mapping reply back to a label. Returns null for an
+ * encoding this driver does not recognise — a keyboard shortcut, a control
+ * outside the four shipped here, or anything else unmapped — so a caller can
+ * preserve it rather than misrepresent it as one of the known five.
+ */
+export function razerDecodeButtonMapping(args: Uint8Array): RazerButtonMapping | null {
+  const type = args[3];
+  const value = args[5];
+  if (type === 0x00) return "Disabled";
+  if (type !== 0x01) return null;
+  const control = RAZER_BUTTON_CONTROLS.find((candidate) => RAZER_BUTTON_CONTROL_INDEX[candidate] === value);
+  return control ? RAZER_BUTTON_CONTROL_LABEL[control] : null;
+}
+
+/** Only the Standard layer is trusted for reads — see `RAZER_READ.buttonMapping`. */
+export function razerReadButtonMappingCommand(control: RazerButtonControl): RazerCommand {
+  return { ...RAZER_READ.buttonMapping, args: [0x01, RAZER_BUTTON_CONTROL_INDEX[control], 0x00] };
+}
+
+/**
+ * Left Click cannot be reassigned or disabled on the Standard layer — Synapse
+ * enforces the same restriction, presumably because it is the only reliable
+ * way to interact with Windows (and with Synapse itself) at all. Exported so
+ * the UI can disable the control outright instead of letting a user hit the
+ * error.
+ */
+export const RAZER_LOCKED_BUTTON_CONTROL: RazerButtonControl = "leftClick";
+
+export function razerSetButtonMappingCommand(control: RazerButtonControl, mapping: RazerButtonMapping): RazerCommand {
+  if (control === RAZER_LOCKED_BUTTON_CONTROL && mapping !== RAZER_BUTTON_CONTROL_LABEL[RAZER_LOCKED_BUTTON_CONTROL]) {
+    throw new RazerProtocolError(
+      `${RAZER_BUTTON_CONTROL_LABEL[RAZER_LOCKED_BUTTON_CONTROL]} is fixed on the Standard layer and cannot be reassigned or disabled.`,
+    );
+  }
+  const [type, len, value] = razerEncodeButtonMapping(mapping);
+  return {
+    ...RAZER_WRITE.buttonMapping,
+    args: [0x01, RAZER_BUTTON_CONTROL_INDEX[control], 0x00, type, len, value, 0x00, 0x00, 0x00, 0x00],
+  };
+}
+
+/**
+ * Scroll Up, Scroll Down and the bottom sensitivity button, each restricted
+ * to exactly two states: their own factory action, or Disabled. Unlike
+ * `RazerButtonControl`, these are not cross-assignable — assigning one of
+ * these an action from `RAZER_BUTTON_MAPPINGS`, or assigning a button one of
+ * these controls' actions, has never been attempted on hardware and is not
+ * exposed here. Deliberately a separate type from `RazerButtonControl` and
+ * kept out of `RAZER_BUTTON_MAPPINGS` for that reason, even though three of
+ * these four values would otherwise fit the same plain-action shape.
+ *
+ * Each control's enabled state is a fixed, opaque payload captured verbatim
+ * from the mouse rather than something constructed from a shared formula,
+ * because the bottom sensitivity button's default ("Cycle Up Sensitivity
+ * Stages") is not a plain-button action at all — `actionType=0x06`, a type
+ * this driver otherwise never decodes.
+ *
+ * Scroll Click (index `0x03`) is deliberately not included: its index is
+ * known and Synapse's own disable was physically confirmed, but the one
+ * physical test run against this driver's own write to that index checked
+ * the wrong result (scroll-down instead of the click), so it has not
+ * separately cleared this driver's own bar yet.
+ */
+export type RazerToggleControl = "scrollUp" | "scrollDown" | "sensitivityButton";
+
+export const RAZER_TOGGLE_CONTROLS: readonly RazerToggleControl[] = ["scrollUp", "scrollDown", "sensitivityButton"];
+
+export interface RazerToggleControlInfo {
+  index: number;
+  /** Display heading for the control itself, independent of its current state. */
+  label: string;
+  /** The label for this control's one non-Disabled state. */
+  enabledLabel: string;
+  /** `[actionType, actionLen, actionValue]` for the enabled state, captured verbatim from the mouse. */
+  enabledArgs: readonly [number, number, number];
+}
+
+export const RAZER_TOGGLE_CONTROL_INFO: Record<RazerToggleControl, RazerToggleControlInfo> = {
+  scrollUp: { index: 0x09, label: "Scroll Up", enabledLabel: "Scroll Up", enabledArgs: [0x01, 0x01, 0x09] },
+  scrollDown: { index: 0x0a, label: "Scroll Down", enabledLabel: "Scroll Down", enabledArgs: [0x01, 0x01, 0x0a] },
+  sensitivityButton: {
+    index: 0x60,
+    label: "Sensitivity Button",
+    enabledLabel: "Cycle Up Sensitivity Stages",
+    enabledArgs: [0x06, 0x01, 0x06],
+  },
+};
+
+/** Only the Standard layer is trusted for reads — see `RAZER_READ.buttonMapping`. */
+export function razerReadToggleControlCommand(control: RazerToggleControl): RazerCommand {
+  return { ...RAZER_READ.buttonMapping, args: [0x01, RAZER_TOGGLE_CONTROL_INFO[control].index, 0x00] };
+}
+
+/**
+ * Decodes a toggle control's reply to its own enabled label or "Disabled".
+ * Returns null for anything else — Hypershift data, a Synapse reassignment
+ * this driver has never captured, or noise — so a caller can preserve it
+ * rather than misrepresent it as one of the two known states.
+ */
+export function razerDecodeToggleControl(control: RazerToggleControl, args: Uint8Array): string | null {
+  const type = args[3];
+  const len = args[4];
+  const value = args[5];
+  if (type === 0x00 && len === 0x00 && value === 0x00) return "Disabled";
+  const info = RAZER_TOGGLE_CONTROL_INFO[control];
+  const [enabledType, enabledLen, enabledValue] = info.enabledArgs;
+  if (type === enabledType && len === enabledLen && value === enabledValue) return info.enabledLabel;
+  return null;
+}
+
+export function razerSetToggleControlCommand(control: RazerToggleControl, label: string): RazerCommand {
+  const info = RAZER_TOGGLE_CONTROL_INFO[control];
+  let type: number;
+  let len: number;
+  let value: number;
+  if (label === "Disabled") {
+    [type, len, value] = [0x00, 0x00, 0x00];
+  } else if (label === info.enabledLabel) {
+    [type, len, value] = info.enabledArgs;
+  } else {
+    throw new RazerProtocolError(`${info.label} only supports "${info.enabledLabel}" or "Disabled".`);
+  }
+  return {
+    ...RAZER_WRITE.buttonMapping,
+    args: [0x01, info.index, 0x00, type, len, value, 0x00, 0x00, 0x00, 0x00],
+  };
+}
