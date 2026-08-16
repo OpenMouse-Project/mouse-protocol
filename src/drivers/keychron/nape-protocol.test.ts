@@ -18,6 +18,7 @@ import {
   keychronActionForKeycode,
   keychronDecodeKeymapBuffer,
   keychronEncodeGetBuffer,
+  keychronEncodeGetLayerOrientation,
   keychronEncodeSetEncoder,
   keychronEncodeSetKeycode,
   keychronKeycodeForAction,
@@ -31,7 +32,11 @@ import {
   keychronDecodePolling,
   keychronDecodeSleepTimeout,
   keychronEncodeSetLayer,
+  keychronEncodeSetLayerOrientation,
+  keychronEncodeSetOrientation,
   keychronEncodeSleepTimeout,
+  keychronOrientationDegrees,
+  keychronOrientationLabel,
   keychronPacket,
 } from "@openmouse/protocol/keychron";
 
@@ -121,6 +126,15 @@ test("VIA layer count and current-layer get/set use 1–8", () => {
   assert.deepEqual(keychronEncodeSetLayer(8), [167, 45, 8]);
 });
 
+test("per-layer orientation is eight 45° steps packed as [57, layer, index]", () => {
+  assert.equal(keychronOrientationDegrees(0), 0);
+  assert.equal(keychronOrientationDegrees(2), 90);
+  assert.equal(keychronOrientationLabel(5), "225°");
+  assert.deepEqual(keychronEncodeSetOrientation(2), [167, 52, 2]);
+  assert.deepEqual(keychronEncodeGetLayerOrientation(3), [167, 56, 3]);
+  assert.deepEqual(keychronEncodeSetLayerOrientation(3, 5), [167, 57, 3, 5]);
+});
+
 test("VIA keymap buffer is packed 7 big-endian keycodes per layer", () => {
   assert.equal(KEYCHRON_VIA_COMMAND.getBuffer, 18);
   assert.deepEqual(keychronEncodeGetBuffer(0), [18, 0, 0, 14]);
@@ -163,4 +177,5 @@ test("protocol-12 mouse and CUSTOM actions round-trip through the Nape catalog",
   assert.equal(map.keys[3]?.action, "DPI cycle");
   assert.equal(map.wheel.ccw.action, "Volume down");
   assert.equal(map.wheel.cw.action, "Volume up");
+  assert.equal(map.orientationIndex, 0);
 });

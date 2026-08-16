@@ -8,6 +8,7 @@ import {
   KEYCHRON_NAPE_DPI_MIN as DPI_MIN,
   KEYCHRON_NAPE_DPI_STEP as DPI_STEP,
   KEYCHRON_NAPE_LAYER_COUNT as LAYER_COUNT,
+  KEYCHRON_NAPE_ORIENTATION_STEPS as ORIENTATION_STEPS,
   KEYCHRON_NAPE_SLEEP_MAX_SECONDS as SLEEP_MAX,
   KEYCHRON_NAPE_SLEEP_MIN_SECONDS as SLEEP_MIN,
   KEYCHRON_NAPE_SLEEP_OPTIONS as SLEEP_OPTIONS,
@@ -26,15 +27,21 @@ import {
   keychronDecodeLayerCount,
   keychronDecodePolling,
   keychronDecodeSleepTimeout,
+  keychronDecodeOrientationIndex,
   keychronEncodeGetBuffer,
   keychronEncodeGetEncoder,
   keychronEncodeGetKeycode,
+  keychronEncodeGetLayerOrientation,
   keychronEncodeSetEncoder,
   keychronEncodeSetKeycode,
   keychronEncodeSetLayer,
+  keychronEncodeSetLayerOrientation,
+  keychronEncodeSetOrientation,
   keychronEncodeSleepTimeout,
   keychronLayerKeymapFromCodes,
   keychronLayerLabel,
+  keychronOrientationDegrees,
+  keychronOrientationIndex,
   keychronPacket,
   keychronUserLayerToVia,
   type KeychronNapeLayerKeymap,
@@ -42,7 +49,6 @@ import {
 const QUERY_TIMEOUT_MS = 1200;
 
 const DPI_STAGE_COUNT = 5;
-const ORIENTATION_STEPS = 8;
 const NAPE_DISPLAY_NAME = "Nape Pro";
 const PRODUCT_IDS = new Set<number>(PRODUCTS.keys());
 
@@ -339,12 +345,39 @@ export class KeychronNapeHidClient {
       (bytes) => bytes[0] === VIA.getEncoder && bytes[3] === 1,
       keychronEncodeGetEncoder(viaLayer, true),
     );
+    const orientationIndex = await this.getLayerOrientationIndex(layer).catch(() => 0);
     return keychronLayerKeymapFromCodes(
       layer,
       columns,
       keychronDecodeKeycodeReply(ccw),
       keychronDecodeKeycodeReply(cw),
+      orientationIndex >= 0 && orientationIndex < ORIENTATION_STEPS ? orientationIndex : 0,
     );
+  }
+
+  async setLayerOrientation(layer: number, index: number): Promise<number> {
+    await this.open();
+    const count = await this.usableLayerCount();
+    if (!Number.isInteger(layer) || layer < 1 || layer > count) {
+      throw new Error(`Layer must be between 1 and ${count}.`);
+    }
+    const next = keychronOrientationIndex(index);
+    await this.query(
+      (bytes) => bytes[0] === CMD.miscGroup && bytes[1] === NAPE.setLayerOrientation,
+      keychronEncodeSetLayerOrientation(layer, next),
+    );
+    const confirmed = await this.getLayerOrientationIndex(layer);
+    if (confirmed !== next) {
+      throw new Error(`The mouse kept orientation index ${confirmed} on that layer instead of ${next}.`);
+    }
+    const current = await this.getCurrentLayer();
+    if (current === layer) {
+      await this.query(
+        (bytes) => bytes[0] === CMD.miscGroup && bytes[1] === NAPE.setOrientation,
+        keychronEncodeSetOrientation(next),
+      );
+    }
+    return confirmed;
   }
 
   async setKeycode(layer: number, col: number, keycode: number): Promise<number> {
@@ -442,13 +475,21 @@ export class KeychronNapeHidClient {
       (bytes) => bytes[0] === CMD.miscGroup && bytes[1] === NAPE.getOrientation,
       [CMD.miscGroup, NAPE.getOrientation],
     );
-    return response[2] ?? 0xff;
+    return keychronDecodeOrientationIndex(response);
+  }
+
+  private async getLayerOrientationIndex(layer: number): Promise<number> {
+    const response = await this.query(
+      (bytes) => bytes[0] === CMD.miscGroup && bytes[1] === NAPE.getLayerOrientation,
+      keychronEncodeGetLayerOrientation(layer),
+    );
+    return keychronDecodeOrientationIndex(response);
   }
 
   private async getOrientation(): Promise<number | null> {
     const index = await this.getOrientationIndex();
     if (index < 0 || index >= ORIENTATION_STEPS) return null;
-    return 45 * index;
+    return keychronOrientationDegrees(index);
   }
 
   private async getCustomDpi(): Promise<number> {

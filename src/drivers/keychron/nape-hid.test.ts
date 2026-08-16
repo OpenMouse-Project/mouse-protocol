@@ -50,6 +50,7 @@ class FakeHidDevice {
   private firmware = "1.0.4";
   private layerCount = 8;
   private currentLayer = 1;
+  private layerOrientations = Array.from({ length: 9 }, () => 2);
   private keycodes = Array.from({ length: 9 }, () => [0x00d1, 0x00d2, 0x00d3, 0x00d4, 0x00d5, 0, 0]);
   private encoders = Array.from({ length: 9 }, () => [0x00aa, 0x00a9]);
 
@@ -67,6 +68,7 @@ class FakeHidDevice {
     this.layerCount = options.layerCount ?? 8;
     if (options.incompatibleReceiver) {
       this.orientation = 0xff;
+      this.layerOrientations = Array.from({ length: 9 }, () => 0xff);
       this.dpiStages = [40, 40, 40, 40, 40];
     }
   }
@@ -197,6 +199,26 @@ class FakeHidDevice {
       this.emit(reply);
       return;
     }
+    if (sub === NAPE.setOrientation) {
+      this.orientation = request[2] ?? this.orientation;
+      this.layerOrientations[this.currentLayer] = this.orientation;
+      this.emit(reply);
+      return;
+    }
+    if (sub === NAPE.getLayerOrientation) {
+      const layer = request[2] ?? 0;
+      reply[2] = this.layerOrientations[layer] ?? 0;
+      this.emit(reply);
+      return;
+    }
+    if (sub === NAPE.setLayerOrientation) {
+      const layer = request[2] ?? 0;
+      const index = request[3] ?? 0;
+      this.layerOrientations[layer] = index;
+      if (layer === this.currentLayer) this.orientation = index;
+      this.emit(reply);
+      return;
+    }
     if (sub === NAPE.getDpiStage) {
       reply[2] = this.dpiStage;
       this.emit(reply);
@@ -260,6 +282,7 @@ class FakeHidDevice {
     }
     if (sub === NAPE.setLayer) {
       this.currentLayer = request[2] ?? this.currentLayer;
+      this.orientation = this.layerOrientations[this.currentLayer] ?? this.orientation;
       this.emit(reply);
     }
   }
@@ -418,6 +441,7 @@ test("reads the Nape Pro VIA keymap and independent wheel directions", async () 
   assert.equal(map.keys[1]?.action, "Right click");
   assert.equal(map.wheel.ccw.keycode, KEYCHRON_NAPE_KEYCODE.volumeDown);
   assert.equal(map.wheel.cw.keycode, KEYCHRON_NAPE_KEYCODE.volumeUp);
+  assert.equal(map.orientationIndex, 2);
 });
 
 test("writes a button and one wheel direction then confirms them", async () => {
@@ -433,4 +457,25 @@ test("writes a button and one wheel direction then confirms them", async () => {
     packet[0] === VIA.setKeycode && packet[1] === 3 && packet[3] === 5 && packet[5] === 0xd2));
   assert.ok(fake.sent.some((packet) =>
     packet[0] === VIA.setEncoder && packet[1] === 3 && packet[3] === 0 && packet[5] === 0xd9));
+});
+
+test("saves per-layer orientation as [57, layer, index] and applies live angle on the current layer", async () => {
+  const fake = new FakeHidDevice();
+  const client = new KeychronNapeHidClient(fake as unknown as HIDDevice);
+  assert.equal(await client.setLayerOrientation(3, 5), 5);
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === NAPE.setLayerOrientation
+    && packet[2] === 3 && packet[3] === 5));
+  assert.ok(!fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === NAPE.setOrientation));
+  const stored = await client.readLayerKeymap(3);
+  assert.equal(stored.orientationIndex, 5);
+
+  fake.sent.length = 0;
+  await client.setLayer(3);
+  assert.equal(await client.setLayerOrientation(3, 2), 2);
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === NAPE.setOrientation && packet[2] === 2));
+  const status = await client.readStatus();
+  assert.match(status.connectionDetail ?? "", /90° orientation/);
 });

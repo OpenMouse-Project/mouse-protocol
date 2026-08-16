@@ -21,8 +21,12 @@ export const KEYCHRON_VIA_COMMAND = {
 } as const;
 export const KEYCHRON_NAPE_COMMAND = {
   getOrientation: 32, getDpiStage: 33, setDpiStage: 34, setDpiValue: 35,
-  getDpiValue: 36, setLayer: 45, getBattery: 49, getCustomDpi: 54, setCustomDpi: 55,
+  getDpiValue: 36, setLayer: 45, getBattery: 49, setOrientation: 52,
+  getCustomDpi: 54, setCustomDpi: 55, getLayerOrientation: 56, setLayerOrientation: 57,
 } as const;
+/** Sensor heading is stored per layer in 45° steps (0–7 → 0°–315°). */
+export const KEYCHRON_NAPE_ORIENTATION_STEPS = 8;
+export const KEYCHRON_NAPE_ORIENTATION_STEP_DEGREES = 45;
 /**
  * Nape Pro exposes eight user layers (1–8). VIA may report a spare slot at
  * index 0; GET_CURRENT_LAYER and keymap/encoder commands use the same 1–8
@@ -111,6 +115,51 @@ export function keychronDecodeCurrentLayer(response: Uint8Array): number {
 
 export function keychronEncodeSetLayer(layer: number): number[] {
   return [KEYCHRON_COMMAND.miscGroup, KEYCHRON_NAPE_COMMAND.setLayer, layer & 0xff];
+}
+
+export function keychronOrientationIndex(index: number): number {
+  if (!Number.isInteger(index) || index < 0 || index >= KEYCHRON_NAPE_ORIENTATION_STEPS) {
+    throw new Error(`Orientation must be a 45° step from 0° to 315°.`);
+  }
+  return index;
+}
+
+export function keychronOrientationDegrees(index: number): number {
+  return KEYCHRON_NAPE_ORIENTATION_STEP_DEGREES * keychronOrientationIndex(index);
+}
+
+export function keychronOrientationLabel(index: number): string {
+  return `${keychronOrientationDegrees(index)}\u00b0`;
+}
+
+export const KEYCHRON_NAPE_ORIENTATION_OPTIONS = Array.from(
+  { length: KEYCHRON_NAPE_ORIENTATION_STEPS },
+  (_, index) => ({
+    index,
+    degrees: KEYCHRON_NAPE_ORIENTATION_STEP_DEGREES * index,
+    label: `${KEYCHRON_NAPE_ORIENTATION_STEP_DEGREES * index}\u00b0`,
+  }),
+);
+
+export function keychronDecodeOrientationIndex(response: Uint8Array): number {
+  return response[2] ?? 0xff;
+}
+
+export function keychronEncodeSetOrientation(index: number): number[] {
+  return [KEYCHRON_COMMAND.miscGroup, KEYCHRON_NAPE_COMMAND.setOrientation, keychronOrientationIndex(index)];
+}
+
+export function keychronEncodeGetLayerOrientation(layer: number): number[] {
+  return [KEYCHRON_COMMAND.miscGroup, KEYCHRON_NAPE_COMMAND.getLayerOrientation, layer & 0xff];
+}
+
+export function keychronEncodeSetLayerOrientation(layer: number, index: number): number[] {
+  return [
+    KEYCHRON_COMMAND.miscGroup,
+    KEYCHRON_NAPE_COMMAND.setLayerOrientation,
+    layer & 0xff,
+    keychronOrientationIndex(index),
+  ];
 }
 
 /** Nape VIA keymap is 7 packed columns; the overlay exposes the first six. */
@@ -224,6 +273,8 @@ export interface KeychronNapeLayerKeymap {
   layer: number;
   keys: Array<KeychronNapeMappedControl & { col: number; name: string }>;
   wheel: { ccw: KeychronNapeMappedControl; cw: KeychronNapeMappedControl };
+  /** Saved sensor heading for this layer, 0–7 (0°–315°). */
+  orientationIndex: number;
 }
 
 export function keychronUserLayerToVia(layer: number): number {
@@ -256,6 +307,7 @@ export function keychronLayerKeymapFromCodes(
   columnCodes: readonly number[],
   ccw: number,
   cw: number,
+  orientationIndex = 0,
 ): KeychronNapeLayerKeymap {
   return {
     layer,
@@ -267,6 +319,7 @@ export function keychronLayerKeymapFromCodes(
       ccw: keychronMappedControl(ccw),
       cw: keychronMappedControl(cw),
     },
+    orientationIndex,
   };
 }
 
