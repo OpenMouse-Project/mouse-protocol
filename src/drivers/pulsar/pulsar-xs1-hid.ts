@@ -25,6 +25,12 @@ const RESPONSE_ATTEMPTS = 5;
 const RESPONSE_DELAY_MS = 25;
 const DPI_VALUE_OFFSET = 7;
 
+// The X3 family dongles report a generic "1K Dongle" product name from WebHID,
+// which is useless in the UI. Known product ids map to the paired model name.
+const XS1_PRODUCT_NAMES: ReadonlyMap<number, string> = new Map([
+  [0x5402, "Pulsar X3 M"],
+]);
+
 const LIFT_OFF_DISTANCES: ReadonlyArray<readonly [number, LiftOffDistance]> = [
   [0x07, "Low"],
   [0x0a, "Medium"],
@@ -124,7 +130,7 @@ export class PulsarXs1HidClient {
     const pollingRate = await this.query(QUERY.pollingRate).catch(() => null);
     return this.lastStatus = {
       brand: "Pulsar",
-      name: this.device.productName || "Pulsar X3",
+      name: XS1_PRODUCT_NAMES.get(this.device.productId) ?? (this.device.productName || "Pulsar X3"),
       ui: {
         family: "pulsar",
         hideUnsupportedPollingRates: true,
