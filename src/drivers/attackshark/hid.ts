@@ -111,12 +111,10 @@ export function attackSharkNativeOnlyMessage(devices: HIDDevice[]): string | nul
   );
   if (!unit) return null;
   const name = X11_FAMILY_NAMES.get(unit.productId) ?? "Attack Shark X11";
-  return `This ${name} entry cannot answer: it is one of the mouse's plain `
-    + "keyboard/mouse interfaces. Re-open the picker and ctrl-click every row with "
-    + "this name so OpenMouse can attach to the status entry (battery readout on "
-    + "wireless). Changing settings is not possible from a browser for this mouse: "
-    + "its config channel needs a native desktop driver (e.g. the open-source "
-    + "Attack Shark X11 driver).";
+  return `This ${name} cannot be configured through the browser: its settings channel `
+    + "is on an interface the browser is not allowed to reach. To change DPI, polling "
+    + "rate and lighting, install the OpenMouse Bridge, then open Interface settings "
+    + "→ Bridge → Native devices and click “Enable native control”.";
 }
 
 // ── Protocol family detection ─────────────────────────────────────────────

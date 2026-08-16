@@ -118,7 +118,8 @@ test("X11 units whose battery report is hidden do not advertise a battery column
 test("X11-family grants get a native-only explanation, other refusals do not", () => {
   const wireless = attackSharkNativeOnlyMessage([x11Entry(0xfa60, [[0x01, 0x06]])]);
   assert.match(wireless ?? "", /X11 \(wireless receiver\)/);
-  assert.match(wireless ?? "", /native desktop driver/);
+  assert.match(wireless ?? "", /Enable native control/);
+  assert.match(wireless ?? "", /OpenMouse Bridge/);
 
   const wired = attackSharkNativeOnlyMessage([x11Entry(0xfa55, [[0x01, 0x02]])]);
   assert.match(wired ?? "", /X11 \(wired\)/);
