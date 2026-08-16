@@ -1,3 +1,4 @@
+/** Keychron Nape Pro VIA driver. M-series mice use a different HID protocol and need their own client. */
 import type { MouseStatus } from "../mouse-types.ts";
 import {
   KEYCHRON_COMMAND as CMD,
@@ -11,7 +12,7 @@ import {
   KEYCHRON_NAPE_SLEEP_MIN_SECONDS as SLEEP_MIN,
   KEYCHRON_NAPE_SLEEP_OPTIONS as SLEEP_OPTIONS,
   KEYCHRON_POLLING_TABLE as POLLING_TABLE,
-  KEYCHRON_PRODUCTS as PRODUCTS,
+  KEYCHRON_NAPE_PRODUCTS as PRODUCTS,
   KEYCHRON_RAW_USAGE as RAW_USAGE,
   KEYCHRON_RAW_USAGE_PAGE as RAW_USAGE_PAGE,
   KEYCHRON_REPORT_ID as REPORT_ID,
@@ -20,12 +21,23 @@ import {
   keychronDecodeBattery,
   keychronDecodeCurrentLayer,
   keychronDecodeFirmware,
+  keychronDecodeKeycodeReply,
+  keychronDecodeKeymapBuffer,
   keychronDecodeLayerCount,
   keychronDecodePolling,
   keychronDecodeSleepTimeout,
+  keychronEncodeGetBuffer,
+  keychronEncodeGetEncoder,
+  keychronEncodeGetKeycode,
+  keychronEncodeSetEncoder,
+  keychronEncodeSetKeycode,
   keychronEncodeSetLayer,
   keychronEncodeSleepTimeout,
+  keychronLayerKeymapFromCodes,
+  keychronLayerLabel,
   keychronPacket,
+  keychronUserLayerToVia,
+  type KeychronNapeLayerKeymap,
 } from "@openmouse/protocol/keychron";
 const QUERY_TIMEOUT_MS = 1200;
 
@@ -34,7 +46,7 @@ const ORIENTATION_STEPS = 8;
 const NAPE_DISPLAY_NAME = "Nape Pro";
 const PRODUCT_IDS = new Set<number>(PRODUCTS.keys());
 
-export class KeychronHidClient {
+export class KeychronNapeHidClient {
   private responseWaiter: {
     match: (bytes: Uint8Array) => boolean;
     resolve: (bytes: Uint8Array) => void;
@@ -126,7 +138,7 @@ export class KeychronHidClient {
   private incompatibleReceiverMessage(): string {
     const receiver = PRODUCTS.get(this.device.productId)?.name ?? "Keychron receiver";
     return `This ${receiver} is not paired to a Nape Pro that OpenMouse can control. `
-      + "Use the wired cable, or pair a supported Keychron mouse to the receiver.";
+      + "Use the wired cable, or pair a Nape Pro to the receiver.";
   }
 
   getDpiOptions(): number[] {
@@ -162,7 +174,7 @@ export class KeychronHidClient {
       viaReceiver ? `2.4 GHz (${product?.name ?? "receiver"})` : "Wired USB",
       orientation !== null ? `${orientation}\u00b0 orientation` : null,
       `DPI stage ${stage + 1}/${DPI_STAGE_COUNT}`,
-      layers ? `Layer ${layers.current}` : null,
+      layers ? keychronLayerLabel(layers.current) : null,
     ].filter(Boolean).join(" · ");
 
     return {
@@ -196,8 +208,8 @@ export class KeychronHidClient {
       liftOffDistance: null,
       supportedLiftOffDistances: [],
       sleepTimeout,
-      keychronLayer: layers?.current,
-      keychronLayerCount: layers?.count,
+      napeLayer: layers?.current,
+      napeLayerCount: layers?.count,
       firmware: [firmware ?? "Firmware unavailable"],
     };
   }
@@ -309,6 +321,66 @@ export class KeychronHidClient {
       throw new Error(`The mouse kept layer ${confirmed} instead of layer ${layer}.`);
     }
     return confirmed;
+  }
+
+  async readLayerKeymap(layer: number): Promise<KeychronNapeLayerKeymap> {
+    await this.open();
+    const viaLayer = keychronUserLayerToVia(layer);
+    const buffer = await this.query(
+      (bytes) => bytes[0] === VIA.getBuffer,
+      keychronEncodeGetBuffer(viaLayer),
+    );
+    const columns = keychronDecodeKeymapBuffer(buffer);
+    const ccw = await this.query(
+      (bytes) => bytes[0] === VIA.getEncoder && bytes[3] === 0,
+      keychronEncodeGetEncoder(viaLayer, false),
+    );
+    const cw = await this.query(
+      (bytes) => bytes[0] === VIA.getEncoder && bytes[3] === 1,
+      keychronEncodeGetEncoder(viaLayer, true),
+    );
+    return keychronLayerKeymapFromCodes(
+      layer,
+      columns,
+      keychronDecodeKeycodeReply(ccw),
+      keychronDecodeKeycodeReply(cw),
+    );
+  }
+
+  async setKeycode(layer: number, col: number, keycode: number): Promise<number> {
+    await this.open();
+    const viaLayer = keychronUserLayerToVia(layer);
+    await this.query(
+      (bytes) => bytes[0] === VIA.setKeycode,
+      keychronEncodeSetKeycode(viaLayer, col, keycode),
+    );
+    const confirmed = await this.query(
+      (bytes) => bytes[0] === VIA.getKeycode && bytes[3] === (col & 0xff),
+      keychronEncodeGetKeycode(viaLayer, col),
+    );
+    const actual = keychronDecodeKeycodeReply(confirmed);
+    if (actual !== keycode) {
+      throw new Error(`The mouse kept 0x${actual.toString(16)} on that button instead of 0x${keycode.toString(16)}.`);
+    }
+    return actual;
+  }
+
+  async setEncoder(layer: number, clockwise: boolean, keycode: number): Promise<number> {
+    await this.open();
+    const viaLayer = keychronUserLayerToVia(layer);
+    await this.query(
+      (bytes) => bytes[0] === VIA.setEncoder,
+      keychronEncodeSetEncoder(viaLayer, clockwise, keycode),
+    );
+    const confirmed = await this.query(
+      (bytes) => bytes[0] === VIA.getEncoder && bytes[3] === (clockwise ? 1 : 0),
+      keychronEncodeGetEncoder(viaLayer, clockwise),
+    );
+    const actual = keychronDecodeKeycodeReply(confirmed);
+    if (actual !== keycode) {
+      throw new Error(`The mouse kept 0x${actual.toString(16)} on the scroll wheel instead of 0x${keycode.toString(16)}.`);
+    }
+    return actual;
   }
 
   private async getDpiStage(): Promise<number> {

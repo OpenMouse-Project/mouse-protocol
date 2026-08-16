@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+/** Nape Pro VIA keymap and layer codec tests. */
+
 import {
   KEYCHRON_NAPE_DPI_MAX,
   KEYCHRON_NAPE_DPI_MIN,
@@ -11,6 +13,17 @@ import {
   KEYCHRON_PACKET_LENGTH,
   KEYCHRON_POLLING_TABLE,
   KEYCHRON_VIA_COMMAND,
+  KEYCHRON_NAPE_KEYCODE,
+  KEYCHRON_NAPE_BUTTON_ACTIONS,
+  keychronActionForKeycode,
+  keychronDecodeKeymapBuffer,
+  keychronEncodeGetBuffer,
+  keychronEncodeSetEncoder,
+  keychronEncodeSetKeycode,
+  keychronKeycodeForAction,
+  keychronLayerKeymapFromCodes,
+  keychronLayerLabel,
+  keychronUserLayerToVia,
   keychronDecodeBattery,
   keychronDecodeCurrentLayer,
   keychronDecodeFirmware,
@@ -106,4 +119,48 @@ test("VIA layer count and current-layer get/set use 1–8", () => {
   assert.deepEqual(keychronEncodeSetLayer(1), [167, 45, 1]);
   assert.deepEqual(keychronEncodeSetLayer(2), [167, 45, 2]);
   assert.deepEqual(keychronEncodeSetLayer(8), [167, 45, 8]);
+});
+
+test("VIA keymap buffer is packed 7 big-endian keycodes per layer", () => {
+  assert.equal(KEYCHRON_VIA_COMMAND.getBuffer, 18);
+  assert.deepEqual(keychronEncodeGetBuffer(0), [18, 0, 0, 14]);
+  assert.deepEqual(keychronEncodeGetBuffer(2), [18, 0, 28, 14]);
+  assert.deepEqual(keychronEncodeGetBuffer(3), [18, 0, 42, 14]);
+  const reply = new Uint8Array(32);
+  reply[0] = 18;
+  reply[3] = 14;
+  reply[4] = 0x00;
+  reply[5] = 0xd1;
+  reply[6] = 0x52;
+  reply[7] = 0x2a;
+  assert.deepEqual(keychronDecodeKeymapBuffer(reply).slice(0, 2), [0x00d1, 0x522a]);
+});
+
+test("SET_KEYCODE and SET_ENCODER pack protocol-12 codes big-endian", () => {
+  assert.deepEqual(keychronEncodeSetKeycode(2, 5, 0x00d4), [5, 2, 0, 5, 0x00, 0xd4]);
+  assert.deepEqual(keychronEncodeSetEncoder(2, false, 0x00aa), [21, 2, 0, 0, 0x00, 0xaa]);
+  assert.deepEqual(keychronEncodeSetEncoder(2, true, 0x00a9), [21, 2, 0, 1, 0x00, 0xa9]);
+});
+
+test("protocol-12 mouse and CUSTOM actions round-trip through the Nape catalog", () => {
+  assert.equal(keychronUserLayerToVia(1), 1);
+  assert.equal(keychronUserLayerToVia(3), 3);
+  assert.equal(keychronLayerLabel(1), "Layer 0");
+  assert.equal(keychronLayerLabel(3), "Layer 2");
+  assert.equal(keychronKeycodeForAction("Left click"), KEYCHRON_NAPE_KEYCODE.leftClick);
+  assert.equal(keychronActionForKeycode(KEYCHRON_NAPE_KEYCODE.volumeDown), "Volume down");
+  assert.equal(keychronActionForKeycode(KEYCHRON_NAPE_KEYCODE.scrollMode), "Scroll mode");
+  assert.equal(keychronActionForKeycode(KEYCHRON_NAPE_KEYCODE.dpiCycle), "DPI cycle");
+  assert.equal(keychronActionForKeycode(KEYCHRON_NAPE_KEYCODE.customDpi), "Custom");
+  assert.equal(keychronActionForKeycode(0x1234), "Custom");
+  assert.ok(KEYCHRON_NAPE_BUTTON_ACTIONS.includes("Volume up"));
+  assert.ok(!KEYCHRON_NAPE_BUTTON_ACTIONS.includes("Custom DPI"));
+  const map = keychronLayerKeymapFromCodes(3, [0x00d1, 0x522a, 0x00d2, 0x7e2c, 0x00d5, 0x00d4], 0x00aa, 0x00a9);
+  assert.equal(map.layer, 3);
+  assert.deepEqual(map.keys.map((key) => key.name), ["03", "04", "01", "02", "M1", "M2"]);
+  assert.equal(map.keys[0]?.action, "Left click");
+  assert.equal(map.keys[1]?.action, "Scroll mode");
+  assert.equal(map.keys[3]?.action, "DPI cycle");
+  assert.equal(map.wheel.ccw.action, "Volume down");
+  assert.equal(map.wheel.cw.action, "Volume up");
 });
