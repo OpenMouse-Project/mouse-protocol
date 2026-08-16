@@ -4,6 +4,7 @@ import {
   LOGITECH_DIRECT_PRODUCT_IDS,
 } from "@openmouse/protocol/logitech";
 import { RAZER_PRODUCTS, RAZER_PRODUCT_IDS } from "@openmouse/protocol/razer-devices";
+import { PULSAR_XS1_PRODUCT_IDS } from "@openmouse/protocol/pulsar";
 import {
   NINJUTSO_LEGACY_MOUSE_PRODUCT_IDS,
   NINJUTSO_LEGACY_RECEIVER_PRODUCT_IDS,
@@ -54,6 +55,14 @@ export const MODDO_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.moddo, usagePage: 0xff, usage: 0x01 },
   { vendorId: VENDOR_ID.moddo, usagePage: 0xff, usage: 0x02 },
 ];
+
+// The X3 family's control channel is the Sonix XS-1 interface: a single
+// 64-byte unnumbered feature report on usage page 0xffff. Request that
+// collection directly so the picker lists the control interface instead of the
+// mouse's plain pointer interface, which cannot answer feature reports.
+export const PULSAR_XS1_HID_FILTERS: HIDDeviceFilter[] = [...PULSAR_XS1_PRODUCT_IDS].map(
+  (productId) => ({ vendorId: VENDOR_ID.pulsar, productId, usagePage: 0xffff, usage: 0x01 }),
+);
 
 // Viper V2/V3 Pro and Mouse Dock Pro expose their control channel as a Generic
 // Desktop Mouse collection. Limit this broad collection filter to known PIDs so
@@ -213,6 +222,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   })),
   { vendorId: VENDOR_ID.finalmouse, productId: 0x0100, usagePage: 0xff00, usage: 0x0001 },
   { vendorId: VENDOR_ID.pulsar },
+  ...PULSAR_XS1_HID_FILTERS,
   { vendorId: VENDOR_ID.endgameGear },
   { vendorId: VENDOR_ID.wlmouse },
   // 0x373e is the shared CompX ODM vendor id behind Lamzu, CRDRAKO, and

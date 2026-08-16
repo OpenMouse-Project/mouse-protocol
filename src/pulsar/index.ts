@@ -87,6 +87,49 @@ export function readUint16LE(data: Uint8Array, offset: number): number {
   return (data[offset] ?? 0) | ((data[offset + 1] ?? 0) << 8);
 }
 
+// XS-1 protocol used by the X3 family: unnumbered 64-byte feature reports
+// (report ID 0, which WebHID does not prefix) carrying a 16-bit
+// little-endian checksum of bytes 0..61 in bytes 62..63.
+export const PULSAR_XS1_PRODUCT_IDS: ReadonlySet<number> = new Set([0x3409, 0x3410, 0x5402, 0x5403]);
+export const PULSAR_XS1_WIRELESS_PRODUCT_IDS: ReadonlySet<number> = new Set([0x5402, 0x5403]);
+export const PULSAR_XS1_FEATURE_REPORT_ID = 0;
+export const PULSAR_XS1_PACKET_LENGTH = 64;
+export const PULSAR_XS1_DPI_MIN = 50;
+export const PULSAR_XS1_DPI_MAX = 26000;
+export const PULSAR_XS1_DPI_STEP = 50;
+export const PULSAR_XS1_DEBOUNCE_MAX_MS = 15;
+export const PULSAR_XS1_POLLING_RATES: readonly number[] = [125, 250, 500, 1000];
+
+export function pulsarXs1Checksum(packet: Uint8Array): number {
+  let sum = 0;
+  for (let index = 0; index < packet.length - 2; index += 1) sum += packet[index] ?? 0;
+  return sum & 0xffff;
+}
+
+export function pulsarXs1EncodeRequest(command: readonly number[]): Uint8Array<ArrayBuffer> {
+  const packet = new Uint8Array(PULSAR_XS1_PACKET_LENGTH);
+  packet[0] = 0x00;
+  for (let index = 0; index < command.length; index += 1) packet[index + 1] = command[index] ?? 0;
+  const checksum = pulsarXs1Checksum(packet);
+  packet[62] = checksum & 0xff;
+  packet[63] = checksum >> 8;
+  return packet;
+}
+
+export function pulsarXs1DpiOptions(): number[] {
+  const options: number[] = [];
+  for (let dpi = PULSAR_XS1_DPI_MIN; dpi <= PULSAR_XS1_DPI_MAX; dpi += PULSAR_XS1_DPI_STEP) options.push(dpi);
+  return options;
+}
+
+export function pulsarXs1DecodePollingRate(value: number): number | null {
+  return PULSAR_XS1_POLLING_QUERY_RATES[value] ?? null;
+}
+
+const PULSAR_XS1_POLLING_QUERY_RATES: Readonly<Record<number, number>> = {
+  240: 125, 120: 250, 60: 500, 30: 1000, 15: 2000, 8: 4000, 4: 8000,
+};
+
 export function readUint32LE(data: Uint8Array, offset: number): number {
   return ((data[offset] ?? 0) | ((data[offset + 1] ?? 0) << 8) | ((data[offset + 2] ?? 0) << 16) | ((data[offset + 3] ?? 0) << 24)) >>> 0;
 }

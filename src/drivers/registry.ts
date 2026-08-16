@@ -11,6 +11,7 @@ import { NinjutsoHidClient } from "./ninjutso/hid.ts";
 import { OrbitalHidClient } from "./orbital/hid.ts";
 import { PulsarHidClient } from "./pulsar/pulsar-hid.ts";
 import { PulsarProHidClient } from "./pulsar/pulsar-pro-hid.ts";
+import { PulsarXs1HidClient } from "./pulsar/pulsar-xs1-hid.ts";
 import { RazerCobraHidClient } from "./razer/cobra-hid.ts";
 import { RazerHidClient } from "./razer/hid.ts";
 import { RazerViperHidClient } from "./razer/viper-hid.ts";
@@ -21,7 +22,7 @@ import { VgnF2HidClient } from "./vgn/hid.ts";
 import { WLMouseHidClient } from "./wlmouse/hid.ts";
 import { ZaunkoenigHidClient } from "./zaunkoenig/hid.ts";
 
-export type PulsarClient = PulsarHidClient | PulsarProHidClient;
+export type PulsarClient = PulsarHidClient | PulsarProHidClient | PulsarXs1HidClient;
 export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient | KeychronHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | AttackSharkHidClient;
 
 export interface DeviceDriver {
@@ -36,6 +37,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Finalmouse", supports: (device) => FinalmouseHidClient.isSupported(device), create: (device) => new FinalmouseHidClient(device), score: () => 10 },
   { brand: "Endgame Gear", supports: (device) => EggOp1HidClient.isSupported(device), create: (device) => new EggOp1HidClient(device), score: () => 10 },
   { brand: "Endgame Gear", supports: eggWeIsSupported, create: eggWeCreate, score: eggWeSupportScore },
+  { brand: "Pulsar", supports: (device) => PulsarXs1HidClient.isSupported(device), create: (device) => new PulsarXs1HidClient(device), score: () => 8 },
   { brand: "Pulsar", supports: (device) => PulsarProHidClient.isSupported(device), create: (device) => new PulsarProHidClient(device), score: () => 8 },
   { brand: "Pulsar", supports: (device) => PulsarHidClient.isSupported(device), create: (device) => new PulsarHidClient(device), score: () => 7 },
   { brand: "Teevolution", supports: (device) => TeevolutionHidClient.isSupported(device), create: (device) => new TeevolutionHidClient(device), score: () => 7 },
