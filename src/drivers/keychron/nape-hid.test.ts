@@ -1,28 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-// `hid.ts` schedules write delays and query timeouts through `window`.
+// `nape-hid.ts` schedules write delays and query timeouts through `window`.
 Object.assign(globalThis, { window: globalThis });
 
-const { KeychronHidClient } = await import("./hid.ts");
+const { KeychronNapeHidClient } = await import("./nape-hid.ts");
 const {
   KEYCHRON_COMMAND,
+  KEYCHRON_NAPE_KEYCODE,
   KEYCHRON_MISC_COMMAND,
   KEYCHRON_NAPE_COMMAND,
   KEYCHRON_PACKET_LENGTH,
   KEYCHRON_POLLING_TABLE,
+  KEYCHRON_VIA_COMMAND,
 } = await import("@openmouse/protocol/keychron");
 const { VENDOR_ID } = await import("../vendors.ts");
 
 const CMD = KEYCHRON_COMMAND;
 const MISC = KEYCHRON_MISC_COMMAND;
 const NAPE = KEYCHRON_NAPE_COMMAND;
+const VIA = KEYCHRON_VIA_COMMAND;
 
 type FakeOptions = {
   productId?: number;
   productName?: string;
   /** Force orientation/DPI values that fail Nape Pro receiver verification. */
   incompatibleReceiver?: boolean;
+  layerCount?: number;
 };
 
 class FakeHidDevice {
@@ -44,6 +48,11 @@ class FakeHidDevice {
   private batteryStatus = 0;
   private orientation = 2; // 90°
   private firmware = "1.0.4";
+  private layerCount = 8;
+  private currentLayer = 1;
+  private layerOrientations = Array.from({ length: 9 }, () => 2);
+  private keycodes = Array.from({ length: 9 }, () => [0x00d1, 0x00d2, 0x00d3, 0x00d4, 0x00d5, 0, 0]);
+  private encoders = Array.from({ length: 9 }, () => [0x00aa, 0x00a9]);
 
   constructor(options: FakeOptions = {}) {
     this.productId = options.productId ?? 0x0440;
@@ -56,8 +65,10 @@ class FakeHidDevice {
       inputReports: [{ reportId: 0, items: [{ reportCount: 32, reportSize: 8 }] }],
       outputReports: [{ reportId: 0, items: [{ reportCount: 32, reportSize: 8 }] }],
     }] as unknown as HIDCollectionInfo[];
+    this.layerCount = options.layerCount ?? 8;
     if (options.incompatibleReceiver) {
       this.orientation = 0xff;
+      this.layerOrientations = Array.from({ length: 9 }, () => 0xff);
       this.dpiStages = [40, 40, 40, 40, 40];
     }
   }
@@ -97,12 +108,114 @@ class FakeHidDevice {
       return;
     }
 
+    if (command === VIA.getLayerCount) {
+      reply[0] = VIA.getLayerCount;
+      reply[1] = this.layerCount;
+      this.emit(reply);
+      return;
+    }
+
+    if (command === CMD.getCurrentLayer) {
+      reply[0] = CMD.getCurrentLayer;
+      reply[1] = this.currentLayer;
+      this.emit(reply);
+      return;
+    }
+
+    if (command === VIA.getBuffer) {
+      const offset = ((request[1] ?? 0) << 8) | (request[2] ?? 0);
+      const size = request[3] ?? 0;
+      const viaLayer = Math.floor(offset / 14);
+      const codes = this.keycodes[viaLayer] ?? this.keycodes[0]!;
+      reply[0] = VIA.getBuffer;
+      reply[1] = request[1] ?? 0;
+      reply[2] = request[2] ?? 0;
+      reply[3] = size;
+      for (let index = 0; index < Math.min(codes.length, Math.floor(size / 2)); index += 1) {
+        const code = codes[index] ?? 0;
+        reply[4 + index * 2] = (code >> 8) & 0xff;
+        reply[5 + index * 2] = code & 0xff;
+      }
+      this.emit(reply);
+      return;
+    }
+
+    if (command === VIA.getKeycode) {
+      const viaLayer = request[1] ?? 0;
+      const col = request[3] ?? 0;
+      const code = this.keycodes[viaLayer]?.[col] ?? 0;
+      reply[0] = VIA.getKeycode;
+      reply[1] = viaLayer;
+      reply[2] = request[2] ?? 0;
+      reply[3] = col;
+      reply[4] = (code >> 8) & 0xff;
+      reply[5] = code & 0xff;
+      this.emit(reply);
+      return;
+    }
+
+    if (command === VIA.setKeycode) {
+      const viaLayer = request[1] ?? 0;
+      const col = request[3] ?? 0;
+      const code = ((request[4] ?? 0) << 8) | (request[5] ?? 0);
+      const layerCodes = this.keycodes[viaLayer];
+      if (layerCodes && col >= 0 && col < layerCodes.length) layerCodes[col] = code;
+      reply.set(request.subarray(0, 6));
+      this.emit(reply);
+      return;
+    }
+
+    if (command === VIA.getEncoder) {
+      const viaLayer = request[1] ?? 0;
+      const direction = request[3] ?? 0;
+      const code = this.encoders[viaLayer]?.[direction] ?? 0;
+      reply[0] = VIA.getEncoder;
+      reply[1] = viaLayer;
+      reply[2] = request[2] ?? 0;
+      reply[3] = direction;
+      reply[4] = (code >> 8) & 0xff;
+      reply[5] = code & 0xff;
+      this.emit(reply);
+      return;
+    }
+
+    if (command === VIA.setEncoder) {
+      const viaLayer = request[1] ?? 0;
+      const direction = request[3] ?? 0;
+      const code = ((request[4] ?? 0) << 8) | (request[5] ?? 0);
+      const pair = this.encoders[viaLayer];
+      if (pair && (direction === 0 || direction === 1)) pair[direction] = code;
+      reply.set(request.subarray(0, 6));
+      this.emit(reply);
+      return;
+    }
+
     if (command !== CMD.miscGroup) return;
     reply[0] = CMD.miscGroup;
     reply[1] = sub;
 
     if (sub === NAPE.getOrientation) {
       reply[2] = this.orientation;
+      this.emit(reply);
+      return;
+    }
+    if (sub === NAPE.setOrientation) {
+      this.orientation = request[2] ?? this.orientation;
+      this.layerOrientations[this.currentLayer] = this.orientation;
+      this.emit(reply);
+      return;
+    }
+    if (sub === NAPE.getLayerOrientation) {
+      const layer = request[2] ?? 0;
+      reply[2] = this.layerOrientations[layer] ?? 0;
+      this.emit(reply);
+      return;
+    }
+    if (sub === NAPE.setLayerOrientation) {
+      const layer = request[2] ?? 0;
+      const index = request[3] ?? 0;
+      this.layerOrientations[layer] = index;
+      if (layer === this.currentLayer) this.orientation = index;
       this.emit(reply);
       return;
     }
@@ -165,6 +278,12 @@ class FakeHidDevice {
       this.sleepSeconds = (request[4] ?? 0) | ((request[5] ?? 0) << 8);
       reply[2] = 0;
       this.emit(reply);
+      return;
+    }
+    if (sub === NAPE.setLayer) {
+      this.currentLayer = request[2] ?? this.currentLayer;
+      this.orientation = this.layerOrientations[this.currentLayer] ?? this.orientation;
+      this.emit(reply);
     }
   }
 
@@ -195,16 +314,16 @@ function device(productId: number, usagePage = 0xff60, usage = 0x61): HIDDevice 
 }
 
 test("support is limited to Nape Pro and Link-KM VIA raw HID collections", () => {
-  assert.equal(KeychronHidClient.isSupported(device(0x0440)), true);
-  assert.equal(KeychronHidClient.isSupported(device(0xd026)), true);
-  assert.equal(KeychronHidClient.isSupported(device(0xd029)), true);
-  assert.equal(KeychronHidClient.isSupported(device(0x0441)), false);
-  assert.equal(KeychronHidClient.isSupported(device(0x0440, 0xff00, 0x61)), false);
-  assert.equal(KeychronHidClient.isSupported(device(0x0440, 0xff60, 1)), false);
+  assert.equal(KeychronNapeHidClient.isSupported(device(0x0440)), true);
+  assert.equal(KeychronNapeHidClient.isSupported(device(0xd026)), true);
+  assert.equal(KeychronNapeHidClient.isSupported(device(0xd029)), true);
+  assert.equal(KeychronNapeHidClient.isSupported(device(0x0441)), false);
+  assert.equal(KeychronNapeHidClient.isSupported(device(0x0440, 0xff00, 0x61)), false);
+  assert.equal(KeychronNapeHidClient.isSupported(device(0x0440, 0xff60, 1)), false);
 });
 
 test("DPI options follow the Nape Pro 50–4000 step-50 ladder", () => {
-  const options = new KeychronHidClient(device(0x0440)).getDpiOptions();
+  const options = new KeychronNapeHidClient(device(0x0440)).getDpiOptions();
   assert.equal(options[0], 50);
   assert.equal(options.at(-1), 4000);
   assert.equal(options.length, (4000 - 50) / 50 + 1);
@@ -213,7 +332,7 @@ test("DPI options follow the Nape Pro 50–4000 step-50 ladder", () => {
 
 test("reads wired Nape Pro status from Launcher misc commands", async () => {
   const fake = new FakeHidDevice();
-  const status = await new KeychronHidClient(fake as unknown as HIDDevice).readStatus();
+  const status = await new KeychronNapeHidClient(fake as unknown as HIDDevice).readStatus();
   assert.equal(status.brand, "Keychron");
   assert.equal(status.name, "Nape Pro");
   assert.equal(status.dpi, 800);
@@ -232,12 +351,15 @@ test("reads wired Nape Pro status from Launcher misc commands", async () => {
   assert.equal(status.ui?.hideProcessingCard, true);
   assert.equal(status.ui?.showAdvancedSection, true);
   assert.equal(status.sleepTimeout, 600);
+  assert.equal(status.napeLayer, 1);
+  assert.equal(status.napeLayerCount, 8);
+  assert.match(status.connectionDetail ?? "", /Layer 0/);
   assert.equal(status.liftOffDistance, null);
 });
 
 test("writes DPI, polling, and sleep then confirms them by reading back", async () => {
   const fake = new FakeHidDevice();
-  const client = new KeychronHidClient(fake as unknown as HIDDevice);
+  const client = new KeychronNapeHidClient(fake as unknown as HIDDevice);
   assert.equal(await client.setDpi(1600), 1600);
   assert.equal(await client.setDpiStageValue(0, 500), 500);
   assert.equal(await client.setActiveDpiStage(2), 2);
@@ -260,14 +382,14 @@ test("writes DPI, polling, and sleep then confirms them by reading back", async 
 });
 
 test("sleep options stay inside the Launcher 1 minute–12:59:59 range", () => {
-  const options = new KeychronHidClient(device(0x0440)).getSleepOptions();
+  const options = new KeychronNapeHidClient(device(0x0440)).getSleepOptions();
   assert.ok(options.length > 0);
   assert.ok(options.every((seconds) => seconds >= 60 && seconds <= 12 * 3600 + 59 * 60 + 59));
   assert.equal(options[0], 60);
 });
 
 test("rejects sleep timeouts outside the Launcher range", async () => {
-  const client = new KeychronHidClient(new FakeHidDevice() as unknown as HIDDevice);
+  const client = new KeychronNapeHidClient(new FakeHidDevice() as unknown as HIDDevice);
   await assert.rejects(() => client.setSleepTimeout(59), /1 minute/);
   await assert.rejects(() => client.setSleepTimeout(12 * 3600 + 59 * 60 + 60), /12:59:59/);
 });
@@ -279,15 +401,81 @@ test("rejects receiver paths that are not paired to a Nape Pro", async () => {
     incompatibleReceiver: true,
   });
   await assert.rejects(
-    () => new KeychronHidClient(fake as unknown as HIDDevice).open(),
+    () => new KeychronNapeHidClient(fake as unknown as HIDDevice).open(),
     /not paired to a Nape Pro/,
   );
 });
 
+test("switches the active VIA layer and confirms it by reading back", async () => {
+  const fake = new FakeHidDevice();
+  const client = new KeychronNapeHidClient(fake as unknown as HIDDevice);
+  assert.equal(await client.setLayer(3), 3);
+  const status = await client.readStatus();
+  assert.equal(status.napeLayer, 3);
+  assert.equal(status.napeLayerCount, 8);
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === NAPE.setLayer && packet[2] === 3));
+  await assert.rejects(() => client.setLayer(0), /between 1 and 8/);
+  await assert.rejects(() => client.setLayer(9), /between 1 and 8/);
+});
+
+test("Nape Pro user layers stay at 1–8 even when VIA reports a spare slot", async () => {
+  const fake = new FakeHidDevice({ layerCount: 9 });
+  const status = await new KeychronNapeHidClient(fake as unknown as HIDDevice).readStatus();
+  assert.equal(status.napeLayerCount, 8);
+});
+
 test("unsupported sensor controls stay unavailable on this protocol", async () => {
-  const client = new KeychronHidClient(new FakeHidDevice() as unknown as HIDDevice);
+  const client = new KeychronNapeHidClient(new FakeHidDevice() as unknown as HIDDevice);
   await assert.rejects(() => client.setLiftOffDistance("Medium"), /not exposed/);
   await assert.rejects(() => client.setMotionSync(true), /not exposed/);
   await assert.rejects(() => client.setAngleSnapping(false), /not exposed/);
   await assert.rejects(() => client.setDebounceTime(4), /not exposed/);
+});
+
+test("reads the Nape Pro VIA keymap and independent wheel directions", async () => {
+  const client = new KeychronNapeHidClient(new FakeHidDevice() as unknown as HIDDevice);
+  const map = await client.readLayerKeymap(1);
+  assert.equal(map.layer, 1);
+  assert.equal(map.keys[0]?.action, "Left click");
+  assert.equal(map.keys[1]?.action, "Right click");
+  assert.equal(map.wheel.ccw.keycode, KEYCHRON_NAPE_KEYCODE.volumeDown);
+  assert.equal(map.wheel.cw.keycode, KEYCHRON_NAPE_KEYCODE.volumeUp);
+  assert.equal(map.orientationIndex, 2);
+});
+
+test("writes a button and one wheel direction then confirms them", async () => {
+  const fake = new FakeHidDevice();
+  const client = new KeychronNapeHidClient(fake as unknown as HIDDevice);
+  assert.equal(await client.setKeycode(3, 5, KEYCHRON_NAPE_KEYCODE.rightClick), KEYCHRON_NAPE_KEYCODE.rightClick);
+  assert.equal(await client.setEncoder(3, false, KEYCHRON_NAPE_KEYCODE.scrollUp), KEYCHRON_NAPE_KEYCODE.scrollUp);
+  const map = await client.readLayerKeymap(3);
+  assert.equal(map.keys[5]?.keycode, KEYCHRON_NAPE_KEYCODE.rightClick);
+  assert.equal(map.wheel.ccw.action, "Scroll up");
+  assert.equal(map.wheel.cw.action, "Volume up");
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === VIA.setKeycode && packet[1] === 3 && packet[3] === 5 && packet[5] === 0xd2));
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === VIA.setEncoder && packet[1] === 3 && packet[3] === 0 && packet[5] === 0xd9));
+});
+
+test("saves per-layer orientation as [57, layer, index] and applies live angle on the current layer", async () => {
+  const fake = new FakeHidDevice();
+  const client = new KeychronNapeHidClient(fake as unknown as HIDDevice);
+  assert.equal(await client.setLayerOrientation(3, 5), 5);
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === NAPE.setLayerOrientation
+    && packet[2] === 3 && packet[3] === 5));
+  assert.ok(!fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === NAPE.setOrientation));
+  const stored = await client.readLayerKeymap(3);
+  assert.equal(stored.orientationIndex, 5);
+
+  fake.sent.length = 0;
+  await client.setLayer(3);
+  assert.equal(await client.setLayerOrientation(3, 2), 2);
+  assert.ok(fake.sent.some((packet) =>
+    packet[0] === CMD.miscGroup && packet[1] === NAPE.setOrientation && packet[2] === 2));
+  const status = await client.readStatus();
+  assert.match(status.connectionDetail ?? "", /90° orientation/);
 });
