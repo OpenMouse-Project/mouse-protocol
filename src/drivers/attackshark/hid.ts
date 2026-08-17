@@ -5,7 +5,7 @@ import { LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
 // Attack Shark mice ship from multiple OEMs with different VIDs and protocols:
 //
 //   0x1d57 — R1, X11 family: HID feature reports, 250 ms cmd delay
-//   0x25a7 — X3, X6, X11 direct — protocol TBD
+//   0x25a7 — X3, X6, X8, X11 direct: GearHub-derived protocol (report 0, 64 B)
 //   0x373e — R5 Ultra, R3 (Lamzu OEM) — usagePage 0xffff feature reports
 //
 // PIDs change between firmware revisions, so detection is collection-based,
@@ -25,12 +25,13 @@ import { LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
 //
 // Protocol source: xb-bx/attack-shark-r1-driver (Odin)
 //                  HarukaYamamoto0/attack-shark-x11-driver (TypeScript)
+//                  qmk.top GearHub bundle (MU class — 0x25a7 protocol)
 //                  Research credit: viix0dev
 
 // ── VID constants ─────────────────────────────────────────────────────────
 
 const VID_1D57 = 0x1d57; // R1 / X11 family
-const VID_25A7 = VENDOR_ID.attackShark; // X3, X6, X11 direct
+const VID_25A7 = VENDOR_ID.attackShark; // X3, X6, X8, X11 direct
 const VID_373E = 0x373e; // Lamzu OEM (R5 Ultra, R3)
 
 // ── 0x1d57 protocol (R1 / X11) ───────────────────────────────────────────
@@ -56,6 +57,32 @@ const DPI_READ_REPORT_ID = 0xa0;
 // The leading 0x03 is the HID report id of the battery packet.
 const BATTERY_SIGNATURE = [0x03, 0x55, 0x40, 0x01];
 const BATTERY_REPORT_ID = BATTERY_SIGNATURE[0];
+
+// ── 0x25a7 protocol (GearHub / MU class) ─────────────────────────────────
+// Reverse-engineered from the qmk.top GearHub web driver JS bundle.
+// Uses HID feature reports on report ID 0x00, 64 bytes total.
+// Commands are padded to 9 bytes; checksum goes in byte[7].
+
+const REPORT_ID_25A7 = 0x00;
+const REPORT_LEN_25A7 = 64;
+const CMD_LEN_25A7 = 9;
+const CMD_DELAY_25A7_MS = 100;
+
+// Command IDs (MU class)
+const FEA_CMD_GET_REV = 0x80; // Get firmware revision
+const FEA_CMD_GET_DPI = 0xd4; // Get DPI slots (param: profile)
+const FEA_CMD_SET_REPORT_RATE = 0x04; // Set polling rate
+
+/** Polling-rate byte codes used by the 0x25a7 protocol. */
+export const POLLING_CODES_25A7: ReadonlyMap<number, number> = new Map([
+  [125, 0x08],
+  [250, 0x04],
+  [500, 0x02],
+  [1000, 0x01],
+  [2000, 0x84],
+  [4000, 0x82],
+  [8000, 0x81],
+]);
 
 // ── Collection helpers ─────────────────────────────────────────────────────
 
@@ -145,6 +172,36 @@ function detectFamily(device: HIDDevice): ProtocolFamily {
   return null;
 }
 
+// ── 0x25a7 helpers ────────────────────────────────────────────────────────
+
+/**
+ * Compute the GearHub checksum: one's-complement of the sum of the first 7
+ * command bytes, stored in byte 7.  Byte 8 stays zero (unused padding).
+ */
+export function checksum25a7(cmd: Uint8Array): Uint8Array {
+  const out = new Uint8Array(CMD_LEN_25A7);
+  out.set(cmd.subarray(0, Math.min(cmd.length, CMD_LEN_25A7)));
+  let sum = 0;
+  for (let i = 0; i < 7; i++) sum = (sum + out[i]) & 0xff;
+  out[7] = (0xff - sum) & 0xff;
+  return out;
+}
+
+/**
+ * Encode a 64-byte HID report that starts with the 9-byte padded+checksummed
+ * command and is zero-padded to REPORT_LEN_25A7.
+ */
+function encodeReport25a7(cmd: Uint8Array): Uint8Array {
+  const report = new Uint8Array(REPORT_LEN_25A7);
+  report.set(checksum25a7(cmd));
+  return report;
+}
+
+/** Lookup a polling-rate Hz value and return its byte code. */
+function pollingHzToCode25a7(hz: number): number | undefined {
+  return POLLING_CODES_25A7.get(hz);
+}
+
 // ── Driver ────────────────────────────────────────────────────────────────
 
 export class AttackSharkHidClient {
@@ -228,6 +285,7 @@ export class AttackSharkHidClient {
 
   getSupportedPollingRates(): number[] {
     if (this.family === "1d57") return POLLING_RATES_1D57.map(([, hz]) => hz);
+    if (this.family === "25a7") return [...POLLING_CODES_25A7.keys()];
     return [];
   }
 
@@ -239,8 +297,19 @@ export class AttackSharkHidClient {
     await this.open();
 
     let pollingRateHz = 0;
+    let dpi = 0;
+    let firmware: string[] = [];
+
     if (this.family === "1d57") {
       pollingRateHz = await this.read1d57PollingRate().catch(() => 0);
+    }
+    if (this.family === "25a7") {
+      const result = await this.read25a7Status().catch(() => null);
+      if (result) {
+        pollingRateHz = result.pollingRateHz;
+        dpi = result.dpi;
+        firmware = result.firmware;
+      }
     }
 
     return this.lastStatus = {
@@ -248,7 +317,7 @@ export class AttackSharkHidClient {
       name: this.displayName(),
       ui: {
         family: "attackshark",
-        settingsReady: this.family === "1d57",
+        settingsReady: this.family === "1d57" || this.family === "25a7",
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
         // Wireless X11-family units push battery on their own — but only
@@ -265,13 +334,13 @@ export class AttackSharkHidClient {
       },
       batteryPercent: this.batteryPercent,
       batteryState: this.batteryPercent !== null ? "Discharging" : "Unknown",
-      dpi: 0,
+      dpi,
       pollingRateHz,
       supportedPollingRates: this.getSupportedPollingRates(),
       activeProfile: null,
       connectionType: this.isWireless() ? "Wireless" : "Wired",
       liftOffDistance: null,
-      firmware: [],
+      firmware,
     };
   }
 
@@ -282,18 +351,99 @@ export class AttackSharkHidClient {
         + "changing settings needs the native Attack Shark X11 driver.",
       );
     }
-    if (this.family !== "1d57") {
-      throw new Error("Polling rate control is not yet implemented for this Attack Shark model.");
+    if (this.family === "1d57") {
+      const entry = POLLING_RATES_1D57.find(([, hz]) => hz === pollingRateHz);
+      if (!entry) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
+      await this.write1d57PollingRate(entry[0]);
+      const confirmed = await this.read1d57PollingRate();
+      if (confirmed !== pollingRateHz) {
+        throw new Error(`The mouse kept ${confirmed} Hz instead of ${pollingRateHz} Hz.`);
+      }
+      if (this.lastStatus) this.lastStatus = { ...this.lastStatus, pollingRateHz: confirmed };
+      return confirmed;
     }
-    const entry = POLLING_RATES_1D57.find(([, hz]) => hz === pollingRateHz);
-    if (!entry) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
-    await this.write1d57PollingRate(entry[0]);
-    const confirmed = await this.read1d57PollingRate();
-    if (confirmed !== pollingRateHz) {
-      throw new Error(`The mouse kept ${confirmed} Hz instead of ${pollingRateHz} Hz.`);
+    if (this.family === "25a7") {
+      const code = pollingHzToCode25a7(pollingRateHz);
+      if (code === undefined) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
+      await this.write25a7PollingRate(code);
+      if (this.lastStatus) this.lastStatus = { ...this.lastStatus, pollingRateHz };
+      return pollingRateHz;
     }
-    if (this.lastStatus) this.lastStatus = { ...this.lastStatus, pollingRateHz: confirmed };
-    return confirmed;
+    throw new Error("Polling rate control is not yet implemented for this Attack Shark model.");
+  }
+
+  // ── 0x25a7 low-level ──────────────────────────────────────────────────
+
+  /**
+   * Send a 9-byte command via a 64-byte HID feature report (report ID 0x00),
+   * then wait a short delay for the device to process it.
+   */
+  private async sendCmd25a7(cmd: Uint8Array): Promise<void> {
+    const report = encodeReport25a7(cmd);
+    await this.run(() => this.device.sendFeatureReport(REPORT_ID_25A7, report as BufferSource));
+    await this.delay(CMD_DELAY_25A7_MS);
+  }
+
+  /**
+   * Send a command and read back the 64-byte feature report reply.
+   */
+  private async askCmd25a7(cmd: Uint8Array): Promise<Uint8Array> {
+    await this.sendCmd25a7(cmd);
+    const reply = await this.run(() => this.device.receiveFeatureReport(REPORT_ID_25A7));
+    return this.copyView(reply);
+  }
+
+  /**
+   * Get firmware revision string(s) from the device.
+   * Command 0x80 → response byte[1..2] = version (little-endian uint16).
+   */
+  private async getFirmware25a7(): Promise<string[]> {
+    const resp = await this.askCmd25a7(new Uint8Array([FEA_CMD_GET_REV]));
+    if (resp[0] !== FEA_CMD_GET_REV) return [];
+    const version = resp[1] | (resp[2] << 8);
+    return version !== 0 ? [`v${version}`] : [];
+  }
+
+  /**
+   * Get DPI configuration for a profile.
+   * Command 0xD4 [profile] → response contains active DPI index, slot count,
+   * and per-slot X/Y values encoded as LE uint16.
+   */
+  private async getDpi25a7(profile: number): Promise<{ activeIndex: number; slots: number; dpis: number[] }> {
+    const resp = await this.askCmd25a7(new Uint8Array([FEA_CMD_GET_DPI, profile]));
+    if (resp[0] !== FEA_CMD_GET_DPI) return { activeIndex: 0, slots: 0, dpis: [] };
+    const activeIndex = resp[2] > 8 ? 0 : resp[2];
+    const slotCount = resp[3];
+    const dpis: number[] = [];
+    for (let i = 0; i < slotCount; i++) {
+      const x = resp[8 + i * 2] | (resp[9 + i * 2] << 8);
+      dpis.push(x);
+    }
+    return { activeIndex, slots: slotCount, dpis };
+  }
+
+  /**
+   * Set polling rate via command 0x04.
+   */
+  private async write25a7PollingRate(code: number): Promise<void> {
+    await this.sendCmd25a7(new Uint8Array([FEA_CMD_SET_REPORT_RATE, 0, code]));
+  }
+
+  /**
+   * Read all status from a 0x25a7 device (firmware + DPI + polling rate).
+   */
+  private async read25a7Status(): Promise<{ pollingRateHz: number; dpi: number; firmware: string[] }> {
+    const firmware = await this.getFirmware25a7();
+
+    // Read DPI from profile 0
+    const dpiResult = await this.getDpi25a7(0);
+    const dpi = dpiResult.dpis[dpiResult.activeIndex] ?? 0;
+
+    // Polling rate is not directly readable via a single command in the MU
+    // class protocol; we default to 1000 Hz and let the user set it.
+    const pollingRateHz = 1000;
+
+    return { pollingRateHz, dpi, firmware };
   }
 
   // ── 0x1d57 low-level ──────────────────────────────────────────────────
@@ -319,6 +469,8 @@ export class AttackSharkHidClient {
     const match = POLLING_RATES_1D57.find(([code]) => code === rateByte);
     return match ? match[1] : 0;
   }
+
+  // ── shared helpers ────────────────────────────────────────────────────
 
   private run<T>(task: () => Promise<T>): Promise<T> {
     const next = this.queue.then(task, task);
