@@ -11,6 +11,18 @@ import { LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
 // PIDs change between firmware revisions, so detection is collection-based,
 // not PID-based. For 0x373e we exclude known Lamzu PIDs.
 //
+// Real X11 hardware (0x1d57, wired 0xfa55 and wireless 0xfa60) exposes NO
+// feature reports to the browser on any of its four HID entries. Its config
+// channel is USB interface 2 (a system-control/consumer composite; see the
+// lsusb dump in dressedinblack5/attack-shark-x11-electron docs/descritors),
+// and the reference driver bypasses the HID stack entirely: it claims
+// interface 2 with libusb, detaches the kernel HID driver on Linux, and on
+// Windows requires Zadig to swap the driver for WinUSB. A browser can do
+// none of that — WebHID sees no feature reports, and WebUSB refuses to
+// claim HID-class interfaces. The collection gate below therefore correctly
+// refuses these units; the X11-family helper further down turns that
+// refusal into a real explanation.
+//
 // Protocol source: xb-bx/attack-shark-r1-driver (Odin)
 //                  HarukaYamamoto0/attack-shark-x11-driver (TypeScript)
 //                  qmk.top GearHub bundle (MU class — 0x25a7 protocol)
@@ -42,7 +54,9 @@ const POLLING_RATES_1D57: ReadonlyArray<readonly [number, number]> = [
 const DPI_READ_REPORT_ID = 0xa0;
 
 // Battery arrives as input report with this 4-byte signature; byte 4 = %.
+// The leading 0x03 is the HID report id of the battery packet.
 const BATTERY_SIGNATURE = [0x03, 0x55, 0x40, 0x01];
+const BATTERY_REPORT_ID = BATTERY_SIGNATURE[0];
 
 // ── 0x25a7 protocol (GearHub / MU class) ─────────────────────────────────
 // Reverse-engineered from the qmk.top GearHub web driver JS bundle.
@@ -82,13 +96,71 @@ function hasVendorControl(collection: HIDCollectionInfo): boolean {
   return collection.children.some(hasVendorControl);
 }
 
+function declaresInputReport(collection: HIDCollectionInfo, reportId: number): boolean {
+  if (collection.inputReports.some((report) => report.reportId === reportId)) return true;
+  return collection.children.some((child) => declaresInputReport(child, reportId));
+}
+
+// ── X11 family (config is native-only; battery is readable) ──────────────
+
+// Documented 0x1d57 PIDs: wired X11, wireless X11 receiver, R1.
+const X11_FAMILY_PIDS: ReadonlySet<number> = new Set([0xfa55, 0xfa60, 0xfa61]);
+
+const X11_FAMILY_NAMES: ReadonlyMap<number, string> = new Map([
+  [0xfa55, "Attack Shark X11 (wired)"],
+  [0xfa60, "Attack Shark X11 (wireless receiver)"],
+  [0xfa61, "Attack Shark R1"],
+]);
+
+const X11_FAMILY_MODELS: ReadonlyMap<number, string> = new Map([
+  [0xfa55, "Attack Shark X11"],
+  [0xfa60, "Attack Shark X11"],
+  [0xfa61, "Attack Shark R1"],
+]);
+
+// The wireless receiver's interface 2 pushes battery packets on its own —
+// no command needed — so a read-only claim of that entry costs nothing and
+// risks nothing. The wired PIDs never report battery on this endpoint.
+const X11_WIRELESS_PID = 0xfa60;
+
+/**
+ * If the granted devices include an X11-family unit that no driver could
+ * claim, explain why instead of letting the generic "not a control
+ * interface" error blame the picker choice. This fires only when the
+ * status entry (the composite with a Consumer collection) was not among
+ * the grants — the rows look identical in the picker, so say how to get
+ * the right one — and it stays honest about settings being native-only.
+ * Returns null when no X11-family device is present.
+ */
+export function attackSharkNativeOnlyMessage(devices: HIDDevice[]): string | null {
+  const unit = devices.find(
+    (device) => device.vendorId === VID_1D57 && X11_FAMILY_PIDS.has(device.productId),
+  );
+  if (!unit) return null;
+  const name = X11_FAMILY_NAMES.get(unit.productId) ?? "Attack Shark X11";
+  return `This ${name} cannot be configured through the browser: its settings channel `
+    + "is on an interface the browser is not allowed to reach. To change DPI, polling "
+    + "rate and lighting, install the OpenMouse Bridge, then open Interface settings "
+    + "→ Bridge → Native devices and click “Enable native control”.";
+}
+
 // ── Protocol family detection ─────────────────────────────────────────────
 
-type ProtocolFamily = "1d57" | "25a7" | "373e" | null;
+type ProtocolFamily = "1d57" | "1d57-x11" | "25a7" | "373e" | null;
 
 function detectFamily(device: HIDDevice): ProtocolFamily {
   if (device.vendorId === VID_1D57) {
-    return device.collections.some(hasFeatureReports) ? "1d57" : null;
+    if (device.collections.some(hasFeatureReports)) return "1d57";
+    // Real X11/R1 units declare no feature reports anywhere (see header
+    // note), so config writes are impossible here — but their interface-2
+    // entry, the composite with a Consumer top-level collection, carries the
+    // autonomous battery stream. Claim that one read-only; the plain boot
+    // keyboard/mouse entries stay refused.
+    if (X11_FAMILY_PIDS.has(device.productId)
+      && device.collections.some((collection) => collection.usagePage === 0x0c)) {
+      return "1d57-x11";
+    }
+    return null;
   }
   if (device.vendorId === VID_25A7) {
     return device.collections.some(hasVendorControl) ? "25a7" : null;
@@ -138,6 +210,8 @@ export class AttackSharkHidClient {
   private readonly family: ProtocolFamily;
   private lastStatus: MouseStatus | null = null;
   private queue: Promise<unknown> = Promise.resolve();
+  private batteryPercent: number | null = null;
+  private listening = false;
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -148,12 +222,37 @@ export class AttackSharkHidClient {
     return detectFamily(device) !== null;
   }
 
+  // Battery packets arrive as inputreport events; the raw packet's leading
+  // 0x03 is the HID report id, which WebHID strips into event.reportId, so
+  // rebuild the native shape before matching the signature.
+  private readonly onInputReport = (event: HIDInputReportEvent): void => {
+    const data = new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength);
+    const packet = new Uint8Array(data.length + 1);
+    packet[0] = event.reportId;
+    packet.set(data, 1);
+    const percent = AttackSharkHidClient.parseBatteryReport(packet);
+    if (percent !== null) {
+      this.batteryPercent = percent;
+      if (this.lastStatus) {
+        this.lastStatus = { ...this.lastStatus, batteryPercent: percent, batteryState: "Discharging" };
+      }
+    }
+  };
+
   async open(): Promise<void> {
     if (!this.device.opened) await this.device.open();
+    if (this.family === "1d57-x11" && !this.listening) {
+      this.device.addEventListener("inputreport", this.onInputReport);
+      this.listening = true;
+    }
   }
 
   async close(): Promise<void> {
     this.lastStatus = null;
+    if (this.listening) {
+      this.device.removeEventListener("inputreport", this.onInputReport);
+      this.listening = false;
+    }
     if (this.device.opened) await this.device.close();
   }
 
@@ -162,6 +261,12 @@ export class AttackSharkHidClient {
   }
 
   displayName(): string {
+    // X11-family product strings are generic OEM labels ("2.4G Wireless
+    // Device", "USB Gaming Mouse"), so name those models by PID instead.
+    const model = this.device.vendorId === VID_1D57
+      ? X11_FAMILY_MODELS.get(this.device.productId)
+      : undefined;
+    if (model) return model;
     const name = this.device.productName?.trim();
     if (!name) return "Attack Shark";
     return /^attack\s*shark/i.test(name) ? name : `Attack Shark ${name}`;
@@ -172,6 +277,9 @@ export class AttackSharkHidClient {
   }
 
   isWireless(): boolean {
+    if (this.device.vendorId === VID_1D57 && X11_FAMILY_PIDS.has(this.device.productId)) {
+      return this.device.productId === X11_WIRELESS_PID;
+    }
     return /receiver|dongle|wireless|2\.4g/i.test(this.device.productName || "");
   }
 
@@ -212,9 +320,20 @@ export class AttackSharkHidClient {
         settingsReady: this.family === "1d57" || this.family === "25a7",
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
+        // Wireless X11-family units push battery on their own — but only
+        // show the column when the battery report is actually visible to
+        // the browser. On known units it is declared under the protected
+        // system-control collection, so Chrome hides it and the packet can
+        // never arrive; an always-empty battery column would just confuse.
+        forceShowBattery: this.family === "1d57-x11"
+          && this.isWireless()
+          && this.device.collections.some((collection) => declaresInputReport(collection, BATTERY_REPORT_ID)),
+        statusNote: this.family === "1d57-x11"
+          ? "Status only: this mouse's settings channel is not reachable from a browser and needs a native driver."
+          : undefined,
       },
-      batteryPercent: null,
-      batteryState: "Unknown",
+      batteryPercent: this.batteryPercent,
+      batteryState: this.batteryPercent !== null ? "Discharging" : "Unknown",
       dpi,
       pollingRateHz,
       supportedPollingRates: this.getSupportedPollingRates(),
@@ -226,6 +345,12 @@ export class AttackSharkHidClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
+    if (this.family === "1d57-x11") {
+      throw new Error(
+        "This mouse's settings channel is not reachable from a browser; "
+        + "changing settings needs the native Attack Shark X11 driver.",
+      );
+    }
     if (this.family === "1d57") {
       const entry = POLLING_RATES_1D57.find(([, hz]) => hz === pollingRateHz);
       if (!entry) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
