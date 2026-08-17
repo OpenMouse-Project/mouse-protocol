@@ -39,6 +39,7 @@ export const VENDOR_ID = {
   ninjutsoLegacy: NINJUTSO_LEGACY_VENDOR_ID,
   ninjutso: NINJUTSO_VENDOR_ID,
   zaunkoenig: ZAUNKOENIG_VENDOR_ID,
+  fantech: 0x3151,
 } as const;
 
 // Keychron Nape Pro VIA raw HID. 0x0440 is wired; 0xd026/0xd029 are shared Link-KM receivers.
@@ -258,4 +259,6 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...[...NINJUTSO_MOUSE_PRODUCT_IDS, ...NINJUTSO_RECEIVER_PRODUCT_IDS]
     .map((productId) => ({ vendorId: NINJUTSO_VENDOR_ID, productId })),
   ...LOGITECH_RECEIVER_FILTERS,
+  // Fantech mice use vendor usage page 0xFFFF, usage 0x02 for configuration.
+  { vendorId: VENDOR_ID.fantech, usagePage: 0xffff, usage: 0x02 },
 ];
