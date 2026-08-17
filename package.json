@@ -29,6 +29,10 @@
       "types": "./dist/finalmouse/index.d.ts",
       "import": "./dist/finalmouse/index.js"
     },
+    "./fantech": {
+      "types": "./dist/fantech/index.d.ts",
+      "import": "./dist/fantech/index.js"
+    },
     "./keychron": {
       "types": "./dist/keychron/index.d.ts",
       "import": "./dist/keychron/index.js"
