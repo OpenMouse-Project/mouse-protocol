@@ -20,11 +20,13 @@ import { RazerViperMiniHidClient } from "./razer/viper-mini-hid.ts";
 import { RazerViperV4ProHidClient } from "./razer/viper-v4-pro-hid.ts";
 import { TeevolutionHidClient } from "./teevolution/hid.ts";
 import { VgnF2HidClient } from "./vgn/hid.ts";
+import { WallhackKeyboardHidClient } from "./wallhack/keyboard-hid.ts";
+import { WallhackMouseHidClient } from "./wallhack/mouse-hid.ts";
 import { WLMouseHidClient } from "./wlmouse/hid.ts";
 import { ZaunkoenigHidClient } from "./zaunkoenig/hid.ts";
 
 export type PulsarClient = PulsarHidClient | PulsarProHidClient | PulsarXs1HidClient;
-export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient | KeychronHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | AttackSharkHidClient | FantechHidClient;
+export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient | KeychronHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | AttackSharkHidClient | FantechHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient;
 
 export interface DeviceDriver {
   brand: string;
@@ -58,6 +60,8 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Razer", supports: (device) => RazerViperV4ProHidClient.isSupported(device), create: (device) => new RazerViperV4ProHidClient(device), score: () => 7 },
   { brand: "Keychron", supports: (device) => KeychronHidClient.isSupported(device), create: (device) => new KeychronHidClient(device), score: () => 6 },
   { brand: "Fantech", supports: (device) => FantechHidClient.isSupported(device), create: (device) => new FantechHidClient(device), score: () => 5 },
+  { brand: "WALLHACK", supports: (device) => WallhackMouseHidClient.isSupported(device), create: (device) => new WallhackMouseHidClient(device), score: () => 8 },
+  { brand: "WALLHACK", supports: (device) => WallhackKeyboardHidClient.isSupported(device), create: (device) => new WallhackKeyboardHidClient(device), score: () => 8 },
 ];
 
 function driverFor(device: HIDDevice): DeviceDriver | undefined {

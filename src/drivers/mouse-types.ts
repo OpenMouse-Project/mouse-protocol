@@ -113,7 +113,7 @@ export type MouseLightingMode =
   | "Breathing dual";
 
 export interface MouseStatus {
-  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech";
+  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "WALLHACK";
   name: string;
   /** Driver-supplied UI policy (optional; keeps control.ts brand-agnostic). */
   ui?: MouseUiHints;

@@ -18,6 +18,16 @@ import {
   ZAUNKOENIG_USAGE_PAGE,
   ZAUNKOENIG_VENDOR_ID,
 } from "@openmouse/protocol/zaunkoenig";
+import {
+  WALLHACK_KEYBOARD_ALT_VENDOR_ID,
+  WALLHACK_KEYBOARD_PRODUCT_IDS,
+  WALLHACK_KEYBOARD_USAGE,
+  WALLHACK_KEYBOARD_USAGE_PAGE,
+  WALLHACK_MOUSE_PRODUCT_IDS,
+  WALLHACK_MOUSE_USAGE,
+  WALLHACK_MOUSE_USAGE_PAGE,
+  WALLHACK_VENDOR_ID,
+} from "@openmouse/protocol/wallhack";
 
 export const VENDOR_ID = {
   pulsar: 0x3710,
@@ -40,6 +50,8 @@ export const VENDOR_ID = {
   ninjutso: NINJUTSO_VENDOR_ID,
   zaunkoenig: ZAUNKOENIG_VENDOR_ID,
   fantech: 0x3151,
+  wallhack: WALLHACK_VENDOR_ID,
+  wallhackKeyboardAlt: WALLHACK_KEYBOARD_ALT_VENDOR_ID,
 } as const;
 
 // Keychron VIA raw HID. 0x0440 is Nape Pro wired; 0xd026/0xd029 are shared Link-KM receivers.
@@ -215,6 +227,12 @@ export const WLMOUSE_MAX_POLLING_HZ: ReadonlyMap<number, number> = new Map([
   [0xa882, 1000],
 ]);
 
+export const WALLHACK_HID_FILTERS: HIDDeviceFilter[] = [
+  ...[...WALLHACK_MOUSE_PRODUCT_IDS].map((productId) => ({ vendorId: WALLHACK_VENDOR_ID, productId, usagePage: WALLHACK_MOUSE_USAGE_PAGE, usage: WALLHACK_MOUSE_USAGE })),
+  ...[...WALLHACK_KEYBOARD_PRODUCT_IDS].flatMap((productId) =>
+    [WALLHACK_VENDOR_ID, WALLHACK_KEYBOARD_ALT_VENDOR_ID].map((vendorId) => ({ vendorId, productId, usagePage: WALLHACK_KEYBOARD_USAGE_PAGE, usage: WALLHACK_KEYBOARD_USAGE }))),
+];
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
@@ -261,4 +279,5 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...LOGITECH_RECEIVER_FILTERS,
   // Fantech mice use vendor usage page 0xFFFF, usage 0x02 for configuration.
   { vendorId: VENDOR_ID.fantech, usagePage: 0xffff, usage: 0x02 },
+  ...WALLHACK_HID_FILTERS,
 ];

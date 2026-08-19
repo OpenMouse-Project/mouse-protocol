@@ -81,6 +81,10 @@
       "types": "./dist/vgn/index.d.ts",
       "import": "./dist/vgn/index.js"
     },
+    "./wallhack": {
+      "types": "./dist/wallhack/index.d.ts",
+      "import": "./dist/wallhack/index.js"
+    },
     "./wlmouse": {
       "types": "./dist/wlmouse/index.d.ts",
       "import": "./dist/wlmouse/index.js"
