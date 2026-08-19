@@ -88,6 +88,10 @@ type ProtocolFamily = "1d57" | "25a7" | "373e" | null;
 
 function detectFamily(device: HIDDevice): ProtocolFamily {
   if (device.vendorId === VID_1D57) {
+    // Some 0x1d57 mice (X8 SE, X11) use the GearHub protocol despite
+    // sharing the R1 VID.  Distinguish by checking for a vendor-specific
+    // collection (usagePage 0xffff) which the GearHub interface exposes.
+    if (device.collections.some(hasVendorControl)) return "25a7";
     return device.collections.some(hasFeatureReports) ? "1d57" : null;
   }
   if (device.vendorId === VID_25A7) {
@@ -182,6 +186,12 @@ export class AttackSharkHidClient {
   }
 
   getDpiOptions(): number[] {
+    // 25a7 devices expose up to 8 DPI slots per profile.
+    // The actual values are read dynamically in readStatus(); we return a
+    // standard set of supported DPI steps so the UI can offer them.
+    if (this.family === "25a7") {
+      return [400, 800, 1200, 1600, 2400, 3200, 6400, 12000, 26000];
+    }
     return [];
   }
 
