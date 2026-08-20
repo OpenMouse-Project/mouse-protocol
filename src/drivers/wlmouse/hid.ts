@@ -26,7 +26,6 @@ const FRAME_OFFSETS = [0, 1] as const;
 const SLEEP_DISABLED = 0xffff;
 const SLEEP_DISABLED_MIN = 0xff00;
 
-const PROFILE = 0x01;
 const DPI_STEP = 50;
 const DPI_MAX = 30000;
 
@@ -63,17 +62,30 @@ const READ = {
   serial: { target: TARGET.mouse, page: PAGE.device, command: 0x82, length: 0x02, args: [] },
   battery: { target: TARGET.mouse, page: PAGE.device, command: 0x83, length: 0x02, args: [] },
   activeProfile: { target: TARGET.mouse, page: PAGE.device, command: 0x85, length: 0x01, args: [] },
-  sleepTimeout: { target: TARGET.mouse, page: PAGE.device, command: 0x87, length: 0x03, args: [0x01] },
-  debounce: { target: TARGET.mouse, page: PAGE.device, command: 0x88, length: 0x02, args: [0x01] },
-  dpiStages: { target: TARGET.mouse, page: PAGE.profile, command: 0x81, length: 0x0a, args: [PROFILE, 0x06] },
-  activeStage: { target: TARGET.mouse, page: PAGE.profile, command: 0x82, length: 0x02, args: [PROFILE] },
-  pollingRate: { target: TARGET.mouse, page: PAGE.profile, command: 0x80, length: 0x02, args: [PROFILE] },
-  liftOffDistance: { target: TARGET.mouse, page: PAGE.profile, command: 0x88, length: 0x02, args: [PROFILE] },
-  separateAxes: { target: TARGET.mouse, page: PAGE.profile, command: 0x8d, length: 0x02, args: [PROFILE] },
-  angleSnapping: { target: TARGET.mouse, page: PAGE.profile, command: 0x84, length: 0x02, args: [PROFILE] },
-  motionSync: { target: TARGET.mouse, page: PAGE.profile, command: 0x89, length: 0x02, args: [PROFILE] },
-  rippleControl: { target: TARGET.mouse, page: PAGE.profile, command: 0x8a, length: 0x02, args: [PROFILE] },
 } as const satisfies Record<string, WLMouseRequest>;
+
+const PROFILE_READ = {
+  sleepTimeout: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.device, command: 0x87, length: 0x03, args: [profile] }),
+  debounce: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.device, command: 0x88, length: 0x02, args: [profile] }),
+  dpiStages: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x81, length: 0x0a, args: [profile, 0x06] }),
+  activeStage: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x82, length: 0x02, args: [profile] }),
+  pollingRate: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x80, length: 0x02, args: [profile] }),
+  liftOffDistance: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x88, length: 0x02, args: [profile] }),
+  separateAxes: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x8d, length: 0x02, args: [profile] }),
+  angleSnapping: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x84, length: 0x02, args: [profile] }),
+  motionSync: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x89, length: 0x02, args: [profile] }),
+  rippleControl: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x8a, length: 0x02, args: [profile] }),
+} as const;
 
 const WRITE = {
   dpiStages: 0x01,
@@ -102,6 +114,7 @@ export class WLMouseHidClient {
   private lastStatus: MouseStatus | null = null;
   private notifier: HIDDevice | null = null;
   private notifyListener: ((event: HIDInputReportEvent) => void) | null = null;
+  private activeProfile = 1;
 
   readonly device: HIDDevice;
 
@@ -218,17 +231,22 @@ export class WLMouseHidClient {
       wireless ? this.request(READ.dongleFirmware).catch(() => null) : Promise.resolve(null));
     const serial = await this.once("serial", () => this.request(READ.serial).catch(() => null));
     const battery = await this.request(READ.battery);
-    const sleepTimeout = await this.request(READ.sleepTimeout).catch(() => null);
-    const debounce = await this.request(READ.debounce).catch(() => null);
-    const stages = this.decodeDpiStages(await this.request(READ.dpiStages));
-    const activeStage = this.stageIndex((await this.request(READ.activeStage))[1], stages.length);
-    const pollingRate = await this.request(READ.pollingRate);
-    const liftOffDistance = await this.request(READ.liftOffDistance);
-    const separateAxes = await this.request(READ.separateAxes).catch(() => null);
-    const activeProfile = await this.request(READ.activeProfile).catch(() => null);
-    const angleSnapping = await this.request(READ.angleSnapping).catch(() => null);
-    const motionSync = await this.request(READ.motionSync).catch(() => null);
-    const rippleControl = await this.request(READ.rippleControl).catch(() => null);
+    // Profile-page commands must address the profile the mouse is actually
+    // running, not a fixed slot: writing to profile 1 is silently ignored when
+    // a different onboard profile is active.
+    const activeProfileReply = await this.request(READ.activeProfile).catch(() => null);
+    const profile = activeProfileReply ? Math.max(1, activeProfileReply[0]) : 1;
+    this.activeProfile = profile;
+    const sleepTimeout = await this.request(PROFILE_READ.sleepTimeout(profile)).catch(() => null);
+    const debounce = await this.request(PROFILE_READ.debounce(profile)).catch(() => null);
+    const stages = this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile)));
+    const activeStage = this.stageIndex((await this.request(PROFILE_READ.activeStage(profile)))[1], stages.length);
+    const pollingRate = await this.request(PROFILE_READ.pollingRate(profile));
+    const liftOffDistance = await this.request(PROFILE_READ.liftOffDistance(profile));
+    const separateAxes = await this.request(PROFILE_READ.separateAxes(profile)).catch(() => null);
+    const angleSnapping = await this.request(PROFILE_READ.angleSnapping(profile)).catch(() => null);
+    const motionSync = await this.request(PROFILE_READ.motionSync(profile)).catch(() => null);
+    const rippleControl = await this.request(PROFILE_READ.rippleControl(profile)).catch(() => null);
     const stage = stages[activeStage];
     if (!stage) throw new Error("The mouse did not report any DPI stages.");
     return this.lastStatus = {
@@ -246,7 +264,7 @@ export class WLMouseHidClient {
       supportsSeparateDpiAxes: separateAxes ? separateAxes[1] === 1 : false,
       pollingRateHz: this.decodePollingRate(pollingRate[1]),
       supportedPollingRates: this.getSupportedPollingRates(),
-      activeProfile: activeProfile ? activeProfile[0] : null,
+      activeProfile: activeProfileReply ? activeProfileReply[0] : null,
       angleSnapping: angleSnapping ? angleSnapping[1] === 1 : null,
       motionSync: motionSync ? motionSync[1] === 1 : null,
       rippleControl: rippleControl ? rippleControl[1] === 1 : null,
@@ -264,7 +282,7 @@ export class WLMouseHidClient {
 
   private async readLiveStatus(previous: MouseStatus): Promise<MouseStatus> {
     const battery = await this.request(READ.battery);
-    const pollingRate = await this.request(READ.pollingRate);
+    const pollingRate = await this.request(PROFILE_READ.pollingRate(this.activeProfile));
     return this.lastStatus = {
       ...previous,
       batteryPercent: battery[1] <= 100 ? battery[1] : null,
@@ -278,8 +296,9 @@ export class WLMouseHidClient {
     if (!encoded || !this.getSupportedPollingRates().includes(pollingRateHz)) {
       throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
     }
-    await this.write(PAGE.profile, WRITE.pollingRate, [encoded[0]]);
-    const confirmed = this.decodePollingRate((await this.request(READ.pollingRate))[1]);
+    const profile = await this.currentProfile();
+    await this.write(PAGE.profile, WRITE.pollingRate, profile, [encoded[0]]);
+    const confirmed = this.decodePollingRate((await this.request(PROFILE_READ.pollingRate(profile)))[1]);
     if (confirmed !== pollingRateHz) {
       throw new Error(`The mouse kept ${confirmed} Hz instead of ${pollingRateHz} Hz.`);
     }
@@ -290,8 +309,9 @@ export class WLMouseHidClient {
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
     const encoded = LIFT_OFF_DISTANCES.find(([, name]) => name === value);
     if (!encoded) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
-    await this.write(PAGE.profile, WRITE.liftOffDistance, [encoded[0]]);
-    const confirmed = this.decodeLiftOffDistance((await this.request(READ.liftOffDistance))[1]);
+    const profile = await this.currentProfile();
+    await this.write(PAGE.profile, WRITE.liftOffDistance, profile, [encoded[0]]);
+    const confirmed = this.decodeLiftOffDistance((await this.request(PROFILE_READ.liftOffDistance(profile)))[1]);
     if (confirmed !== value) {
       throw new Error(`The mouse kept a ${String(confirmed).toLowerCase()} lift-off distance instead of ${value.toLowerCase()}.`);
     }
@@ -300,26 +320,27 @@ export class WLMouseHidClient {
   }
 
   async setAngleSnapping(enabled: boolean): Promise<boolean> {
-    return await this.setFlag(WRITE.angleSnapping, READ.angleSnapping, enabled, "angleSnapping", "angle snapping");
+    return await this.setFlag(WRITE.angleSnapping, PROFILE_READ.angleSnapping, enabled, "angleSnapping", "angle snapping");
   }
 
   async setMotionSync(enabled: boolean): Promise<boolean> {
-    return await this.setFlag(WRITE.motionSync, READ.motionSync, enabled, "motionSync", "Motion Sync");
+    return await this.setFlag(WRITE.motionSync, PROFILE_READ.motionSync, enabled, "motionSync", "Motion Sync");
   }
 
   async setRippleControl(enabled: boolean): Promise<boolean> {
-    return await this.setFlag(WRITE.rippleControl, READ.rippleControl, enabled, "rippleControl", "ripple control");
+    return await this.setFlag(WRITE.rippleControl, PROFILE_READ.rippleControl, enabled, "rippleControl", "ripple control");
   }
 
   private async setFlag(
     command: number,
-    read: WLMouseRequest,
+    read: (profile: number) => WLMouseRequest,
     enabled: boolean,
     field: "angleSnapping" | "motionSync" | "rippleControl",
     label: string,
   ): Promise<boolean> {
-    await this.write(PAGE.profile, command, [enabled ? 1 : 0]);
-    const confirmed = (await this.request(read))[1] === 1;
+    const profile = await this.currentProfile();
+    await this.write(PAGE.profile, command, profile, [enabled ? 1 : 0]);
+    const confirmed = (await this.request(read(profile)))[1] === 1;
     if (confirmed !== enabled) {
       throw new Error(`The mouse left ${label} ${confirmed ? "on" : "off"}.`);
     }
@@ -331,8 +352,9 @@ export class WLMouseHidClient {
     if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > DEBOUNCE_MAX_MS) {
       throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${DEBOUNCE_MAX_MS}.`);
     }
-    await this.write(PAGE.device, WRITE.debounce, [milliseconds]);
-    const confirmed = (await this.request(READ.debounce))[1];
+    const profile = await this.currentProfile();
+    await this.write(PAGE.device, WRITE.debounce, profile, [milliseconds]);
+    const confirmed = (await this.request(PROFILE_READ.debounce(profile)))[1];
     if (confirmed !== milliseconds) {
       throw new Error(`The mouse kept ${confirmed} ms of debounce instead of ${milliseconds} ms.`);
     }
@@ -344,8 +366,9 @@ export class WLMouseHidClient {
     if (!Number.isInteger(seconds) || seconds < 0 || seconds > SLEEP_DISABLED) {
       throw new Error(`The sleep timeout must be a whole number of seconds between 0 and ${SLEEP_DISABLED}.`);
     }
-    await this.write(PAGE.device, WRITE.sleepTimeout, [seconds >> 8 & 0xff, seconds & 0xff]);
-    const reply = await this.request(READ.sleepTimeout);
+    const profile = await this.currentProfile();
+    await this.write(PAGE.device, WRITE.sleepTimeout, profile, [seconds >> 8 & 0xff, seconds & 0xff]);
+    const reply = await this.request(PROFILE_READ.sleepTimeout(profile));
     const confirmed = (reply[1] << 8) | reply[2];
     if (confirmed !== seconds) {
       throw new Error(`The mouse kept a ${confirmed} second sleep timeout instead of ${seconds} seconds.`);
@@ -360,15 +383,16 @@ export class WLMouseHidClient {
         throw new Error(`${value.toLocaleString()} is not a supported DPI value.`);
       }
     }
-    const stages = this.decodeDpiStages(await this.request(READ.dpiStages));
-    const active = this.stageIndex((await this.request(READ.activeStage))[1], stages.length);
+    const profile = await this.currentProfile();
+    const stages = this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile)));
+    const active = this.stageIndex((await this.request(PROFILE_READ.activeStage(profile)))[1], stages.length);
     if (!stages[active]) throw new Error("The mouse did not report any DPI stages.");
     stages[active] = { x: dpi, y: dpiY };
-    await this.write(PAGE.profile, WRITE.dpiStages, [
+    await this.write(PAGE.profile, WRITE.dpiStages, profile, [
       stages.length,
       ...stages.flatMap((stage) => [stage.x >> 8 & 0xff, stage.x & 0xff, stage.y >> 8 & 0xff, stage.y & 0xff]),
     ]);
-    const confirmed = this.decodeDpiStages(await this.request(READ.dpiStages))[active];
+    const confirmed = this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile)))[active];
     if (!confirmed || confirmed.x !== dpi || confirmed.y !== dpiY) {
       throw new Error(`The mouse kept ${confirmed ? confirmed.x.toLocaleString() : "an unknown"} DPI instead of ${dpi.toLocaleString()}.`);
     }
@@ -376,8 +400,14 @@ export class WLMouseHidClient {
     return confirmed.x;
   }
 
-  private async write(page: number, command: number, values: readonly number[]): Promise<void> {
-    const args = [PROFILE, ...values];
+  private async currentProfile(): Promise<number> {
+    const reply = await this.request(READ.activeProfile);
+    this.activeProfile = Math.max(1, reply[0]);
+    return this.activeProfile;
+  }
+
+  private async write(page: number, command: number, profile: number, values: readonly number[]): Promise<void> {
+    const args = [profile, ...values];
     await this.request({ target: TARGET.mouse, page, command, length: args.length, args });
   }
 

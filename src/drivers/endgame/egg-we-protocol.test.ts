@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { EggWeHidClient } from "./egg-we-hid.ts";
+
 import {
   WE_OFF,
   WE_REPORT_ID,
@@ -15,6 +17,36 @@ import {
   weUnpackDpiStage,
   weUnpackScalarPair,
 } from "@openmouse/protocol/endgame-gear-we";
+
+function hidDevice(productId: number, productName = ""): HIDDevice {
+  return {
+    vendorId: 0x3367,
+    productId,
+    productName,
+    collections: [],
+  } as unknown as HIDDevice;
+}
+
+test("XM2we receiver revisions are supported and keep their model identity", () => {
+  for (const productId of [0x1960, 0x1968, 0x1982]) {
+    const device = hidDevice(productId);
+    assert.equal(EggWeHidClient.isSupported(device), true);
+    assert.equal(EggWeHidClient.isReceiverDevice(device), true);
+    assert.equal(EggWeHidClient.displayNameForDevice(device), "Endgame Gear XM2we");
+    assert.equal(new EggWeHidClient(device).displayName(), "Endgame Gear XM2we");
+  }
+});
+
+test("WE model names can fall back to the USB product string", () => {
+  assert.equal(
+    EggWeHidClient.displayNameForDevice(hidDevice(0x1962, "XM2we")),
+    "Endgame Gear XM2we",
+  );
+  assert.equal(
+    EggWeHidClient.displayNameForDevice(hidDevice(0x1962, "OP1we")),
+    "Endgame Gear OP1we",
+  );
+});
 
 test("commands produce a valid report checksum", () => {
   for (const payload of [weBuildReadEepromPayload(0x1234, 8), weBuildWriteEepromPayload(0x12, [1, 2, 3, 4])]) {

@@ -4,6 +4,7 @@ import {
   LOGITECH_DIRECT_PRODUCT_IDS,
 } from "@openmouse/protocol/logitech";
 import { RAZER_PRODUCTS, RAZER_PRODUCT_IDS } from "@openmouse/protocol/razer-devices";
+import { PULSAR_XS1_PRODUCT_IDS } from "@openmouse/protocol/pulsar";
 import {
   NINJUTSO_LEGACY_MOUSE_PRODUCT_IDS,
   NINJUTSO_LEGACY_RECEIVER_PRODUCT_IDS,
@@ -17,12 +18,23 @@ import {
   ZAUNKOENIG_USAGE_PAGE,
   ZAUNKOENIG_VENDOR_ID,
 } from "@openmouse/protocol/zaunkoenig";
+import {
+  WALLHACK_KEYBOARD_ALT_VENDOR_ID,
+  WALLHACK_KEYBOARD_PRODUCT_IDS,
+  WALLHACK_KEYBOARD_USAGE,
+  WALLHACK_KEYBOARD_USAGE_PAGE,
+  WALLHACK_MOUSE_PRODUCT_IDS,
+  WALLHACK_MOUSE_USAGE,
+  WALLHACK_MOUSE_USAGE_PAGE,
+  WALLHACK_VENDOR_ID,
+} from "@openmouse/protocol/wallhack";
 
 export const VENDOR_ID = {
   pulsar: 0x3710,
   endgameGear: 0x3367,
   wlmouse: 0x36a7,
   lamzu: 0x373e,
+  attackshark: 0x373e,
   logitech: 0x046d,
   orbital: 0x1915,
   razer: 0x1532,
@@ -32,9 +44,14 @@ export const VENDOR_ID = {
   finalmouse: 0x361d,
   keychron: 0x3434,
   moddo: 0x2fe3,
+  attackShark: 0x25a7,
+  attackSharkX: 0x1d57, // R1 / X11 family OEM VID (PIDs vary per firmware)
   ninjutsoLegacy: NINJUTSO_LEGACY_VENDOR_ID,
   ninjutso: NINJUTSO_VENDOR_ID,
   zaunkoenig: ZAUNKOENIG_VENDOR_ID,
+  fantech: 0x3151,
+  wallhack: WALLHACK_VENDOR_ID,
+  wallhackKeyboardAlt: WALLHACK_KEYBOARD_ALT_VENDOR_ID,
 } as const;
 
 // Keychron VIA raw HID. 0x0440 is Nape Pro wired; 0xd026/0xd029 are shared Link-KM receivers.
@@ -51,6 +68,14 @@ export const MODDO_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.moddo, usagePage: 0xff, usage: 0x01 },
   { vendorId: VENDOR_ID.moddo, usagePage: 0xff, usage: 0x02 },
 ];
+
+// The X3 family's control channel is the Sonix XS-1 interface: a single
+// 64-byte unnumbered feature report on usage page 0xffff. Request that
+// collection directly so the picker lists the control interface instead of the
+// mouse's plain pointer interface, which cannot answer feature reports.
+export const PULSAR_XS1_HID_FILTERS: HIDDeviceFilter[] = [...PULSAR_XS1_PRODUCT_IDS].map(
+  (productId) => ({ vendorId: VENDOR_ID.pulsar, productId, usagePage: 0xffff, usage: 0x01 }),
+);
 
 // Viper V2/V3 Pro and Mouse Dock Pro expose their control channel as a Generic
 // Desktop Mouse collection. Limit this broad collection filter to known PIDs so
@@ -202,6 +227,12 @@ export const WLMOUSE_MAX_POLLING_HZ: ReadonlyMap<number, number> = new Map([
   [0xa882, 1000],
 ]);
 
+export const WALLHACK_HID_FILTERS: HIDDeviceFilter[] = [
+  ...[...WALLHACK_MOUSE_PRODUCT_IDS].map((productId) => ({ vendorId: WALLHACK_VENDOR_ID, productId, usagePage: WALLHACK_MOUSE_USAGE_PAGE, usage: WALLHACK_MOUSE_USAGE })),
+  ...[...WALLHACK_KEYBOARD_PRODUCT_IDS].flatMap((productId) =>
+    [WALLHACK_VENDOR_ID, WALLHACK_KEYBOARD_ALT_VENDOR_ID].map((vendorId) => ({ vendorId, productId, usagePage: WALLHACK_KEYBOARD_USAGE_PAGE, usage: WALLHACK_KEYBOARD_USAGE }))),
+];
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
@@ -210,8 +241,16 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   })),
   { vendorId: VENDOR_ID.finalmouse, productId: 0x0100, usagePage: 0xff00, usage: 0x0001 },
   { vendorId: VENDOR_ID.pulsar },
+  ...PULSAR_XS1_HID_FILTERS,
+  // The Pulsar 4K Wireless Receiver enumerates under the shared Teevolution/VGN
+  // vendor id with a Pulsar-specific product id, so the broad VID-only filter
+  // keeps it visible in the picker; the driver disambiguates by product id.
+  { vendorId: VENDOR_ID.vgn },
   { vendorId: VENDOR_ID.endgameGear },
   { vendorId: VENDOR_ID.wlmouse },
+  // 0x373e is the shared CompX ODM vendor id behind Lamzu, CRDRAKO, and
+  // Attack Shark. The broad filter surfaces all of them; each driver rejects
+  // interfaces that lack the feature-report-0 control channel.
   { vendorId: VENDOR_ID.lamzu },
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   ...TEEVOLUTION_PRODUCT_IDS.map((productId) => ({ vendorId: VENDOR_ID.teevolution, productId })),
@@ -223,6 +262,8 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.vgn, productId: 0xfb56 },
   { vendorId: VENDOR_ID.vgn, productId: 0xfb57 },
   { vendorId: VENDOR_ID.atk, usagePage: 0xff02, usage: 2 },
+  { vendorId: VENDOR_ID.attackShark },
+  { vendorId: VENDOR_ID.attackSharkX },
   ...RAZER_VIPER_V4_CONTROL_FILTERS,
   ...RAZER_DEATHADDER_ESSENTIAL_FILTERS,
   ...RAZER_COBRA_FILTERS,
@@ -236,4 +277,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...[...NINJUTSO_MOUSE_PRODUCT_IDS, ...NINJUTSO_RECEIVER_PRODUCT_IDS]
     .map((productId) => ({ vendorId: NINJUTSO_VENDOR_ID, productId })),
   ...LOGITECH_RECEIVER_FILTERS,
+  // Fantech mice use vendor usage page 0xFFFF, usage 0x02 for configuration.
+  { vendorId: VENDOR_ID.fantech, usagePage: 0xffff, usage: 0x02 },
+  ...WALLHACK_HID_FILTERS,
 ];

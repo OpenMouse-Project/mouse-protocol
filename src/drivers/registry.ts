@@ -1,5 +1,7 @@
 import { AtkHidClient } from "./atk/hid.ts";
+import { AttackSharkHidClient } from "./attackshark/hid.ts";
 import { EggOp1HidClient } from "./endgame/egg-op1-hid.ts";
+import { FantechHidClient } from "./fantech/hid.ts";
 import { eggWeCreate, eggWeIsSupported, eggWeSupportScore, isEggWeClient, type EggWeHidClient } from "./endgame/egg-we-control.ts";
 import { FinalmouseHidClient } from "./finalmouse/hid.ts";
 import { KeychronHidClient } from "./keychron/hid.ts";
@@ -10,6 +12,7 @@ import { NinjutsoHidClient } from "./ninjutso/hid.ts";
 import { OrbitalHidClient } from "./orbital/hid.ts";
 import { PulsarHidClient } from "./pulsar/pulsar-hid.ts";
 import { PulsarProHidClient } from "./pulsar/pulsar-pro-hid.ts";
+import { PulsarXs1HidClient } from "./pulsar/pulsar-xs1-hid.ts";
 import { RazerCobraHidClient } from "./razer/cobra-hid.ts";
 import { RazerHidClient } from "./razer/hid.ts";
 import { RazerViperHidClient } from "./razer/viper-hid.ts";
@@ -17,11 +20,13 @@ import { RazerViperMiniHidClient } from "./razer/viper-mini-hid.ts";
 import { RazerViperV4ProHidClient } from "./razer/viper-v4-pro-hid.ts";
 import { TeevolutionHidClient } from "./teevolution/hid.ts";
 import { VgnF2HidClient } from "./vgn/hid.ts";
+import { WallhackKeyboardHidClient } from "./wallhack/keyboard-hid.ts";
+import { WallhackMouseHidClient } from "./wallhack/mouse-hid.ts";
 import { WLMouseHidClient } from "./wlmouse/hid.ts";
 import { ZaunkoenigHidClient } from "./zaunkoenig/hid.ts";
 
-export type PulsarClient = PulsarHidClient | PulsarProHidClient;
-export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient | KeychronHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient;
+export type PulsarClient = PulsarHidClient | PulsarProHidClient | PulsarXs1HidClient;
+export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient | KeychronHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | AttackSharkHidClient | FantechHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient;
 
 export interface DeviceDriver {
   brand: string;
@@ -35,6 +40,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Finalmouse", supports: (device) => FinalmouseHidClient.isSupported(device), create: (device) => new FinalmouseHidClient(device), score: () => 10 },
   { brand: "Endgame Gear", supports: (device) => EggOp1HidClient.isSupported(device), create: (device) => new EggOp1HidClient(device), score: () => 10 },
   { brand: "Endgame Gear", supports: eggWeIsSupported, create: eggWeCreate, score: eggWeSupportScore },
+  { brand: "Pulsar", supports: (device) => PulsarXs1HidClient.isSupported(device), create: (device) => new PulsarXs1HidClient(device), score: () => 8 },
   { brand: "Pulsar", supports: (device) => PulsarProHidClient.isSupported(device), create: (device) => new PulsarProHidClient(device), score: () => 8 },
   { brand: "Pulsar", supports: (device) => PulsarHidClient.isSupported(device), create: (device) => new PulsarHidClient(device), score: () => 7 },
   { brand: "Teevolution", supports: (device) => TeevolutionHidClient.isSupported(device), create: (device) => new TeevolutionHidClient(device), score: () => 7 },
@@ -50,8 +56,12 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Razer", supports: (device) => RazerViperMiniHidClient.isSupported(device), create: (device) => new RazerViperMiniHidClient(device), score: () => 6 },
   { brand: "Razer", supports: (device) => RazerViperHidClient.isSupported(device), create: (device) => new RazerViperHidClient(device), score: () => 6 },
   { brand: "ATK", supports: (device) => AtkHidClient.isSupported(device), create: (device) => new AtkHidClient(device), score: () => 5 },
+  { brand: "Attack Shark", supports: (device) => AttackSharkHidClient.isSupported(device), create: (device) => new AttackSharkHidClient(device), score: () => 5 },
   { brand: "Razer", supports: (device) => RazerViperV4ProHidClient.isSupported(device), create: (device) => new RazerViperV4ProHidClient(device), score: () => 7 },
   { brand: "Keychron", supports: (device) => KeychronHidClient.isSupported(device), create: (device) => new KeychronHidClient(device), score: () => 6 },
+  { brand: "Fantech", supports: (device) => FantechHidClient.isSupported(device), create: (device) => new FantechHidClient(device), score: () => 5 },
+  { brand: "WALLHACK", supports: (device) => WallhackMouseHidClient.isSupported(device), create: (device) => new WallhackMouseHidClient(device), score: () => 8 },
+  { brand: "WALLHACK", supports: (device) => WallhackKeyboardHidClient.isSupported(device), create: (device) => new WallhackKeyboardHidClient(device), score: () => 8 },
 ];
 
 function driverFor(device: HIDDevice): DeviceDriver | undefined {

@@ -13,12 +13,22 @@ export const KEYCHRON_NAPE_COMMAND = {
   getOrientation: 32, getDpiStage: 33, setDpiStage: 34, setDpiValue: 35,
   getDpiValue: 36, getBattery: 49, getCustomDpi: 54, setCustomDpi: 55,
 } as const;
-export const KEYCHRON_MISC_COMMAND = { getPolling: 13, setPolling: 14 } as const;
+export const KEYCHRON_MISC_COMMAND = {
+  getSleep: 11,
+  setSleep: 12,
+  getPolling: 13,
+  setPolling: 14,
+} as const;
 export const KEYCHRON_POLLING_TABLE = [8000, 4000, 2000, 1000, 500, 250, 125] as const;
 /** Nape Pro only — observed on firmware v1.2.6-ZK (stage 5 stores 4000). Other Keychron mice should define their own ranges. */
 export const KEYCHRON_NAPE_DPI_MIN = 50;
 export const KEYCHRON_NAPE_DPI_MAX = 4000;
 export const KEYCHRON_NAPE_DPI_STEP = 50;
+export const KEYCHRON_NAPE_SLEEP_MIN_SECONDS = 60;
+export const KEYCHRON_NAPE_SLEEP_MAX_SECONDS = 12 * 3600 + 59 * 60 + 59;
+export const KEYCHRON_NAPE_SLEEP_OPTIONS = [
+  60, 120, 300, 600, 1800, 3600, 7200, 18_000, 43_200,
+] as const;
 
 export function keychronPacket(command: readonly number[]): Uint8Array<ArrayBuffer> {
   const packet = new Uint8Array(KEYCHRON_PACKET_LENGTH);
@@ -53,5 +63,22 @@ export function keychronDecodeBattery(
       ? "Full"
       : "Discharging";
   return { percent, state };
+}
+
+export function keychronDecodeSleepTimeout(response: Uint8Array): number {
+  return (response[5] ?? 0) | ((response[6] ?? 0) << 8);
+}
+
+export function keychronEncodeSleepTimeout(seconds: number): number[] {
+  return [
+    KEYCHRON_COMMAND.miscGroup,
+    KEYCHRON_MISC_COMMAND.setSleep,
+    0,
+    0,
+    seconds & 0xff,
+    (seconds >> 8) & 0xff,
+    0,
+    0,
+  ];
 }
 

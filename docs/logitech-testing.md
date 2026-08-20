@@ -180,3 +180,25 @@ lift-off and onboard-profile paths stay inactive.
 7. Cross-check against Logi Options+ by changing the strength preset **there**
    and confirming OpenMouse reads the new value. Options+ caches its own view
    and will not re-read a change made outside it, so verify in that direction.
+
+### Button remapping (`0x1B04`)
+
+This unit reports nine controls. Left and right click report a group mask of
+zero, so the firmware itself offers no targets for them.
+
+Reading the table costs two round-trips per control, so it is deliberately not
+part of the status refresh: read it on connect and after a write.
+
+1. Confirm all nine controls are listed, and that **left and right click offer
+   no targets at all** — that restriction comes from the device, so a mouse
+   that started offering them would mean the group mask is being misread.
+2. Remap a button — the gesture button to middle click, say — and confirm the
+   physical button performs the new action. Reload and confirm it persisted.
+3. Set it back to itself and confirm the original action returns.
+4. Confirm a remap does not change any button's diverted state. The write
+   marks no flag valid, so diversion should be untouched either way.
+5. With Logi Options+ **running**, confirm the buttons it has taken over read
+   as diverted. Close Options+ and confirm the mouse clears that itself —
+   Options+ uses the temporary flag, not the persistent one.
+6. Use "restore to hardware control" on a mouse with nothing diverted and
+   confirm it writes nothing rather than rewriting every control.

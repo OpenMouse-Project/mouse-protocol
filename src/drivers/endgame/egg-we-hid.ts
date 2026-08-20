@@ -36,6 +36,8 @@ import {
 const EGG_VENDOR_ID = 0x3367;
 const OP1WE_CABLE_PIDS = new Set([0x1962, 0x1972]);
 const OP1WE_RECEIVER_PIDS = new Set([0x1961, 0x1970]);
+/** XM2we receiver revisions observed in WebHID hardware reports. */
+const XM2WE_RECEIVER_PIDS = new Set([0x1960, 0x1968, 0x1982]);
 const EGG_8K_PRODUCT_IDS = new Set([0x1964, 0x1966, 0x1976, 0x1978]);
 
 const USAGE_PAGE_CMD = 0xff02;
@@ -102,13 +104,22 @@ export class EggWeHidClient {
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== EGG_VENDOR_ID) return false;
     return !EGG_8K_PRODUCT_IDS.has(device.productId)
-      && (OP1WE_CABLE_PIDS.has(device.productId) || OP1WE_RECEIVER_PIDS.has(device.productId));
+      && (OP1WE_CABLE_PIDS.has(device.productId)
+        || OP1WE_RECEIVER_PIDS.has(device.productId)
+        || XM2WE_RECEIVER_PIDS.has(device.productId));
   }
 
   static isReceiverDevice(device: HIDDevice): boolean {
-    if (OP1WE_RECEIVER_PIDS.has(device.productId)) return true;
+    if (OP1WE_RECEIVER_PIDS.has(device.productId) || XM2WE_RECEIVER_PIDS.has(device.productId)) return true;
     const name = (device.productName || "").toLowerCase();
     return name.includes("receiver") || name.includes("dongle");
+  }
+
+  static displayNameForDevice(device: HIDDevice): string {
+    const name = (device.productName || "").toLowerCase();
+    return XM2WE_RECEIVER_PIDS.has(device.productId) || name.includes("xm2")
+      ? "Endgame Gear XM2we"
+      : "Endgame Gear OP1we";
   }
 
   static pickDevices(devices: readonly HIDDevice[]): HIDDevice[] {
@@ -152,6 +163,15 @@ export class EggWeHidClient {
     return device === this.device
       || device === this.cmdDevice
       || device === this.notifyDevice;
+  }
+
+  displayName(): string {
+    const devices = [this.device, this.cmdDevice, this.notifyDevice].filter(
+      (device): device is HIDDevice => device !== null,
+    );
+    return devices.some((device) => EggWeHidClient.displayNameForDevice(device).includes("XM2we"))
+      ? "Endgame Gear XM2we"
+      : "Endgame Gear OP1we";
   }
 
   /**
@@ -263,8 +283,8 @@ export class EggWeHidClient {
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
         forceShowBattery: true,
-        pollingNote: "OP1we supports up to 1,000 Hz (125 / 250 / 500 / 1000).",
-        defaultDisplayName: "Endgame Gear OP1we",
+        pollingNote: `${meta.name.replace("Endgame Gear ", "")} supports up to 1,000 Hz (125 / 250 / 500 / 1000).`,
+        defaultDisplayName: meta.name,
       },
     };
   }
@@ -394,9 +414,8 @@ export class EggWeHidClient {
   // ---------------------------------------------------------------------------
 
   private productMeta(): { name: string; wired: boolean; viaReceiver: boolean } {
-    // isSupported only accepts OP1we cable/receiver PIDs.
     const viaReceiver = EggWeHidClient.isReceiverDevice(this.device);
-    return { name: "Endgame Gear OP1we", wired: !viaReceiver, viaReceiver };
+    return { name: this.displayName(), wired: !viaReceiver, viaReceiver };
   }
 
   private requireChannels(): WeChannels {

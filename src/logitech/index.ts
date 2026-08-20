@@ -1,3 +1,4 @@
+export * from "./controls.js";
 export * from "./friendly-name.js";
 export * from "./haptics.js";
 export * from "./hosts.js";
@@ -24,16 +25,43 @@ export const BOLT_PAIRING_SLOTS = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06] as const;
  * receiver. They answer HID++ on device index 0xFF and keep their writable
  * settings in an onboard profile.
  *
+ * G203 / G102 generation (HID++ 2.0, legacy DPI feature 0x2201):
+ * - 0xc084 — G203 PRODIGY (wired)
+ * - 0xc089 — G102 LIGHTSYNC (wired)
+ * - 0xc092 — G203 LIGHTSYNC (wired)
+ *
+ * G303 / G402 generation:
  * - 0xc07d — G502 / G502 Proteus Core (wired)
  * - 0xc07e — G402 / G402 Hyperion Fury (wired)
+ * - 0xc080 — G303 Daedalus Apex (wired)
+ *
+ * G Pro / G502 / G403 HERO generation (HID++ 2.0, DPI feature 0x2202):
+ * - 0xc085 — G Pro (wired, 2017)
+ * - 0xc08b — G502 HERO (wired)
+ * - 0xc08c — G Pro Hero (wired)
+ * - 0xc08e — G903 HERO (wired)
  * - 0xc08f — G403 HERO (wired)
  * - 0xc095 — G502 X PLUS (USB cable)
  * - 0xc099 — G502 X (wired)
  *
+ * G Pro X Superlight generation:
+ * - 0xc094 — G Pro X Superlight (wired)
+ *
  * This module deliberately imports nothing, so both the driver and the WebHID
  * filters in ../vendors can read it without a cycle.
  */
-export const LOGITECH_DIRECT_PRODUCT_IDS = [0xc07d, 0xc07e, 0xc08f, 0xc095, 0xc099] as const;
+export const LOGITECH_DIRECT_PRODUCT_IDS = [
+  // G203 / G102 generation
+  0xc084, 0xc089, 0xc092,
+  // G303 / G402 generation
+  0xc07d, 0xc07e, 0xc080,
+  // G Pro / G502 / G403 HERO generation
+  0xc085, 0xc08b, 0xc08c, 0xc08e, 0xc08f,
+  // G Pro X Superlight generation
+  0xc094,
+  // G502 X generation
+  0xc095, 0xc099,
+] as const;
 
 /**
  * Logi Bolt receivers. Unlike Lightspeed, device HID++ 2.0 rides long reports

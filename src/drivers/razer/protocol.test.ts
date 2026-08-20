@@ -37,6 +37,19 @@ import {
   razerEnableAsymmetricLiftOffCommand,
   razerSetLowPowerThresholdCommand,
   razerSetSleepTimeoutCommand,
+  RAZER_BUTTON_CONTROLS,
+  RAZER_BUTTON_CONTROL_LABEL,
+  RAZER_BUTTON_MAPPINGS,
+  RAZER_BUTTON_TRANSACTION_ID,
+  RAZER_LOCKED_BUTTON_CONTROL,
+  RAZER_TOGGLE_CONTROLS,
+  RAZER_TOGGLE_CONTROL_INFO,
+  razerDecodeButtonMapping,
+  razerDecodeToggleControl,
+  razerReadButtonMappingCommand,
+  razerReadToggleControlCommand,
+  razerSetButtonMappingCommand,
+  razerSetToggleControlCommand,
 } from "@openmouse/protocol/razer";
 
 /**
@@ -519,4 +532,249 @@ test("serial text stops at the terminator", () => {
   );
 
   assert.equal(decodeSerial(args), "PM0000H00000000");
+});
+
+/*
+ * Button-mapping fixtures are Viper V3 Pro (firmware 1.12) captures logged in
+ * BUTTONS-RUNBOOK.md, read with Synapse fully closed. Checksums are re-derived
+ * since only the byte content was recorded, not the checksummed packet.
+ */
+test("button mapping decodes a control's own default action", () => {
+  const args = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 04 00 01 01 04 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+
+  assert.equal(razerDecodeButtonMapping(args), "Mouse Button 4");
+});
+
+test("button mapping decodes Disabled", () => {
+  const args = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 04 00 00 00 00 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+
+  assert.equal(razerDecodeButtonMapping(args), "Disabled");
+});
+
+test("button mapping decodes a physically-confirmed cross-control remap", () => {
+  // Mouse Button 4's slot written with Right Click's index, then Left Click's
+  // index — pressing the physical button right-clicked, then left-clicked.
+  // Not just a changed read-back; see BUTTONS-RUNBOOK.md.
+  const asRightClick = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 04 00 01 01 02 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+  const asLeftClick = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 04 00 01 01 01 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+
+  assert.equal(razerDecodeButtonMapping(asRightClick), "Right Click");
+  assert.equal(razerDecodeButtonMapping(asLeftClick), "Left Click");
+});
+
+test("button mapping decodes Left Click and Right Click's own defaults", () => {
+  const left = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 01 01 01 01 01 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+  const right = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 02 01 01 01 02 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+
+  assert.equal(razerDecodeButtonMapping(left), "Left Click");
+  assert.equal(razerDecodeButtonMapping(right), "Right Click");
+});
+
+test("an unrecognised button-mapping type decodes to null, not a guess", () => {
+  // Type 0x02 has never been captured — this driver has no business claiming
+  // to know what it means.
+  const args = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 04 00 02 01 05 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+
+  assert.equal(razerDecodeButtonMapping(args), null);
+});
+
+test("a button-mapping write matches the packet this driver's own write was physically confirmed with", () => {
+  // Transcribed from writeAndVerify() output: Mouse Button 4 set to Right
+  // Click's index, status 0x02, read-back changed and physically confirmed
+  // by pressing the button. See BUTTONS-RUNBOOK.md.
+  const packet = encodeRazerRequest(razerSetButtonMappingCommand("mouse4", "Right Click"), RAZER_BUTTON_TRANSACTION_ID);
+
+  assert.equal(packet[5], 0x0a);
+  assert.equal(packet[6], 0x02);
+  assert.equal(packet[7], 0x0c);
+  assert.deepEqual([...packet.slice(8, 18)], [0x01, 0x04, 0x00, 0x01, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00]);
+  assert.equal(packet[88], razerChecksum(packet));
+});
+
+test("a button-mapping write clears the high bit of the matching read", () => {
+  assert.equal(RAZER_WRITE.buttonMapping.commandClass, RAZER_READ.buttonMapping.commandClass);
+  assert.equal(RAZER_WRITE.buttonMapping.commandId, RAZER_READ.buttonMapping.commandId & 0x7f);
+});
+
+test("the button write carries its own transaction id, not the shared default", () => {
+  // Confirmed on hardware: RAZER_TRANSACTION_ID (0x1f) silently no-ops this
+  // write — status 0x02 (ok), read-back even changes — while any other id
+  // (0x10 and 0x02 both tried) persists it and was physically confirmed at
+  // the button. Every other write in this file uses the shared default
+  // without issue, so this is the one exception.
+  assert.equal(RAZER_WRITE.buttonMapping.transactionId, RAZER_BUTTON_TRANSACTION_ID);
+  assert.notEqual(RAZER_BUTTON_TRANSACTION_ID, RAZER_TRANSACTION_ID);
+});
+
+test("a button-mapping read selects the control by index", () => {
+  const mouse4 = encodeRazerRequest(razerReadButtonMappingCommand("mouse4"));
+  const mouse5 = encodeRazerRequest(razerReadButtonMappingCommand("mouse5"));
+
+  assert.deepEqual([...mouse4.slice(8, 11)], [0x01, 0x04, 0x00]);
+  assert.deepEqual([...mouse5.slice(8, 11)], [0x01, 0x05, 0x00]);
+});
+
+test("Left Click is fixed on the Standard layer, matching Synapse's own restriction", () => {
+  assert.throws(() => razerSetButtonMappingCommand("leftClick", "Right Click"), RazerProtocolError);
+  assert.throws(() => razerSetButtonMappingCommand("leftClick", "Disabled"), RazerProtocolError);
+  assert.doesNotThrow(() => razerSetButtonMappingCommand("leftClick", "Left Click"));
+  // No such restriction on the other three — each can take any mapping,
+  // including disabling itself.
+  assert.doesNotThrow(() => razerSetButtonMappingCommand("rightClick", "Disabled"));
+  assert.doesNotThrow(() => razerSetButtonMappingCommand("mouse4", "Left Click"));
+});
+
+test("button-mapping writes round-trip through the decoder", () => {
+  for (const [control, mapping] of [
+    ["leftClick", "Left Click"],
+    ["rightClick", "Right Click"],
+    ["mouse4", "Mouse Button 4"],
+    ["mouse4", "Right Click"],
+    ["mouse4", "Left Click"],
+    ["mouse5", "Disabled"],
+  ] as const) {
+    const request = encodeRazerRequest(razerSetButtonMappingCommand(control, mapping));
+    assert.equal(razerDecodeButtonMapping(request.slice(8)), mapping);
+  }
+});
+
+/*
+ * Toggle-control fixtures (Scroll Up, Scroll Down, the bottom sensitivity
+ * button) are Viper V3 Pro captures logged in BUTTONS-RUNBOOK.md, same
+ * conventions as the button-mapping fixtures above. Scroll Click is
+ * deliberately not covered here yet — see the comment on RazerToggleControl.
+ */
+test("toggle control decodes its own default action", () => {
+  const scrollUp = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 09 00 01 01 09 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+  const scrollDown = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 0a 00 01 01 0a 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+  const sensitivityButton = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 60 00 06 01 06 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+
+  assert.equal(razerDecodeToggleControl("scrollUp", scrollUp), "Scroll Up");
+  assert.equal(razerDecodeToggleControl("scrollDown", scrollDown), "Scroll Down");
+  // The bottom button's default is actionType 0x06 — not the plain-button
+  // shape the other three use — captured verbatim rather than decoded from a
+  // shared formula, per the comment on RAZER_TOGGLE_CONTROL_INFO.
+  assert.equal(razerDecodeToggleControl("sensitivityButton", sensitivityButton), "Cycle Up Sensitivity Stages");
+});
+
+test("toggle control decodes Disabled", () => {
+  for (const [control, index] of [["scrollUp", "09"], ["scrollDown", "0a"], ["sensitivityButton", "60"]] as const) {
+    const args = decodeRazerResponse(
+      reply(`02 1f 00 00 00 0a 02 8c 01 ${index} 00 00 00 00 00 00 00 00`),
+      RAZER_READ.buttonMapping,
+    );
+    assert.equal(razerDecodeToggleControl(control, args), "Disabled");
+  }
+});
+
+test("an unrecognised toggle-control encoding decodes to null, not a guess", () => {
+  // Type 0x02 has never been captured for any control in this file.
+  const args = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 09 00 02 01 09 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+
+  assert.equal(razerDecodeToggleControl("scrollUp", args), null);
+});
+
+test("a toggle control does not decode another control's default as its own", () => {
+  // Scroll Down's own default (type=1, len=1, value=0x0a) is structurally
+  // identical to a plain-button record — decoding it as Scroll Up must not
+  // succeed just because the shape matches; the value has to match too.
+  const scrollDownDefault = decodeRazerResponse(
+    reply("02 1f 00 00 00 0a 02 8c 01 0a 00 01 01 0a 00 00 00 00"),
+    RAZER_READ.buttonMapping,
+  );
+
+  assert.equal(razerDecodeToggleControl("scrollUp", scrollDownDefault), null);
+});
+
+test("a toggle-control write matches the packet physically confirmed with it", () => {
+  // Scroll Up: transcribed from writeAndVerify() output restoring it to its
+  // own default — before (disabled) -> after (default) was a real, clean
+  // transition driven by this exact write, and scrolling up physically
+  // worked afterward. See BUTTONS-RUNBOOK.md.
+  const scrollUp = encodeRazerRequest(razerSetToggleControlCommand("scrollUp", "Scroll Up"), RAZER_BUTTON_TRANSACTION_ID);
+  assert.deepEqual([...scrollUp.slice(8, 18)], [0x01, 0x09, 0x00, 0x01, 0x01, 0x09, 0x00, 0x00, 0x00, 0x00]);
+  assert.equal(scrollUp[88], razerChecksum(scrollUp));
+
+  // Sensitivity button: both directions of its disable/restore cycle were
+  // clean transitions driven by this driver's own write and both physically
+  // confirmed — the most completely verified of the three.
+  const disable = encodeRazerRequest(razerSetToggleControlCommand("sensitivityButton", "Disabled"), RAZER_BUTTON_TRANSACTION_ID);
+  assert.deepEqual([...disable.slice(8, 18)], [0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  const restore = encodeRazerRequest(razerSetToggleControlCommand("sensitivityButton", "Cycle Up Sensitivity Stages"), RAZER_BUTTON_TRANSACTION_ID);
+  assert.deepEqual([...restore.slice(8, 18)], [0x01, 0x60, 0x00, 0x06, 0x01, 0x06, 0x00, 0x00, 0x00, 0x00]);
+});
+
+test("a toggle-control read selects the control by index", () => {
+  const scrollUp = encodeRazerRequest(razerReadToggleControlCommand("scrollUp"));
+  const scrollDown = encodeRazerRequest(razerReadToggleControlCommand("scrollDown"));
+  const sensitivityButton = encodeRazerRequest(razerReadToggleControlCommand("sensitivityButton"));
+
+  assert.deepEqual([...scrollUp.slice(8, 11)], [0x01, 0x09, 0x00]);
+  assert.deepEqual([...scrollDown.slice(8, 11)], [0x01, 0x0a, 0x00]);
+  assert.deepEqual([...sensitivityButton.slice(8, 11)], [0x01, 0x60, 0x00]);
+});
+
+test("an invalid label for a toggle control throws instead of sending garbage", () => {
+  assert.throws(() => razerSetToggleControlCommand("scrollUp", "Right Click"), RazerProtocolError);
+  assert.throws(() => razerSetToggleControlCommand("scrollUp", "Scroll Down"), RazerProtocolError);
+  assert.doesNotThrow(() => razerSetToggleControlCommand("scrollUp", "Scroll Up"));
+  assert.doesNotThrow(() => razerSetToggleControlCommand("scrollUp", "Disabled"));
+});
+
+test("toggle-control writes round-trip through the decoder", () => {
+  for (const control of RAZER_TOGGLE_CONTROLS) {
+    const info = RAZER_TOGGLE_CONTROL_INFO[control];
+    for (const label of [info.enabledLabel, "Disabled"]) {
+      const request = encodeRazerRequest(razerSetToggleControlCommand(control, label));
+      assert.equal(razerDecodeToggleControl(control, request.slice(8)), label);
+    }
+  }
+});
+
+test("button controls and toggle controls share no control names or option labels", () => {
+  // The two families write into the same status dict, keyed by control name
+  // (see hid.ts's readButtonMappings) — a shared key would let one family's
+  // renderer read the other's state. A shared option label ("Disabled"
+  // aside, which means the same thing everywhere) would risk the same
+  // confusion one level up, in the rendered <option> lists.
+  const buttonNames: readonly string[] = RAZER_BUTTON_CONTROLS;
+  const toggleNames: readonly string[] = RAZER_TOGGLE_CONTROLS;
+  assert.equal(buttonNames.some((name) => toggleNames.includes(name)), false);
+
+  const buttonOnlyMappings = RAZER_BUTTON_MAPPINGS.filter((mapping) => mapping !== "Disabled");
+  const toggleEnabledLabels = RAZER_TOGGLE_CONTROLS.map((control) => RAZER_TOGGLE_CONTROL_INFO[control].enabledLabel);
+  assert.equal(buttonOnlyMappings.some((mapping) => toggleEnabledLabels.includes(mapping)), false);
 });

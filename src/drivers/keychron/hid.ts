@@ -6,6 +6,9 @@ import {
   KEYCHRON_NAPE_DPI_MAX as DPI_MAX,
   KEYCHRON_NAPE_DPI_MIN as DPI_MIN,
   KEYCHRON_NAPE_DPI_STEP as DPI_STEP,
+  KEYCHRON_NAPE_SLEEP_MAX_SECONDS as SLEEP_MAX,
+  KEYCHRON_NAPE_SLEEP_MIN_SECONDS as SLEEP_MIN,
+  KEYCHRON_NAPE_SLEEP_OPTIONS as SLEEP_OPTIONS,
   KEYCHRON_POLLING_TABLE as POLLING_TABLE,
   KEYCHRON_PRODUCTS as PRODUCTS,
   KEYCHRON_RAW_USAGE as RAW_USAGE,
@@ -15,6 +18,8 @@ import {
   keychronDecodeBattery,
   keychronDecodeFirmware,
   keychronDecodePolling,
+  keychronDecodeSleepTimeout,
+  keychronEncodeSleepTimeout,
   keychronPacket,
 } from "@openmouse/protocol/keychron";
 const QUERY_TIMEOUT_MS = 1200;
@@ -125,6 +130,12 @@ export class KeychronHidClient {
     return options;
   }
 
+  getSleepOptions(): number[] {
+    return [...SLEEP_OPTIONS];
+  }
+
+  readonly canDisableSleep = false;
+
   async readStatus(): Promise<MouseStatus> {
     await this.open();
     const firmware = await this.getFirmwareVersion().catch(() => null);
@@ -133,6 +144,7 @@ export class KeychronHidClient {
     const battery = await this.getBattery().catch(() => null);
     const polling = await this.getPolling().catch(() => null);
     const orientation = await this.getOrientation().catch(() => null);
+    const sleepTimeout = await this.getSleepTimeout().catch(() => null);
     const active = stages.find((entry) => entry.index === stage) ?? stages[0];
     const dpi = active?.value ?? 800;
     const product = PRODUCTS.get(this.device.productId);
@@ -155,6 +167,7 @@ export class KeychronHidClient {
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
         forceShowBattery: true,
+        showAdvancedSection: sleepTimeout !== null,
         pollingNote: "Nape Pro exposes polling through Keychron's misc HID commands when the firmware allows it.",
         dpiStageEditor: {
           maxStages: DPI_STAGE_COUNT,
@@ -175,6 +188,7 @@ export class KeychronHidClient {
       connectionDetail: connectionDetail || "Keychron Launcher protocol",
       liftOffDistance: null,
       supportedLiftOffDistances: [],
+      sleepTimeout,
       firmware: [firmware ?? "Firmware unavailable"],
     };
   }
@@ -244,8 +258,26 @@ export class KeychronHidClient {
     throw new Error("Debounce is not exposed by the Nape Pro Launcher protocol.");
   }
 
-  async setSleepTimeout(_timeout: number): Promise<never> {
-    throw new Error("Sleep timeout is not exposed by the Nape Pro Launcher protocol.");
+  async setSleepTimeout(seconds: number): Promise<number> {
+    if (!Number.isInteger(seconds) || seconds < SLEEP_MIN) {
+      throw new Error("The sleep time cannot be less than 1 minute.");
+    }
+    if (seconds > SLEEP_MAX) {
+      throw new Error("The sleep time cannot be more than 12:59:59.");
+    }
+    await this.open();
+    const reply = await this.query(
+      (bytes) => bytes[0] === CMD.miscGroup && bytes[1] === MISC.setSleep,
+      keychronEncodeSleepTimeout(seconds),
+    );
+    if ((reply[2] ?? 0) !== 0) {
+      throw new Error("The Nape Pro rejected the requested sleep timeout.");
+    }
+    const confirmed = await this.getSleepTimeout();
+    if (confirmed !== seconds) {
+      throw new Error(`The mouse kept a ${confirmed} second sleep timeout instead of ${seconds} seconds.`);
+    }
+    return confirmed;
   }
 
   async setPerformanceMode(_enabled: boolean): Promise<never> {
@@ -334,6 +366,14 @@ export class KeychronHidClient {
       [CMD.miscGroup, MISC.getPolling],
     );
     return keychronDecodePolling(response);
+  }
+
+  private async getSleepTimeout(): Promise<number> {
+    const response = await this.query(
+      (bytes) => bytes[0] === CMD.miscGroup && bytes[1] === MISC.getSleep,
+      [CMD.miscGroup, MISC.getSleep],
+    );
+    return keychronDecodeSleepTimeout(response);
   }
 
   private async getFirmwareVersion(): Promise<string | null> {
