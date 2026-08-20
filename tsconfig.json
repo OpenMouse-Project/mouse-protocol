@@ -37,6 +37,7 @@
       "@openmouse/protocol/vgn": ["./src/vgn/index.ts"],
       "@openmouse/protocol/wallhack": ["./src/wallhack/index.ts"],
       "@openmouse/protocol/wlmouse": ["./src/wlmouse/index.ts"],
+      "@openmouse/protocol/wooting": ["./src/wooting/index.ts"],
       "@openmouse/protocol/zaunkoenig": ["./src/zaunkoenig/index.ts"]
     }
   },

@@ -89,6 +89,10 @@
       "types": "./dist/wlmouse/index.d.ts",
       "import": "./dist/wlmouse/index.js"
     },
+    "./wooting": {
+      "types": "./dist/wooting/index.d.ts",
+      "import": "./dist/wooting/index.js"
+    },
     "./zaunkoenig": {
       "types": "./dist/zaunkoenig/index.d.ts",
       "import": "./dist/zaunkoenig/index.js"
