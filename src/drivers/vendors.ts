@@ -59,6 +59,7 @@ export const VENDOR_ID = {
   wooting: WOOTING_VENDOR_ID,
   wallhack: WALLHACK_VENDOR_ID,
   wallhackKeyboardAlt: WALLHACK_KEYBOARD_ALT_VENDOR_ID,
+  gwolves: 0x33e4,
 } as const;
 
 // Keychron VIA raw HID. 0x0440 is Nape Pro wired; 0xd026/0xd029 are shared Link-KM receivers.
@@ -297,4 +298,6 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // Fantech mice use vendor usage page 0xFFFF, usage 0x02 for configuration.
   { vendorId: VENDOR_ID.fantech, usagePage: 0xffff, usage: 0x02 },
   ...WALLHACK_HID_FILTERS,
+  { vendorId: VENDOR_ID.gwolves, productId: 0x5618, usagePage: 0xff02 },
+  { vendorId: VENDOR_ID.gwolves, productId: 0x3854, usagePage: 0xff02 },
 ];
