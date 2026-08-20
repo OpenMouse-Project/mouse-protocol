@@ -247,6 +247,20 @@ test("the asymmetric lift-off write probe is only armed where it was confirmed",
   for (const id of armed) assert.equal(RAZER_PRODUCTS.get(id)?.verified, true);
 });
 
+test("button mapping is only offered on connections where class 0x02 answered", () => {
+  // Gated per product id and per connection, not per model. An all-zero reply
+  // decodes as "Disabled" on every control, so a transport that does not
+  // implement class 0x02 does not fail loudly — it produces a full, plausible
+  // set of controls that all read Disabled and silently do nothing. Hence an
+  // allowlist, and hence a hardware run per entry even for two connections of
+  // the same mouse.
+  const offered = RAZER_PRODUCT_IDS.filter((id) => RAZER_PRODUCTS.get(id)?.buttonMapping === true);
+  assert.deepEqual(offered.sort(), [0x00c0, 0x00c1]);
+  for (const id of offered) {
+    assert.equal(RAZER_PRODUCTS.get(id)?.verified, true, `0x${id.toString(16)} offers button mapping without being verified`);
+  }
+});
+
 test("no product is claimed by both this registry and a dedicated Razer driver", () => {
   // `driverFor` returns the first match in DEVICE_DRIVERS, so an overlap would
   // silently kill whichever driver is registered later.
