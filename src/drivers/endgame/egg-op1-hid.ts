@@ -167,7 +167,7 @@ export class EggOp1HidClient {
       dpiY,
       supportsSeparateDpiAxes: true,
       pollingRateHz: this.decodePollingRate(config[EGG_OFFSET.pollingDivider]),
-      supportedPollingRates: [...EGG_POLLING_RATES],
+      supportedPollingRates: this.supportedPollingRates(),
       activeProfile: null,
       connectionType: "Wired",
       connectionDetail: `Wired USB - PID 0x${this.device.productId.toString(16).toUpperCase()} - ${this.profile.sensorFamily.toUpperCase()}`,
@@ -234,8 +234,13 @@ export class EggOp1HidClient {
     return dpi;
   }
 
+  /** RF dongles (e.g. OP1w 4K v2) are capped below the 8000 Hz wired ceiling. */
+  supportedPollingRates(): number[] {
+    return EGG_POLLING_RATES.filter((rate) => rate <= this.profile.maxPollingHz);
+  }
+
   async setPollingRate(rate: number): Promise<number> {
-    if (!EGG_POLLING_RATES.includes(rate as (typeof EGG_POLLING_RATES)[number])) {
+    if (!this.supportedPollingRates().includes(rate)) {
       throw new Error("Unsupported Endgame Gear 8K polling rate.");
     }
     const divider = 8000 / rate;

@@ -18,12 +18,19 @@ import {
   weUnpackScalarPair,
 } from "@openmouse/protocol/endgame-gear-we";
 
-function hidDevice(productId: number, productName = ""): HIDDevice {
+function hidDevice(productId: number, productName = "", featureReportIds: number[] = []): HIDDevice {
   return {
     vendorId: 0x3367,
     productId,
     productName,
-    collections: [],
+    collections: featureReportIds.length === 0 ? [] : [{
+      usagePage: 0xff02,
+      usage: 0,
+      featureReports: featureReportIds.map((reportId) => ({ reportId, items: [] })),
+      inputReports: [],
+      outputReports: [],
+      children: [],
+    }],
   } as unknown as HIDDevice;
 }
 
@@ -35,6 +42,14 @@ test("XM2we receiver revisions are supported and keep their model identity", () 
     assert.equal(EggWeHidClient.displayNameForDevice(device), "Endgame Gear XM2we");
     assert.equal(new EggWeHidClient(device).displayName(), "Endgame Gear XM2we");
   }
+});
+
+test("a 0x1970 receiver exposing the OP1-8K command report is left for EggOp1HidClient (issue #107)", () => {
+  const legacyWeDongle = hidDevice(0x1970);
+  assert.equal(EggWeHidClient.isSupported(legacyWeDongle), true);
+
+  const op1w4kV2Dongle = hidDevice(0x1970, "", [0xa1]);
+  assert.equal(EggWeHidClient.isSupported(op1w4kV2Dongle), false);
 });
 
 test("WE model names can fall back to the USB product string", () => {
