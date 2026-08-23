@@ -572,7 +572,7 @@ test("decodes all captured G502 LIGHTSPEED format-3 profiles", () => {
 test("parses the captured G502 LIGHTSPEED format-3 geometry and directory", () => {
   assert.deepEqual(
     { verified: describeProfileFormat(3).verified, writable: describeProfileFormat(3).writable },
-    { verified: true, writable: false },
+    { verified: true, writable: true },
   );
   assert.deepEqual(parseProfilesInfo(G502_LIGHTSPEED_INFO_REPLY), {
     memoryModelId: 1,
@@ -591,6 +591,13 @@ test("parses the captured G502 LIGHTSPEED format-3 geometry and directory", () =
     { sector: 4, enabled: false },
     { sector: 5, enabled: false },
   ]);
+});
+
+test("format-3 encoders use the G703-captured scalar grid and shared rate", () => {
+  const capabilities = capabilitiesForFormat(3);
+  assert.deepEqual(capabilities.dpiStages, { maxStages: 5, minDpi: 50, maxDpi: 12000, stepDpi: 50 });
+  assert.deepEqual(reportRatesFor(capabilities.reportRates, "wired"), [125, 250, 500, 1000]);
+  assert.equal(describeProfileFormat(3).writable, true);
 });
 
 test("format-3 probe encoders accept limits collected live from the mouse", () => {

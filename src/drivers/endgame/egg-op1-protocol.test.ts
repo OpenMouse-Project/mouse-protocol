@@ -22,12 +22,22 @@ const op1 = EGG_DEVICE_PROFILES.get(0x1964)!;
 const purple = EGG_DEVICE_PROFILES.get(0x1976)!;
 const op1v2 = EGG_DEVICE_PROFILES.get(0x1978)!;
 
-test("all five Endgame Gear 8K devices have explicit capability profiles", () => {
-  assert.deepEqual([...EGG_DEVICE_PROFILES.keys()], [0x1964, 0x1966, 0x1976, 0x1978, 0x1980]);
+test("all seven Endgame Gear 8K devices have explicit capability profiles", () => {
+  assert.deepEqual(
+    [...EGG_DEVICE_PROFILES.keys()],
+    [0x1964, 0x1966, 0x1976, 0x1978, 0x1980, 0x1984, 0x1970],
+  );
   assert.equal(op1.motionSyncAt8k, false);
   assert.equal(EGG_DEVICE_PROFILES.get(0x1966)!.motionSyncAt8k, false);
   assert.equal(purple.motionSyncAt8k, true);
   assert.equal(op1v2.motionSyncAt8k, true);
+});
+
+test("OP1w 4K v2 wireless models are capped at 4000 Hz while wired 8K models keep 8000 Hz", () => {
+  assert.equal(op1.maxPollingHz, 8000);
+  assert.equal(op1v2.maxPollingHz, 8000);
+  assert.equal(EGG_DEVICE_PROFILES.get(0x1984)!.maxPollingHz, 4000);
+  assert.equal(EGG_DEVICE_PROFILES.get(0x1970)!.maxPollingHz, 4000);
 });
 
 test("CPI ranges and quantization follow each sensor generation", () => {

@@ -11,7 +11,22 @@ import {
   pulsarEncodeDpi,
   pulsarEncodePollingRate,
   pulsarPacketChecksum,
+  pulsarVgnDecodeDpi,
+  pulsarVgnDpiOptions,
+  pulsarVgnEncodeDpi,
 } from "@openmouse/protocol/pulsar";
+
+// The Pulsar 4K Wireless Receiver is sold as a Pulsar product but enumerates
+// under the shared Teevolution/VGN vendor id (0x3554) and speaks the same
+// report-8 16-byte protocol as Pulsar receivers. VID 0x3554 is also used by
+// the Teevolution and VGN drivers, so only product ids those drivers have not
+// already claimed are accepted here.
+const VGN_VENDOR_ID = 0x3554;
+const CLAIMED_VGN_PRODUCT_IDS: ReadonlySet<number> = new Set([
+  0xf520, 0xf523, 0xf5bb, 0xf522, // Teevolution (Terra Pro family)
+  0xfb56, 0xfb57, // VGN Dragonfly F2 Master+
+]);
+const PULSAR_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
 
 export interface PulsarReport {
   timestamp: number;
@@ -56,7 +71,9 @@ export class PulsarHidClient {
   }
 
   static isSupported(device: HIDDevice): boolean {
-    return device.vendorId === PULSAR_VENDOR_ID
+    const vendorSupported = device.vendorId === PULSAR_VENDOR_ID
+      || (device.vendorId === VGN_VENDOR_ID && !CLAIMED_VGN_PRODUCT_IDS.has(device.productId));
+    return vendorSupported
       && device.collections.some((collection) =>
         collection.inputReports.length === 1
         && collection.outputReports.length === 1
@@ -116,15 +133,17 @@ export class PulsarHidClient {
         : null;
       const rssi = await this.query(COMMAND.getRssi).catch(() => null);
       const currentDpi = Math.min(flash[FLASH.currentDpi] ?? 0, 7);
-      const dpi = pulsarDecodeDpi(flash.slice(FLASH.dpiValues + currentDpi * 4, FLASH.dpiValues + currentDpi * 4 + 4));
+      const dpi = this.decodeDpi(flash.slice(FLASH.dpiValues + currentDpi * 4, FLASH.dpiValues + currentDpi * 4 + 4)) ?? 800;
       const lodValue = flash[FLASH.liftOffDistance];
       return {
         brand: "Pulsar",
         name: info.cid === 0x57 && info.mid === 0x04 ? "Pulsar X2 CrazyLight" : (this.device.productName || "Pulsar Mouse"),
+        ui: { family: "pulsar", hideUnsupportedPollingRates: true },
         batteryPercent: battery[5] <= 100 ? battery[5] : null,
         batteryState: battery[6] === 1 ? "Charging" : "Discharging",
         dpi,
         pollingRateHz: pulsarDecodePollingRate(flash[FLASH.reportRate]),
+        supportedPollingRates: PULSAR_POLLING_RATES.filter((rate) => rate <= info.maximumPollingRateHz),
         activeProfile: profile && profile[1] === 0 ? (profile[5] ?? 0) + 1 : null,
         connectionDetail: `CID 0x${info.cid.toString(16).toUpperCase().padStart(2, "0")} · MID 0x${info.mid.toString(16).toUpperCase().padStart(2, "0")} · Dongle type ${info.dongleType}`,
         dongleLedEnabled: dongleLed?.enabled ?? null,
@@ -145,10 +164,32 @@ export class PulsarHidClient {
   }
 
   getDpiOptions(): number[] {
-    return pulsarDpiOptions();
+    return this.isVgnReceiver() ? pulsarVgnDpiOptions() : pulsarDpiOptions();
+  }
+
+  /**
+   * The Pulsar 4K Wireless Receiver enumerates under the shared VGN vendor id
+   * and uses a different, flat 50-step DPI encoding than real Pulsar-vendor
+   * mice (including the X2 CrazyLight). Branch on vendor id, not CID/MID —
+   * those are Pulsar-internal identifiers this receiver family reuses.
+   */
+  private isVgnReceiver(): boolean {
+    return this.device.vendorId === VGN_VENDOR_ID;
+  }
+
+  private encodeDpi(dpi: number): Uint8Array {
+    return this.isVgnReceiver() ? pulsarVgnEncodeDpi(dpi) : pulsarEncodeDpi(dpi);
+  }
+
+  private decodeDpi(data: Uint8Array): number | null {
+    return this.isVgnReceiver() ? pulsarVgnDecodeDpi(data) : pulsarDecodeDpi(data);
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
+    const info = this.deviceInfo ?? await this.readDeviceInfo();
+    if (pollingRateHz > info.maximumPollingRateHz) {
+      throw new Error(`This connection supports at most ${info.maximumPollingRateHz} Hz.`);
+    }
     const encoded = pulsarEncodePollingRate(pollingRateHz);
     return await this.withDeviceControl(async () => {
       await this.writeCheckedByte(FLASH.reportRate, encoded);
@@ -163,9 +204,9 @@ export class PulsarHidClient {
     return await this.withDeviceControl(async () => {
       const currentDpi = (await this.readFlash(FLASH.currentDpi, 2))[0] ?? 0;
       const address = FLASH.dpiValues + Math.min(currentDpi, 7) * 4;
-      await this.writeFlash(address, pulsarEncodeDpi(dpi));
-      const confirmed = pulsarDecodeDpi(await this.readFlash(address, 4));
-      if (confirmed !== dpi) throw new Error(`The mouse kept ${confirmed} DPI instead of ${dpi} DPI.`);
+      await this.writeFlash(address, this.encodeDpi(dpi));
+      const confirmed = this.decodeDpi(await this.readFlash(address, 4));
+      if (confirmed !== dpi) throw new Error(`The mouse kept ${confirmed ?? "an unknown DPI"} instead of ${dpi} DPI.`);
       return confirmed;
     });
   }

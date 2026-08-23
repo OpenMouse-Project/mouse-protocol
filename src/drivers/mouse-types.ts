@@ -113,7 +113,7 @@ export type MouseLightingMode =
   | "Breathing dual";
 
 export interface MouseStatus {
-  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig";
+  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK";
   name: string;
   /** Driver-supplied UI policy (optional; keeps control.ts brand-agnostic). */
   ui?: MouseUiHints;
@@ -171,6 +171,17 @@ export interface MouseStatus {
   eggPollingDivider?: number;
   eggMulticlickFilters?: number[];
   eggButtonMappings?: string[];
+  /**
+   * Every shipped Razer control's current state, keyed by control name — the
+   * four cross-assignable `RazerButtonControl`s and the three two-state
+   * `RazerToggleControl`s share one dict, since each family's renderer
+   * iterates its own fixed control list and the two lists share no control
+   * names. Undefined on a model that has not been confirmed to support the
+   * class `0x02` write at all. A control whose reply the driver cannot decode
+   * (a keyboard shortcut, Hypershift data, an index nothing here knows) is
+   * omitted rather than guessed at.
+   */
+  razerButtonMappings?: Record<string, string>;
   performanceMode?: boolean | null;
   hyperMode?: boolean | null;
   sensorMode?: "Eco" | "High" | "Ultra" | null;

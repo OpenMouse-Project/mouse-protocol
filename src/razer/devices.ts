@@ -72,6 +72,25 @@ export interface RazerProduct {
   transactionId: number;
   /** Battery commands only exist on models that have a cell. */
   hasBattery: boolean;
+  /**
+   * Class `0x02` button mapping (`RAZER_READ`/`RAZER_WRITE.buttonMapping`) has
+   * only ever been exercised on the Viper V3 Pro. Other Razer mice may well use
+   * a different class or a different control-index scheme, so nothing is
+   * offered to them until it has been checked on hardware. Gates both
+   * `RazerButtonControl` and `RazerToggleControl` — same command, same risk,
+   * no reason to split them.
+   *
+   * Set per product id, which means per *connection*: the cable and the
+   * receiver are separate entries for one mouse and were verified separately.
+   * That is not pedantry about provenance — the failure mode is silent.
+   * `razerDecodeButtonMapping` reads `type=0x00, len=0x00, value=0x00` as
+   * "Disabled", so a transport that does not implement the class answers
+   * all-zero and yields a full, ordinary-looking set of controls that every
+   * read reports as Disabled and every write appears to accept.
+   * `readButtonMappings`'s null-collapse cannot catch it, because the dict
+   * comes back populated.
+   */
+  buttonMapping?: boolean;
   /** Also accept a vendor-defined collection as the control interface. */
   vendorControlInterface?: boolean;
   /** DPI storage selector; some generations use the no-store command form. */
@@ -362,6 +381,10 @@ const VIPER_V3_PRO = {
   hasBattery: true,
   liftOff: true,
   asymmetricLiftOff: true,
+  // Class 0x02 is confirmed on both of this model's connections, so it belongs
+  // on the shared preset rather than on one product id. It sat on `0x00c1`
+  // alone while only the receiver had been exercised.
+  buttonMapping: true,
   verified: true,
 } as const;
 

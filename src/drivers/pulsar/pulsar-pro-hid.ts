@@ -13,6 +13,8 @@ import {
 
 export class PulsarProHidClient {
   private commandQueue: Promise<void> = Promise.resolve();
+  private readonly unsupportedQueries = new Set<string>();
+  private explicitlyClosed = false;
   private waiter: {
     command: number;
     resolve: (data: Uint8Array) => void;
@@ -21,8 +23,14 @@ export class PulsarProHidClient {
 
   private readonly onInputReport = (event: HIDInputReportEvent): void => {
     const data = new Uint8Array(event.data.buffer.slice(event.data.byteOffset, event.data.byteOffset + event.data.byteLength));
-    if (data[0] !== this.waiter?.command) return;
     const waiter = this.waiter;
+    if (!waiter) return;
+    if (data[0] === 0xa6) {
+      this.waiter = null;
+      waiter.reject(new PulsarProRejectedCommandError(waiter.command));
+      return;
+    }
+    if (data[0] !== waiter.command) return;
     this.waiter = null;
     waiter.resolve(data);
   };
@@ -45,6 +53,7 @@ export class PulsarProHidClient {
 
   async open(): Promise<void> {
     if (!this.device.opened) await this.device.open();
+    this.explicitlyClosed = false;
     this.device.removeEventListener("inputreport", this.onInputReport);
     this.device.addEventListener("inputreport", this.onInputReport);
   }
@@ -232,6 +241,7 @@ export class PulsarProHidClient {
   }
 
   async close(): Promise<void> {
+    this.explicitlyClosed = true;
     this.device.removeEventListener("inputreport", this.onInputReport);
     this.waiter?.reject(new Error("The Pulsar Pro receiver was closed."));
     this.waiter = null;
@@ -253,11 +263,18 @@ export class PulsarProHidClient {
   }
 
   private async queryOptional(command: number, timeoutMs = 500): Promise<Uint8Array | null> {
-    return await this.command(command, new Uint8Array([0]), timeoutMs).catch(() => null);
+    return await this.queryParametersOptional(command, new Uint8Array([0]), timeoutMs);
   }
 
   private async queryParametersOptional(command: number, parameters: Uint8Array, timeoutMs = 500): Promise<Uint8Array | null> {
-    return await this.command(command, parameters, timeoutMs).catch(() => null);
+    const key = `${command}:${Array.from(parameters).join(",")}`;
+    if (this.unsupportedQueries.has(key)) return null;
+    try {
+      return await this.command(command, parameters, timeoutMs);
+    } catch (error) {
+      if (error instanceof PulsarProRejectedCommandError) this.unsupportedQueries.add(key);
+      return null;
+    }
   }
 
   private async applySettings(): Promise<void> {
@@ -285,6 +302,8 @@ export class PulsarProHidClient {
 
   private async exchange(command: number, parameters: Uint8Array, timeoutMs: number): Promise<Uint8Array> {
     if (this.waiter) throw new Error("Another Pulsar Pro request is already in progress.");
+    if (this.explicitlyClosed) throw new Error("The Pulsar Pro receiver was closed.");
+    if (!this.device.opened) await this.open();
     const packet = new Uint8Array(REPORT_LENGTH);
     packet[0] = command;
     packet.set(parameters.slice(0, REPORT_LENGTH - 1), 1);
@@ -299,7 +318,10 @@ export class PulsarProHidClient {
           window.clearTimeout(timeout);
           resolve(data);
         },
-        reject,
+        reject: (error) => {
+          window.clearTimeout(timeout);
+          reject(error);
+        },
       };
     });
     try {
@@ -327,5 +349,12 @@ export class PulsarProHidClient {
 
   private formatVersion(label: string, response: Uint8Array): string {
     return `${label} v${response[1] ?? 0}.${response[2] ?? 0}.${response[3] ?? 0}`;
+  }
+}
+
+class PulsarProRejectedCommandError extends Error {
+  constructor(command: number) {
+    super(`The Pulsar Pro receiver rejected command 0x${command.toString(16)}.`);
+    this.name = "PulsarProRejectedCommandError";
   }
 }
