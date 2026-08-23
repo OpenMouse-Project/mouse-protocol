@@ -31,6 +31,8 @@ export interface EggDeviceProfile {
   lodNormal: readonly string[];
   lodGlass: readonly string[] | null;
   motionSyncAt8k: boolean;
+  /** Wired 8K models top out at 8000 Hz; wireless dongles are RF-limited to 4000 Hz. */
+  maxPollingHz: number;
 }
 
 const LOD_V1 = ["0.7 mm", "1 mm", "2 mm"] as const;
@@ -53,6 +55,7 @@ export const EGG_DEVICE_PROFILES: ReadonlyMap<number, EggDeviceProfile> = new Ma
     lodNormal: LOD_V1,
     lodGlass: null,
     motionSyncAt8k: false,
+    maxPollingHz: 8000,
   }],
   [0x1966, {
     pid: 0x1966,
@@ -66,6 +69,7 @@ export const EGG_DEVICE_PROFILES: ReadonlyMap<number, EggDeviceProfile> = new Ma
     lodNormal: LOD_V1,
     lodGlass: null,
     motionSyncAt8k: false,
+    maxPollingHz: 8000,
   }],
   [0x1976, {
     pid: 0x1976,
@@ -79,6 +83,7 @@ export const EGG_DEVICE_PROFILES: ReadonlyMap<number, EggDeviceProfile> = new Ma
     lodNormal: LOD_V1,
     lodGlass: LOD_GLASS,
     motionSyncAt8k: true,
+    maxPollingHz: 8000,
   }],
   [0x1978, {
     pid: 0x1978,
@@ -92,6 +97,7 @@ export const EGG_DEVICE_PROFILES: ReadonlyMap<number, EggDeviceProfile> = new Ma
     lodNormal: LOD_V2,
     lodGlass: LOD_GLASS,
     motionSyncAt8k: true,
+    maxPollingHz: 8000,
   }],
   [0x1980, {
     pid: 0x1980,
@@ -105,6 +111,39 @@ export const EGG_DEVICE_PROFILES: ReadonlyMap<number, EggDeviceProfile> = new Ma
     lodNormal: LOD_V2,
     lodGlass: LOD_GLASS,
     motionSyncAt8k: true,
+    maxPollingHz: 8000,
+  }],
+  // OP1w 4K v2: first wireless model on the OP1-8K v2 config protocol. The
+  // dongle's own USB PID (0x1970) is reused from the older, unrelated OP1we
+  // (see egg-we-hid.ts) — descriptor-based detection there keeps the two
+  // drivers from both claiming it. See issue #107.
+  [0x1984, {
+    pid: 0x1984,
+    name: "Endgame Gear OP1w 4K v2",
+    configFamily: "v2",
+    sensorFamily: "paw3950",
+    cpiMin: 10,
+    cpiMax: 30_000,
+    cpiStepLow: 10,
+    cpiStepHigh: 50,
+    lodNormal: LOD_V2,
+    lodGlass: null,
+    motionSyncAt8k: true,
+    maxPollingHz: 4000,
+  }],
+  [0x1970, {
+    pid: 0x1970,
+    name: "Endgame Gear OP1w 4K v2",
+    configFamily: "v2",
+    sensorFamily: "paw3950",
+    cpiMin: 10,
+    cpiMax: 30_000,
+    cpiStepLow: 10,
+    cpiStepHigh: 50,
+    lodNormal: LOD_V2,
+    lodGlass: null,
+    motionSyncAt8k: true,
+    maxPollingHz: 4000,
   }],
 ]);
 
@@ -153,10 +192,15 @@ export function eggNormalizeFeatureReport(
   // config size. On Windows, command replies then retain their A0/A1 wire
   // header as the first payload byte. Treat that byte as framing instead of
   // prepending a duplicate report ID and shifting the status/version fields.
+  // Status byte values observed on the wire (issue #107): 0x01 OK, 0x03 busy,
+  // 0x07 rejected, 0x08 mouse unreachable (RF sleep). All four are valid
+  // framing markers, not just OK/busy — treating only 0x01/0x03 as framing
+  // left rejected and RF-sleep replies on the OP1w 4K v2 falling through to
+  // the byte-shifting path below, corrupting the payload length calculation.
   const hasWireHeader = raw.length === payloadLength
     && raw.length >= 2
     && (raw[0] === 0 || raw[0] === EGG_REPORT.config || raw[0] === EGG_REPORT.command)
-    && (raw[1] === 0x01 || raw[1] === 0x03);
+    && (raw[1] === 0x01 || raw[1] === 0x03 || raw[1] === 0x07 || raw[1] === 0x08);
   if (hasWireHeader) {
     const result = new Uint8Array(Math.max(expectedTotal, raw.length));
     result.set(raw);

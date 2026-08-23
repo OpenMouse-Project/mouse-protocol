@@ -14,6 +14,7 @@ Supported identifiers:
 - `046d:c0a8` — PRO X 2 Superstrike (USB)
 - `046d:c07e` — G402 / G402 Hyperion Fury (wired)
 - `046d:c08f` — G403 HERO (wired)
+- `046d:c087` — G703 (wired)
 - `046d:c08b` — G502 HERO (wired)
 - `046d:c07d` — G502 / G502 Proteus Core (wired)
 - `046d:c095` — G502 X PLUS (USB cable; wireless identity `4099` uses its Lightspeed receiver)
@@ -94,6 +95,44 @@ Persistent polling-rate changes write the profile sector and are implemented for
 format 2 (LOGAN); DPI-stage changes still are not (the v1 format has no stage
 table). Record the device identifier, protocol version, and any failing setting
 in the issue or pull request. Do not use factory reset during initial testing.
+
+## G703 (direct-connect, HID++ device index `0xFF`)
+
+The original G703 on its USB cable (`046d:c087`) takes the same direct-connect
+path as the G403 HERO: legacy Adjustable DPI `0x2201` and legacy Report Rate
+`0x8060`. Extended DPI `0x2202` is absent, so the lift-off/sensor card stays
+hidden. Identity reports USB transport `C087` and firmware `MPM 14.02` /
+`BOT 64.00` / `RQI 04.00`.
+
+Its onboard profile is format `3` (HEAT). A 2026-08-16 guided write probe on
+this cable unit passed: name `OM_VERIFY`, default-slot DPI 1000, and 500 Hz
+were stored exactly, confirmed live, and restored. Polling-rate and DPI-slot
+edits therefore write the active onboard profile. The sensor advertises
+50–12,000 DPI in steps of 50 and 125 / 250 / 500 / 1000 Hz. Battery is
+reported from the voltage feature (`0x1001`). RGB lighting (`0x8070`)
+enumerates Primary and Logo zones as write-only.
+
+A cable capture confirmed Wired USB, 450 DPI, 1000 Hz, charging, active
+onboard profile 3, four of five DPI slots in use (450 / 800 / 1600 / 12000).
+The Lightspeed dongle was not present; wireless remains untested on this unit.
+
+1. Confirm the sidebar and title show the mouse and the connection reads
+   **Wired**.
+2. Confirm the firmware list and the HID++ device details section populate.
+3. Confirm DPI reads back and that a staged DPI write re-reads as the value
+   sent (`0x2201` function 3, short request).
+4. Confirm the polling-rate controls are **enabled** and that changing the rate
+   writes the active onboard profile's report-rate byte, then reloads as the
+   new rate.
+5. Open a stored profile and change the DPI slot table. Confirm the physical
+   DPI button cycles the new values and that unused slots stay unused.
+6. Confirm the sensor card (lift-off distance) is hidden.
+7. Confirm battery percentage and charging state populate while the cable is
+   attached.
+8. Confirm Primary and Logo lighting zones are offered. Writes are
+   write-only — the current effect is not read back.
+
+Do not use factory reset. Format 3 has no factory-reset image.
 
 ## G502 HERO (direct-connect, HID++ device index `0xFF`)
 
