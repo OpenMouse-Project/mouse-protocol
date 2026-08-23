@@ -69,6 +69,11 @@ export const KEYCHRON_HID_FILTERS: HIDDeviceFilter[] = KEYCHRON_PRODUCT_IDS.map(
   (productId) => ({ vendorId: VENDOR_ID.keychron, productId, usagePage: 0xff60, usage: 0x61 }),
 );
 
+export const KEYCHRON_M6_HID_FILTERS: HIDDeviceFilter[] = [
+  { vendorId: VENDOR_ID.keychron, productId: 0xd060, usagePage: 0xffc1, usage: 0x01 },
+  { vendorId: VENDOR_ID.keychron, productId: 0xd029, usagePage: 0xffc1, usage: 0x01 },
+];
+
 // moddoMOUSE exposes its vendor config interface on usage page 0xff, usage 0x01
 // (older firmware answers on usage 0x02). Offer both so the picker lists the
 // control interface; the driver rejects anything without the config report.
