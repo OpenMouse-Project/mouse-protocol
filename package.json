@@ -108,6 +108,10 @@
     "./gwolves": {
       "types": "./dist/gwolves/index.d.ts",
       "import": "./dist/gwolves/index.js"
+    },
+    "./glorious": {
+      "types": "./dist/glorious/index.d.ts",
+      "import": "./dist/glorious/index.js"
     }
   },
   "scripts": {
