@@ -52,6 +52,7 @@ checklist.
 | Pulsar | `@openmouse/protocol/pulsar` |
 | Razer legacy/current | `@openmouse/protocol/razer` |
 | Razer V4 | `@openmouse/protocol/razer-v4` |
+| SteelSeries Rival 3 (Gen 1) | `@openmouse/protocol/steelseries` |
 | Teevolution | `@openmouse/protocol/teevolution` |
 | VGN | `@openmouse/protocol/vgn` |
 | WLMouse | `@openmouse/protocol/wlmouse` |
@@ -64,3 +65,9 @@ The Ninjutso catalog and packet layouts are derived from the JavaScript shipped
 by the official NinjaForce WebHID panel. They have automated transport and
 codec coverage, but are not marked as hardware-verified until tested on the
 corresponding Sora V2/V3 and TEN-family devices.
+
+The SteelSeries Rival 3 Gen 1 codec and driver are derived from the public
+rivalcfg project, corroborated against libratbag and OpenRGB. The device is
+write-only — only the firmware version can be read back — and no entry is
+marked hardware-verified yet. See
+[docs/steelseries-testing.md](docs/steelseries-testing.md).
