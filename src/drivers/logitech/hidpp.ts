@@ -499,21 +499,38 @@ export class LogitechHidppClient {
    * So ask. The root feature query is the cheapest request there is, and the
    * wrong index simply times out.
    */
-  private async resolveDeviceIndex(): Promise<void> {
+  private async resolveDeviceIndex(
+    excluded?: ReadonlySet<number>,
+    priorAnsweredWithoutSensor = false,
+  ): Promise<void> {
     if (this.resolvedDeviceIndex !== null) return;
     const receiverAttached = KNOWN_RECEIVER_PRODUCT_IDS.has(this.device.productId);
-    const candidates = hidppDeviceIndexCandidates(receiverAttached);
+    const candidates = hidppDeviceIndexCandidates(receiverAttached)
+      .filter((candidate) => !excluded?.has(candidate));
 
     // A merged receiver can carry a keyboard on a lower slot than the mouse.
     // Keyboards answer the same HID++ queries, so an answering slot only counts
-    // once it proves it has a sensor; a direct connection has a single endpoint
-    // and is latched as before, with readStatus deciding whether it is a mouse.
-    let answeredWithoutSensor = false;
+    // once it proves it has a sensor; a direct connection is latched on its
+    // first HID++2.0 answer without that extra round trip — correct for the
+    // common case, where a "direct connect" product id really does have one
+    // dedicated endpoint, but not universally true: confirmed on real
+    // hardware (a PRO X Superlight), DEVICE_INDEX_DIRECT can be an
+    // admin/pass-through endpoint that answers the root feature query with
+    // no sensor behind it, while DEVICE_INDEX_RECEIVER — the very next
+    // candidate — is the mouse itself. `readStatus()` catches that after the
+    // fact (its own dpiFeature check) and calls this again with the
+    // sensorless index in `excluded` (and `priorAnsweredWithoutSensor: true`,
+    // since that index answering-without-a-sensor is *why* it's excluded —
+    // this call's own loop never revisits it to rediscover that itself); on
+    // that retry there is no "trust the first answer" shortcut left to take,
+    // so every remaining candidate gets the same sensor check a
+    // receiver-attached probe always got.
+    let answeredWithoutSensor = priorAnsweredWithoutSensor;
     for (const candidate of candidates) {
       this.resolvedDeviceIndex = candidate;
       const outcome = await this.probeHidpp20Root();
       if (outcome !== "hidpp20") continue;
-      if (!receiverAttached) return;
+      if (!receiverAttached && !excluded) return;
       answeredWithoutSensor = true;
       if (await this.hasDpiFeature()) return;
     }
@@ -631,7 +648,18 @@ export class LogitechHidppClient {
     // the picker cannot filter them out by descriptor. A sensor feature is what
     // actually distinguishes a mouse, and it is only knowable once connected.
     if (!dpiFeature.index) {
-      throw new NotAMouseError(this.device.productName || "That Logitech device");
+      // `resolveDeviceIndex()`'s direct-connect fast path trusts the first
+      // HID++2.0-answering index without a sensor probe — cheap and correct
+      // for the common case, but confirmed wrong on real hardware (a PRO X
+      // Superlight whose DEVICE_INDEX_DIRECT is an admin/pass-through
+      // endpoint with no sensor while DEVICE_INDEX_RECEIVER, the very next
+      // candidate, is the mouse itself). Retry properly — this time with a
+      // sensor check on every remaining candidate — before concluding this
+      // interface really isn't a mouse.
+      const sensorless = this.resolvedDeviceIndex;
+      this.resolvedDeviceIndex = null;
+      await this.resolveDeviceIndex(sensorless === null ? undefined : new Set([sensorless]), sensorless !== null);
+      return this.readStatus();
     }
     const reportRateFeature = await this.resolveReportRateFeature();
     const profilesFeature = await this.getFeature(FEATURE.onboardProfiles);

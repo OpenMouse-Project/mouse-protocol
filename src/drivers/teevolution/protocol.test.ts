@@ -25,6 +25,10 @@ import {
   teevolutionParseBattery,
   teevolutionParseReadResponse,
   teevolutionSensorModeUi,
+  teevolutionLcdChecksum,
+  teevolutionBuildLcdTimePacket,
+  TEEVOLUTION_LCD_REPORT_ID,
+  TEEVOLUTION_LCD_PACKET_LENGTH,
 } from "@openmouse/protocol/teevolution";
 
 test("host-control and battery commands match Compx report-8 checksums", () => {
@@ -193,4 +197,19 @@ test("sensor mode encoding accepts Eco and High only", () => {
   assert.equal(teevolutionEncodeSensorMode("Eco"), 0);
   assert.equal(teevolutionEncodeSensorMode("High"), 1);
   assert.throws(() => teevolutionEncodeSensorMode("Ultra"), /cannot be written/);
+});
+
+test("RapidSync LCD time packets match Teevolink framing and CRC", () => {
+  // Arrange — Saturday 15 Aug 2026 21:27:00 local (verified on hardware)
+  const now = new Date(2026, 7, 15, 21, 27, 0);
+
+  // Act
+  const packet = teevolutionBuildLcdTimePacket(now);
+
+  // Assert
+  assert.equal(packet.length, TEEVOLUTION_LCD_PACKET_LENGTH);
+  assert.equal(packet[0], TEEVOLUTION_LCD_REPORT_ID);
+  assert.deepEqual([...packet.subarray(1, 11)], [0x00, 0x10, 0x07, 0xea, 0x08, 0x0f, 0x15, 0x1b, 0x00, 6]);
+  assert.equal(packet[39], teevolutionLcdChecksum(packet));
+  assert.equal(now.getDay(), 6);
 });

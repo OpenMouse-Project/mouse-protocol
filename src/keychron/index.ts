@@ -4,6 +4,23 @@ export const KEYCHRON_RAW_USAGE_PAGE = 0xff60;
 export const KEYCHRON_RAW_USAGE = 0x61;
 export const KEYCHRON_REPORT_ID = 0;
 export const KEYCHRON_PACKET_LENGTH = 32;
+/** Keychron M6 wired control interface and report layout, verified on PID 0xd060. */
+export const KEYCHRON_M6_PRODUCT_ID = 0xd060;
+/** Link-KM receiver paired with the Keychron M6, verified on 2.4 GHz. */
+export const KEYCHRON_M6_RECEIVER_PRODUCT_ID = 0xd029;
+export const KEYCHRON_M6_USAGE_PAGE = 0xffc1;
+export const KEYCHRON_M6_USAGE = 0x01;
+export const KEYCHRON_M6_COMMAND_REPORT_ID = 0xb3;
+export const KEYCHRON_M6_COMMAND_RESPONSE_REPORT_ID = 0xb4;
+export const KEYCHRON_M6_SETTINGS_REPORT_ID = 0xb5;
+export const KEYCHRON_M6_SETTINGS_RESPONSE_REPORT_ID = 0xb6;
+export const KEYCHRON_M6_STATUS_COMMAND = 0x06;
+export const KEYCHRON_M6_STATUS_PACKET_LENGTH = 63;
+export const KEYCHRON_PRODUCTS = new Map<number, { name: string; receiver?: boolean }>([
+  [0x0440, { name: "Nape Pro" }],
+  [0xd026, { name: "Keychron Link-KM", receiver: true }],
+  [0xd029, { name: "Keychron Link-KM Type C", receiver: true }],
+]);
 export const KEYCHRON_NAPE_PRODUCTS = new Map<number, { name: string; receiver?: boolean }>([
   [0x0440, { name: "Nape Pro" }],
   [0xd026, { name: "Keychron Link-KM", receiver: true }],
