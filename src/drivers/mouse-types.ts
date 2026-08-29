@@ -42,6 +42,11 @@ export interface MouseUiHints {
   showAdvancedSection?: boolean;
   /** Always show battery column (even wired with null %). */
   forceShowBattery?: boolean;
+  /**
+   * Extra sentence appended to the connected status line, for drivers whose
+   * connection is deliberately limited (e.g. why settings are unavailable).
+   */
+  statusNote?: string;
   /** Override the polling-rate footnote. */
   pollingNote?: string;
   /** Sidebar name before first status read. */

@@ -280,6 +280,29 @@ async function resolveIndex(client: LogitechHidppClient): Promise<number | null>
   return driver.resolvedDeviceIndex;
 }
 
+/**
+ * Simulates `readStatus()`'s own retry: clear the already-resolved (and, by
+ * the time a real caller does this, already proven sensorless) index and
+ * resolve again excluding it — same as `readStatus()` does when its
+ * post-resolution DPI check comes back empty.
+ */
+async function resolveIndexExcluding(
+  client: LogitechHidppClient,
+  excluded: ReadonlySet<number>,
+): Promise<number | null> {
+  const driver = client as unknown as {
+    open(): Promise<void>;
+    resolveDeviceIndex(excluded?: ReadonlySet<number>, priorAnsweredWithoutSensor?: boolean): Promise<void>;
+    resolvedDeviceIndex: number | null;
+  };
+  await driver.open();
+  driver.resolvedDeviceIndex = null;
+  // Mirrors readStatus()'s own call: excluding an index only ever happens
+  // because that index already answered-without-a-sensor.
+  await driver.resolveDeviceIndex(excluded, excluded.size > 0);
+  return driver.resolvedDeviceIndex;
+}
+
 test("a merged receiver's mouse is found past the empty first slot", async () => {
   // The G502 X PLUS moves off slot 0x01 once G HUB merges the keyboard in.
   const { client, device } = harness(0xc547, { 0x02: "mouse" });
@@ -319,4 +342,26 @@ test("a direct-connect mouse is latched on its own index without a sensor probe"
   const { client, device } = harness(G402, { 0xff: "mouse" });
   assert.equal(await resolveIndex(client), 0xff);
   assert.equal(device.probed.some(({ data }) => data[1] === 0x00 && ((data[3] << 8) | data[4]) === 0x2202), false);
+});
+
+test("a direct-connect product falls back to the receiver index when its own index has no sensor", async () => {
+  // Confirmed on real hardware (a PRO X Superlight): DEVICE_INDEX_DIRECT can
+  // answer HID++2.0 as a genuine admin/pass-through endpoint with no sensor
+  // behind it, while DEVICE_INDEX_RECEIVER — the very next candidate — is
+  // the mouse. `readStatus()` discovers this after the fact and re-resolves
+  // excluding the sensorless index; this simulates that second call.
+  const { client } = harness(G402, { 0xff: "keyboard", 0x01: "mouse" });
+  assert.equal(await resolveIndex(client), 0xff, "the fast path still trusts the first answer with no probe");
+  assert.equal(
+    await resolveIndexExcluding(client, new Set([0xff])),
+    0x01,
+    "excluding the sensorless index finds the mouse on the next candidate",
+  );
+});
+
+test("a direct-connect product with no sensor anywhere is reported as not a mouse", async () => {
+  const { client } = harness(G402, { 0xff: "keyboard" });
+  assert.equal(await resolveIndex(client), 0xff, "the fast path still trusts the first answer with no probe");
+  const error = await resolveIndexExcluding(client, new Set([0xff])).catch((reason) => reason);
+  assert.equal((error as Error).name, "NotAMouseError");
 });
