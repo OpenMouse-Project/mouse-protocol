@@ -28,9 +28,10 @@ import { WootingHidClient } from "./wooting/hid.ts";
 import { ZaunkoenigHidClient } from "./zaunkoenig/hid.ts";
 import { GWolvesHidClient } from "./gwolves/hid.ts";
 import { SteelSeriesRival3HidClient } from "./steelseries/hid.ts";
+import { GloriousHidClient } from "./glorious/hid.ts";
 
 export type PulsarClient = PulsarHidClient | PulsarProHidClient | PulsarXs1HidClient;
-export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient | KeychronM6HidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | AttackSharkHidClient | FantechHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | SteelSeriesRival3HidClient;
+export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient | KeychronM6HidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | AttackSharkHidClient | FantechHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | SteelSeriesRival3HidClient | GloriousHidClient;
 
 export interface DeviceDriver {
   brand: string;
@@ -70,6 +71,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "WALLHACK", supports: (device) => WallhackKeyboardHidClient.isSupported(device), create: (device) => new WallhackKeyboardHidClient(device), score: () => 8 },
   { brand: "G-Wolves", supports: (device) => GWolvesHidClient.isSupported(device), create: (device) => new GWolvesHidClient(device), score: () => 7 },
   { brand: "SteelSeries", supports: (device) => SteelSeriesRival3HidClient.isSupported(device), create: (device) => new SteelSeriesRival3HidClient(device), score: () => 6 },
+  { brand: "Glorious", supports: (device) => GloriousHidClient.isSupported(device), create: (device) => new GloriousHidClient(device), score: () => 5 },
 ];
 
 function driverFor(device: HIDDevice): DeviceDriver | undefined {

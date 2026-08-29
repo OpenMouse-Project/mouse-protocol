@@ -69,6 +69,7 @@ export const VENDOR_ID = {
   wallhackKeyboardAlt: WALLHACK_KEYBOARD_ALT_VENDOR_ID,
   gwolves: 0x33e4,
   steelseries: STEELSERIES_VENDOR_ID,
+  glorious: 0x093a,
 } as const;
 
 /**
@@ -84,6 +85,16 @@ export const VENDOR_ID = {
 export const STEELSERIES_RIVAL3_FILTERS: HIDDeviceFilter[] = [...STEELSERIES_PRODUCTS.keys()].map(
   (productId) => ({ vendorId: STEELSERIES_VENDOR_ID, productId }),
 );
+
+// Pixart-based Model O 2 / I 2 family (OpenRGB issue #4649, linux-hardware.org).
+export const GLORIOUS_PRODUCTS: ReadonlyMap<number, { name: string; wireless: boolean }> = new Map([
+  [0x821d, { name: "Model I 2 Wireless", wireless: false }],
+  [0x822a, { name: "Model O 2 Wireless", wireless: false }],
+  [0x822b, { name: "Model O 2 Bluetooth", wireless: true }],
+  [0x822d, { name: "Model O 2 Wireless receiver", wireless: true }],
+  [0x826a, { name: "Model O 2 Mini Wireless", wireless: false }],
+  [0x826d, { name: "Model O 2 Mini Wireless receiver", wireless: true }],
+]);
 
 // Keychron Nape Pro VIA raw HID. 0x0440 is wired; 0xd026/0xd029 are shared Link-KM receivers.
 export const KEYCHRON_NAPE_PRODUCT_IDS = [0x0440, 0xd026, 0xd029] as const;
@@ -335,4 +346,5 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.gwolves, productId: 0x5618, usagePage: 0xff02 },
   { vendorId: VENDOR_ID.gwolves, productId: 0x3854, usagePage: 0xff02 },
   ...STEELSERIES_RIVAL3_FILTERS,
+  { vendorId: VENDOR_ID.glorious },
 ];
