@@ -19,6 +19,10 @@ import {
   ZAUNKOENIG_VENDOR_ID,
 } from "@openmouse/protocol/zaunkoenig";
 import {
+  TEEVOLUTION_LCD_USAGE,
+  TEEVOLUTION_LCD_USAGE_PAGE,
+} from "@openmouse/protocol/teevolution";
+import {
   WOOTING_CONFIG_USAGE,
   WOOTING_CONFIG_USAGE_PAGE,
   WOOTING_PRODUCT_IDS,
@@ -81,12 +85,17 @@ export const STEELSERIES_RIVAL3_FILTERS: HIDDeviceFilter[] = [...STEELSERIES_PRO
   (productId) => ({ vendorId: STEELSERIES_VENDOR_ID, productId }),
 );
 
-// Keychron VIA raw HID. 0x0440 is Nape Pro wired; 0xd026/0xd029 are shared Link-KM receivers.
-export const KEYCHRON_PRODUCT_IDS = [0x0440, 0xd026, 0xd029] as const;
+// Keychron Nape Pro VIA raw HID. 0x0440 is wired; 0xd026/0xd029 are shared Link-KM receivers.
+export const KEYCHRON_NAPE_PRODUCT_IDS = [0x0440, 0xd026, 0xd029] as const;
 
-export const KEYCHRON_HID_FILTERS: HIDDeviceFilter[] = KEYCHRON_PRODUCT_IDS.map(
+export const KEYCHRON_NAPE_HID_FILTERS: HIDDeviceFilter[] = KEYCHRON_NAPE_PRODUCT_IDS.map(
   (productId) => ({ vendorId: VENDOR_ID.keychron, productId, usagePage: 0xff60, usage: 0x61 }),
 );
+
+export const KEYCHRON_M6_HID_FILTERS: HIDDeviceFilter[] = [
+  { vendorId: VENDOR_ID.keychron, productId: 0xd060, usagePage: 0xffc1, usage: 0x01 },
+  { vendorId: VENDOR_ID.keychron, productId: 0xd029, usagePage: 0xffc1, usage: 0x01 },
+];
 
 // moddoMOUSE exposes its vendor config interface on usage page 0xff, usage 0x01
 // (older firmware answers on usage 0x02). Offer both so the picker lists the
@@ -290,6 +299,12 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.lamzu },
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   ...TEEVOLUTION_PRODUCT_IDS.map((productId) => ({ vendorId: VENDOR_ID.teevolution, productId })),
+  ...TEEVOLUTION_PRODUCT_IDS.map((productId) => ({
+    vendorId: VENDOR_ID.teevolution,
+    productId,
+    usagePage: TEEVOLUTION_LCD_USAGE_PAGE,
+    usage: TEEVOLUTION_LCD_USAGE,
+  })),
   ...RAZER_MOUSE_DOCK_PRO_CONTROL_FILTERS,
   ...RAZER_VIPER_V2_CONTROL_FILTERS,
   ...RAZER_VIPER_V3_CONTROL_FILTERS,
@@ -303,7 +318,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...RAZER_VIPER_V4_CONTROL_FILTERS,
   ...RAZER_DEATHADDER_ESSENTIAL_FILTERS,
   ...RAZER_COBRA_FILTERS,
-  ...KEYCHRON_HID_FILTERS,
+  ...KEYCHRON_NAPE_HID_FILTERS,
   ...RAZER_REGISTRY_FILTERS,
   ...RAZER_DEATHADDER_V2_FILTERS,
   ...EGG_WE_HID_FILTERS,
