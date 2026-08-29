@@ -187,6 +187,12 @@ export interface MouseStatus {
    * omitted rather than guessed at.
    */
   razerButtonMappings?: Record<string, string>;
+  /** Keychron Nape Pro user layer currently running on the device (1–8).
+   * Matches firmware get/set. Undefined when the layer commands were not answered.
+   */
+  napeLayer?: number;
+  /** How many Nape onboard layers VIA reported. Undefined when unread. */
+  napeLayerCount?: number;
   performanceMode?: boolean | null;
   hyperMode?: boolean | null;
   sensorMode?: "Eco" | "High" | "Ultra" | null;

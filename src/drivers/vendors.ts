@@ -77,10 +77,10 @@ export const GLORIOUS_PRODUCTS: ReadonlyMap<number, { name: string; wireless: bo
   [0x826d, { name: "Model O 2 Mini Wireless receiver", wireless: true }],
 ]);
 
-// Keychron VIA raw HID. 0x0440 is Nape Pro wired; 0xd026/0xd029 are shared Link-KM receivers.
-export const KEYCHRON_PRODUCT_IDS = [0x0440, 0xd026, 0xd029] as const;
+// Keychron Nape Pro VIA raw HID. 0x0440 is wired; 0xd026/0xd029 are shared Link-KM receivers.
+export const KEYCHRON_NAPE_PRODUCT_IDS = [0x0440, 0xd026, 0xd029] as const;
 
-export const KEYCHRON_HID_FILTERS: HIDDeviceFilter[] = KEYCHRON_PRODUCT_IDS.map(
+export const KEYCHRON_NAPE_HID_FILTERS: HIDDeviceFilter[] = KEYCHRON_NAPE_PRODUCT_IDS.map(
   (productId) => ({ vendorId: VENDOR_ID.keychron, productId, usagePage: 0xff60, usage: 0x61 }),
 );
 
@@ -310,7 +310,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...RAZER_VIPER_V4_CONTROL_FILTERS,
   ...RAZER_DEATHADDER_ESSENTIAL_FILTERS,
   ...RAZER_COBRA_FILTERS,
-  ...KEYCHRON_HID_FILTERS,
+  ...KEYCHRON_NAPE_HID_FILTERS,
   ...RAZER_REGISTRY_FILTERS,
   ...RAZER_DEATHADDER_V2_FILTERS,
   ...EGG_WE_HID_FILTERS,
