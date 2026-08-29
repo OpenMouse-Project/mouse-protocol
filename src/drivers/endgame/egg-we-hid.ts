@@ -38,7 +38,16 @@ const OP1WE_CABLE_PIDS = new Set([0x1962, 0x1972]);
 const OP1WE_RECEIVER_PIDS = new Set([0x1961, 0x1970]);
 /** XM2we receiver revisions observed in WebHID hardware reports. */
 const XM2WE_RECEIVER_PIDS = new Set([0x1960, 0x1968, 0x1982]);
-const EGG_8K_PRODUCT_IDS = new Set([0x1964, 0x1966, 0x1976, 0x1978]);
+const EGG_8K_PRODUCT_IDS = new Set([0x1964, 0x1966, 0x1976, 0x1978, 0x1980]);
+/**
+ * Wire report ID of the OP1-8K config protocol's command feature report
+ * (EGG_REPORT.command in endgame-gear/op1.ts). The OP1w 4K v2 wireless
+ * receiver reuses PID 0x1970 from the older, unrelated OP1we dongle
+ * (OP1WE_RECEIVER_PIDS below), so PID alone cannot tell them apart — see
+ * issue #107. Any device exposing this feature report speaks the OP1-8K
+ * protocol and must be left to EggOp1HidClient regardless of its PID.
+ */
+const EGG_OP1_COMMAND_REPORT_ID = 0xa1;
 
 const USAGE_PAGE_CMD = 0xff02;
 const USAGE_PAGE_NOTIFY = 0xff01;
@@ -103,10 +112,19 @@ export class EggWeHidClient {
 
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== EGG_VENDOR_ID) return false;
-    return !EGG_8K_PRODUCT_IDS.has(device.productId)
-      && (OP1WE_CABLE_PIDS.has(device.productId)
-        || OP1WE_RECEIVER_PIDS.has(device.productId)
-        || XM2WE_RECEIVER_PIDS.has(device.productId));
+    if (EGG_8K_PRODUCT_IDS.has(device.productId)) return false;
+    // PID-based exclusion above only covers the wired OP1-8K family. A
+    // receiver PID here (e.g. 0x1970) can also belong to a newer OP1-8K-v2
+    // wireless model that happens to reuse it; the descriptor is the only
+    // reliable signal in that case.
+    if (this.hasOp1EightKCommandReport(device)) return false;
+    return OP1WE_CABLE_PIDS.has(device.productId)
+      || OP1WE_RECEIVER_PIDS.has(device.productId)
+      || XM2WE_RECEIVER_PIDS.has(device.productId);
+  }
+
+  private static hasOp1EightKCommandReport(device: HIDDevice): boolean {
+    return this.listFeatureReports(device).some((report) => report.reportId === EGG_OP1_COMMAND_REPORT_ID);
   }
 
   static isReceiverDevice(device: HIDDevice): boolean {
