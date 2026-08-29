@@ -12,6 +12,7 @@ export * as pulsar from "./pulsar/index.js";
 export * as razer from "./razer/index.js";
 export * as razerDevices from "./razer/devices.js";
 export * as razerV4 from "./razer/v4.js";
+export * as steelseries from "./steelseries/index.js";
 export * as teevolution from "./teevolution/index.js";
 export * as vgn from "./vgn/index.js";
 export * as wlmouse from "./wlmouse/index.js";

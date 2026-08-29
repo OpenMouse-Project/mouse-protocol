@@ -29,6 +29,10 @@ import {
   WOOTING_VENDOR_ID,
 } from "@openmouse/protocol/wooting";
 import {
+  STEELSERIES_PRODUCTS,
+  STEELSERIES_VENDOR_ID,
+} from "@openmouse/protocol/steelseries";
+import {
   WALLHACK_KEYBOARD_ALT_VENDOR_ID,
   WALLHACK_KEYBOARD_PRODUCT_IDS,
   WALLHACK_KEYBOARD_USAGE,
@@ -64,8 +68,23 @@ export const VENDOR_ID = {
   wallhack: WALLHACK_VENDOR_ID,
   wallhackKeyboardAlt: WALLHACK_KEYBOARD_ALT_VENDOR_ID,
   gwolves: 0x33e4,
+  steelseries: STEELSERIES_VENDOR_ID,
   glorious: 0x093a,
 } as const;
+
+/**
+ * SteelSeries ships keyboards, headsets, and USB audio under 0x1038, so there
+ * must never be a VID-only SteelSeries filter. The Rival 3 Gen 1's config
+ * channel is hidapi interface 3, whose WebHID collection shape has not been
+ * captured yet, so the whole device is requested per product id and the
+ * picker offers each interface; the driver's firmware probe fails loudly on
+ * the ones that never answer (add the device again and choose another entry).
+ * Narrow these to a usage-page filter once the collection dump is recorded in
+ * docs/steelseries-testing.md.
+ */
+export const STEELSERIES_RIVAL3_FILTERS: HIDDeviceFilter[] = [...STEELSERIES_PRODUCTS.keys()].map(
+  (productId) => ({ vendorId: STEELSERIES_VENDOR_ID, productId }),
+);
 
 // Pixart-based Model O 2 / I 2 family (OpenRGB issue #4649, linux-hardware.org).
 export const GLORIOUS_PRODUCTS: ReadonlyMap<number, { name: string; wireless: boolean }> = new Map([
@@ -326,5 +345,6 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...WALLHACK_HID_FILTERS,
   { vendorId: VENDOR_ID.gwolves, productId: 0x5618, usagePage: 0xff02 },
   { vendorId: VENDOR_ID.gwolves, productId: 0x3854, usagePage: 0xff02 },
+  ...STEELSERIES_RIVAL3_FILTERS,
   { vendorId: VENDOR_ID.glorious },
 ];

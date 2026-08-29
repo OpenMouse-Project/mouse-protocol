@@ -33,6 +33,7 @@
       "@openmouse/protocol/razer": ["./src/razer/index.ts"],
       "@openmouse/protocol/razer-devices": ["./src/razer/devices.ts"],
       "@openmouse/protocol/razer-v4": ["./src/razer/v4.ts"],
+      "@openmouse/protocol/steelseries": ["./src/steelseries/index.ts"],
       "@openmouse/protocol/teevolution": ["./src/teevolution/index.ts"],
       "@openmouse/protocol/vgn": ["./src/vgn/index.ts"],
       "@openmouse/protocol/wallhack": ["./src/wallhack/index.ts"],

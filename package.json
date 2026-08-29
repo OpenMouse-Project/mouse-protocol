@@ -73,6 +73,10 @@
       "types": "./dist/razer/v4.d.ts",
       "import": "./dist/razer/v4.js"
     },
+    "./steelseries": {
+      "types": "./dist/steelseries/index.d.ts",
+      "import": "./dist/steelseries/index.js"
+    },
     "./teevolution": {
       "types": "./dist/teevolution/index.d.ts",
       "import": "./dist/teevolution/index.js"
