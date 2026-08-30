@@ -1,4 +1,5 @@
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
+import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
 import {
   LOGITECH_BOLT_PRODUCT_IDS,
   LOGITECH_DIRECT_PRODUCT_IDS,
@@ -343,8 +344,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // Fantech mice use vendor usage page 0xFFFF, usage 0x02 for configuration.
   { vendorId: VENDOR_ID.fantech, usagePage: 0xffff, usage: 0x02 },
   ...WALLHACK_HID_FILTERS,
-  { vendorId: VENDOR_ID.gwolves, productId: 0x5618, usagePage: 0xff02 },
-  { vendorId: VENDOR_ID.gwolves, productId: 0x3854, usagePage: 0xff02 },
+  ...[...GWOLVES_PRODUCTS.keys()].map((productId) => ({ vendorId: VENDOR_ID.gwolves, productId, usagePage: 0xff02 })),
   ...STEELSERIES_RIVAL3_FILTERS,
   { vendorId: VENDOR_ID.glorious },
 ];
