@@ -219,6 +219,11 @@ const TRANSACTION_1F: readonly number[] = [
   // name. The SE reference separately mentions `0xff`, but only for the
   // HyperPolling dongle indicator command, which this driver does not send.
   0x00de, 0x00df,
+  // DeathAdder V4 Pro Carbon Fiber Edition. Same electronics as `0x00be`/
+  // `0x00bf` under a cosmetic SKU (Razer's own live `AvailableDevices.json`
+  // groups them the same way, receiver id one above the mouse id), so it
+  // shares that pair's transaction id — not independently audited.
+  0x00ef, 0x00f0,
 ];
 
 /**
@@ -614,15 +619,25 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   // has measured it — see TESTING.md.
   [0x00b7, { model: "DeathAdder V3 Pro", ...MODERN_RECEIVER, highRatePolling: false, maxDpi: DPI_FOCUS_PRO }],
   [0x00b9, { model: "Basilisk V3 X HyperSpeed", ...LEGACY_RECEIVER, maxDpi: 18_000 }],
-  // The control channel is on a Chrome-protected collection: with Synapse fully
-  // stopped the diagnostics harness got "no feature report channel" on every
-  // interface, in both the wired and wireless roles. Native HAL only.
+  // Was nativeOnly: the control channel used to sit on a Chrome-protected
+  // collection (with Synapse fully stopped the diagnostics harness got "no
+  // feature report channel" on every interface, wired and wireless both —
+  // see git blame). Razer's own live `AvailableDevices.json` on Synapse Web
+  // now lists this model (productId 190/191, i.e. 0x00be/0x00bf), meaning a
+  // firmware or descriptor update moved the control channel off that
+  // collection. Re-tested and confirmed reachable over WebHID.
   // OpenRazer PR #2508: both the cable and the HyperPolling dongle reach
   // 8000 Hz on this model (the wired half is not capped at MODERN_WIRED's
   // usual 1000 Hz — a HyperPolling receiver ships in the box, so the cable
   // gets the same ceiling as the dongle).
-  [0x00be, { model: "DeathAdder V4 Pro (Wired)", ...MODERN_WIRED, pollingRates: RATES_8K, highRatePolling: true, maxDpi: DPI_DEATHADDER_V4_PRO, nativeOnly: true }],
-  [0x00bf, { model: "DeathAdder V4 Pro", ...HYPERPOLLING_RECEIVER, maxDpi: DPI_DEATHADDER_V4_PRO, nativeOnly: true }],
+  [0x00be, { model: "DeathAdder V4 Pro (Wired)", ...MODERN_WIRED, pollingRates: RATES_8K, highRatePolling: true, maxDpi: DPI_DEATHADDER_V4_PRO }],
+  [0x00bf, { model: "DeathAdder V4 Pro", ...HYPERPOLLING_RECEIVER, maxDpi: DPI_DEATHADDER_V4_PRO }],
+  // Carbon Fiber Edition — cosmetic SKU on its own product ids, listed
+  // alongside 0x00be/0x00bf in Razer's live AvailableDevices.json
+  // (productId 239/240). Not independently hardware-tested; same specs
+  // assumed as the standard edition until proven otherwise.
+  [0x00ef, { model: "DeathAdder V4 Pro Carbon Fiber Edition (Wired)", ...MODERN_WIRED, pollingRates: RATES_8K, highRatePolling: true, maxDpi: DPI_DEATHADDER_V4_PRO }],
+  [0x00f0, { model: "DeathAdder V4 Pro Carbon Fiber Edition", ...HYPERPOLLING_RECEIVER, maxDpi: DPI_DEATHADDER_V4_PRO }],
   [0x00c2, { model: "DeathAdder V3 Pro (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO }],
   [0x00c3, { model: "DeathAdder V3 Pro", ...MODERN_RECEIVER, maxDpi: DPI_FOCUS_PRO }],
   [0x00c4, { model: "DeathAdder V3 HyperSpeed (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO }],

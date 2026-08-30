@@ -532,13 +532,16 @@ test("the DeathAdder V2 is accepted on either interface shape", () => {
 });
 
 test("a nativeOnly model is never accepted, whatever the interface shape", () => {
-  // The DeathAdder V4 Pro 0x00be has its control channel on a collection the
-  // browser refuses to expose. A granted device may still enumerate through
-  // getDevices()/auto-reconnect, so isSupported must refuse it regardless.
+  // The Viper Ultimate wireless receiver 0x007b has its control channel on a
+  // collection the browser refuses to expose. A granted device may still
+  // enumerate through getDevices()/auto-reconnect, so isSupported must refuse
+  // it regardless. (The DeathAdder V4 Pro used to be this test's example —
+  // Razer's own live AvailableDevices.json now lists it, so it's no longer
+  // nativeOnly; see devices.ts.)
   // Arrange
   const mouse = {
     vendorId: 0x1532,
-    productId: 0x00be,
+    productId: 0x007b,
     collections: [{ usagePage: 0x01, usage: 0x02, featureReports: [], children: [] }],
   } as unknown as HIDDevice;
   const vendor = {
