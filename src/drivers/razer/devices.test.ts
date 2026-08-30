@@ -336,6 +336,12 @@ const EXPECTED_DIVERGENCE: ReadonlyMap<number, { ours: number; openRazer: number
   // Not a mouse in OpenRazer's table; the dock answers on the paired mouse's
   // generation id. Confirmed with a Naga V2 Pro.
   [0x00a4, { ours: 0x1f, openRazer: 0xff, why: "hardware report with Naga V2 Pro: dock answers on 0x1f" }],
+  // DeathAdder V4 Pro Carbon Fiber Edition: not in OpenRazer's table at all
+  // yet (a cosmetic SKU, likely too new), so the audit map has no entry and
+  // the fallback would be 0xff. Assumed to share 0x00be/0x00bf's 0x1f as the
+  // same electronics under a different shell — unverified either way.
+  [0x00ef, { ours: 0x1f, openRazer: 0xff, why: "not yet in OpenRazer; assumed same generation as 0x00be" }],
+  [0x00f0, { ours: 0x1f, openRazer: 0xff, why: "not yet in OpenRazer; assumed same generation as 0x00bf" }],
 ]);
 
 test("every transaction id matches OpenRazer, or is a divergence with a reason", () => {
