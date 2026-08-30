@@ -244,6 +244,11 @@ const DPI_CHROMA = 16_000;
 const DPI_FOCUS = 20_000;
 const DPI_FOCUS_PRO = 30_000;
 const DPI_FOCUS_PRO_35K = 35_000;
+// DeathAdder V4 Pro only. OpenRazer PR #2508 documents this model's own
+// `DPI_MAX = 45000` (and raised the shared set-DPI clamp to match) — a higher
+// ceiling than the rest of the 35K-sensor generation above, so it gets its
+// own constant rather than reusing DPI_FOCUS_PRO_35K.
+const DPI_DEATHADDER_V4_PRO = 45_000;
 
 /**
  * Chroma-era and older wired mice. OpenRazer's `standard` group answers on the
@@ -612,8 +617,12 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   // The control channel is on a Chrome-protected collection: with Synapse fully
   // stopped the diagnostics harness got "no feature report channel" on every
   // interface, in both the wired and wireless roles. Native HAL only.
-  [0x00be, { model: "DeathAdder V4 Pro (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO_35K, nativeOnly: true }],
-  [0x00bf, { model: "DeathAdder V4 Pro", ...HYPERPOLLING_RECEIVER, nativeOnly: true }],
+  // OpenRazer PR #2508: both the cable and the HyperPolling dongle reach
+  // 8000 Hz on this model (the wired half is not capped at MODERN_WIRED's
+  // usual 1000 Hz — a HyperPolling receiver ships in the box, so the cable
+  // gets the same ceiling as the dongle).
+  [0x00be, { model: "DeathAdder V4 Pro (Wired)", ...MODERN_WIRED, pollingRates: RATES_8K, highRatePolling: true, maxDpi: DPI_DEATHADDER_V4_PRO, nativeOnly: true }],
+  [0x00bf, { model: "DeathAdder V4 Pro", ...HYPERPOLLING_RECEIVER, maxDpi: DPI_DEATHADDER_V4_PRO, nativeOnly: true }],
   [0x00c2, { model: "DeathAdder V3 Pro (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO }],
   [0x00c3, { model: "DeathAdder V3 Pro", ...MODERN_RECEIVER, maxDpi: DPI_FOCUS_PRO }],
   [0x00c4, { model: "DeathAdder V3 HyperSpeed (Wired)", ...MODERN_WIRED, maxDpi: DPI_FOCUS_PRO }],
