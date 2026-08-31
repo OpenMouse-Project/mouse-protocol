@@ -24,11 +24,19 @@
  * reconciliation of PR flozz/rivalcfg#269's Rival 3 Gen 2 claim (not added
  * here: its DPI command differs from Aerox 3's even though most other
  * commands match).
+ *
+ * The Aerox 5 is split across **two** families despite one product line and
+ * mostly-shared command bytes: `"aerox5"` (`0x1850`, the plain wired mouse —
+ * see `./aerox5.ts`) and `"aerox5-wireless"` (the separately-sold Aerox 5
+ * Wireless, six PIDs across its USB-cabled and 2.4 GHz dongle modes — see
+ * `./aerox5-wireless.ts`). The two families' polling-rate byte values and
+ * RGB zone-color packet shapes differ even though several other command
+ * bytes match; do not assume one family's codec for the other's PIDs.
  */
 
 export const STEELSERIES_VENDOR_ID = 0x1038;
 
-export type SteelSeriesProtocolFamily = "rival3" | "aerox3" | "rival3-wireless";
+export type SteelSeriesProtocolFamily = "rival3" | "aerox3" | "rival3-wireless" | "aerox5" | "aerox5-wireless";
 
 export interface SteelSeriesProduct {
   model: string;
@@ -88,6 +96,70 @@ export const STEELSERIES_PRODUCTS: ReadonlyMap<number, SteelSeriesProduct> = new
     wireless: true,
     settingsReadable: false,
     hasFirmwareQuery: true,
+    verified: false,
+  }],
+  // aerox5.py: plain wired Aerox 5. No getter, no firmware-query command.
+  [0x1850, {
+    model: "Aerox 5",
+    family: "aerox5",
+    wireless: false,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // aerox5_wireless_wired.py: Aerox 5 Wireless in USB-cabled mode. Own
+  // command set from the plain Aerox 5 (different polling-rate bytes,
+  // different RGB zone packing, extra sleep/dim timers, a battery read the
+  // plain Aerox 5 has no equivalent of). No firmware-query command.
+  [0x1854, {
+    model: "Aerox 5 Wireless (wired mode)",
+    family: "aerox5-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  [0x185e, {
+    model: "Aerox 5 Wireless Destiny 2 Edition (wired mode)",
+    family: "aerox5-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  [0x1862, {
+    model: "Aerox 5 Wireless Diablo IV Edition (wired mode)",
+    family: "aerox5-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // aerox5_wireless_wireless.py: same mouse, 2.4 GHz dongle mode. Every
+  // command byte is `aerox5_wireless_wired.py`'s with `0b01000000` ORed into
+  // byte 0 (see ./aerox5-wireless.ts's `applyWirelessFlag`).
+  [0x1852, {
+    model: "Aerox 5 Wireless (2.4 GHz mode)",
+    family: "aerox5-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  [0x185c, {
+    model: "Aerox 5 Wireless Destiny 2 Edition (2.4 GHz mode)",
+    family: "aerox5-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  [0x1860, {
+    model: "Aerox 5 Wireless Diablo IV Edition (2.4 GHz mode)",
+    family: "aerox5-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
     verified: false,
   }],
 ]);
