@@ -158,8 +158,17 @@ export class SteelSeriesRival650HidClient {
     return pollingRateHz;
   }
 
-  /** `20 01 <v>` — lift-off distance, 1–8 mm. */
-  async setLiftOffDistance(millimeters: number): Promise<number> {
+  /**
+   * `20 01 <v>` — lift-off distance, 1–8 mm. Named distinctly from the
+   * shared `setLiftOffDistance(lod: "Low" | "Medium" | "High")` surface
+   * every other driver implements: the Rival 650's scale is a raw
+   * millimeter range with no natural 3-way mapping onto that enum (see the
+   * `readStatus` comment above), and giving it the same method name would
+   * collapse `SupportedClient`'s intersected parameter type to `never` for
+   * every driver, since TypeScript intersects the parameter types of a
+   * union of function members. Not currently wired to any UI control.
+   */
+  async setLiftOffDistanceMm(millimeters: number): Promise<number> {
     const report = steelseriesRival650EncodeLiftOffDistance(millimeters);
     await this.run(async () => {
       await this.open();

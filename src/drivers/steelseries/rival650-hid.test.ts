@@ -94,7 +94,7 @@ test("setDpi, setPollingRate, and setLiftOffDistance write the value then save, 
   const client = new SteelSeriesRival650HidClient(device);
   assert.equal(await client.setDpi(1600), 1600);
   assert.equal(await client.setPollingRate(500), 500);
-  assert.equal(await client.setLiftOffDistance(2), 2);
+  assert.equal(await client.setLiftOffDistanceMm(2), 2);
   assert.deepEqual(sent, [
     { reportId: 0, payload: [0x15, 0x01, 0x0f] },
     { reportId: 0, payload: [0x09] },
@@ -135,7 +135,7 @@ test("invalid values are rejected before any report reaches the mouse", async ()
   const client = new SteelSeriesRival650HidClient(device);
   await assert.rejects(client.setDpi(150), /100 DPI steps/);
   await assert.rejects(client.setPollingRate(2000), /125, 250, 500, or 1000 Hz/);
-  await assert.rejects(client.setLiftOffDistance(9), Error);
+  await assert.rejects(client.setLiftOffDistanceMm(9), Error);
   await assert.rejects(client.setSleepTimer(21), /1–20 minutes/);
   assert.deepEqual(sent, []);
 });
@@ -143,7 +143,7 @@ test("invalid values are rejected before any report reaches the mouse", async ()
 test("concurrent setters never interleave their write/save pairs", async () => {
   const { device, sent } = fakeDevice();
   const client = new SteelSeriesRival650HidClient(device);
-  await Promise.all([client.setDpi(400), client.setPollingRate(125), client.setLiftOffDistance(8)]);
+  await Promise.all([client.setDpi(400), client.setPollingRate(125), client.setLiftOffDistanceMm(8)]);
   assert.deepEqual(sent.map(({ payload }) => payload), [
     [0x15, 0x01, 0x03],
     [0x09],
