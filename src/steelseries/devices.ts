@@ -12,11 +12,18 @@
  * here. The Rival 3 Wireless (`0x1830`, `0x1872`) and Rival 3 Gen 2 (`0x1870`)
  * are deliberately absent: their command sets are documented as different, and
  * listing them would claim devices this codec would misprogram.
+ *
+ * The Aerox 3 (`0x1836`, family `"aerox3"`) is a separate protocol family
+ * from Rival 3 despite both being SteelSeries, single-byte vs. two-byte
+ * command prefixes and all — see `./aerox3.ts`'s doc comment, including its
+ * reconciliation of PR flozz/rivalcfg#269's Rival 3 Gen 2 claim (not added
+ * here: its DPI command differs from Aerox 3's even though most other
+ * commands match).
  */
 
 export const STEELSERIES_VENDOR_ID = 0x1038;
 
-export type SteelSeriesProtocolFamily = "rival3";
+export type SteelSeriesProtocolFamily = "rival3" | "aerox3";
 
 export interface SteelSeriesProduct {
   model: string;
@@ -54,6 +61,15 @@ export const STEELSERIES_PRODUCTS: ReadonlyMap<number, SteelSeriesProduct> = new
     wireless: false,
     settingsReadable: false,
     hasFirmwareQuery: true,
+    verified: false,
+  }],
+  // aerox3.py defines no getter and no firmware-query command for this family.
+  [0x1836, {
+    model: "Aerox 3",
+    family: "aerox3",
+    wireless: false,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
     verified: false,
   }],
 ]);

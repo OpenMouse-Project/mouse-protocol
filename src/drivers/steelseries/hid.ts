@@ -59,7 +59,8 @@ export class SteelSeriesRival3HidClient {
   }
 
   static isSupported(device: HIDDevice): boolean {
-    return device.vendorId === STEELSERIES_VENDOR_ID && STEELSERIES_PRODUCTS.has(device.productId);
+    if (device.vendorId !== STEELSERIES_VENDOR_ID) return false;
+    return STEELSERIES_PRODUCTS.get(device.productId)?.family === "rival3";
   }
 
   get pollIntervalMs(): number { return 30_000; }
