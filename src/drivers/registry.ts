@@ -90,6 +90,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "SteelSeries", supports: (device) => SteelSeriesRival310HidClient.isSupported(device), create: (device) => new SteelSeriesRival310HidClient(device), score: () => 6 },
   { brand: "SteelSeries", supports: (device) => SteelSeriesPrimePlusHidClient.isSupported(device), create: (device) => new SteelSeriesPrimePlusHidClient(device), score: () => 6 },
   { brand: "SteelSeries", supports: (device) => SteelSeriesPrimeMiniWirelessHidClient.isSupported(device), create: (device) => new SteelSeriesPrimeMiniWirelessHidClient(device), score: () => 6 },
+  { brand: "SteelSeries", supports: (device) => SteelSeriesSenseiTenHidClient.isSupported(device), create: (device) => new SteelSeriesSenseiTenHidClient(device), score: () => 6 },
   { brand: "Glorious", supports: (device) => GloriousHidClient.isSupported(device), create: (device) => new GloriousHidClient(device), score: () => 5 },
 ];
 
