@@ -32,11 +32,45 @@
  * `./aerox5-wireless.ts`). The two families' polling-rate byte values and
  * RGB zone-color packet shapes differ even though several other command
  * bytes match; do not assume one family's codec for the other's PIDs.
+ *
+ * The Aerox 9 Wireless (`"aerox9-wireless"`, four PIDs across its
+ * USB-cabled and 2.4 GHz dongle modes — see `./aerox9-wireless.ts`) is its
+ * own family, not folded into `"aerox5-wireless"` despite sharing the same
+ * `_patch_command`-style wireless-flag transform and several command bytes:
+ * its RGB zone commands, dim timer, and battery read match Aerox 5
+ * Wireless's byte-for-byte, but it defines no button-mapping command at all
+ * (`./aerox9-wireless.ts`'s doc comment) where Aerox 5 Wireless does, and
+ * its product-id space is disjoint from every other family here.
+ *
+ * The Prime+ (`0x182C`, family `"prime-plus"`) is its own family per this
+ * rollout's per-cluster scoping, even though — see `./prime-plus.ts`'s doc
+ * comment for the full corroboration-gap disclosure — its rivalcfg profile
+ * (`prime_plus.py`) is byte-identical to plain Prime's (`prime.py`, PIDs
+ * `0x182E`/`0x182A`/`0x1856`, none of which are listed here: plain/non-Plus
+ * Prime is out of scope for this cluster and deliberately not added).
+ *
+ * The Prime Mini Wireless (`"prime-mini-wireless"`, PIDs `0x184A` wired /
+ * `0x1848` 2.4 GHz — see `./prime-mini-wireless.ts`) is its own family for
+ * the same reason: rivalcfg documents it and the plain (non-Mini) Prime
+ * Wireless as one shared `settings` dict inside
+ * `prime_wireless_wired.py`/`prime_wireless_wireless.py`, but the plain
+ * Prime Wireless's PIDs (`0x1842` wired / `0x1840` 2.4 GHz) are out of scope
+ * for this cluster and deliberately not added here.
  */
 
 export const STEELSERIES_VENDOR_ID = 0x1038;
 
-export type SteelSeriesProtocolFamily = "rival3" | "aerox3" | "rival3-wireless" | "aerox5" | "aerox5-wireless";
+export type SteelSeriesProtocolFamily =
+  | "rival3"
+  | "rival310"
+  | "aerox3"
+  | "rival3-wireless"
+  | "aerox5"
+  | "aerox5-wireless"
+  | "rival650"
+  | "aerox9-wireless"
+  | "prime-plus"
+  | "prime-mini-wireless";
 
 export interface SteelSeriesProduct {
   model: string;
@@ -157,6 +191,129 @@ export const STEELSERIES_PRODUCTS: ReadonlyMap<number, SteelSeriesProduct> = new
   [0x1860, {
     model: "Aerox 5 Wireless Diablo IV Edition (2.4 GHz mode)",
     family: "aerox5-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // rival650.py: wired/USB-cabled mode, endpoint 0. Own command set (0x15/
+  // 0x17/0x20/0x19/0x2B), a battery_level read (0xAA 0x01, byte-identical
+  // shape to Rival 3 Wireless's) but no firmware-query command. See
+  // ./rival650.ts.
+  [0x172b, {
+    model: "Rival 650 Wireless (wired mode)",
+    family: "rival650",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // rival650.py: same mouse, 2.4 GHz wireless mode. Same command bytes as
+  // wired mode — no wireless-flag transform, unlike Aerox 5 Wireless.
+  [0x1726, {
+    model: "Rival 650 Wireless (2.4 GHz wireless mode)",
+    family: "rival650",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // aerox9_wireless_wired.py: Aerox 9 Wireless in USB-cabled mode. Shares
+  // the applyWirelessFlag transform with Aerox 5 Wireless (confirmed by
+  // diffing the two rivalcfg wired/wireless file pairs) but defines no
+  // button-mapping command. No firmware-query command.
+  [0x185a, {
+    model: "Aerox 9 Wireless (wired mode)",
+    family: "aerox9-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  [0x1876, {
+    model: "Aerox 9 Wireless WOW Edition (wired mode)",
+    family: "aerox9-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // aerox9_wireless_wireless.py: same mouse, 2.4 GHz dongle mode. Every
+  // command byte is `aerox9_wireless_wired.py`'s with `0b01000000` ORed into
+  // byte 0 (see ./aerox9-wireless.ts's `applyWirelessFlag`).
+  [0x1858, {
+    model: "Aerox 9 Wireless (2.4 GHz mode)",
+    family: "aerox9-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  [0x1874, {
+    model: "Aerox 9 Wireless WOW Edition (2.4 GHz mode)",
+    family: "aerox9-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // prime_plus.py: wired only, endpoint 0. No getter, no firmware-query
+  // command. Protocol is byte-identical to plain Prime's — see
+  // ./prime-plus.ts's doc comment for the full disclosure.
+  [0x182c, {
+    model: "Prime+",
+    family: "prime-plus",
+    wireless: false,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // rival310.py: wired only, endpoint 0. Own command set (0x53/0x54/0x5B/
+  // 0x31), a linear (non-table) DPI encoding, and a readable firmware
+  // version behind 0x90 00 — see ./rival310.ts's doc comment, including its
+  // explicit libratbag/OpenRGB corroboration-gap disclosure.
+  [0x1720, {
+    model: "Rival 310",
+    family: "rival310",
+    wireless: false,
+    settingsReadable: false,
+    hasFirmwareQuery: true,
+    verified: false,
+  }],
+  [0x171e, {
+    model: "Rival 310 CS:GO Howl Edition",
+    family: "rival310",
+    wireless: false,
+    settingsReadable: false,
+    hasFirmwareQuery: true,
+    verified: false,
+  }],
+  [0x1736, {
+    model: "Rival 310 PUBG Edition",
+    family: "rival310",
+    wireless: false,
+    settingsReadable: false,
+    hasFirmwareQuery: true,
+    verified: false,
+  }],
+  // prime_wireless_wired.py: Prime Mini Wireless in USB-cabled mode (one of
+  // two models in that file's shared profile — the other is the plain Prime
+  // Wireless, out of scope for this cluster, see the doc comment above).
+  // No firmware-query command.
+  [0x184a, {
+    model: "Prime Mini Wireless (wired mode)",
+    family: "prime-mini-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // prime_wireless_wireless.py: same mouse, 2.4 GHz dongle mode. Every
+  // command byte is `prime_wireless_wired.py`'s with `0b01000000` ORed into
+  // byte 0 (see ./prime-mini-wireless.ts's `applyWirelessFlag`).
+  [0x1848, {
+    model: "Prime Mini Wireless (2.4 GHz mode)",
+    family: "prime-mini-wireless",
     wireless: true,
     settingsReadable: false,
     hasFirmwareQuery: false,
