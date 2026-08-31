@@ -8,4 +8,5 @@ export * from "./rival650.js";
 export * from "./aerox9-wireless.js";
 export * from "./prime-plus.js";
 export * from "./prime-mini-wireless.js";
+export * from "./sensei-ten.js";
 export * from "./devices.js";

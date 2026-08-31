@@ -70,7 +70,8 @@ export type SteelSeriesProtocolFamily =
   | "rival650"
   | "aerox9-wireless"
   | "prime-plus"
-  | "prime-mini-wireless";
+  | "prime-mini-wireless"
+  | "sensei-ten";
 
 export interface SteelSeriesProduct {
   model: string;
@@ -317,6 +318,27 @@ export const STEELSERIES_PRODUCTS: ReadonlyMap<number, SteelSeriesProduct> = new
     wireless: true,
     settingsReadable: false,
     hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // sensei_ten.py: wired only, endpoint 0. Own command set (0x54/0x55/0x5B/
+  // 0x31/0x59), a linear (non-table) DPI encoding distinct from rival310's
+  // (2-byte little-endian words vs. 1-byte), and a readable firmware version
+  // behind 0x90 00 — see ./sensei-ten.ts's doc comment, including its
+  // explicit libratbag/OpenRGB corroboration-gap disclosure.
+  [0x1832, {
+    model: "Sensei TEN",
+    family: "sensei-ten",
+    wireless: false,
+    settingsReadable: false,
+    hasFirmwareQuery: true,
+    verified: false,
+  }],
+  [0x1834, {
+    model: "Sensei TEN CS:GO Neon Rider Edition",
+    family: "sensei-ten",
+    wireless: false,
+    settingsReadable: false,
+    hasFirmwareQuery: true,
     verified: false,
   }],
 ]);
