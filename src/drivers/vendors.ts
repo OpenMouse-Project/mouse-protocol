@@ -71,6 +71,11 @@ export const VENDOR_ID = {
   gwolves: 0x33e4,
   steelseries: STEELSERIES_VENDOR_ID,
   glorious: 0x093a,
+  // Pre-Pixart "classic" Glorious line (Model O/O-, Model D/D-, Model O V2).
+  // Shares 0x258a with several other Sonix-based OEM mice.
+  gloriousClassic: 0x258a,
+  gloriousClassicI: 0x22d4, // original Model I
+  gloriousClassicIWired: 0x320f, // Model O V2 / Model I 2 wired
 } as const;
 
 /**
@@ -96,6 +101,43 @@ export const GLORIOUS_PRODUCTS: ReadonlyMap<number, { name: string; wireless: bo
   [0x826a, { name: "Model O 2 Mini Wireless", wireless: false }],
   [0x826d, { name: "Model O 2 Mini Wireless receiver", wireless: true }],
 ]);
+
+// Pre-Pixart "classic" Glorious line, reverse-engineered from
+// https://github.com/louis4craft/glorious-ctl (devices.json) and
+// https://github.com/korkje/mxw. Keyed by product id only for lookup
+// convenience; isSupported() also checks the VID.
+//
+// Deliberately EXCLUDES the Model O3 Wireless (VID 0x3794, PID 0xa312, dongle
+// 0xa300): it is a newer 8000Hz-generation mouse on a different vendor id,
+// and as of 2026-09-03 no public reverse-engineering of its protocol exists
+// (checked glorious-ctl, mxw, mow, gloryctl, libratbag, OpenRGB, and GitHub
+// code search for 0x3794/0xa312). Sending this driver's commands — built for
+// the older 1000Hz-max 0x258a generation — to O3 hardware would likely be
+// silently wrong rather than merely unsupported, so it stays unrecognized
+// until someone captures the real protocol (e.g. a USB capture of Glorious
+// CORE talking to the mouse). See [[glorious-classic-protocol]] in memory.
+export const GLORIOUS_CLASSIC_PRODUCTS: ReadonlyMap<number, { name: string; wireless: boolean }> = new Map([
+  [0x2022, { name: "Model O Wireless", wireless: true }],
+  [0x2033, { name: "Model O 2 Wireless", wireless: true }],
+  [0x823a, { name: "Model O V2 Wired", wireless: false }],
+  [0x2011, { name: "Model D Wireless", wireless: true }],
+  [0x2023, { name: "Model D Wireless", wireless: true }],
+  [0x2025, { name: "Model D- Wireless", wireless: true }],
+  [0x201a, { name: "Model D 2 PRO", wireless: false }],
+  [0x2034, { name: "Model D 2 PRO Wireless receiver", wireless: true }],
+  [0x2036, { name: "Model D 2 PRO 4K/8KHz Edition", wireless: false }],
+  [0x1503, { name: "Model I", wireless: false }],
+  [0x821a, { name: "Model I 2 Wireless", wireless: false }],
+  [0x831a, { name: "Model I 2 Wired", wireless: false }],
+]);
+
+export const GLORIOUS_CLASSIC_HID_FILTERS: HIDDeviceFilter[] = [...GLORIOUS_CLASSIC_PRODUCTS.keys()].flatMap(
+  (productId) => [
+    { vendorId: VENDOR_ID.gloriousClassic, productId },
+    { vendorId: VENDOR_ID.gloriousClassicI, productId },
+    { vendorId: VENDOR_ID.gloriousClassicIWired, productId },
+  ],
+);
 
 // Keychron Nape Pro VIA raw HID. 0x0440 is wired; 0xd026/0xd029 are shared Link-KM receivers.
 export const KEYCHRON_NAPE_PRODUCT_IDS = [0x0440, 0xd026, 0xd029] as const;
@@ -347,4 +389,5 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...[...GWOLVES_PRODUCTS.keys()].map((productId) => ({ vendorId: VENDOR_ID.gwolves, productId, usagePage: 0xff02 })),
   ...STEELSERIES_RIVAL3_FILTERS,
   { vendorId: VENDOR_ID.glorious },
+  ...GLORIOUS_CLASSIC_HID_FILTERS,
 ];

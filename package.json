@@ -116,6 +116,10 @@
     "./glorious": {
       "types": "./dist/glorious/index.d.ts",
       "import": "./dist/glorious/index.js"
+    },
+    "./glorious-classic": {
+      "types": "./dist/glorious-classic/index.d.ts",
+      "import": "./dist/glorious-classic/index.js"
     }
   },
   "scripts": {
