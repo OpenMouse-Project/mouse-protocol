@@ -28,9 +28,11 @@ import { GLORIOUS_CLASSIC_PRODUCTS, VENDOR_ID } from "../vendors.ts";
 
 /**
  * Driver for Glorious's pre-Pixart "classic" line (Model O / O-, Model D /
- * D-, Model I, Model O V2, Model O3 — see vendors.ts for the VID/PID table).
- * The config channel is an unnumbered 64-byte feature report; see
- * ../../glorious-classic/index.ts for the payload layout.
+ * D-, Model I, Model O V2 — plus the newer "core2" 8000Hz-class mice, Model
+ * O3 Wireless and Model D 2 PRO 4K/8KHz Edition, on a reduced feature set —
+ * see the `generation` doc comment on `GLORIOUS_CLASSIC_PRODUCTS` in
+ * vendors.ts for why). The config channel is an unnumbered 64-byte feature
+ * report; see ../../glorious-classic/index.ts for the payload layout.
  *
  * DPI, polling rate, lift-off distance, and RGB are all write-only on this
  * protocol (neither glorious-ctl nor mxw, the two tools this was ported
@@ -85,7 +87,8 @@ export class GloriousClassicHidClient {
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== VENDOR_ID.gloriousClassic
       && device.vendorId !== VENDOR_ID.gloriousClassicI
-      && device.vendorId !== VENDOR_ID.gloriousClassicIWired) return false;
+      && device.vendorId !== VENDOR_ID.gloriousClassicIWired
+      && device.vendorId !== VENDOR_ID.gloriousO3) return false;
     if (!GLORIOUS_CLASSIC_PRODUCTS.has(device.productId)) return false;
     return device.collections.some((collection) => this.hasConfigReport(collection));
   }
@@ -113,13 +116,24 @@ export class GloriousClassicHidClient {
     return GLORIOUS_CLASSIC_PRODUCTS.get(this.device.productId)?.wireless ?? false;
   }
 
+  /**
+   * "core2" (Model O3 Wireless, Model D 2 PRO 4K/8KHz Edition) only gets
+   * RGB/debounce/battery — see the doc comment on `GLORIOUS_CLASSIC_PRODUCTS`
+   * in vendors.ts for why DPI/polling/LOD stay off for this generation.
+   */
+  private isCore2(): boolean {
+    return GLORIOUS_CLASSIC_PRODUCTS.get(this.device.productId)?.generation === "core2";
+  }
+
   getDpiOptions(): number[] {
+    if (this.isCore2()) return [];
     const options: number[] = [];
     for (let dpi = GLORIOUS_CLASSIC_DPI_MIN; dpi <= GLORIOUS_CLASSIC_DPI_MAX; dpi += 50) options.push(dpi);
     return options;
   }
 
   getSupportedPollingRates(): number[] {
+    if (this.isCore2()) return [];
     return GLORIOUS_CLASSIC_POLLING_RATES.map(([, hertz]) => hertz).sort((left, right) => left - right);
   }
 
@@ -128,17 +142,18 @@ export class GloriousClassicHidClient {
     const state = this.loadState();
     const battery = this.isWireless() ? await this.readBattery().catch(() => null) : null;
     const wireless = this.isWireless();
-    const liftOffDistance = LIFT_OFF_DISTANCES.find(([mm]) => mm === state.lodMm)?.[1] ?? "Medium";
+    const core2 = this.isCore2();
+    const liftOffDistance = core2 ? null : LIFT_OFF_DISTANCES.find(([mm]) => mm === state.lodMm)?.[1] ?? "Medium";
     return {
       brand: "Glorious",
       name: this.displayName(),
       ui: this.getUiHints(),
       batteryPercent: battery?.percent ?? null,
       batteryState: battery ? BATTERY_STATE_LABEL[battery.state] : "Unknown",
-      dpi: state.stageDpis[state.activeStage] ?? state.stageDpis[0] ?? 800,
-      pollingRateHz: gloriousClassicDecodePollingRate(state.pollingIntervalMs) ?? 1000,
+      dpi: core2 ? 0 : state.stageDpis[state.activeStage] ?? state.stageDpis[0] ?? 800,
+      pollingRateHz: core2 ? 0 : gloriousClassicDecodePollingRate(state.pollingIntervalMs) ?? 1000,
       supportedPollingRates: this.getSupportedPollingRates(),
-      activeProfile: state.profileId,
+      activeProfile: core2 ? null : state.profileId,
       connectionType: wireless ? "Wireless" : "Wired",
       connectionDetail: wireless
         ? "2.4 GHz / Bluetooth · settings are write-only, not read back"
@@ -150,6 +165,9 @@ export class GloriousClassicHidClient {
   }
 
   async setDpi(dpi: number): Promise<number> {
+    if (this.isCore2()) {
+      throw new Error("DPI is not confirmed on this mouse's newer protocol generation yet.");
+    }
     if (!Number.isFinite(dpi) || dpi < GLORIOUS_CLASSIC_DPI_MIN || dpi > GLORIOUS_CLASSIC_DPI_MAX) {
       throw new Error(`DPI must be between ${GLORIOUS_CLASSIC_DPI_MIN} and ${GLORIOUS_CLASSIC_DPI_MAX}.`);
     }
@@ -170,6 +188,9 @@ export class GloriousClassicHidClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
+    if (this.isCore2()) {
+      throw new Error("Polling rate is not confirmed on this mouse's newer protocol generation yet.");
+    }
     const intervalMs = gloriousClassicEncodePollingRate(pollingRateHz);
     if (intervalMs === null) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
     const state = this.loadState();
@@ -181,6 +202,9 @@ export class GloriousClassicHidClient {
   }
 
   async setLiftOffDistance(value: NonNullable<MouseStatus["liftOffDistance"]>): Promise<NonNullable<MouseStatus["liftOffDistance"]>> {
+    if (this.isCore2()) {
+      throw new Error("Lift-off distance is not confirmed on this mouse's newer protocol generation yet.");
+    }
     const millimetres = LIFT_OFF_DISTANCES.find(([, name]) => name === value)?.[0];
     if (!millimetres) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
     const state = this.loadState();
@@ -236,7 +260,9 @@ export class GloriousClassicHidClient {
       hideSleepCard: true,
       hideSignalCard: true,
       forceShowBattery: this.isWireless(),
-      statusNote: "DPI, polling rate, lift-off distance and RGB are written to this mouse but never read back.",
+      statusNote: this.isCore2()
+        ? "This mouse's newer protocol generation only has confirmed commands for RGB, debounce, and battery — DPI, polling rate, and lift-off distance aren't wired in yet."
+        : "DPI, polling rate, lift-off distance and RGB are written to this mouse but never read back.",
     };
   }
 
