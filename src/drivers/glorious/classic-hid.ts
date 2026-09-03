@@ -21,6 +21,7 @@ import {
   gloriousClassicDecodePollingRate,
   gloriousClassicEncodePollingRate,
   parseGloriousClassicBatteryResponse,
+  type GloriousClassicBattery,
   type GloriousClassicBatteryState,
   type GloriousClassicRgb,
 } from "../../glorious-classic/index.ts";
@@ -149,7 +150,9 @@ export class GloriousClassicHidClient {
       name: this.displayName(),
       ui: this.getUiHints(),
       batteryPercent: battery?.percent ?? null,
-      batteryState: battery ? BATTERY_STATE_LABEL[battery.state] : "Unknown",
+      batteryState: battery
+        ? (battery.state === "Normal" && battery.charging ? "Charging" : BATTERY_STATE_LABEL[battery.state])
+        : "Unknown",
       dpi: core2 ? 0 : state.stageDpis[state.activeStage] ?? state.stageDpis[0] ?? 800,
       pollingRateHz: core2 ? 0 : gloriousClassicDecodePollingRate(state.pollingIntervalMs) ?? 1000,
       supportedPollingRates: this.getSupportedPollingRates(),
@@ -239,7 +242,7 @@ export class GloriousClassicHidClient {
     return rgb;
   }
 
-  private async readBattery(): Promise<{ state: GloriousClassicBatteryState; percent: number | null }> {
+  private async readBattery(): Promise<GloriousClassicBattery> {
     await this.device.sendFeatureReport(GLORIOUS_CLASSIC_REPORT_ID, buildGloriousClassicBatteryRequestPayload());
     await this.delay(BATTERY_RESPONSE_DELAY_MS);
     const view = await this.device.receiveFeatureReport(GLORIOUS_CLASSIC_REPORT_ID);

@@ -105,38 +105,62 @@ export const GLORIOUS_PRODUCTS: ReadonlyMap<number, { name: string; wireless: bo
 
 /**
  * Pre-Pixart "classic" Glorious line, reverse-engineered from
- * https://github.com/louis4craft/glorious-ctl (devices.json + mouse.py) and
- * https://github.com/korkje/mxw. Keyed by product id only for lookup
- * convenience; isSupported() also checks the VID.
+ * https://github.com/louis4craft/glorious-ctl (devices.json + mouse.py),
+ * https://github.com/korkje/mxw, https://github.com/RealCrystalNight/Glorious-Mouse-Toolkit-Linux
+ * (an expanded mxw fork with its own device enum), and
+ * https://github.com/AwesomeTy18/GloriousBatteryMonitor (an unrelated C#
+ * battery-only tool whose device table cross-confirms the "wired PID +
+ * receiver PID" pairing for most of these models). Keyed by product id only
+ * for lookup convenience; isSupported() also checks the VID.
  *
  * `generation` gates which commands the driver will actually send:
  * - "core1": the original protocol korkje/mxw reverse-engineered. Full
  *   support — RGB, debounce, battery (glorious-ctl), DPI/polling/LOD (mxw).
- * - "core2": a newer, mostly-undocumented protocol generation (8000Hz-class
- *   mice: Model O3 Wireless, Model D 2 PRO 4K/8KHz Edition). Only RGB,
- *   debounce, and battery are enabled for these — glorious-ctl's own
- *   `devices.json` explicitly lists them alongside the core1 devices and
- *   applies the exact same `mouse.py` commands uniformly across its whole
- *   device list, which is real (if secondhand) evidence those three commands
+ * - "core2": a newer, mostly-undocumented protocol generation (the 4K/8K-class
+ *   mice: Model O3 Wireless, Model O2 Pro 4K/8K, Model D2 Pro 4K/8K). Only
+ *   RGB, debounce, and battery are enabled for these — glorious-ctl's own
+ *   `devices.json` lists Model O3/D2Pro-4K8K alongside the core1 devices and
+ *   applies the exact same `mouse.py` commands uniformly, and
+ *   AwesomeTy18/GloriousBatteryMonitor independently confirms the exact same
+ *   battery-read command (byte-for-byte: class 0x02, subclass 0x02, command
+ *   0x83) works across its ENTIRE device list, core1 and core2 alike — two
+ *   unrelated implementations agreeing is real evidence RGB/debounce/battery
  *   carry over. DPI, polling rate, and lift-off distance stay OFF for core2:
- *   korkje/mxw's own device list does not include any core2 model, so
- *   there's no equivalent evidence for those, and (for polling rate
- *   specifically) https://github.com/AMarcinkiewicz/GloriousAutoPollingRate
- *   shows the Model D 2 PRO 4K/8KHz Edition's real polling-rate command uses
- *   a DIFFERENT usage page (0xFFFF/0x0000) and report layout entirely from
- *   the one below — confirming core2 is not just core1 with new values, so
+ *   korkje/mxw's own device list does not include any core2 model, and (for
+ *   polling rate specifically) https://github.com/AMarcinkiewicz/GloriousAutoPollingRate
+ *   shows the Model D2 Pro 4K/8K's real polling-rate command uses a
+ *   DIFFERENT usage page (0xFFFF/0x0000) and report layout entirely from the
+ *   one below — confirming core2 is not just core1 with new values, so
  *   guessing at DPI/LOD offsets for it would likely be silently wrong. See
  *   [[glorious-classic-protocol]] in memory for the full writeup, including
  *   the exact D2 Pro 4K/8K polling-rate bytes for whoever wires that in
  *   (needs multi-interface HID support this driver doesn't have yet).
+ *
+ * KNOWN UNRESOLVED DISCREPANCY: glorious-ctl's devices.json labels PID
+ * 0x2011 "Model D Wireless", but two independent, more structured sources
+ * (RealCrystalNight's Rust device enum and AwesomeTy18's C# device table)
+ * both instead pair 0x2011 with Model O (as its wired-mode PID, alongside
+ * receiver 0x2022) and put Model D's wired-mode PID at 0x2012. This table
+ * follows the 2-source majority below; if a real Model D Wireless answers
+ * "Model O Wireless" in the app, that's why — it's cosmetic only (the actual
+ * commands are identical either way), but worth fixing with a hardware
+ * report from whoever it happens to.
  */
 export const GLORIOUS_CLASSIC_PRODUCTS: ReadonlyMap<number, { name: string; wireless: boolean; generation: "core1" | "core2" }> = new Map([
+  [0x2011, { name: "Model O Wireless", wireless: false, generation: "core1" }], // see discrepancy note above
   [0x2022, { name: "Model O Wireless", wireless: true, generation: "core1" }],
+  [0x2012, { name: "Model D Wireless", wireless: false, generation: "core1" }],
+  [0x2023, { name: "Model D Wireless", wireless: true, generation: "core1" }],
+  [0x2013, { name: "Model O- Wireless", wireless: false, generation: "core1" }],
+  [0x2024, { name: "Model O- Wireless receiver", wireless: true, generation: "core1" }],
+  [0x2014, { name: "Model D- Wireless", wireless: false, generation: "core1" }],
+  [0x2025, { name: "Model D- Wireless", wireless: true, generation: "core1" }],
   [0x2033, { name: "Model O 2 Wireless", wireless: true, generation: "core1" }],
   [0x823a, { name: "Model O V2 Wired", wireless: false, generation: "core1" }],
-  [0x2011, { name: "Model D Wireless", wireless: true, generation: "core1" }],
-  [0x2023, { name: "Model D Wireless", wireless: true, generation: "core1" }],
-  [0x2025, { name: "Model D- Wireless", wireless: true, generation: "core1" }],
+  [0x2015, { name: "Model O Pro", wireless: false, generation: "core1" }],
+  [0x2027, { name: "Model O Pro Wireless receiver", wireless: true, generation: "core1" }],
+  [0x2018, { name: "Series One Pro", wireless: false, generation: "core1" }],
+  [0x2031, { name: "Series One Pro Wireless receiver", wireless: true, generation: "core1" }],
   [0x201a, { name: "Model D 2 PRO", wireless: false, generation: "core1" }],
   [0x2034, { name: "Model D 2 PRO Wireless receiver", wireless: true, generation: "core1" }],
   [0x1503, { name: "Model I", wireless: false, generation: "core1" }],
@@ -145,7 +169,10 @@ export const GLORIOUS_CLASSIC_PRODUCTS: ReadonlyMap<number, { name: string; wire
   // core2 — RGB/debounce/battery only, see the doc comment above.
   [0xa312, { name: "Model O3 Wireless", wireless: true, generation: "core2" }],
   [0xa300, { name: "Model O3 Wireless receiver", wireless: true, generation: "core2" }],
-  [0x2036, { name: "Model D 2 PRO 4K/8KHz Edition", wireless: false, generation: "core2" }],
+  [0x201b, { name: "Model O2 Pro 4K/8K", wireless: false, generation: "core2" }],
+  [0x2035, { name: "Model O2 Pro 4K/8K Wireless receiver", wireless: true, generation: "core2" }],
+  [0x201c, { name: "Model D 2 PRO 4K/8KHz Edition", wireless: false, generation: "core2" }],
+  [0x2036, { name: "Model D 2 PRO 4K/8KHz Edition receiver", wireless: true, generation: "core2" }],
 ]);
 
 export const GLORIOUS_CLASSIC_HID_FILTERS: HIDDeviceFilter[] = [...GLORIOUS_CLASSIC_PRODUCTS.keys()].flatMap(

@@ -229,6 +229,14 @@ export interface GloriousClassicBattery {
   state: GloriousClassicBatteryState;
   /** 1-100, or null when the state has no meaningful percentage. */
   percent: number | null;
+  /**
+   * bfr[7], independently confirmed by a second, unrelated implementation
+   * (AwesomeTy18/GloriousBatteryMonitor's MouseV2ProBatteryChecker.cs, C#)
+   * that reads this same command's response for the whole 0x258a device
+   * range (both core1 and core2/"V2 Pro" generations) — `inputReport[7] == 1`
+   * there is this same byte, byte-for-byte.
+   */
+  charging: boolean;
 }
 
 /** Raw status byte -> meaning, per `status_map.index(bfr_r[1])` in mouse.py. */
@@ -247,15 +255,16 @@ const STATUS_BYTE_TO_STATE: ReadonlyMap<number, GloriousClassicBatteryState> = n
 export function parseGloriousClassicBatteryResponse(body: Uint8Array): GloriousClassicBattery {
   const statusByte = body[0]; // bfr[1]
   const echo = body[5]; // bfr[6]
+  const charging = body[6] === 1; // bfr[7]
   const rawPercent = body[7]; // bfr[8]
 
-  if (echo !== 0x83) return { state: "Unknown", percent: null };
+  if (echo !== 0x83) return { state: "Unknown", percent: null, charging: false };
 
   const state = STATUS_BYTE_TO_STATE.get(statusByte) ?? "Unknown";
-  if (state !== "Normal") return { state, percent: null };
+  if (state !== "Normal") return { state, percent: null, charging: false };
 
   const percent = rawPercent === 0 ? 1 : rawPercent;
-  return { state, percent: percent > 0 && percent <= 100 ? percent : null };
+  return { state, percent: percent > 0 && percent <= 100 ? percent : null, charging };
 }
 
 // ---------------------------------------------------------------------------

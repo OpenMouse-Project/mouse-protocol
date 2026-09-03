@@ -81,9 +81,19 @@ test("battery response decodes a normal, discharging reply", () => {
   const body = new Uint8Array(64);
   body[0] = 0xa1; // bfr[1]: normal
   body[5] = 0x83; // bfr[6]: echo
+  body[6] = 0; // bfr[7]: not charging
   body[7] = 76; // bfr[8]: percent
   const battery = parseGloriousClassicBatteryResponse(body);
-  assert.deepEqual(battery, { state: "Normal", percent: 76 });
+  assert.deepEqual(battery, { state: "Normal", percent: 76, charging: false });
+});
+
+test("battery response reports the charging bit independently of the status byte", () => {
+  const body = new Uint8Array(64);
+  body[0] = 0xa1;
+  body[5] = 0x83;
+  body[6] = 1; // bfr[7]: charging
+  body[7] = 42;
+  assert.deepEqual(parseGloriousClassicBatteryResponse(body), { state: "Normal", percent: 42, charging: true });
 });
 
 test("battery response treats a raw 0% as 1% so it never reads as falsy", () => {
@@ -98,19 +108,19 @@ test("battery response reports asleep and waking-up states without a percentage"
   const asleep = new Uint8Array(64);
   asleep[0] = 0xa4;
   asleep[5] = 0x83;
-  assert.deepEqual(parseGloriousClassicBatteryResponse(asleep), { state: "Asleep", percent: null });
+  assert.deepEqual(parseGloriousClassicBatteryResponse(asleep), { state: "Asleep", percent: null, charging: false });
 
   const waking = new Uint8Array(64);
   waking[0] = 0xa0;
   waking[5] = 0x83;
-  assert.deepEqual(parseGloriousClassicBatteryResponse(waking), { state: "WakingUp", percent: null });
+  assert.deepEqual(parseGloriousClassicBatteryResponse(waking), { state: "WakingUp", percent: null, charging: false });
 });
 
 test("battery response without the expected echo byte is unknown", () => {
   const body = new Uint8Array(64);
   body[0] = 0xa1;
   body[5] = 0x00;
-  assert.deepEqual(parseGloriousClassicBatteryResponse(body), { state: "Unknown", percent: null });
+  assert.deepEqual(parseGloriousClassicBatteryResponse(body), { state: "Unknown", percent: null, charging: false });
 });
 
 test("DPI stages payload matches mxw's dpi_stages.rs header and doubled big-endian values", () => {
