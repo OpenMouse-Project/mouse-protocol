@@ -43,6 +43,7 @@ export const BOLT_PAIRING_SLOTS = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06] as const;
  * - 0xc08e — G903 HERO (wired)
  * - 0xc08f — G403 HERO (wired)
  * - 0xc095 — G502 X PLUS (USB cable)
+ * - 0xc098 — G502 X LIGHTSPEED (USB cable, direct-connect mode)
  * - 0xc099 — G502 X (wired)
  *
  * G Pro X Superlight generation:
@@ -61,7 +62,7 @@ export const LOGITECH_DIRECT_PRODUCT_IDS = [
   // G Pro X Superlight generation
   0xc094,
   // G502 X generation
-  0xc095, 0xc099,
+  0xc095, 0xc098, 0xc099,
 ] as const;
 
 /**

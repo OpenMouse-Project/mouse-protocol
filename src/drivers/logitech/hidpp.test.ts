@@ -29,6 +29,7 @@ const G403_HERO = 0xc08f;
 const G703 = 0xc087;
 const G502 = 0xc07d;
 const G502_X_PLUS = 0xc095;
+const G502_X_LIGHTSPEED = 0xc098;
 const G502_X = 0xc099;
 const LIGHTSPEED_RECEIVER = 0xc54d;
 const SUPERSTRIKE_USB = 0xc0a8;
@@ -52,6 +53,7 @@ test("runtime probing alone classifies direct and receiver connections", () => {
 test("the G502 family direct USB interfaces are recognized", () => {
   assert.equal(isDirectConnectProduct(G502), true);
   assert.equal(isDirectConnectProduct(G502_X_PLUS), true);
+  assert.equal(isDirectConnectProduct(G502_X_LIGHTSPEED), true);
   assert.equal(isDirectConnectProduct(G502_X), true);
   assert.equal(isDirectConnectProduct(LIGHTSPEED_RECEIVER), false);
 });
