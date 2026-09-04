@@ -4,21 +4,32 @@ import {
   WE_REPORT_ID,
   weBuildCmdPayload,
   wePackScalarPair,
+  weUnpackScalarPair,
 } from "@openmouse/protocol/endgame-gear-we";
 import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
-import { atkDecodeLiftOff, atkPackDpiStage, atkUnpackDpiStage } from "@openmouse/protocol/atk";
+import {
+  ATK_SENSORS,
+  atkDecodeLiftOff,
+  atkPackDpiStageForSensor,
+  atkUnpackDpiStageForSensor,
+} from "@openmouse/protocol/atk";
+import { type AtkProduct, ATK_COMPX_PRODUCT_IDS, ATK_PRODUCTS } from "./products.ts";
 
 // ATK mice (A9 family and siblings) use the same OEM framing as the Endgame
 // Gear WE series — 16-byte EEPROM commands on report 0x08 — but carry them on
 // output/input reports rather than feature reports.
 const BATTERY_COMMAND = 0x04;
 const VERSION_COMMAND = 0x12;
+// GetMouseCIDMID: identifies the mouse behind a shared receiver product id.
+const CIDMID_COMMAND = 0x10;
 const FRAME_LENGTH = 16;
 const DATA_OFFSET = 5;
 const MAX_DATA_LENGTH = 10;
 const REPLY_TIMEOUT_MS = 500;
 const WRITE_SETTLE_MS = 10;
+// A sleeping mouse answers nothing; ask a few times before giving up for good.
+const MAX_IDENTIFY_ATTEMPTS = 3;
 
 // Byte addresses in the mouse's configuration EEPROM.
 const REGISTER = {
@@ -73,6 +84,9 @@ export class AtkHidClient {
 
   private queue: Promise<unknown> = Promise.resolve();
   private lastStatus: MouseStatus | null = null;
+  private product: AtkProduct | null = null;
+  private identified = false;
+  private identifyAttempts = 0;
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -82,7 +96,11 @@ export class AtkHidClient {
     const search = (collection: HIDCollectionInfo): boolean =>
       (collection.usagePage === 0xff02 && collection.usage === 0x0002)
       || collection.children.some(search);
-    return device.vendorId === VENDOR_ID.atk && device.collections.some(search);
+    if (!device.collections.some(search)) return false;
+    if (device.vendorId === VENDOR_ID.atk) return true;
+    // VXE's wired transports sit under COMPX's 0x3554, which is shared with the
+    // VGN Dragonfly F2 and its own driver — so only known product ids here.
+    return device.vendorId === VENDOR_ID.vgn && ATK_COMPX_PRODUCT_IDS.includes(device.productId);
   }
 
   async open(): Promise<void> {
@@ -91,6 +109,8 @@ export class AtkHidClient {
 
   async close(): Promise<void> {
     this.lastStatus = null;
+    this.product = null;
+    this.identified = false;
     if (this.device.opened) await this.device.close();
   }
 
@@ -99,10 +119,18 @@ export class AtkHidClient {
     return false;
   }
 
+  /** VXE-branded units report their own model, so the receiver's generic USB string is a last resort. */
   displayName(): string {
+    const product = this.product;
+    if (product) return `${product.brand} ${product.model}`;
     const name = this.device.productName?.trim();
     if (!name) return "ATK";
     return /^atk/i.test(name) ? name : `ATK ${name}`;
+  }
+
+  /** Registry hook: 0x373b covers both ATK and its VXE sibling brand. */
+  deviceBrand(): AtkProduct["brand"] {
+    return this.product?.brand ?? "ATK";
   }
 
   /**
@@ -115,7 +143,8 @@ export class AtkHidClient {
   }
 
   maxDpi(): number {
-    return DPI_MAX;
+    const sensor = this.product?.sensor;
+    return sensor ? ATK_SENSORS[sensor].maxDpi : DPI_MAX;
   }
 
   getSleepOptions(): readonly number[] {
@@ -131,26 +160,58 @@ export class AtkHidClient {
   }
 
   /**
-   * The encoding steps by 10 DPI, then 50 above 10,000 and 100 above 30,000.
-   * Models top out below 42,000; writes are confirmed by reading back.
+   * PAW3950Ultra steps by 10 DPI, then 50 above 10,000 and 100 above 30,000.
+   * The PAW3395/PAW3950 family steps by a flat 50 up to its own ceiling.
+   * Writes are confirmed by reading back either way.
    */
   getDpiOptions(): number[] {
     const options: number[] = [];
+    const profile = this.product ? ATK_SENSORS[this.product.sensor] : null;
+    if (profile?.family === "step50") {
+      for (let dpi = profile.minDpi; dpi <= profile.maxDpi; dpi += profile.stepDpi) options.push(dpi);
+      return options;
+    }
     for (let dpi = DPI_MIN; dpi <= 10000; dpi += 10) options.push(dpi);
     for (let dpi = 10050; dpi <= 30000; dpi += 50) options.push(dpi);
     for (let dpi = 30100; dpi <= DPI_MAX; dpi += 100) options.push(dpi);
     return options;
   }
 
+  /**
+   * A receiver's product id is shared across models, so the mouse's own CID/MID
+   * is what names it and picks its DPI encoding. An unidentified mouse keeps the
+   * historical A9 behaviour.
+   *
+   * A sleeping 2.4 GHz mouse answers nothing, so a timeout must not be cached as
+   * "unidentified" — it would leave a woken mouse misnamed, and its DPI decoded
+   * with the wrong sensor's encoding, for the rest of the session. Retried a few
+   * times, then left alone so a mouse that does not implement the command does
+   * not pay the timeout on every status read.
+   */
+  private async identify(): Promise<void> {
+    if (this.identified || this.identifyAttempts >= MAX_IDENTIFY_ATTEMPTS) return;
+    this.identifyAttempts += 1;
+    const reply = await this.exchange(
+      weBuildCmdPayload(CIDMID_COMMAND),
+      (frame) => frame[0] === CIDMID_COMMAND && frame[4] >= 2,
+    ).catch(() => null);
+    if (!reply) return;
+    this.identified = true;
+    this.product = ATK_PRODUCTS[`${reply[DATA_OFFSET]},${reply[DATA_OFFSET + 1]}`] ?? null;
+  }
+
   async readStatus(live = false): Promise<MouseStatus> {
     await this.open();
+    await this.identify();
     const battery = await this.readBattery();
     const system = await this.read(REGISTER.system, SYSTEM_LENGTH);
     const stage = await this.readDpiStage(this.stageIndex(system));
     if (live && this.lastStatus) {
       return this.lastStatus = {
         ...this.lastStatus,
-        batteryPercent: battery,
+        batteryPercent: battery?.percent ?? null,
+        batteryState: batteryState(battery),
+        batteryVoltageMv: battery?.millivolts ?? null,
         pollingRateHz: this.decodePollingRate(system[0]),
         dpi: stage.x,
         dpiY: stage.y,
@@ -160,16 +221,21 @@ export class AtkHidClient {
     const liftOffDistance = await this.read(REGISTER.liftOffDistance, 2);
     const advanced = await this.read(REGISTER.advanced, ADVANCED_LENGTH);
     const angle = await this.read(REGISTER.angle, ANGLE_LENGTH).catch(() => null);
+    // Unprogrammed EEPROM reads back as 0xff, which fails the value/checksum
+    // pair. Report "not supported" rather than decoding 0xff as -1 degrees.
+    const angleTuning = angle ? weUnpackScalarPair(angle[0], angle[1]) : null;
+    const angleSnapping = angle ? weUnpackScalarPair(angle[2], angle[3]) : null;
     return this.lastStatus = {
-      brand: "ATK",
+      brand: this.deviceBrand(),
       name: this.displayName(),
       ui: {
         family: "atk",
         hideUnsupportedPollingRates: true,
         forceShowBattery: battery !== null,
       },
-      batteryPercent: battery,
-      batteryState: "Unknown",
+      batteryPercent: battery?.percent ?? null,
+      batteryState: batteryState(battery),
+      batteryVoltageMv: battery?.millivolts ?? null,
       dpi: stage.x,
       dpiY: stage.y,
       supportsSeparateDpiAxes: false,
@@ -182,8 +248,8 @@ export class AtkHidClient {
       motionSync: advanced[2] === 1,
       sleepTimeout: advanced[4] * SLEEP_STEP_SECONDS || null,
       rippleControl: advanced[8] === 1,
-      angleSnapping: angle ? angle[2] === 1 : null,
-      angleTuning: angle ? this.decodeAngle(angle[0]) : null,
+      angleSnapping: angleSnapping === null ? null : angleSnapping === 1,
+      angleTuning: angleTuning === null ? null : this.decodeAngle(angleTuning),
       liftOffDistance: this.decodeLiftOffDistance(liftOffDistance[0]),
       firmware,
     };
@@ -202,13 +268,18 @@ export class AtkHidClient {
   }
 
   async setDpi(dpi: number, dpiY: number = dpi): Promise<number> {
+    await this.identify();
+    const sensor = this.product?.sensor ?? null;
+    const profile = sensor ? ATK_SENSORS[sensor] : null;
+    const minDpi = profile?.minDpi ?? DPI_MIN;
+    const maxDpi = profile?.maxDpi ?? DPI_MAX;
     for (const value of [dpi, dpiY]) {
-      if (!Number.isInteger(value) || value < DPI_MIN || value > DPI_MAX) {
+      if (!Number.isInteger(value) || value < minDpi || value > maxDpi) {
         throw new Error(`${value.toLocaleString()} is not a supported DPI value.`);
       }
     }
     const index = this.stageIndex(await this.read(REGISTER.system, SYSTEM_LENGTH));
-    await this.write(this.dpiAddress(index), atkPackDpiStage(dpi, dpiY));
+    await this.write(this.dpiAddress(index), atkPackDpiStageForSensor(sensor, dpi, dpiY));
     const confirmed = await this.readDpiStage(index);
     if (confirmed.x !== dpi || confirmed.y !== dpiY) {
       throw new Error(`The mouse kept ${confirmed.x.toLocaleString()} DPI instead of ${dpi.toLocaleString()}.`);
@@ -296,7 +367,10 @@ export class AtkHidClient {
   }
 
   private async readDpiStage(index: number): Promise<{ x: number; y: number }> {
-    const stage = atkUnpackDpiStage(await this.read(this.dpiAddress(index), DPI_STAGE_LENGTH));
+    const stage = atkUnpackDpiStageForSensor(
+      this.product?.sensor ?? null,
+      await this.read(this.dpiAddress(index), DPI_STAGE_LENGTH),
+    );
     if (!stage) throw new Error("The mouse reported a DPI stage that failed its checksum.");
     return stage;
   }
@@ -343,12 +417,28 @@ export class AtkHidClient {
     return [`Mouse ${Number(bcd(data[0]))}.${bcd(data[1])}`];
   }
 
-  private async readBattery(): Promise<number | null> {
+  /**
+   * GetBatteryLevel answers `[percent, charging, mV_hi, mV_lo]`.
+   *
+   * The charging byte was captured as 0 on battery, with the voltage steady, and
+   * 1 on the cable, with the voltage climbing monotonically and the percentage
+   * rising — so a non-zero byte means charging. ATK's own HUB tests `=== 2` for
+   * charging on some families, which this treats as charging too; only a
+   * non-zero code that means "not charging" would be misread, and none has been
+   * observed.
+   */
+  private async readBattery(): Promise<{ percent: number; charging: boolean; millivolts: number | null } | null> {
     const reply = await this.exchange(
       weBuildCmdPayload(BATTERY_COMMAND),
       (frame) => frame[0] === BATTERY_COMMAND,
     ).catch(() => null);
-    return reply ? Math.min(reply[DATA_OFFSET], 100) : null;
+    if (!reply) return null;
+    const millivolts = (reply[DATA_OFFSET + 2] << 8) | reply[DATA_OFFSET + 3];
+    return {
+      percent: Math.min(reply[DATA_OFFSET], 100),
+      charging: reply[DATA_OFFSET + 1] !== 0,
+      millivolts: millivolts > 0 ? millivolts : null,
+    };
   }
 
   private async read(address: number, length: number): Promise<Uint8Array> {
@@ -414,6 +504,17 @@ export class AtkHidClient {
 
 function copyDataView(view: DataView): Uint8Array {
   return new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
+}
+
+/**
+ * A mouse that answered nothing is "Unknown" rather than "Discharging": the
+ * two are not the same, and a sleeping 2.4 GHz mouse answers nothing at all.
+ */
+function batteryState(
+  battery: { charging: boolean } | null,
+): MouseStatus["batteryState"] {
+  if (!battery) return "Unknown";
+  return battery.charging ? "Charging" : "Discharging";
 }
 
 function delay(milliseconds: number): Promise<void> {

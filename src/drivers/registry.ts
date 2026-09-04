@@ -111,5 +111,7 @@ export function clientSupportScore(device: HIDDevice): number {
 export function deviceBrand(client: SupportedClient): string {
   if (client instanceof EggOp1HidClient || isEggWeClient(client)) return "Endgame Gear";
   if (client instanceof LamzuHidClient) return client.deviceBrand();
+  // 0x373b covers ATK and its VXE sibling brand; the mouse's CID/MID says which.
+  if (client instanceof AtkHidClient) return client.deviceBrand();
   return driverFor(client.device)?.brand ?? "Unknown";
 }

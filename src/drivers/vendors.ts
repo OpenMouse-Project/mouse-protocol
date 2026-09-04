@@ -1,3 +1,4 @@
+import { ATK_COMPX_PRODUCT_IDS } from "./atk/products.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
 import {
@@ -412,6 +413,11 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.vgn, productId: 0xfb56 },
   { vendorId: VENDOR_ID.vgn, productId: 0xfb57 },
   { vendorId: VENDOR_ID.atk, usagePage: 0xff02, usage: 2 },
+  // VXE's wired transport under COMPX's shared 0x3554: request only the config
+  // collection, so the picker lists it instead of the plain pointer interface.
+  ...ATK_COMPX_PRODUCT_IDS.map((productId) => (
+    { vendorId: VENDOR_ID.vgn, productId, usagePage: 0xff02, usage: 2 }
+  )),
   { vendorId: VENDOR_ID.attackShark },
   { vendorId: VENDOR_ID.attackSharkX },
   ...RAZER_VIPER_V4_CONTROL_FILTERS,
