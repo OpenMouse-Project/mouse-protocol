@@ -5,8 +5,12 @@ import {
   atkDecodeLiftOff,
   atkDecodeVxeR1PollingCode,
   atkPackDpiStage,
+  atkPackVxeR1LiveSetting,
   atkPackVxeR1PollingSetting,
   atkUnpackDpiStage,
+  ATK_VXE_R1_ANGLE_SELECTOR,
+  ATK_VXE_R1_DEBOUNCE_SELECTOR,
+  ATK_VXE_R1_LOD_SELECTOR,
   ATK_VXE_R1_POLLING_RATES,
 } from "@openmouse/protocol/atk";
 
@@ -50,4 +54,12 @@ test("R1 polling codes decode back to hertz and reject unknown bytes", () => {
   assert.equal(atkDecodeVxeR1PollingCode(0x00), null);
   assert.equal(atkDecodeVxeR1PollingCode(0x40), null);
   assert.deepEqual(ATK_VXE_R1_POLLING_RATES, [250, 500, 1000]);
+});
+
+test("R1 angle/debounce/LOD settings pack as their live-settings selectors", () => {
+  assert.deepEqual(atkPackVxeR1LiveSetting(ATK_VXE_R1_ANGLE_SELECTOR, 0x10), [0x01, 0x10, 0x00, 0x45]);
+  assert.deepEqual(atkPackVxeR1LiveSetting(ATK_VXE_R1_ANGLE_SELECTOR, 0x00), [0x01, 0x00, 0x00, 0x55]);
+  assert.deepEqual(atkPackVxeR1LiveSetting(ATK_VXE_R1_DEBOUNCE_SELECTOR, 4), [0x02, 0x04, 0x00, 0x51]);
+  assert.deepEqual(atkPackVxeR1LiveSetting(ATK_VXE_R1_LOD_SELECTOR, 1), [0x03, 0x01, 0x00, 0x54]);
+  assert.deepEqual(atkPackVxeR1LiveSetting(ATK_VXE_R1_LOD_SELECTOR, 2), [0x03, 0x02, 0x00, 0x53]);
 });

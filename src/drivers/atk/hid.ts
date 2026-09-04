@@ -8,11 +8,15 @@ import {
 import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
 import {
+  ATK_VXE_R1_ANGLE_SELECTOR,
+  ATK_VXE_R1_DEBOUNCE_SELECTOR,
+  ATK_VXE_R1_LOD_SELECTOR,
   ATK_VXE_R1_POLLING_RATES,
   ATK_VXE_R1_SETTINGS_REGISTER,
   atkDecodeLiftOff,
   atkDecodeVxeR1PollingCode,
   atkPackDpiStage,
+  atkPackVxeR1LiveSetting,
   atkPackVxeR1PollingSetting,
   atkUnpackDpiStage,
 } from "@openmouse/protocol/atk";
@@ -56,6 +60,8 @@ const MAX_DPI_STAGES = 6;
 const DPI_MIN = 50;
 const DPI_MAX = 42000;
 const DEBOUNCE_MAX_MS = 15;
+// The R1 accepts 1-20 ms in its live-settings debounce entry (per OpenVXE).
+const R1_DEBOUNCE_MAX_MS = 20;
 const SLEEP_STEP_SECONDS = 10;
 const SLEEP_MAX_SECONDS = 0xff * SLEEP_STEP_SECONDS;
 const SLEEP_SECONDS: readonly number[] = [30, 60, 120, 300, 600, 1800];
@@ -77,6 +83,12 @@ const LIFT_OFF_CODES: ReadonlyArray<readonly [number, LiftOffDistance]> = [
   [1, "Low"],
   [4, "Medium"],
   [11, "High"],
+];
+
+/** R1 lift-off levels are 1 mm and 2 mm in the live-settings entry. */
+const R1_LIFT_OFF_CODES: ReadonlyArray<readonly [number, LiftOffDistance]> = [
+  [1, "Low"],
+  [2, "High"],
 ];
 
 export class AtkHidClient {
@@ -142,7 +154,7 @@ export class AtkHidClient {
   }
 
   getDebounceMaxMs(): number {
-    return DEBOUNCE_MAX_MS;
+    return this.isR1() ? R1_DEBOUNCE_MAX_MS : DEBOUNCE_MAX_MS;
   }
 
   getSupportedPollingRates(): number[] {
@@ -206,6 +218,7 @@ export class AtkHidClient {
       angleSnapping: angle ? angle[2] === 1 : null,
       angleTuning: angle ? this.decodeAngle(angle[0]) : null,
       liftOffDistance: this.decodeLiftOffDistance(liftOffDistance[0]),
+      supportedLiftOffDistances: this.isR1() ? ["Low", "High"] : undefined,
       firmware,
     };
   }
@@ -240,6 +253,7 @@ export class AtkHidClient {
   }
 
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
+    if (this.isR1()) return await this.setR1LiftOffDistance(value);
     const encoded = LIFT_OFF_CODES.find(([, name]) => name === value);
     if (!encoded) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
     await this.write(REGISTER.liftOffDistance, wePackScalarPair(encoded[0]));
@@ -260,6 +274,7 @@ export class AtkHidClient {
   }
 
   async setAngleSnapping(enabled: boolean): Promise<boolean> {
+    if (this.isR1()) return await this.setR1AngleSnapping(enabled);
     const group = await this.read(REGISTER.angle, ANGLE_LENGTH);
     await this.write(REGISTER.angle, [group[0], enabled ? 1 : 0].flatMap((value) => wePackScalarPair(value)));
     const confirmed = (await this.read(REGISTER.angle, ANGLE_LENGTH))[2] === 1;
@@ -269,6 +284,7 @@ export class AtkHidClient {
   }
 
   async setDebounceTime(milliseconds: number): Promise<number> {
+    if (this.isR1()) return await this.setR1DebounceTime(milliseconds);
     if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > DEBOUNCE_MAX_MS) {
       throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${DEBOUNCE_MAX_MS}.`);
     }
@@ -371,6 +387,36 @@ export class AtkHidClient {
     const confirmed = await this.readPollingRate();
     this.patch({ pollingRateHz: confirmed });
     return confirmed;
+  }
+
+  /** The R1's lift-off levels are 1 mm and 2 mm, applied through the live-settings row. */
+  private async setR1LiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
+    const encoded = R1_LIFT_OFF_CODES.find(([, name]) => name === value);
+    if (!encoded) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
+    await this.write(ATK_VXE_R1_SETTINGS_REGISTER, atkPackVxeR1LiveSetting(ATK_VXE_R1_LOD_SELECTOR, encoded[0]));
+    this.patch({ liftOffDistance: value });
+    return value;
+  }
+
+  private async setR1DebounceTime(milliseconds: number): Promise<number> {
+    if (!Number.isInteger(milliseconds) || milliseconds < 1 || milliseconds > R1_DEBOUNCE_MAX_MS) {
+      throw new Error(`Debounce must be a whole number of milliseconds between 1 and ${R1_DEBOUNCE_MAX_MS}.`);
+    }
+    await this.write(
+      ATK_VXE_R1_SETTINGS_REGISTER,
+      atkPackVxeR1LiveSetting(ATK_VXE_R1_DEBOUNCE_SELECTOR, milliseconds),
+    );
+    this.patch({ debounceMs: milliseconds });
+    return milliseconds;
+  }
+
+  private async setR1AngleSnapping(enabled: boolean): Promise<boolean> {
+    await this.write(
+      ATK_VXE_R1_SETTINGS_REGISTER,
+      atkPackVxeR1LiveSetting(ATK_VXE_R1_ANGLE_SELECTOR, enabled ? 0x10 : 0x00),
+    );
+    this.patch({ angleSnapping: enabled });
+    return enabled;
   }
 
   private patch(changes: Partial<MouseStatus>): void {

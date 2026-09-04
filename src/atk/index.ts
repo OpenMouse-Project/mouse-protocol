@@ -69,11 +69,21 @@ export function atkDecodeLiftOff(code: number): number | null {
 /**
  * Address of the R1's live-settings row. It carries several settings as
  * [selector, value, 0x00, checksum], so a write must always include the
- * selector byte.
+ * selector byte. Applying an entry over the row updates that setting live
+ * without rewriting the persisted EEPROM.
  */
 export const ATK_VXE_R1_SETTINGS_REGISTER = 0x0070;
 
-/** Selector for the 250/500/1000 Hz polling-rate entry (per OpenVXE). */
+/** Selector for the angle-snapping flag (value 0x10 on, 0x00 off). */
+export const ATK_VXE_R1_ANGLE_SELECTOR = 0x01;
+
+/** Selector for the debounce entry (value is milliseconds, 1-20). */
+export const ATK_VXE_R1_DEBOUNCE_SELECTOR = 0x02;
+
+/** Selector for the lift-off level (value 1 low, 2 high). */
+export const ATK_VXE_R1_LOD_SELECTOR = 0x03;
+
+/** Selector for the 250/500/1000 Hz polling-rate entry. */
 export const ATK_VXE_R1_POLLING_SELECTOR = 0x0b;
 
 /** Rates the R1 SE/SE+ offers on its stock 1K receiver. */
@@ -85,12 +95,16 @@ const VXE_POLLING_CODES: ReadonlyArray<readonly [number, number]> = [
   [0x01, 1000],
 ];
 
-/** Build the 4-byte live-settings row, or null for an unsupported rate. */
+/** Build the 4-byte live-settings row for a given selector/value pair. */
+export function atkPackVxeR1LiveSetting(selector: number, value: number): number[] {
+  return [selector, value, 0x00, (CHECKSUM_TOTAL - value) & 0xff];
+}
+
+/** Build the 4-byte live-settings polling row, or null for an unsupported rate. */
 export function atkPackVxeR1PollingSetting(pollingRateHz: number): number[] | null {
   const rate = VXE_POLLING_CODES.find(([, hertz]) => hertz === pollingRateHz);
   if (!rate) return null;
-  const value = rate[0];
-  return [ATK_VXE_R1_POLLING_SELECTOR, value, 0x00, (CHECKSUM_TOTAL - value) & 0xff];
+  return atkPackVxeR1LiveSetting(ATK_VXE_R1_POLLING_SELECTOR, rate[0]);
 }
 
 /** Decode the value byte of an R1 polling row, or null if unrecognised. */
