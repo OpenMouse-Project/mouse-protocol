@@ -16,6 +16,7 @@ import {
   decodeLiftOffLevel,
   describeProfileFormat,
   dpiStageCapabilitiesForOptions,
+  isProfileWritableForProduct,
   encodeDpiStages,
   encodeButtonAssignment,
   encodeMacroButtonAssignment,
@@ -1113,4 +1114,20 @@ test("G502 keyboard shortcuts and consumer keys use direct four-byte HID binding
   const media = encodeButtonAssignment(keyboard, 2, "g-shift", 5, { kind: "consumer", usage: 0x00cd });
   assert.deepEqual([...media.slice(0x60 + 5 * 4, 0x60 + 6 * 4)], [0x80, 0x03, 0x00, 0xcd]);
   assert.equal(profileCrc(media), storedCrc(media));
+});
+
+test("format 7 writes are refused on the original G Pro X Superlight (PID 0xc094)", () => {
+  // Format 7's layout was only confirmed against a Pro X Superlight 2 dump;
+  // the original Superlight reports the same format id on a different board
+  // and rejects the write on hardware (HID++ error 0x05). It stays read-only
+  // until a dump from that PID confirms the layout.
+  assert.equal(describeProfileFormat(7).writable, true);
+  assert.equal(isProfileWritableForProduct(7, 0xc094), false);
+  // Other format-7 devices (e.g. the Superlight 2) are unaffected.
+  assert.equal(isProfileWritableForProduct(7, 0xc099), true);
+  assert.equal(isProfileWritableForProduct(7, null), true);
+  assert.equal(isProfileWritableForProduct(7, undefined), true);
+  // Unwritable formats stay refused regardless of product id.
+  assert.equal(isProfileWritableForProduct(6, 0xc099), false);
+  assert.equal(isProfileWritableForProduct(null, 0xc099), false);
 });

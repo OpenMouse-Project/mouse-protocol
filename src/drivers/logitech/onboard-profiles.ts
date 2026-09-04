@@ -58,6 +58,31 @@ const WRITABLE_FORMATS = new Set([2, 3, 4, 7]);
 const PROFILE_WRITE_PROBE_FORMATS = new Set([2, 3, 4]);
 const FACTORY_RESET_FORMATS = new Set([7]);
 
+/**
+ * Format 7's layout was recovered from a Pro X Superlight 2 dump; the original
+ * G Pro X Superlight (PID 0xc094, wpid 4093 — Logitech's "PRO X Wireless" in
+ * its own tooling) reports the same format id but is a different, older
+ * board. docs/logitech-onboard-profiles.md records an unresolved report of a
+ * differently-shifted DPI stage layout on what is likely this device, and
+ * live reports show it returning HID++ error 0x05 ("Logitech internal error")
+ * when the format-7 write sequence is applied — the device rejects an offset
+ * that is valid for the Superlight 2. Until a dump from this specific PID
+ * confirms (or corrects) the layout, refuse writes on it even though the
+ * format id is otherwise trusted.
+ */
+const UNVERIFIED_WRITE_PRODUCT_IDS = new Set([0xc094]);
+
+/** Whether profile-content writes for `profileFormatId` are trusted on this specific device. */
+export function isProfileWritableForProduct(
+  profileFormatId: number | null | undefined,
+  productId: number | null | undefined,
+): boolean {
+  if (profileFormatId === null || profileFormatId === undefined) return false;
+  if (!WRITABLE_FORMATS.has(profileFormatId)) return false;
+  if (productId !== null && productId !== undefined && UNVERIFIED_WRITE_PRODUCT_IDS.has(productId)) return false;
+  return true;
+}
+
 /** Whether this format has a reversible guided write probe. */
 export function supportsProfileWriteProbe(profileFormatId: number | null | undefined): boolean {
   return profileFormatId !== null

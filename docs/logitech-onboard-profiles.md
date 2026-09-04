@@ -574,6 +574,17 @@ stages them into a single pending-change group for the same reason.
 layout, so it is the Superstrike; a Superlight 2 is most likely 7, but that is a
 guess until read from hardware.
 
+**The original G Pro X Superlight (PID `0xc094`, wpid `4093` — "PRO X Wireless"
+in Logitech's/Solaar's naming) reports format 7 but is not the Superlight 2 this
+layout was verified on.** Live reports show it returning HID++ error `0x05`
+("Logitech internal error") when the format-7 write sequence used for LOD,
+debounce and angle-snap is applied — the device rejects an offset that is valid
+on the Superlight 2. This matches the unresolved DPI-stage-offset report below.
+`onboard-profiles.ts` refuses profile-content writes for this specific PID via
+`isProfileWritableForProduct` even though format 7 is otherwise trusted; lift
+that once a profile dump from a real `0xc094` device confirms (or corrects) the
+layout it actually uses.
+
 **Names for format ids 7 and 8**, and the meaning of the extra
 component-specific prototype fields (for example `dpi_v6` carries
 `0, 1, 2, 5, 5, 0, 2, 4` after offset and size — plausibly stage count, stride
