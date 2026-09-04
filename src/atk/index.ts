@@ -1,10 +1,16 @@
 /**
- * Pure ATK (A9 family) DPI codec, unit-tested without WebHID.
+ * Pure ATK (A9 family) and VXE R1 (Beken) codecs, unit-tested without WebHID.
  *
  * ATK shares the Endgame Gear WE framing (see endgame-gear-we.ts): feature
  * command 0x08 reads an EEPROM address, 0x07 writes one, every frame and every
  * value/checksum pair sums to 0x55. Only the DPI stage encoding differs — ATK
  * packs a mode nibble per axis so newer sensors reach 42,000 DPI.
+ *
+ * VXE R1 SE/SE+ ("Wireless mouse -1k dongle", 0x373b:0x1085, Beken MCU) uses
+ * the same framing and the same DPI/advanced registers as the A9 family, but
+ * stores the polling rate in a live-settings row at 0x0070 keyed by a selector
+ * byte. The mapping below comes from the OpenVXE tracker (BuSd777/OpenVXE),
+ * the only reverse-engineering project that targets this exact receiver PID.
  */
 
 const CHECKSUM_TOTAL = 0x55;
@@ -56,5 +62,39 @@ export function atkUnpackDpiStage(data: Uint8Array | readonly number[]): { x: nu
 /** Register holds tenths of a millimetre offset by 6 (code 1 = 0.7 mm). */
 export function atkDecodeLiftOff(code: number): number | null {
   return code ? (code + 6) / 10 : null;
+}
+
+// ── VXE R1 SE/SE+ live-settings polling ────────────────────────────────────
+
+/**
+ * Address of the R1's live-settings row. It carries several settings as
+ * [selector, value, 0x00, checksum], so a write must always include the
+ * selector byte.
+ */
+export const ATK_VXE_R1_SETTINGS_REGISTER = 0x0070;
+
+/** Selector for the 250/500/1000 Hz polling-rate entry (per OpenVXE). */
+export const ATK_VXE_R1_POLLING_SELECTOR = 0x0b;
+
+/** Rates the R1 SE/SE+ offers on its stock 1K receiver. */
+export const ATK_VXE_R1_POLLING_RATES: readonly number[] = [250, 500, 1000];
+
+const VXE_POLLING_CODES: ReadonlyArray<readonly [number, number]> = [
+  [0x03, 250],
+  [0x02, 500],
+  [0x01, 1000],
+];
+
+/** Build the 4-byte live-settings row, or null for an unsupported rate. */
+export function atkPackVxeR1PollingSetting(pollingRateHz: number): number[] | null {
+  const rate = VXE_POLLING_CODES.find(([, hertz]) => hertz === pollingRateHz);
+  if (!rate) return null;
+  const value = rate[0];
+  return [ATK_VXE_R1_POLLING_SELECTOR, value, 0x00, (CHECKSUM_TOTAL - value) & 0xff];
+}
+
+/** Decode the value byte of an R1 polling row, or null if unrecognised. */
+export function atkDecodeVxeR1PollingCode(code: number): number | null {
+  return VXE_POLLING_CODES.find(([value]) => (value & 0xff) === (code & 0xff))?.[1] ?? null;
 }
 

@@ -7,7 +7,15 @@ import {
 } from "@openmouse/protocol/endgame-gear-we";
 import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
-import { atkDecodeLiftOff, atkPackDpiStage, atkUnpackDpiStage } from "@openmouse/protocol/atk";
+import {
+  ATK_VXE_R1_POLLING_RATES,
+  ATK_VXE_R1_SETTINGS_REGISTER,
+  atkDecodeLiftOff,
+  atkDecodeVxeR1PollingCode,
+  atkPackDpiStage,
+  atkPackVxeR1PollingSetting,
+  atkUnpackDpiStage,
+} from "@openmouse/protocol/atk";
 
 // ATK mice (A9 family and siblings) use the same OEM framing as the Endgame
 // Gear WE series — 16-byte EEPROM commands on report 0x08 — but carry them on
@@ -19,6 +27,12 @@ const DATA_OFFSET = 5;
 const MAX_DATA_LENGTH = 10;
 const REPLY_TIMEOUT_MS = 500;
 const WRITE_SETTLE_MS = 10;
+
+// The VXE R1 SE/SE+ ships its "Wireless mouse -1k dongle" under 0x373b:0x1085
+// (Beken MCU). It shares the A9 EEPROM map for DPI/advanced/lod, but the poll
+// rate lives in the live-settings row; see the codec for the full story.
+const VXE_R1_RECEIVER_PID = 0x1085;
+const R1_SETTINGS_LENGTH = 4;
 
 // Byte addresses in the mouse's configuration EEPROM.
 const REGISTER = {
@@ -114,6 +128,11 @@ export class AtkHidClient {
     return /receiver|dongle/i.test(this.device.productName || "");
   }
 
+  /** VXE R1 SE/SE+ on its stock 1K receiver (Beken MCU, per OpenVXE). */
+  isR1(): boolean {
+    return this.device.productId === VXE_R1_RECEIVER_PID;
+  }
+
   maxDpi(): number {
     return DPI_MAX;
   }
@@ -127,7 +146,9 @@ export class AtkHidClient {
   }
 
   getSupportedPollingRates(): number[] {
-    return POLLING_RATES.map(([, hertz]) => hertz);
+    return this.isR1()
+      ? [...ATK_VXE_R1_POLLING_RATES]
+      : POLLING_RATES.map(([, hertz]) => hertz);
   }
 
   /**
@@ -151,7 +172,7 @@ export class AtkHidClient {
       return this.lastStatus = {
         ...this.lastStatus,
         batteryPercent: battery,
-        pollingRateHz: this.decodePollingRate(system[0]),
+        pollingRateHz: await this.readPollingRate(system),
         dpi: stage.x,
         dpiY: stage.y,
       };
@@ -173,7 +194,7 @@ export class AtkHidClient {
       dpi: stage.x,
       dpiY: stage.y,
       supportsSeparateDpiAxes: false,
-      pollingRateHz: this.decodePollingRate(system[0]),
+      pollingRateHz: await this.readPollingRate(system),
       supportedPollingRates: this.getSupportedPollingRates(),
       activeProfile: null,
       connectionType: this.isWireless() ? "Wireless" : "Wired",
@@ -190,6 +211,7 @@ export class AtkHidClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
+    if (this.isR1()) return await this.setR1PollingRate(pollingRateHz);
     const encoded = POLLING_RATES.find(([, hertz]) => hertz === pollingRateHz);
     if (!encoded) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
     await this.write(REGISTER.system, wePackScalarPair(encoded[0]));
@@ -321,6 +343,34 @@ export class AtkHidClient {
 
   private decodeAngle(byte: number): number {
     return byte > 0x80 ? byte - 0x100 : byte;
+  }
+
+  /**
+   * R1 polling comes from the live-settings row at 0x0070, not the A9 system
+   * block (whose first pair is a link-mode byte on this family). A stock row
+   * may be unpopulated, so fall back to the receiver's ceiling when unknown.
+   */
+  private async readPollingRate(system?: Uint8Array): Promise<number> {
+    if (this.isR1()) {
+      const settings = await this.read(ATK_VXE_R1_SETTINGS_REGISTER, R1_SETTINGS_LENGTH).catch(() => null);
+      const decoded = settings ? atkDecodeVxeR1PollingCode(settings[1]) : null;
+      return decoded ?? 1000;
+    }
+    return this.decodePollingRate((system ?? await this.read(REGISTER.system, SYSTEM_LENGTH))[0]!);
+  }
+
+  /**
+   * The R1 applies the write through its live-settings row (OpenVXE sends it
+   * fire-and-forget), so confirmation stays optimistic rather than erroring on
+   * a register that may not echo what was applied.
+   */
+  private async setR1PollingRate(pollingRateHz: number): Promise<number> {
+    const data = atkPackVxeR1PollingSetting(pollingRateHz);
+    if (!data) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
+    await this.write(ATK_VXE_R1_SETTINGS_REGISTER, data);
+    const confirmed = await this.readPollingRate();
+    this.patch({ pollingRateHz: confirmed });
+    return confirmed;
   }
 
   private patch(changes: Partial<MouseStatus>): void {
