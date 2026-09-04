@@ -94,7 +94,8 @@ import {
   decodeOnboardProfile,
   describeProfileFormat,
   dpiStageCapabilitiesForOptions,
-  isProfileWritableForProduct,
+  isProfileWritable,
+  isLodWritableForProduct,
   encodeDpiStages,
   encodeButtonAssignment,
   encodeMacroButtonAssignment,
@@ -743,7 +744,7 @@ export class LogitechHidppClient {
     // only change once that format is verified and actually carries a
     // report-rate field. Anything else stays read-only.
     const profileRateWritable = this.isDirectConnect
-      && isProfileWritableForProduct(this.profileFormatId, this.device.productId)
+      && isProfileWritable(this.profileFormatId)
       && capabilitiesForFormat(this.profileFormatId).reportRates !== null;
     const liftOffDistance = decodeLiftOffLevel(dpiState.lod, this.lodCapabilities);
     const hasLiveLiftOffControl = !dpiFeature.legacy && dpiCapabilities.liftOff;
@@ -1316,12 +1317,8 @@ export class LogitechHidppClient {
     }
     const info = parseProfilesInfo(await this.request(feature.index, PROFILE_FN.getInfo));
     const format = describeProfileFormat(info.profileFormatId);
-    if (!isProfileWritableForProduct(format.id, this.device.productId)) {
-      throw new Error(
-        format.writable
-          ? `Profile format ${format.id} writes have not been verified on this device (PID 0x${this.device.productId.toString(16)}).`
-          : `Profile format ${format.id} profile-content writes have not been verified on hardware.`,
-      );
+    if (!isProfileWritable(format.id)) {
+      throw new Error(`Profile format ${format.id} profile-content writes have not been verified on hardware.`);
     }
 
     // A profile can be edited without the mouse being switched to it, so the
@@ -1433,7 +1430,8 @@ export class LogitechHidppClient {
           throw new Error(`Slot ${index + 1} uses a DPI value the connected mouse did not advertise.`);
         }
       }
-      updated = encodeDpiStages(updated, formatId, values.dpiStages, dpiCapabilities);
+      const writeLod = isLodWritableForProduct(formatId, this.device.productId);
+      updated = encodeDpiStages(updated, formatId, values.dpiStages, dpiCapabilities, writeLod);
     }
 
     // The two links are stored separately, so each is set on its own.

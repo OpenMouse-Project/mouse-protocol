@@ -16,7 +16,8 @@ import {
   decodeLiftOffLevel,
   describeProfileFormat,
   dpiStageCapabilitiesForOptions,
-  isProfileWritableForProduct,
+  isProfileWritable,
+  isLodWritableForProduct,
   encodeDpiStages,
   encodeButtonAssignment,
   encodeMacroButtonAssignment,
@@ -32,6 +33,7 @@ import {
   validateReportRate,
   PROFILE_NAME_MAX_CHARS,
   validateDpiStagePlan,
+  layoutForFormat,
 } from "./onboard-profiles.ts";
 
 function bytes(hex: string): Uint8Array {
@@ -1116,18 +1118,35 @@ test("G502 keyboard shortcuts and consumer keys use direct four-byte HID binding
   assert.equal(profileCrc(media), storedCrc(media));
 });
 
-test("format 7 writes are refused on the original G Pro X Superlight (PID 0xc094)", () => {
-  // Format 7's layout was only confirmed against a Pro X Superlight 2 dump;
-  // the original Superlight reports the same format id on a different board
-  // and rejects the write on hardware (HID++ error 0x05). It stays read-only
-  // until a dump from that PID confirms the layout.
+test("only the per-stage lift-off byte is refused on the original G Pro X Superlight (PID 0xc094)", () => {
+  // Format 7's DPI-stage triplet layout (x/y/lift-off) was only confirmed
+  // against a Pro X Superlight 2 dump; the original Superlight reports the
+  // same format id on an older board that likely predates per-stage
+  // lift-off, and rejects the write on hardware (HID++ error 0x05) when that
+  // byte is touched. Everything else format 7 carries stays writable — the
+  // guard is scoped to the one unverified field, not the whole profile.
   assert.equal(describeProfileFormat(7).writable, true);
-  assert.equal(isProfileWritableForProduct(7, 0xc094), false);
+  assert.equal(isProfileWritable(7), true);
+  assert.equal(isLodWritableForProduct(7, 0xc094), false);
   // Other format-7 devices (e.g. the Superlight 2) are unaffected.
-  assert.equal(isProfileWritableForProduct(7, 0xc099), true);
-  assert.equal(isProfileWritableForProduct(7, null), true);
-  assert.equal(isProfileWritableForProduct(7, undefined), true);
+  assert.equal(isLodWritableForProduct(7, 0xc099), true);
+  assert.equal(isLodWritableForProduct(7, null), true);
+  assert.equal(isLodWritableForProduct(7, undefined), true);
   // Unwritable formats stay refused regardless of product id.
-  assert.equal(isProfileWritableForProduct(6, 0xc099), false);
-  assert.equal(isProfileWritableForProduct(null, 0xc099), false);
+  assert.equal(isLodWritableForProduct(6, 0xc099), false);
+  assert.equal(isLodWritableForProduct(null, 0xc099), false);
+});
+
+test("encodeDpiStages preserves the existing lift-off byte when writeLod is false", () => {
+  const sector = new Uint8Array(255).fill(0xff);
+  const layout = layoutForFormat(7);
+  const base = layout.dpi! + 2;
+  sector[base + 4] = 0x02; // pre-existing, hardware-set lift-off byte
+  const plan = {
+    defaultIndex: 0,
+    stages: [{ x: 800, y: 800, lod: 1 }],
+  };
+  const encoded = encodeDpiStages(sector, 7, plan, undefined, false);
+  assert.equal(encoded[base], 0x20); // x low byte (800 = 0x0320)
+  assert.equal(encoded[base + 4], 0x02); // lift-off byte left untouched
 });
