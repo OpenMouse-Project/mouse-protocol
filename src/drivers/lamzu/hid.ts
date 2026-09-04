@@ -11,8 +11,8 @@ import {
   compaxDecodeSleep,
   compaxEncodeRequest,
   LAMZU_POLLING_RATES as POLLING_RATES,
-  LAMZU_PRODUCTS as PRODUCTS,
-  LAMZU_VENDOR_ID,
+  LAMZU_VENDOR_IDS,
+  lamzuProduct,
   type CompaxDpiStage,
   type LamzuProduct,
 } from "@openmouse/protocol/lamzu";
@@ -128,13 +128,13 @@ export class LamzuHidClient {
     const search = (collection: HIDCollectionInfo): boolean =>
       collection.featureReports.some((report) => report.reportId === REPORT_ID)
       || collection.children.some(search);
-    return device.vendorId === LAMZU_VENDOR_ID
-      && PRODUCTS.has(device.productId)
+    return LAMZU_VENDOR_IDS.includes(device.vendorId)
+      && lamzuProduct(device.vendorId, device.productId) !== undefined
       && device.collections.some(search);
   }
 
   private profile(): LamzuProduct | undefined {
-    return PRODUCTS.get(this.device.productId);
+    return lamzuProduct(this.device.vendorId, this.device.productId);
   }
 
   async open(): Promise<void> {
