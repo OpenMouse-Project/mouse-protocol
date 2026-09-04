@@ -43,7 +43,10 @@ import { GLORIOUS_CLASSIC_PRODUCTS, VENDOR_ID } from "../vendors.ts";
  * mouse.
  */
 
-const CLASSIC_USAGE_PAGES = [0xff01, 0xff00];
+// Config channel usage pages. Older firmware used 0xff01/0xff00; newer
+// firmware (confirmed on a Model D Wireless, 0x258a:0x2012) moved the
+// unnumbered config feature report to the 0xffff:0 collection instead.
+const CLASSIC_USAGE_PAGES = [0xff01, 0xff00, 0xffff];
 const BATTERY_RESPONSE_DELAY_MS = 60;
 
 const BATTERY_STATE_LABEL: Record<GloriousClassicBatteryState, MouseStatus["batteryState"]> = {

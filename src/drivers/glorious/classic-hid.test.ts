@@ -4,10 +4,10 @@ import test from "node:test";
 import { GloriousClassicHidClient } from "./classic-hid.ts";
 import { VENDOR_ID } from "../vendors.ts";
 
-function fakeCollection(usagePage: number) {
+function fakeCollection(usagePage: number, usage = 1) {
   return {
     usagePage,
-    usage: 1,
+    usage,
     type: 1,
     children: [],
     inputReports: [],
@@ -46,6 +46,15 @@ test("recognizes a core1 device (Model O Wireless, VID 0x258a)", () => {
 
 test("recognizes a core2 device (Model O3 Wireless, VID 0x3794)", () => {
   const { device } = fakeDevice(VENDOR_ID.gloriousO3, 0xa312);
+  assert.equal(GloriousClassicHidClient.isSupported(device), true);
+});
+
+test("recognizes a Model D Wireless whose config lives on the 0xffff:0 collection", () => {
+  // A real 0x258a:0x2012 (Model D Wireless) exposed `usage 0xffff:0 feat[0x0]`
+  // as its control interface; the old 0xff01/0xff00-only match rejected it.
+  const { device } = fakeDevice(VENDOR_ID.gloriousClassic, 0x2012, "Model D Wireless");
+  (device.collections[0] as { usagePage: number }).usagePage = 0xffff;
+  (device.collections[0] as { usage: number }).usage = 0;
   assert.equal(GloriousClassicHidClient.isSupported(device), true);
 });
 
