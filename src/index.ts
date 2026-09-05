@@ -1,4 +1,5 @@
 export * as atk from "./atk/index.js";
+export * as bitmouse from "./bitmouse/index.js";
 export * as endgameGearWe from "./endgame-gear/wireless.js";
 export * as endgameGearOp1 from "./endgame-gear/op1.js";
 export * as finalmouse from "./finalmouse/index.js";
