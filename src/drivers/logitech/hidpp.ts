@@ -944,7 +944,16 @@ export class LogitechHidppClient {
   }
 
   private async readColorLedLighting(featureIndex: number): Promise<MouseLighting[]> {
-    const info = await this.request(featureIndex, 0x00);
+    // The feature can be advertised (a nonzero index from root discovery)
+    // without actually being readable — confirmed on a Pro X Superlight,
+    // which has no RGB lighting at all yet still resolves this feature index
+    // and rejects the info read with HID++ error 0x05. Every other optional
+    // read in readStatus degrades gracefully instead of throwing (see the
+    // per-zone current-color read further down, and the profile-format probe
+    // in readStatus itself); this one didn't, so it took the whole connection
+    // down with it.
+    const info = await this.request(featureIndex, 0x00).catch(() => null);
+    if (!info) return [];
     const count = Math.min(info[3] ?? 0, 8);
     const readable = ((((info[6] ?? 0) << 8) | (info[7] ?? 0)) & 1) !== 0;
     this.colorLedZones = [];
