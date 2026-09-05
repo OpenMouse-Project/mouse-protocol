@@ -39,7 +39,7 @@ function collectionShapes(): HIDCollectionInfo[][] {
   shapes.push(USAGE_PAGES.map((page) =>
     collection(page, 1, { feature: REPORT_IDS, input: REPORT_IDS, output: REPORT_IDS })));
   for (const page of USAGE_PAGES) {
-    for (const usage of [0, 1, 2, 0x61]) {
+    for (const usage of [0, 1, 2, 0x10, 0x61]) {
       shapes.push([collection(page, usage, { feature: REPORT_IDS, input: REPORT_IDS, output: REPORT_IDS })]);
       for (const id of REPORT_IDS) {
         shapes.push([collection(page, usage, { input: [id], output: [id] })]);
