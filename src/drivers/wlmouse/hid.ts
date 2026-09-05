@@ -31,12 +31,16 @@ const DPI_MAX = 30000;
 
 const TARGET = {
   dongle: 0x00,
+  // The receiver answers for the mouse it is paired with on its own target,
+  // separate from the pass-through that reaches the mouse itself.
+  pairing: 0x01,
   mouse: 0x02,
 } as const;
 
 const PAGE = {
   device: 0x00,
   profile: 0x01,
+  buttons: 0x03,
 } as const;
 
 type LiftOffDistance = NonNullable<MouseStatus["liftOffDistance"]>;
@@ -62,6 +66,10 @@ const READ = {
   serial: { target: TARGET.mouse, page: PAGE.device, command: 0x82, length: 0x02, args: [] },
   battery: { target: TARGET.mouse, page: PAGE.device, command: 0x83, length: 0x02, args: [] },
   activeProfile: { target: TARGET.mouse, page: PAGE.device, command: 0x85, length: 0x01, args: [] },
+  // Product id of the mouse currently paired to the receiver, big-endian in the
+  // last two payload bytes. The shared 1K dongle enumerates under one product
+  // id whatever it is paired with, so this is the only way to know the model.
+  pairedProduct: { target: TARGET.pairing, page: PAGE.device, command: 0x8b, length: 0x06, args: [0x02], attempts: 2 },
 } as const satisfies Record<string, WLMouseRequest>;
 
 const PROFILE_READ = {
@@ -85,14 +93,18 @@ const PROFILE_READ = {
     ({ target: TARGET.mouse, page: PAGE.profile, command: 0x89, length: 0x02, args: [profile] }),
   rippleControl: (profile: number): WLMouseRequest =>
     ({ target: TARGET.mouse, page: PAGE.profile, command: 0x8a, length: 0x02, args: [profile] }),
+  hyperMode: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x8b, length: 0x02, args: [profile] }),
+  turboMode: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x93, length: 0x02, args: [profile] }),
+  angleTuning: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x94, length: 0x02, args: [profile] }),
+  buttonCombination: (profile: number): WLMouseRequest =>
+    ({ target: TARGET.mouse, page: PAGE.buttons, command: 0x81, length: 0x02, args: [profile] }),
 } as const;
 
 const WRITE = {
   dpiStages: 0x01,
-  // Not seen in a capture: every other command here pairs its 0x8X read with
-  // the same byte minus the high bit, and `activeStage` reads 0x82. The
-  // read-back in `setActiveDpiStage` turns a wrong guess into a plain error,
-  // and the mouse answers an unknown command with `unsupported`.
   activeStage: 0x02,
   pollingRate: 0x00,
   liftOffDistance: 0x08,
@@ -101,9 +113,14 @@ const WRITE = {
   angleSnapping: 0x04,
   motionSync: 0x09,
   rippleControl: 0x0a,
+  hyperMode: 0x0b,
+  turboMode: 0x13,
+  angleTuning: 0x14,
+  buttonCombination: 0x01,
 } as const;
 
 const DPI_STAGE_MAX = 6;
+const ANGLE_TUNING_LIMIT = 30;
 const DEBOUNCE_MAX_MS = 15;
 const SLEEP_SECONDS: readonly number[] = [30, 60, 120, 300, 600, 1800];
 const NOTIFY_REPORT_ID = 4;
@@ -121,6 +138,7 @@ export class WLMouseHidClient {
   private notifier: HIDDevice | null = null;
   private notifyListener: ((event: HIDInputReportEvent) => void) | null = null;
   private activeProfile = 1;
+  private pairedProductId: number | null = null;
 
   readonly device: HIDDevice;
 
@@ -190,8 +208,10 @@ export class WLMouseHidClient {
   }
 
   displayName(): string {
-    const known = WLMOUSE_PRODUCTS.get(this.device.productId);
-    return known ? `WLmouse ${known.name}` : this.device.productName || "WLmouse";
+    const known = WLMOUSE_PRODUCTS.get(this.pairedProductId ?? this.device.productId);
+    if (!known) return this.device.productName || "WLmouse";
+    // The shared-receiver entries already carry the brand in their name.
+    return known.name.startsWith("WLmouse") ? known.name : `WLmouse ${known.name}`;
   }
 
   getSleepOptions(): readonly number[] {
@@ -253,6 +273,13 @@ export class WLMouseHidClient {
     const angleSnapping = await this.request(PROFILE_READ.angleSnapping(profile)).catch(() => null);
     const motionSync = await this.request(PROFILE_READ.motionSync(profile)).catch(() => null);
     const rippleControl = await this.request(PROFILE_READ.rippleControl(profile)).catch(() => null);
+    // Not every model has these, and one that does not answers `unsupported`
+    // rather than failing the read, so null here means "no such control".
+    const hyperMode = await this.request(PROFILE_READ.hyperMode(profile)).catch(() => null);
+    const turboMode = await this.request(PROFILE_READ.turboMode(profile)).catch(() => null);
+    const angleTuning = await this.request(PROFILE_READ.angleTuning(profile)).catch(() => null);
+    const buttonCombination = await this.request(PROFILE_READ.buttonCombination(profile)).catch(() => null);
+    if (wireless) await this.readPairedProduct();
     const stage = stages[activeStage];
     if (!stage) throw new Error("The mouse did not report any DPI stages.");
     return this.lastStatus = {
@@ -283,6 +310,10 @@ export class WLMouseHidClient {
       angleSnapping: angleSnapping ? angleSnapping[1] === 1 : null,
       motionSync: motionSync ? motionSync[1] === 1 : null,
       rippleControl: rippleControl ? rippleControl[1] === 1 : null,
+      hyperMode: hyperMode ? hyperMode[1] === 1 : null,
+      turboMode: turboMode ? turboMode[1] === 1 : null,
+      buttonCombination: buttonCombination ? buttonCombination[1] === 1 : null,
+      angleTuning: angleTuning ? this.decodeAngleTuning(angleTuning[1]) : null,
       connectionType: wireless ? "Wireless" : "Wired",
       connectionDetail: wireless ? "2.4 GHz receiver" : "Wired USB",
       unitId: this.decodeText(serial),
@@ -346,15 +377,54 @@ export class WLMouseHidClient {
     return await this.setFlag(WRITE.rippleControl, PROFILE_READ.rippleControl, enabled, "rippleControl", "ripple control");
   }
 
+  async setHyperMode(enabled: boolean): Promise<boolean> {
+    return await this.setFlag(WRITE.hyperMode, PROFILE_READ.hyperMode, enabled, "hyperMode", "high-speed mode");
+  }
+
+  /**
+   * Turbo mode pins the sensor at 20K FPS. The mouse only runs it with
+   * high-speed mode on, so a turbo write can read back off until that is set.
+   */
+  async setTurboMode(enabled: boolean): Promise<boolean> {
+    return await this.setFlag(WRITE.turboMode, PROFILE_READ.turboMode, enabled, "turboMode", "turbo mode");
+  }
+
+  async setButtonCombination(enabled: boolean): Promise<boolean> {
+    return await this.setFlag(
+      WRITE.buttonCombination,
+      PROFILE_READ.buttonCombination,
+      enabled,
+      "buttonCombination",
+      "button combinations",
+      PAGE.buttons,
+    );
+  }
+
+  async setAngleTuning(degrees: number): Promise<number> {
+    if (!Number.isInteger(degrees) || Math.abs(degrees) > ANGLE_TUNING_LIMIT) {
+      throw new Error(`The sensor angle must be a whole number of degrees between -${ANGLE_TUNING_LIMIT} and ${ANGLE_TUNING_LIMIT}.`);
+    }
+    const profile = await this.currentProfile();
+    // A negative angle goes on the wire as two's complement in one byte.
+    await this.write(PAGE.profile, WRITE.angleTuning, profile, [degrees & 0xff]);
+    const confirmed = this.decodeAngleTuning((await this.request(PROFILE_READ.angleTuning(profile)))[1]);
+    if (confirmed !== degrees) {
+      throw new Error(`The mouse kept a ${confirmed}° sensor angle instead of ${degrees}°.`);
+    }
+    this.patch({ angleTuning: confirmed });
+    return confirmed;
+  }
+
   private async setFlag(
     command: number,
     read: (profile: number) => WLMouseRequest,
     enabled: boolean,
-    field: "angleSnapping" | "motionSync" | "rippleControl",
+    field: "angleSnapping" | "motionSync" | "rippleControl" | "hyperMode" | "turboMode" | "buttonCombination",
     label: string,
+    page: number = PAGE.profile,
   ): Promise<boolean> {
     const profile = await this.currentProfile();
-    await this.write(PAGE.profile, command, profile, [enabled ? 1 : 0]);
+    await this.write(page, command, profile, [enabled ? 1 : 0]);
     const confirmed = (await this.request(read(profile)))[1] === 1;
     if (confirmed !== enabled) {
       throw new Error(`The mouse left ${label} ${confirmed ? "on" : "off"}.`);
@@ -547,6 +617,23 @@ export class WLMouseHidClient {
 
   private decodeLiftOffDistance(value: number): LiftOffDistance | null {
     return compaxDecodeLiftOff(value);
+  }
+
+  /** Sensor angle in degrees, sent as a signed byte. */
+  private decodeAngleTuning(value: number): number {
+    return value > 0x7f ? value - 0x100 : value;
+  }
+
+  /**
+   * Names the mouse behind a receiver. The 1K dongle enumerates under a single
+   * product id whichever model it is paired with, so without this every mouse
+   * on it reports as "WLmouse 1K receiver".
+   */
+  private async readPairedProduct(): Promise<void> {
+    const reply = await this.once("pairedProduct", () => this.request(READ.pairedProduct).catch(() => null));
+    if (!reply || reply.length < 6) return;
+    const productId = (reply[4]! << 8) | reply[5]!;
+    if (WLMOUSE_PRODUCTS.has(productId)) this.pairedProductId = productId;
   }
 
   private decodeSleepTimeout(payload: Uint8Array | null): number | null {

@@ -13,6 +13,8 @@ function fakeDevice(offset: number, sleepingReplies = 0, activeProfile = 1) {
   let debounce = 0x00;
   let stages = [{ x: 1600, y: 1600 }];
   let activeStage = 1;
+  let angleTuning = 0x00;
+  let buttonCombination = 0x00;
   const device = {
     vendorId: VENDOR_ID.wlmouse,
     productId: 0xa863,
@@ -29,8 +31,11 @@ function fakeDevice(offset: number, sleepingReplies = 0, activeProfile = 1) {
         reply[offset] = 0xa0;
         return new DataView(reply.buffer);
       }
+      const target = request[2];
       const page = request[4];
       const command = request[5];
+      if (page === 0x01 && command === 0x14) angleTuning = request[7]!;
+      if (page === 0x03 && command === 0x01) buttonCombination = request[7]!;
       if (page === 0x01 && command === 0x08) liftOff = request[7]!;
       if (page === 0x00 && command === 0x08) debounce = request[7]!;
       if (page === 0x01 && command === 0x02) activeStage = request[7]!;
@@ -40,7 +45,13 @@ function fakeDevice(offset: number, sleepingReplies = 0, activeProfile = 1) {
           y: (request[10 + index * 4]! << 8) | request[11 + index * 4]!,
         }));
       }
-      const payload = page === 0x00 && command === 0x85
+      const payload = target === 0x01 && command === 0x8b
+        ? [0x00, 0x00, 0x00, 0x00, 0xa8, 0x80]
+        : page === 0x01 && command === 0x94
+          ? [0x01, angleTuning]
+          : page === 0x03 && command === 0x81
+            ? [0x01, buttonCombination]
+            : page === 0x00 && command === 0x85
         ? [activeProfile, 0x00]
         : page === 0x01 && command === 0x88
           ? [0x01, liftOff]
@@ -135,4 +146,39 @@ test("a rejected stage count is reported, not silently kept", async () => {
   await assert.rejects(() => client.setDpiStageCount(7), /between 1 and 6/);
   await assert.rejects(() => client.setDpiStageValue(0, 1601), /not a supported DPI value/);
   await assert.rejects(() => client.setActiveDpiStage(4), /does not have a DPI stage 5/);
+});
+
+test("a negative sensor angle survives the round trip as two's complement", async () => {
+  const { device, sent } = fakeDevice(0);
+  const client = new WLMouseHidClient(device);
+  await client.readStatus();
+
+  assert.equal(await client.setAngleTuning(-12), -12);
+  const written = sent.filter((packet) => packet[4] === 0x01 && packet[5] === 0x14).at(-1)!;
+  assert.equal(written[7], 0xf4, "-12 should go out as 0xf4");
+
+  assert.equal(await client.setAngleTuning(12), 12);
+  assert.equal((await client.readStatus()).angleTuning, 12);
+  await assert.rejects(() => client.setAngleTuning(31), /between -30 and 30/);
+});
+
+test("button combinations are written on the button page, not the profile page", async () => {
+  const { device, sent } = fakeDevice(0);
+  const client = new WLMouseHidClient(device);
+  await client.readStatus();
+
+  assert.equal(await client.setButtonCombination(true), true);
+  const written = sent.filter((packet) => packet[5] === 0x01 && packet[4] === 0x03).at(-1);
+  assert.ok(written, "expected a write on page 0x03");
+  assert.equal(written![6], 0x01, "the profile still addresses the packet");
+  assert.equal((await client.readStatus()).buttonCombination, true);
+});
+
+test("a mouse behind the shared receiver is named after the mouse", async () => {
+  const { device } = fakeDevice(0);
+  // The 1K receiver enumerates under its own product id whatever it is paired with.
+  (device as { productId: number }).productId = 0xa882;
+  (device as { productName: string }).productName = "WLmouse 1K receiver";
+  const status = await new WLMouseHidClient(device).readStatus();
+  assert.equal(status.name, "WLmouse Beast Max");
 });
