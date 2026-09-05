@@ -542,6 +542,36 @@ export function razerEnableAsymmetricLiftOffCommand(): RazerCommand {
 }
 
 /**
+ * Canonical asymmetric lift-off unlock: the same sensor-setting write as
+ * `razerEnableAsymmetricLiftOffCommand` with value `0x00`. The 1.14 sweep found
+ * both values arm the pair write, but only the `0x01` form is verified on
+ * 1.12, so this is the driver's fallback arm, never the shipped form.
+ */
+export function razerEnableAsymmetricLiftOffCanonicalCommand(): RazerCommand {
+  return {
+    ...RAZER_WRITE.sensorSetting,
+    args: [0x00, RAZER_SENSOR_SELECTOR, RAZER_SENSOR_SETTING.asymmetric, 0x00],
+  };
+}
+
+/**
+ * Calibration-mode-on step, `0x0b`/`0x03` `00 04 01`. Not required on the
+ * swept firmware 1.14 units, where the unlock alone arms the pair write, so it
+ * is sent only as the last-resort arm in `setLiftOff` for a unit that refuses
+ * both unlock values. Carries the same sensor selector as the settings writes;
+ * the layout is read off the experiment notes rather than verified on
+ * hardware, which is why it comes last.
+ */
+export function razerEnableSensorCalibrationCommand(): RazerCommand {
+  return {
+    commandClass: 0x0b,
+    commandId: 0x03,
+    dataSize: 0x03,
+    args: [0x00, RAZER_SENSOR_SELECTOR, 0x01],
+  };
+}
+
+/**
  * Lift-off write, transcribed from the vendor software's own packet rather than
  * inferred: `dataSize 0x0a`, then `00 04` before the pair. It does NOT mirror
  * the read's layout, which is what three earlier guesses assumed — each was

@@ -45,6 +45,8 @@ import {
   razerSetLiftOffCommand,
   razerSetTrackingDistanceCommand,
   razerEnableAsymmetricLiftOffCommand,
+  razerEnableAsymmetricLiftOffCanonicalCommand,
+  razerEnableSensorCalibrationCommand,
   razerSetLowPowerThresholdCommand,
   razerSetSleepTimeoutCommand,
   type RazerButtonControl,
@@ -616,14 +618,19 @@ export class RazerHidClient {
     // before landing, so an out-of-range lift-off still reports itself rather
     // than being masked by the landing it drags out of range here.
     const command = razerSetLiftOffCommand(liftOff, capped);
-    // The pair write is refused in symmetric mode — and refused while still
-    // moving what the read reports, so skipping this yields a driver that looks
-    // like it works and never reaches the sensor.
-    await this.request(razerEnableAsymmetricLiftOffCommand());
-    await this.request(command);
-    // Rejected writes on this command still disturb the stored pair, so the
-    // read-back is a genuine check, not a formality. Tracking is excluded — it
-    // was never part of the write.
+    // The pair write is refused in symmetric mode, so it is armed first. Units
+    // differ within the same "Mouse 1.14" version string: the 0x01 unlock is
+    // verified on the swept hardware, but a reporter's unit answered the armed
+    // pair write 0x03 in two separate sessions, so each refusal falls back to
+    // the next documented arm rather than giving up.
+    const arms = [
+      [razerEnableAsymmetricLiftOffCommand()],
+      [razerEnableAsymmetricLiftOffCanonicalCommand()],
+      [razerEnableSensorCalibrationCommand(), razerEnableAsymmetricLiftOffCommand()],
+    ];
+    await this.writePairArmed(command, arms);
+    // Some units answer a refused pair write by still moving the stored pair;
+    // others leave it untouched. Either way the read-back is a genuine check.
     const confirmed = decodeLiftOff(await this.request(RAZER_READ.liftOff));
     if (confirmed.liftOff !== liftOff || confirmed.landing !== capped) {
       throw new Error(`The mouse kept lift-off ${confirmed.liftOff} and landing ${confirmed.landing} instead of ${liftOff} and ${capped}.`);
@@ -631,6 +638,34 @@ export class RazerHidClient {
     this.asymmetric = true;
     this.asymmetricKnown = true;
     return confirmed;
+  }
+
+  /**
+   * Sends one arm sequence (setting writes) followed by the pair write, and
+   * returns on the first success. A refused arm is safe to burn — the units
+   * that refuse it read the stored pair back unchanged, and the pair write
+   * that follows restores any pair a refusal may have disturbed. When every
+   * arm fails, the last refusal propagates so the caller sees the refused
+   * command rather than a guessed substitution.
+   */
+  private async writePairArmed(command: RazerCommand, arms: RazerCommand[][]): Promise<void> {
+    let lastRefusal: RazerProtocolError | undefined;
+    for (const sequence of arms) {
+      for (const write of sequence) {
+        await this.request(write);
+      }
+      try {
+        await this.request(command);
+        return;
+      } catch (error) {
+        if (error instanceof RazerProtocolError && error.status === RAZER_STATUS.failure) {
+          lastRefusal = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw lastRefusal ?? new RazerProtocolError(`The mouse refused the lift-off write after ${arms.length} attempts.`);
   }
 
   /**

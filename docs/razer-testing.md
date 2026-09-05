@@ -600,9 +600,16 @@ legacy encoding can express, so no HyperPolling command is missing there.
 
 The asymmetric pair write (`0x0b`/`0x05`) is armed by the unlock
 `0x0b`/`0x0b` `00 04 04 01` — the value Synapse sent on firmware 1.12. Firmware
-1.14 still accepts it; the Aug 12 capture that failed with status `0x03` did not
-reproduce on a fresh run with the same bytes, so it was transient or state-related
-rather than a firmware renumbering.
+1.14 still accepts it on the swept hardware.
+
+It is not universal. A reporter's Viper V3 Pro (HyperSpeed receiver, "Mouse
+1.14") refused the armed pair write with status `0x03` in **two** sessions —
+the Sep 5 capture reproduced the Aug 12 one byte-for-byte, so that failure was
+unit- or state-related, not the "transient" it was first written off as. The
+reporter's unit holds a stale asymmetric pair (26/25) while symmetric "Low" is
+active, its unarmed mode-probe pair write is refused on every connect without
+moving the stored pair, and the same `04 01` unlock that the sweep verified is
+echoed `0x02` before the pair write still comes back `0x03`.
 
 A standalone WebHID sweep over the sensor-setting table on 1.14 (HyperSpeed
 receiver) returned:
@@ -619,10 +626,15 @@ The calib-mode-on step (`0x0b`/`0x03` `00 04 01`) before the unlock is not
 required on this firmware. Both `04 01` and `04 00` arm the pair write with or
 without it, and the fixed/self-cal setting values never do.
 
-The code keeps `04 01`: it is verified on both 1.12 and 1.14, whereas `04 00`
-is verified only on 1.14. The canonical table entry (`04 00` = asymmetric Razer
-calibration) matching would be a cosmetic change with an unverified 1.12
-regression risk, so it stays as shipped.
+`setLiftOff` sends `04 01` first — verified on both 1.12 and 1.14, so the
+shipped path is unchanged on units where it works — and when the pair write is
+refused with `0x03` falls back in turn to the canonical `04 00` unlock (verified
+only on 1.14) and then to the calib-mode-on step followed by `04 01`. A refusal
+is safe to burn on either kind of unit: the swept unit answers a refused write
+by still moving the stored pair (the reason the read-back verifies), while the
+reporter's unit leaves it untouched. Which arm the reporter's unit actually
+accepts, if any, still needs a hands-on trial; the fallback chain exists so the
+attempt costs one extra click instead of a dead feature.
 
 ## Changing the polling rate reconfigures the link
 
