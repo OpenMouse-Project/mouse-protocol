@@ -53,6 +53,8 @@ export const BITMOUSE_COMMAND = {
   setReportRate: 1,
   setDpi: 2,
   setSilentHeight: 3,
+  setFarDistance: 27,
+  setSensorModel: 31,
   getBatteryLevel: 7,
   getCurrentMouseConfig: 9,
   setLinearCorrection: 11,
@@ -79,6 +81,8 @@ export const BITMOUSE_LENGTHS = {
   setReportRate: [3, 1],
   setDpi: [12, 10],
   setSilentHeight: [4, 2],
+  setFarDistance: [3, 1],
+  setSensorModel: [3, 1],
   getBatteryLevel: [2, 1],
   getCurrentMouseConfig: [19, 17],
   setLinearCorrection: [3, 1],
@@ -190,6 +194,86 @@ export function bitmouseDecodeDeviceType(code: number): string | null {
   return BITMOUSE_DEVICE_TYPES.find(([encoded]) => encoded === code)?.[1] ?? null;
 }
 
+/**
+ * Settings the config block does not carry. The vendor reads each with
+ * getAddressData at a fixed address, one byte at a time.
+ */
+export const BITMOUSE_ADDRESS = {
+  sensorModel: 74,
+  farDistance: 75,
+  sensorAngle: 2692,
+} as const;
+
+/**
+ * Sensor sampling modes. The vendor exposes three of the firmware's six codes,
+ * labelled Base / Athletics / Athletics Max; they are mapped onto the shared
+ * eco-to-ultra names here.
+ */
+export const BITMOUSE_SENSOR_MODES: ReadonlyArray<readonly [code: number, name: "Eco" | "High" | "Ultra"]> = [
+  [0, "Eco"],
+  [4, "High"],
+  [5, "Ultra"],
+];
+
+export function bitmouseDecodeSensorMode(code: number): "Eco" | "High" | "Ultra" | null {
+  return BITMOUSE_SENSOR_MODES.find(([encoded]) => encoded === code)?.[1] ?? null;
+}
+
+export function bitmouseEncodeSensorMode(name: string): number | null {
+  return BITMOUSE_SENSOR_MODES.find(([, label]) => label === name)?.[0] ?? null;
+}
+
+/**
+ * Lift-off. The config block's own silentHeight byte reads zero and is not the
+ * height: the vendor reads the level as offsetCalibration + 1 and writes it as
+ * { height: 0, offsetCalibration: level - 1 }.
+ *
+ * The level uses the same register scale as the A9 family (see atk/index.ts):
+ * tenths of a millimetre offset by six, so code 1 is 0.7 mm and code 11 is
+ * 1.7 mm — the continuous range the vendor software presents as a slider.
+ */
+export const BITMOUSE_LIFT_OFF_MIN_CODE = 1;
+export const BITMOUSE_LIFT_OFF_MAX_CODE = 11;
+
+export function bitmouseDecodeLiftOffLevel(offsetCalibration: number): number {
+  return offsetCalibration + 1;
+}
+
+export function bitmouseLiftOffMillimetres(code: number): number | null {
+  return code ? (code + 6) / 10 : null;
+}
+
+export function bitmouseLiftOffCode(millimetres: number): number {
+  return Math.round(millimetres * 10) - 6;
+}
+
+export function bitmouseSetLiftOffRequest(code: number): BitmouseRequest {
+  const [paramLen, cmdLen] = BITMOUSE_LENGTHS.setSilentHeight;
+  if (!Number.isInteger(code)
+    || code < BITMOUSE_LIFT_OFF_MIN_CODE
+    || code > BITMOUSE_LIFT_OFF_MAX_CODE) {
+    throw new Error(
+      `A lift-off code runs ${BITMOUSE_LIFT_OFF_MIN_CODE} to ${BITMOUSE_LIFT_OFF_MAX_CODE}.`,
+    );
+  }
+  return {
+    commandId: BITMOUSE_COMMAND.setSilentHeight,
+    paramLen,
+    cmdLen,
+    payload: [0, code - 1],
+  };
+}
+
+export function bitmouseSetFarDistanceRequest(enabled: boolean): BitmouseRequest {
+  const [paramLen, cmdLen] = BITMOUSE_LENGTHS.setFarDistance;
+  return { commandId: BITMOUSE_COMMAND.setFarDistance, paramLen, cmdLen, payload: [enabled ? 1 : 0] };
+}
+
+export function bitmouseSetSensorModeRequest(code: number): BitmouseRequest {
+  const [paramLen, cmdLen] = BITMOUSE_LENGTHS.setSensorModel;
+  return { commandId: BITMOUSE_COMMAND.setSensorModel, paramLen, cmdLen, payload: [code & 0xff] };
+}
+
 export interface BitmouseConfig {
   profile: number;
   configVersion: number;
@@ -240,8 +324,12 @@ export interface BitmouseDpiStage {
   red: number;
   green: number;
   blue: number;
-  /** Byte 7 of a stage; the vendor writes 1 for the stage it enables. */
-  flag: number;
+  /**
+   * Byte 7 of the stored record. A write puts a literal 0 here, so it reads
+   * back as 0 on every stage; it is not the enable bit, which a write carries
+   * one byte further along and the table never stores.
+   */
+  reserved: number;
 }
 
 export interface BitmouseDpiBlock {
@@ -280,7 +368,7 @@ export function bitmouseDecodeDpiBlock(bytes: Uint8Array | readonly number[]): B
       blue: bytes[at + 4]!,
       green: bytes[at + 5]!,
       red: bytes[at + 6]!,
-      flag: bytes[at + 7]!,
+      reserved: bytes[at + 7]!,
     });
   }
   return { currentIndex: bytes[0]!, stageCount: bytes[1]!, stages };
@@ -359,6 +447,11 @@ export interface BitmouseDpiWrite {
   red: number;
   green: number;
   blue: number;
+  /**
+   * Applies the stage as well as storing it. The vendor sets this exactly when
+   * the stage being written is the active one; writing a stage with it clear
+   * updates the table without moving the sensor onto that stage.
+   */
   enable: boolean;
 }
 

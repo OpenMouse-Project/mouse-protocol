@@ -12,14 +12,23 @@ import {
   bitmouseDecodeReply,
   bitmouseDecodeVersion,
   bitmouseDpiBlockAddresses,
+  bitmouseDecodeLiftOffLevel,
+  bitmouseLiftOffCode,
+  bitmouseLiftOffMillimetres,
+  bitmouseDecodeSensorMode,
   bitmouseDpiOptions,
   bitmouseEnabledStages,
   bitmouseEncodePollingRate,
   bitmouseEncodeRequest,
+  bitmouseEncodeSensorMode,
   bitmouseSetDpiRequest,
+  bitmouseSetFarDistanceRequest,
+  bitmouseSetLiftOffRequest,
+  bitmouseSetSensorModeRequest,
   bitmouseSetSleepRequest,
   BITMOUSE_COMMAND,
   BITMOUSE_COMMAND_CODE,
+  BITMOUSE_ADDRESS,
   BITMOUSE_DPI_RANGES,
   BITMOUSE_FRAME_LENGTH,
   BITMOUSE_LENGTHS,
@@ -173,8 +182,8 @@ test("DPI stages decode little-endian with the colour stored blue first", () => 
 
   assert.equal(decoded!.currentIndex, 1);
   assert.equal(decoded!.stageCount, 4);
-  assert.deepEqual(decoded!.stages[0], { x: 1600, y: 1600, blue: 0x11, green: 0x22, red: 0x33, flag: 1 });
-  assert.deepEqual(decoded!.stages[1], { x: 800, y: 1000, blue: 0, green: 0, red: 0, flag: 0 });
+  assert.deepEqual(decoded!.stages[0], { x: 1600, y: 1600, blue: 0x11, green: 0x22, red: 0x33, reserved: 1 });
+  assert.deepEqual(decoded!.stages[1], { x: 800, y: 1000, blue: 0, green: 0, red: 0, reserved: 0 });
   assert.equal(bitmouseDecodeDpiBlock(new Uint8Array(20)), null);
 });
 
@@ -215,12 +224,25 @@ test("only the stages carrying a DPI value are treated as enabled", () => {
   assert.equal(block!.stages[2]!.red, 0x90);
 });
 
-test("a DPI write can carry the stage's existing enable flag through", () => {
+/**
+ * The stored record is eight bytes, and a write prefixes it with the stage
+ * index — so the write byte that lines up with the record's last byte is the
+ * literal 0 at +8, and `enable` at +9 has no counterpart in the table at all.
+ * Reading the record's last byte back as an enable flag is what made a DPI
+ * write store the value without the sensor ever adopting it.
+ */
+test("enable is a command bit, not the record byte that reads back as reserved", () => {
+  const on = bitmouseEncodeRequest(bitmouseSetDpiRequest({
+    index: 0, x: 800, y: 800, red: 0xff, green: 0, blue: 0, enable: true,
+  }));
   const off = bitmouseEncodeRequest(bitmouseSetDpiRequest({
     index: 0, x: 800, y: 800, red: 0xff, green: 0, blue: 0, enable: false,
   }));
 
-  assert.equal(off[16], 0);
+  // Frame offset 7 is payload[0]; the record byte and the enable bit follow.
+  assert.equal(on[7 + 8], 0, "the byte the table stores stays a literal zero");
+  assert.equal(on[7 + 9], 1);
+  assert.equal(off[7 + 9], 0);
 });
 
 test("the PAW3950 Ultra DPI ladder changes step at 10k and 30k", () => {
@@ -242,4 +264,62 @@ test("sleep is written as little-endian seconds", () => {
 
   assert.equal(frame[5], BITMOUSE_COMMAND.setSensorSleepTime);
   assert.deepEqual([...frame.slice(7, 9)], [0x08, 0x07]);
+});
+
+/**
+ * The vendor software shows lift-off as a 0.7-1.7 mm slider. That is the A9
+ * register scale: tenths of a millimetre offset by six, carried here in the
+ * config block's offsetCalibration byte rather than its silentHeight byte,
+ * which reads zero on an ATK ZERO.
+ */
+test("lift-off codes are tenths of a millimetre offset by six", () => {
+  assert.equal(bitmouseLiftOffMillimetres(1), 0.7);
+  assert.equal(bitmouseLiftOffMillimetres(4), 1);
+  assert.equal(bitmouseLiftOffMillimetres(11), 1.7);
+  assert.equal(bitmouseLiftOffMillimetres(0), null);
+
+  for (const mm of [0.7, 1, 1.2, 1.7]) {
+    assert.equal(bitmouseLiftOffMillimetres(bitmouseLiftOffCode(mm)), mm);
+  }
+});
+
+test("lift-off is carried by offsetCalibration, not the silentHeight byte", () => {
+  // An ATK ZERO reporting offsetCalibration 0 is sitting at 0.7 mm.
+  assert.equal(bitmouseDecodeLiftOffLevel(0), 1);
+  assert.equal(bitmouseLiftOffMillimetres(bitmouseDecodeLiftOffLevel(0)), 0.7);
+
+  const frame = bitmouseEncodeRequest(bitmouseSetLiftOffRequest(11));
+
+  assert.equal(frame[5], BITMOUSE_COMMAND.setSilentHeight);
+  assert.deepEqual([...frame.slice(7, 9)], [0, 10]);
+});
+
+test("a lift-off code outside the register range is refused", () => {
+  assert.throws(() => bitmouseSetLiftOffRequest(0), /runs 1 to 11/);
+  assert.throws(() => bitmouseSetLiftOffRequest(12), /runs 1 to 11/);
+});
+
+test("sensor sampling modes round trip across the vendor's three codes", () => {
+  for (const name of ["Eco", "High", "Ultra"] as const) {
+    assert.equal(bitmouseDecodeSensorMode(bitmouseEncodeSensorMode(name)!), name);
+  }
+  assert.equal(bitmouseDecodeSensorMode(3), null);
+  assert.equal(bitmouseEncodeSensorMode("Turbo"), null);
+
+  const frame = bitmouseEncodeRequest(bitmouseSetSensorModeRequest(bitmouseEncodeSensorMode("Ultra")!));
+
+  assert.equal(frame[5], BITMOUSE_COMMAND.setSensorModel);
+  assert.equal(frame[7], 5);
+});
+
+test("long-range mode is a one-byte write read back from its own address", () => {
+  assert.equal(BITMOUSE_ADDRESS.farDistance, 75);
+  assert.equal(BITMOUSE_ADDRESS.sensorModel, 74);
+
+  const on = bitmouseEncodeRequest(bitmouseSetFarDistanceRequest(true));
+  const off = bitmouseEncodeRequest(bitmouseSetFarDistanceRequest(false));
+
+  assert.equal(on[5], BITMOUSE_COMMAND.setFarDistance);
+  assert.equal(on[7], 1);
+  assert.equal(off[7], 0);
 });

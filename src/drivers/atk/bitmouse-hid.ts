@@ -4,20 +4,30 @@ import {
   bitmouseDecodeConfig,
   bitmouseDecodeDpiBlock,
   bitmouseDecodeReply,
+  bitmouseDecodeSensorMode,
+  bitmouseDecodeLiftOffLevel,
+  bitmouseLiftOffMillimetres,
   bitmouseDecodeVersion,
   bitmouseDpiBlockAddresses,
   bitmouseDpiOptions,
   bitmouseEnabledStages,
   bitmouseEncodePollingRate,
+  bitmouseEncodeSensorMode,
   bitmouseEncodeRequest,
   bitmouseSetDpiRequest,
+  bitmouseSetFarDistanceRequest,
   bitmouseSetFlagRequest,
+  bitmouseSetLiftOffRequest,
+  bitmouseSetSensorModeRequest,
   bitmouseSetSleepRequest,
+  BITMOUSE_ADDRESS,
   BITMOUSE_ADDRESS_DATA_OFFSET,
   BITMOUSE_COMMAND,
   BITMOUSE_DPI_BLOCK_CHUNK,
   BITMOUSE_DPI_RANGES,
   BITMOUSE_LENGTHS,
+  BITMOUSE_LIFT_OFF_MAX_CODE,
+  BITMOUSE_LIFT_OFF_MIN_CODE,
   BITMOUSE_POLLING_RATES,
   BITMOUSE_PRODUCTS,
   BITMOUSE_REPORT_ID,
@@ -57,6 +67,20 @@ const DEBOUNCE_MAX_MS = 15;
 const SLEEP_SECONDS: readonly number[] = [30, 60, 120, 300, 600, 1800];
 const SLEEP_MIN_SECONDS = 30;
 const SLEEP_MAX_SECONDS = 0xffff;
+
+type LiftOffDistance = NonNullable<MouseStatus["liftOffDistance"]>;
+
+/**
+ * The register runs 1 to 11 (0.7 mm to 1.7 mm in tenths), which the vendor
+ * software exposes as a slider. MouseStatus carries three stops, so the shared
+ * control writes the ends and the middle and reports anything the vendor app
+ * left in between by which stop it is nearest.
+ */
+const LIFT_OFF_LEVELS: ReadonlyArray<readonly [code: number, name: LiftOffDistance]> = [
+  [1, "Low"],
+  [4, "Medium"],
+  [11, "High"],
+];
 
 export class AtkBitmouseHidClient {
   readonly canDisableSleep = false;
@@ -151,6 +175,12 @@ export class AtkBitmouseHidClient {
       };
     }
 
+    const sensorMode = bitmouseDecodeSensorMode(
+      await this.readAddressByte(BITMOUSE_ADDRESS.sensorModel) ?? -1,
+    );
+    const longRangeByte = await this.readAddressByte(BITMOUSE_ADDRESS.farDistance);
+    const longRange = longRangeByte === null ? null : longRangeByte === 1;
+
     const usable = this.dpiBlock ? bitmouseEnabledStages(this.dpiBlock) : [];
     const stages = usable.map((stage) => stage.x);
     const activeStage = this.dpiBlock && this.dpiBlock.currentIndex < usable.length
@@ -162,8 +192,6 @@ export class AtkBitmouseHidClient {
       ui: {
         family: "atk-bitmouse",
         hideUnsupportedPollingRates: true,
-        // No angle-snapping or lift-off command has been confirmed on hardware.
-        hideAngleSnapping: true,
         showAdvancedSection: true,
         forceShowBattery: battery !== null,
         dpiStageEditor: stages.length
@@ -191,10 +219,14 @@ export class AtkBitmouseHidClient {
       rippleControl: config?.rippleControl ?? null,
       debounceMs: config?.debounceMs ?? null,
       sleepTimeout: config?.sleepSeconds || null,
-      angleSnapping: null,
-      // The lift-off byte in the config block reads zero on both transports and
-      // the vendor's own field map overlaps there, so it is left unreported.
-      liftOffDistance: null,
+      // The vendor names this "straight line correction"; it is angle snapping.
+      angleSnapping: config?.linearCorrection ?? null,
+      sensorMode,
+      sensorModeEditable: sensorMode !== null,
+      longRangeMode: longRange,
+      liftOffDistance: this.decodeLiftOff(config),
+      supportedLiftOffDistances: ["Low", "Medium", "High"],
+      liftOffScale: this.liftOffScale(config),
       firmware: await this.readFirmware(),
     };
   }
@@ -215,19 +247,30 @@ export class AtkBitmouseHidClient {
     return pollingRateHz;
   }
 
+  /** Writes the stage the mouse is currently on. */
   async setDpi(dpi: number): Promise<number> {
+    if (!this.dpiBlock) this.dpiBlock = await this.readDpiBlock();
+    return await this.writeStage(this.dpiBlock?.currentIndex ?? 0, dpi);
+  }
+
+  /** Writes any stage, which is what the shared DPI stage editor drives. */
+  async setDpiStageValue(stage: number, dpi: number): Promise<number> {
+    return await this.writeStage(stage, dpi);
+  }
+
+  private async writeStage(index: number, dpi: number): Promise<number> {
     const range = BITMOUSE_DPI_RANGES[this.product?.sensor ?? "PAW3950Ultra"];
     if (!Number.isInteger(dpi) || dpi < range.min || dpi > range.max) {
       throw new Error(`${dpi.toLocaleString()} is not a supported DPI value.`);
     }
     if (!this.dpiBlock) this.dpiBlock = await this.readDpiBlock();
-    const block = this.dpiBlock;
-    const index = block?.currentIndex ?? 0;
-    const stage = block?.stages[index];
+    const stage = this.dpiBlock?.stages[index];
     if (!stage) throw new Error("The mouse did not report its DPI stages.");
 
-    // Colour and the enable flag ride along with every DPI write, so both are
-    // carried over from the stage as read rather than reset to a default.
+    // Colour rides along with every DPI write, so it is carried over from the
+    // stage as read. `enable` is not part of the stored record: it tells the
+    // mouse to move onto this stage, which is only right for the active one.
+    const active = this.dpiBlock?.currentIndex ?? 0;
     await this.write(bitmouseSetDpiRequest({
       index,
       x: dpi,
@@ -235,15 +278,125 @@ export class AtkBitmouseHidClient {
       red: stage.red,
       green: stage.green,
       blue: stage.blue,
-      enable: stage.flag !== 0,
+      enable: index === active,
     }));
     this.dpiBlock = await this.readDpiBlock();
-    const confirmed = this.activeStage();
+    const confirmed = this.dpiBlock?.stages[index]?.x;
     if (confirmed !== dpi) {
       throw new Error(`The mouse kept ${confirmed?.toLocaleString() ?? "an unknown value"} instead of ${dpi.toLocaleString()} DPI.`);
     }
-    this.patch({ dpi });
+    const stages = this.dpiBlock ? bitmouseEnabledStages(this.dpiBlock).map((entry) => entry.x) : undefined;
+    this.patch({
+      dpiStages: stages?.length ? stages : undefined,
+      ...(index === active ? { dpi } : {}),
+    });
     return dpi;
+  }
+
+  /**
+   * Lift-off. The level lives in the config block's offsetCalibration byte,
+   * not in the byte the vendor's field map calls silentHeight, and a write
+   * sends it as { height: 0, offsetCalibration: level - 1 }.
+   */
+  async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
+    const level = LIFT_OFF_LEVELS.find(([, name]) => name === value)?.[0];
+    if (level === undefined) {
+      throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
+    }
+    await this.write(bitmouseSetLiftOffRequest(level));
+    const confirmed = this.decodeLiftOff(await this.readConfig());
+    if (confirmed !== value) {
+      throw new Error(`The mouse kept a ${String(confirmed ?? "unknown").toLowerCase()} lift-off distance instead of ${value.toLowerCase()}.`);
+    }
+    this.patch({ liftOffDistance: confirmed });
+    return confirmed;
+  }
+
+  /**
+   * The full 0.7-1.7 mm range, which is what the vendor software offers as a
+   * slider. The three-stop setLiftOffDistance above stays for the shared
+   * Low/Medium/High control.
+   */
+  async setLiftOffScale(code: number): Promise<number> {
+    await this.write(bitmouseSetLiftOffRequest(code));
+    const config = await this.readConfig();
+    const confirmed = config ? bitmouseDecodeLiftOffLevel(config.offsetCalibration) : null;
+    if (confirmed !== code) {
+      throw new Error(`The mouse kept lift-off code ${confirmed ?? "unknown"} instead of ${code}.`);
+    }
+    this.patch({
+      liftOffDistance: this.decodeLiftOff(config),
+      liftOffScale: this.liftOffScale(config),
+    });
+    return code;
+  }
+
+  private liftOffScale(config: BitmouseConfig | null): MouseStatus["liftOffScale"] {
+    if (!config) return null;
+    const code = bitmouseDecodeLiftOffLevel(config.offsetCalibration);
+    const millimetres = bitmouseLiftOffMillimetres(code);
+    if (millimetres === null) return null;
+    return {
+      value: code,
+      min: BITMOUSE_LIFT_OFF_MIN_CODE,
+      max: BITMOUSE_LIFT_OFF_MAX_CODE,
+      millimetres,
+      minMillimetres: bitmouseLiftOffMillimetres(BITMOUSE_LIFT_OFF_MIN_CODE)!,
+      maxMillimetres: bitmouseLiftOffMillimetres(BITMOUSE_LIFT_OFF_MAX_CODE)!,
+    };
+  }
+
+  /** The vendor calls this "straight line correction". */
+  async setAngleSnapping(enabled: boolean): Promise<boolean> {
+    await this.write(bitmouseSetFlagRequest(
+      BITMOUSE_COMMAND.setLinearCorrection,
+      BITMOUSE_LENGTHS.setLinearCorrection,
+      enabled ? 1 : 0,
+    ));
+    const confirmed = (await this.readConfig())?.linearCorrection;
+    if (confirmed !== enabled) throw new Error(`The mouse left angle snapping ${confirmed ? "on" : "off"}.`);
+    this.patch({ angleSnapping: confirmed });
+    return confirmed;
+  }
+
+  /** ATK's "Ultra Long Range": more radio range for less battery life. */
+  async setLongRangeMode(enabled: boolean): Promise<boolean> {
+    await this.write(bitmouseSetFarDistanceRequest(enabled));
+    const byte = await this.readAddressByte(BITMOUSE_ADDRESS.farDistance);
+    const confirmed = byte === null ? null : byte === 1;
+    if (confirmed !== enabled) {
+      throw new Error(`The mouse left long-range mode ${confirmed ? "on" : "off"}.`);
+    }
+    this.patch({ longRangeMode: confirmed });
+    return confirmed;
+  }
+
+  async setSensorMode(mode: "Eco" | "High" | "Ultra"): Promise<"Eco" | "High" | "Ultra"> {
+    const code = bitmouseEncodeSensorMode(mode);
+    if (code === null) throw new Error(`This mouse does not support a ${mode} sensor mode.`);
+    await this.write(bitmouseSetSensorModeRequest(code));
+    const confirmed = bitmouseDecodeSensorMode(
+      await this.readAddressByte(BITMOUSE_ADDRESS.sensorModel) ?? -1,
+    );
+    if (confirmed !== mode) {
+      throw new Error(`The mouse kept the ${confirmed ?? "unknown"} sensor mode instead of ${mode}.`);
+    }
+    this.patch({ sensorMode: confirmed });
+    return confirmed;
+  }
+
+  private decodeLiftOff(config: BitmouseConfig | null): LiftOffDistance | null {
+    if (!config) return null;
+    const millimetres = bitmouseLiftOffMillimetres(bitmouseDecodeLiftOffLevel(config.offsetCalibration));
+    if (millimetres === null) return null;
+    if (millimetres < 1) return "Low";
+    return millimetres < 1.5 ? "Medium" : "High";
+  }
+
+  /** One-byte reads for the settings the config block does not carry. */
+  private async readAddressByte(address: number): Promise<number | null> {
+    const reply = await this.exchange(bitmouseAddressDataRequest(address, 1)).catch(() => null);
+    return reply?.payload[BITMOUSE_ADDRESS_DATA_OFFSET] ?? null;
   }
 
   async setMotionSync(enabled: boolean): Promise<boolean> {
