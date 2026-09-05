@@ -195,6 +195,10 @@ export interface MouseStatus {
   napeLayerCount?: number;
   performanceMode?: boolean | null;
   hyperMode?: boolean | null;
+  /** Sensor pinned to its highest frame rate (WLmouse "Turbo Mode"). */
+  turboMode?: boolean | null;
+  /** Whether button chords can change mouse settings without the driver. */
+  buttonCombination?: boolean | null;
   sensorMode?: "Eco" | "High" | "Ultra" | null;
   sensorModeStored?: 0 | 1 | null;
   sensorModeEditable?: boolean | null;
