@@ -574,6 +574,26 @@ stages them into a single pending-change group for the same reason.
 layout, so it is the Superstrike; a Superlight 2 is most likely 7, but that is a
 guess until read from hardware.
 
+**The original G Pro X Superlight (PID `0xc094`, wpid `4093` — "PRO X Wireless"
+in Logitech's/Solaar's naming) reports format 7 but is not the Superlight 2 this
+layout was verified on.** Live reports show it returning HID++ error `0x05`
+("Logitech internal error") specifically when the format-7 per-stage lift-off
+byte is written — the device rejects a lift-off offset that is valid on the
+Superlight 2, most likely because this older board predates per-stage
+lift-off entirely rather than storing it at a different offset. This matches
+the unresolved DPI-stage-offset report below. Neither Solaar nor libratbag
+implements per-stage lift-off or debounce for any Logitech mouse, onboard or
+otherwise, so there is no reference layout to check this against.
+
+OpenMouse's model is to support what a device can actually do rather than
+gate features off by device, so `onboard-profiles.ts` does not refuse the
+whole profile write for this PID: `isLodWritableForProduct` scopes the guard
+to the one unverified field, and `encodeDpiStages`'s `writeLod` flag leaves
+each stage's existing lift-off byte untouched while still writing its DPI
+x/y — report rate, angle-snap, name and buttons are all unaffected and stay
+writable. Lift the guard once a profile dump from a real `0xc094` device
+confirms it has per-stage lift-off storage (and at what offset).
+
 **Names for format ids 7 and 8**, and the meaning of the extra
 component-specific prototype fields (for example `dpi_v6` carries
 `0, 1, 2, 5, 5, 0, 2, 4` after offset and size — plausibly stage count, stride

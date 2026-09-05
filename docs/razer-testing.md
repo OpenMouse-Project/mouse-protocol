@@ -449,6 +449,30 @@ Until then the entries stay: they are correct data, they cost nothing but a
 picker row, and a model that cannot be opened fails at `open()` with a clear
 browser error rather than doing anything harmful.
 
+### Viper V3 Pro — "failed to write feature report"
+
+A Viper V3 Pro (`0x00c0` wired, `0x00c1` receiver) has been reported stopping on
+Chrome's bare DOMException message "Failed to write feature report." — the same
+string as the protected-collection case above, on a model whose control
+interface is otherwise confirmed working. The first control command (the
+firmware read) hits the refused write first, so the whole status read aborts
+with no explanation. Work through the ordinary causes before blaming the
+protected collection:
+
+1. **Razer Synapse is running.** It holds the control interface and the write is
+   refused. Quit it and try again — this is by far the most common cause.
+2. **Wrong interface granted** on the `0x00c1` receiver. The two picker rows look
+   identical and the pointer collection refuses control writes; re-add the
+   device and pick the other row. On the cable there is only the one interface.
+3. **macOS Input Monitoring** — allow the browser under System Settings → Privacy
+   & Security → Input Monitoring, then re-add the device.
+4. Otherwise it is the protected-collection case above: capture the device's WebHID
+   `collections` dump and the exact error, and it needs the native/HAL transport.
+
+The driver now surfaces these steps in the read error instead of the bare
+browser string, so a repeat of this report should carry enough to tell cause 4
+apart from causes 1–3.
+
 ## DeathAdder Essential — not yet hardware-tested
 
 This model shares the 90-byte protocol above, so it reuses the same commands.

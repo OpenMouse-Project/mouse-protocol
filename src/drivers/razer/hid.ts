@@ -698,11 +698,37 @@ export class RazerHidClient {
     // status read, which is what took the lift-off panel down after an 8,000 Hz
     // switch.
     for (let attempt = 0; attempt < RESPONSE_ATTEMPTS; attempt += 1) {
-      await this.device.sendFeatureReport(RAZER_REPORT_ID, request);
+      await this.write(command, request);
       const reply = await this.awaitReply(command);
       if (reply) return reply;
     }
     throw new Error("The mouse stayed busy — it may be asleep or out of range.");
+  }
+
+  /**
+   * Sends one protocol request as a feature report. Chrome reports a refused
+   * write as a bare `NotAllowedError` whose message is only "Failed to write
+   * feature report." with no hint about why, so the throw is wrapped with the
+   * troubleshooting paths that actually explain it: the control interface is
+   * held by another program (Razer Synapse), the interface granted on the
+   * wireless receiver is the pointer collection rather than the control one,
+   * macOS has denied the browser Input Monitoring access, or the OS/browser
+   * refuses writes to mouse-class collections outright.
+   */
+  private async write(command: RazerCommand, request: Uint8Array<ArrayBuffer>): Promise<void> {
+    try {
+      await this.device.sendFeatureReport(RAZER_REPORT_ID, request);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Chrome could not write the ${this.displayName()}'s feature report (command 0x${command.commandClass
+          .toString(16)}/${command.commandId.toString(16)}). `
+          + "Quit Razer Synapse and try again — it holds the control interface. If it still fails, "
+          + "re-add the device and pick the other Razer Viper interface on the receiver, and on macOS "
+          + "allow the browser under System Settings → Privacy & Security → Input Monitoring. "
+          + `(${detail})`,
+      );
+    }
   }
 
   /**

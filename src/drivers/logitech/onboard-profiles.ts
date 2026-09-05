@@ -58,6 +58,36 @@ const WRITABLE_FORMATS = new Set([2, 3, 4, 7]);
 const PROFILE_WRITE_PROBE_FORMATS = new Set([2, 3, 4]);
 const FACTORY_RESET_FORMATS = new Set([7]);
 
+/** Whether profile-content writes for `profileFormatId` are trusted at all. */
+export function isProfileWritable(profileFormatId: number | null | undefined): boolean {
+  return profileFormatId !== null && profileFormatId !== undefined && WRITABLE_FORMATS.has(profileFormatId);
+}
+
+/**
+ * Format 7's per-stage lift-off byte (and the rest of its DPI-stage triplet
+ * layout) was recovered from a Pro X Superlight 2 dump. The original G Pro X
+ * Superlight (PID 0xc094, wpid 4093 — Logitech's "PRO X Wireless" in its own
+ * tooling) reports the same format id but is an older board that predates
+ * per-stage lift-off entirely; live reports show it returning HID++ error
+ * 0x05 ("Logitech internal error") specifically when a stage's lift-off byte
+ * is written, matching an unresolved report of a differently-shifted DPI
+ * stage layout on what is likely this device. Until a dump from this
+ * specific PID confirms it has lift-off storage to write to, everything else
+ * format 7 carries — DPI x/y, report rate, angle-snap, name, buttons — stays
+ * writable, and only the lift-off byte for each stage is left untouched.
+ */
+const UNVERIFIED_LOD_PRODUCT_IDS = new Set([0xc094]);
+
+/** Whether the per-stage lift-off byte is trusted to write on this specific device. */
+export function isLodWritableForProduct(
+  profileFormatId: number | null | undefined,
+  productId: number | null | undefined,
+): boolean {
+  if (!isProfileWritable(profileFormatId)) return false;
+  if (productId !== null && productId !== undefined && UNVERIFIED_LOD_PRODUCT_IDS.has(productId)) return false;
+  return true;
+}
+
 /** Whether this format has a reversible guided write probe. */
 export function supportsProfileWriteProbe(profileFormatId: number | null | undefined): boolean {
   return profileFormatId !== null
@@ -970,6 +1000,13 @@ export function encodeDpiStages(
   profileFormatId: number,
   plan: DpiStagePlan,
   capabilitiesOverride?: DpiStageCapabilities | null,
+  /**
+   * False on hardware where the per-stage lift-off byte is unverified (see
+   * isLodWritableForProduct): the stage's x/y still get the plan's values,
+   * but its lift-off byte is left exactly as read rather than overwritten,
+   * since this format may not have lift-off storage there at all.
+   */
+  writeLod = true,
 ): Uint8Array {
   const legacyScalar = profileFormatId < 6;
   const capabilities = capabilitiesOverride === undefined
@@ -1000,12 +1037,12 @@ export function encodeDpiStages(
     if (!entry) {
       result[base] = 0; result[base + 1] = 0;
       result[base + 2] = 0; result[base + 3] = 0;
-      result[base + 4] = 0;
+      if (writeLod) result[base + 4] = 0;
       continue;
     }
     writeUint16LE(result, base, entry.x);
     writeUint16LE(result, base + 2, entry.y);
-    result[base + 4] = entry.lod;
+    if (writeLod) result[base + 4] = entry.lod;
   }
   return applyCrc(result);
 }

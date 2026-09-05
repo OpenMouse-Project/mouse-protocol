@@ -94,6 +94,8 @@ import {
   decodeOnboardProfile,
   describeProfileFormat,
   dpiStageCapabilitiesForOptions,
+  isProfileWritable,
+  isLodWritableForProduct,
   encodeDpiStages,
   encodeButtonAssignment,
   encodeMacroButtonAssignment,
@@ -229,6 +231,20 @@ class HidppTimeoutError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "HidppTimeoutError";
+  }
+}
+
+/**
+ * The mouse answered the live report-rate write with an explicit HID++
+ * rejection (as opposed to a timeout, or a confirmation that never arrived).
+ * setPollingRate uses this to decide whether falling back to the onboard
+ * profile write is safe — only a genuine rejection means the live write did
+ * not take effect.
+ */
+class LiveRateWriteRejectedError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "The mouse rejected the live report-rate write.");
+    this.name = "LiveRateWriteRejectedError";
   }
 }
 
@@ -742,8 +758,7 @@ export class LogitechHidppClient {
     // only change once that format is verified and actually carries a
     // report-rate field. Anything else stays read-only.
     const profileRateWritable = this.isDirectConnect
-      && this.profileFormatId !== null
-      && describeProfileFormat(this.profileFormatId).writable
+      && isProfileWritable(this.profileFormatId)
       && capabilitiesForFormat(this.profileFormatId).reportRates !== null;
     const liftOffDistance = decodeLiftOffLevel(dpiState.lod, this.lodCapabilities);
     const hasLiveLiftOffControl = !dpiFeature.legacy && dpiCapabilities.liftOff;
@@ -929,7 +944,16 @@ export class LogitechHidppClient {
   }
 
   private async readColorLedLighting(featureIndex: number): Promise<MouseLighting[]> {
-    const info = await this.request(featureIndex, 0x00);
+    // The feature can be advertised (a nonzero index from root discovery)
+    // without actually being readable — confirmed on a Pro X Superlight,
+    // which has no RGB lighting at all yet still resolves this feature index
+    // and rejects the info read with HID++ error 0x05. Every other optional
+    // read in readStatus degrades gracefully instead of throwing (see the
+    // per-zone current-color read further down, and the profile-format probe
+    // in readStatus itself); this one didn't, so it took the whole connection
+    // down with it.
+    const info = await this.request(featureIndex, 0x00).catch(() => null);
+    if (!info) return [];
     const count = Math.min(info[3] ?? 0, 8);
     const readable = ((((info[6] ?? 0) << 8) | (info[7] ?? 0)) & 1) !== 0;
     this.colorLedZones = [];
@@ -960,15 +984,6 @@ export class LogitechHidppClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
-    if (this.isDirectConnect) {
-      // 0x8060's setter rejects live writes on this generation (HID++ error
-      // 0x02), and the persistent rate lives in the onboard profile anyway.
-      // Write the active profile's report-rate byte; encodeReportRate validates
-      // the value against the format the mouse reported. This costs one sector
-      // erase/write cycle.
-      await this.writeActiveProfile({ reportRateWiredHz: pollingRateHz });
-      return pollingRateHz;
-    }
     const rateLimits = this.lodCapabilities.reportRates;
     const connectionRateCeiling = rateLimits
       ? (this.wiredConnection ? rateLimits.wiredMaxHz : rateLimits.wirelessMaxHz)
@@ -977,21 +992,65 @@ export class LogitechHidppClient {
       throw new Error(`This connection supports up to ${connectionRateCeiling} Hz.`);
     }
     const resolved = await this.resolveReportRateFeature();
-    if (resolved.legacy) {
-      return this.setLegacyReportRate(resolved.index, pollingRateHz);
+
+    if (!this.isDirectConnect) {
+      if (resolved.legacy) {
+        return this.setLegacyReportRate(resolved.index, pollingRateHz);
+      }
+      return this.setExtendedReportRate(resolved.index, pollingRateHz);
     }
+
+    // A direct-connect mouse's persistent rate also lives in the onboard
+    // profile, and one Logitech generation (the Superlight-era boards this
+    // fallback was built for) rejects the live 0x8060/0x8061 write outright
+    // with HID++ error 0x02. But every other Logitech tool (Solaar, libratbag)
+    // always uses the live feature unconditionally and reports no such
+    // rejection on other generations — so try it first here too, the same as
+    // a non-direct-connect mouse, and only fall back to the profile write
+    // (one sector erase/write cycle) if the live attempt actually fails. That
+    // gives a device whose generation accepts the live write a real shot at
+    // it instead of skipping straight to a profile format that may not even
+    // be writable yet (e.g. format 8's Superstrike).
+    if (resolved.index) {
+      try {
+        if (resolved.legacy) {
+          return await this.setLegacyReportRate(resolved.index, pollingRateHz);
+        }
+        return await this.setExtendedReportRate(resolved.index, pollingRateHz);
+      } catch (error) {
+        // Only an explicit on-device rejection of the write itself falls back
+        // to the profile write. A confirmation timeout (the write was ACKed
+        // but the follow-up notification never arrived, or the legacy path
+        // read back a stale rate) is not proof the write failed, so retrying
+        // via a second, profile-based write there risks writing over a rate
+        // the mouse already accepted. HidppTimeoutError is the transport-
+        // level "no reply at all" case, equally not a rejection.
+        if (!(error instanceof LiveRateWriteRejectedError)) throw error;
+      }
+    }
+    // No live feature at all, or the live write was explicitly rejected.
+    // encodeReportRate validates the value against the format the mouse
+    // reported, so a genuinely unsupported rate still surfaces there.
+    await this.writeActiveProfile({ reportRateWiredHz: pollingRateHz });
+    return pollingRateHz;
+  }
+
+  private async setExtendedReportRate(featureIndex: number, pollingRateHz: number): Promise<number> {
     const rateIndex = REPORT_RATE_HZ.indexOf(pollingRateHz as (typeof REPORT_RATE_HZ)[number]);
     if (rateIndex < 0) {
       throw new Error("Unsupported polling rate.");
     }
-
     await this.ensureHostControl();
-    const feature = await this.getFeature(FEATURE.extendedReportRate);
-    if (!feature.index) {
+    const feature = featureIndex || (await this.getFeature(FEATURE.extendedReportRate)).index;
+    if (!feature) {
       throw new Error("This mouse does not expose report-rate controls.");
     }
     const confirmation = this.waitForRateChange(pollingRateHz);
-    await this.request(feature.index, 0x30, rateIndex);
+    try {
+      await this.request(feature, 0x30, rateIndex);
+    } catch (error) {
+      throw error instanceof HidppTimeoutError ? error : new LiveRateWriteRejectedError(error);
+    }
     await confirmation;
     return pollingRateHz;
   }
@@ -1316,7 +1375,7 @@ export class LogitechHidppClient {
     }
     const info = parseProfilesInfo(await this.request(feature.index, PROFILE_FN.getInfo));
     const format = describeProfileFormat(info.profileFormatId);
-    if (!format.writable) {
+    if (!isProfileWritable(format.id)) {
       throw new Error(`Profile format ${format.id} profile-content writes have not been verified on hardware.`);
     }
 
@@ -1429,7 +1488,8 @@ export class LogitechHidppClient {
           throw new Error(`Slot ${index + 1} uses a DPI value the connected mouse did not advertise.`);
         }
       }
-      updated = encodeDpiStages(updated, formatId, values.dpiStages, dpiCapabilities);
+      const writeLod = isLodWritableForProduct(formatId, this.device.productId);
+      updated = encodeDpiStages(updated, formatId, values.dpiStages, dpiCapabilities, writeLod);
     }
 
     // The two links are stored separately, so each is set on its own.
@@ -2740,7 +2800,11 @@ export class LogitechHidppClient {
     }
     await this.ensureHostControl();
     // setReportRate(rateMs).
-    await this.request(featureIndex, 0x20, rateMs);
+    try {
+      await this.request(featureIndex, 0x20, rateMs);
+    } catch (error) {
+      throw error instanceof HidppTimeoutError ? error : new LiveRateWriteRejectedError(error);
+    }
     const confirmed = await this.readLegacyReportRate(featureIndex);
     if (confirmed !== pollingRateHz) {
       throw new Error(`The mouse kept ${confirmed} Hz instead of ${pollingRateHz} Hz.`);

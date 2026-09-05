@@ -659,3 +659,35 @@ test("HyperPolling dongle commits an 8 kHz change through both selectors", async
   assert.deepEqual([commit[1], commit[6], commit[7], commit[8], commit[9]], [0xff, 0x00, 0x40, 0x01, 0x01]);
   assert.deepEqual([confirm[1], confirm[6], confirm[7]], [0x1f, 0x00, 0xc0]);
 });
+
+test("a Chrome-refused feature-report write surfaces troubleshooting, not the bare DOMException", async () => {
+  // The reported Viper V3 Pro symptom — "failed to write feature report" — is
+  // Chrome's own `sendFeatureReport` rejection, which carries no explanation.
+  // The very first control command (the firmware read) hits it first, so the
+  // whole status read aborts: the read must surface what to do, not the bare
+  // string. Arrange: every write is refused, the way a Synapse-held control
+  // interface or a Chrome-protected mouse collection refuses them.
+  const device = {
+    vendorId: 0x1532,
+    productId: 0x00c1,
+    productName: "Razer Viper V3 Pro",
+    opened: true,
+    collections: [{ usagePage: 0x01, usage: 0x02, children: [], featureReports: [], inputReports: [], outputReports: [] }],
+    open: async () => {},
+    close: async () => {},
+    sendFeatureReport: async () => {
+      throw new DOMException("Failed to write feature report.", "NotAllowedError");
+    },
+    receiveFeatureReport: async () => new DataView(new Uint8Array(RAZER_PACKET_LENGTH).buffer),
+  } as unknown as HIDDevice;
+  const client = new RazerHidClient(device);
+
+  await assert.rejects(client.readStatus(), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /Viper V3 Pro/);
+    assert.match(error.message, /Failed to write feature report/);
+    assert.match(error.message, /Quit Razer Synapse/);
+    assert.match(error.message, /other Razer Viper interface/);
+    return true;
+  });
+});
