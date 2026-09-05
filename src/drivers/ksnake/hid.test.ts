@@ -62,8 +62,8 @@ describe("ksnake codec", () => {
     assert.deepEqual(config?.stages.slice(0, 4), [800, 1200, 1600, 3200]);
   });
 
-  it("round-trips polling rates", () => {
-    for (const hz of [125, 250, 500, 1000, 2000, 4000, 8000]) {
+  it("round-trips polling rates (X11: 125-1000 Hz)", () => {
+    for (const hz of [125, 250, 500, 1000]) {
       const index = ksnakeEncodePollingRate(hz);
       assert.ok(index !== null);
       assert.equal(ksnakeDecodePollingRate(index as number), hz);

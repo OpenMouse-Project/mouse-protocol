@@ -49,11 +49,14 @@ export class KsnakeHidClient {
   }
 
   get supportedPollingRates(): number[] {
-    return [125, 250, 500, 1000, 2000, 4000, 8000];
+    return [125, 250, 500, 1000];
   }
 
   getDpiOptions(): number[] {
-    return [400, 800, 1200, 1600, 2400, 3200, 5000, 6400, 8000, 12000, 16000, 26000];
+    // PAW3311, vendor slider 200–12000. Defaults: 800/1200/1600/3200/5000/12000.
+    const options: number[] = [];
+    for (let dpi = 200; dpi <= 12000; dpi += 100) options.push(dpi);
+    return options;
   }
 
   async open(): Promise<void> {
@@ -114,10 +117,19 @@ export class KsnakeHidClient {
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
         defaultDisplayName: this.device.productName || "K-snake X11",
+        dpiStageEditor: {
+          maxStages: 6,
+          countEditable: false,
+          minDpi: 200,
+          maxDpi: 12000,
+          stepDpi: 100,
+        },
       },
       batteryPercent: battery ? Math.min(battery.percent, 100) : null,
       batteryState: battery ? (battery.charging !== 0 ? "Charging" : "Discharging") : "Unknown",
       dpi,
+      dpiStages: stages.length ? stages : undefined,
+      activeDpiStage: stages.length ? activeStage : undefined,
       pollingRateHz,
       supportedPollingRates: this.supportedPollingRates,
       activeProfile: null,

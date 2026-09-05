@@ -50,10 +50,11 @@ const GET_BATTERY_TAIL = [0xa5, 0x0b, 0x2e, 0x01, 0x01, 0x00, 0x00, 0x00] as con
 
 /**
  * Polling-rate index ↔ Hz.
- * The vendor panel only stores the index (default 3); index 3 = 1000 Hz is
- * assumed from that default. Confirm the 125–8000 order on hardware.
+ * Confirmed by vendor panel screenshot + PAW3311 spec: X11 offers
+ * 125/250/500/1000 Hz only (1000 Hz in 2.4G/wired, 125 Hz in BT).
+ * Default index 3 = 1000 Hz.
  */
-export const KSNAKE_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000] as const;
+export const KSNAKE_POLLING_RATES = [125, 250, 500, 1000] as const;
 
 export function ksnakeEncodePollingRate(hz: number): number | null {
   const index = (KSNAKE_POLLING_RATES as readonly number[]).indexOf(hz);
