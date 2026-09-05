@@ -1,4 +1,5 @@
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
+import { LINGBAO_PRODUCTS, LINGBAO_VENDOR_ID } from "./lingbao/hid.ts";
 import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
 import {
   LOGITECH_BOLT_PRODUCT_IDS,
@@ -377,6 +378,15 @@ export const WALLHACK_HID_FILTERS: HIDDeviceFilter[] = [
     [WALLHACK_VENDOR_ID, WALLHACK_KEYBOARD_ALT_VENDOR_ID].map((vendorId) => ({ vendorId, productId, usagePage: WALLHACK_KEYBOARD_USAGE_PAGE, usage: WALLHACK_KEYBOARD_USAGE }))),
 ];
 
+/**
+ * The Lingbao M5 Pro's 2.4G receiver and its wired product id. 0x3151 is the
+ * MicLink/mlzn ODM vendor id, shared with unrelated keyboards and mice, so
+ * these are requested per product id rather than vendor-wide.
+ */
+export const LINGBAO_HID_FILTERS: HIDDeviceFilter[] = [...LINGBAO_PRODUCTS.keys()].map(
+  (productId) => ({ vendorId: LINGBAO_VENDOR_ID, productId, usagePage: 0xffff, usage: 0x02 }),
+);
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
@@ -428,6 +438,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...[...NINJUTSO_MOUSE_PRODUCT_IDS, ...NINJUTSO_RECEIVER_PRODUCT_IDS]
     .map((productId) => ({ vendorId: NINJUTSO_VENDOR_ID, productId })),
   ...LOGITECH_RECEIVER_FILTERS,
+  ...LINGBAO_HID_FILTERS,
   // Fantech mice use vendor usage page 0xFFFF, usage 0x02 for configuration.
   { vendorId: VENDOR_ID.fantech, usagePage: 0xffff, usage: 0x02 },
   ...WALLHACK_HID_FILTERS,

@@ -102,4 +102,78 @@ describe("FantechHidClient", () => {
     const client = new FantechHidClient(device);
     await assert.rejects(() => client.setReportRate(9999), /Unsupported rate/);
   });
+
+  it("only advertises polling rates it can encode", () => {
+    const client = new FantechHidClient(fakeDevice());
+    for (const hz of client.supportedPollingRates) {
+      assert.ok(hz in REPORT_RATE_ENCODE, `${hz} Hz is advertised but cannot be encoded`);
+    }
+    assert.deepEqual(client.supportedPollingRates, [125, 500, 1000, 2000, 4000, 8000]);
+  });
+
+  // A device on the wrong protocol family (VID 0x3151 PID 0x402D, measured)
+  // ACKs the write and answers 64 zero bytes. Decoding that used to yield
+  // 1600 DPI and 8000 Hz, both invented.
+  it("getDpi rejects an all-zero response instead of reporting 1600", async () => {
+    const client = new FantechHidClient(fakeDevice());
+    await assert.rejects(() => client.getDpi(), /not answered/);
+  });
+
+  it("getReportRate rejects an all-zero response instead of decoding 8000 Hz", async () => {
+    const client = new FantechHidClient(fakeDevice());
+    await assert.rejects(() => client.getReportRate(), /not answered/);
+  });
+
+  it("readStatus throws when the device answers nothing", async () => {
+    const client = new FantechHidClient(fakeDevice());
+    await assert.rejects(() => client.readStatus(), /did not answer/);
+  });
+
+  it("readStatus reports only what was answered, with no fabricated link type", async () => {
+    const device = fakeDevice({
+      receiveFeatureReport: async () => {
+        const view = new DataView(new ArrayBuffer(64));
+        view.setUint8(2, 3); // report-rate code 3 = 1000 Hz; also DPI slot 3
+        view.setUint8(3, 4); // four DPI slots
+        view.setUint16(8 + 3 * 2, 1600, true);
+        view.setUint16(24 + 3 * 2, 1600, true);
+        return view;
+      },
+    });
+    const status = await new FantechHidClient(device).readStatus();
+    assert.equal(status.dpi, 1600);
+    assert.equal(status.pollingRateHz, 1000);
+    assert.equal(status.ui?.settingsReady, true);
+    assert.equal(status.connectionType, undefined);
+    assert.deepEqual(status.firmware, []);
+  });
+
+  it("setDpiForSlot leaves the other DPI slots untouched", async () => {
+    const sent: Uint8Array[] = [];
+    const device = fakeDevice({
+      sendFeatureReport: async (_id: number, data: ArrayBuffer | ArrayLike<number>) => {
+        sent.push(data instanceof Uint8Array ? data : new Uint8Array(data));
+      },
+      receiveFeatureReport: async () => {
+        const view = new DataView(new ArrayBuffer(64));
+        view.setUint8(2, 0); // active slot
+        view.setUint8(3, 2); // two slots in use
+        view.setUint16(8, 800, true);   // slot 0 X
+        view.setUint16(10, 3200, true); // slot 1 X
+        view.setUint16(24, 800, true);  // slot 0 Y
+        view.setUint16(26, 3200, true); // slot 1 Y
+        return view;
+      },
+    });
+
+    await new FantechHidClient(device).setDpiForSlot(1600, 1600, 0);
+
+    const write = sent[sent.length - 1];
+    const u16 = (buf: Uint8Array, i: number) => buf[i] | (buf[i + 1] << 8);
+    assert.equal(write[0], CMD.SET_DPI);
+    assert.equal(u16(write, 8), 1600);   // slot 0 X updated
+    assert.equal(u16(write, 24), 1600);  // slot 0 Y updated
+    assert.equal(u16(write, 10), 3200);  // slot 1 X carried over
+    assert.equal(u16(write, 26), 3200);  // slot 1 Y carried over
+  });
 });
