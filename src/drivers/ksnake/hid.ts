@@ -52,6 +52,10 @@ export class KsnakeHidClient {
     return [125, 250, 500, 1000, 2000, 4000, 8000];
   }
 
+  getDpiOptions(): number[] {
+    return [400, 800, 1200, 1600, 2400, 3200, 5000, 6400, 8000, 12000, 16000, 26000];
+  }
+
   async open(): Promise<void> {
     if (!this.device.opened) await this.device.open();
   }
