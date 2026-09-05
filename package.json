@@ -17,6 +17,10 @@
       "types": "./dist/atk/index.d.ts",
       "import": "./dist/atk/index.js"
     },
+    "./bitmouse": {
+      "types": "./dist/bitmouse/index.d.ts",
+      "import": "./dist/bitmouse/index.js"
+    },
     "./endgame-gear-we": {
       "types": "./dist/endgame-gear/wireless.d.ts",
       "import": "./dist/endgame-gear/wireless.js"
