@@ -30,6 +30,7 @@ test("supports the Pulsar 4K Wireless Receiver on the shared VGN vendor id", () 
 test("does not claim product ids owned by the Teevolution and VGN drivers", () => {
   assert.equal(PulsarHidClient.isSupported(device(0x3554, 0xf520)), false);
   assert.equal(PulsarHidClient.isSupported(device(0x3554, 0xfb56)), false);
+  assert.equal(PulsarHidClient.isSupported(device(0x3554, 0xf58f)), false);
 });
 
 test("rejects devices without the report-8 control collection", () => {

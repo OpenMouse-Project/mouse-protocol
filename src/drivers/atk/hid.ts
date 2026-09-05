@@ -4,6 +4,7 @@ import {
   WE_REPORT_ID,
   weBuildCmdPayload,
   wePackScalarPair,
+  weUnpackScalarPair,
 } from "@openmouse/protocol/endgame-gear-we";
 import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
@@ -13,24 +14,32 @@ import {
   ATK_VXE_R1_LOD_SELECTOR,
   ATK_VXE_R1_POLLING_RATES,
   ATK_VXE_R1_SETTINGS_REGISTER,
+  ATK_SENSORS,
   atkDecodeLiftOff,
   atkDecodeVxeR1PollingCode,
+  atkDpiOptionsForSensor,
   atkPackDpiStage,
+  atkPackDpiStageForSensor,
   atkPackVxeR1LiveSetting,
   atkPackVxeR1PollingSetting,
   atkUnpackDpiStage,
+  atkUnpackDpiStageForSensor,
 } from "@openmouse/protocol/atk";
+import { type AtkProduct, ATK_COMPX_PRODUCT_IDS, ATK_PRODUCTS } from "./products.ts";
 
 // ATK mice (A9 family and siblings) use the same OEM framing as the Endgame
 // Gear WE series — 16-byte EEPROM commands on report 0x08 — but carry them on
 // output/input reports rather than feature reports.
 const BATTERY_COMMAND = 0x04;
 const VERSION_COMMAND = 0x12;
+const CIDMID_COMMAND = 0x10;
 const FRAME_LENGTH = 16;
 const DATA_OFFSET = 5;
 const MAX_DATA_LENGTH = 10;
 const REPLY_TIMEOUT_MS = 500;
 const WRITE_SETTLE_MS = 10;
+const R1_LIVE_WRITE_SETTLE_MS = 250;
+const MAX_IDENTIFY_ATTEMPTS = 3;
 
 // The VXE R1 SE/SE+ ships its "Wireless mouse -1k dongle" under 0x373b:0x1085
 // (Beken MCU). It shares the A9 EEPROM map for DPI/advanced/lod, but the poll
@@ -99,6 +108,9 @@ export class AtkHidClient {
 
   private queue: Promise<unknown> = Promise.resolve();
   private lastStatus: MouseStatus | null = null;
+  private product: AtkProduct | null = null;
+  private identified = false;
+  private identifyAttempts = 0;
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -108,7 +120,9 @@ export class AtkHidClient {
     const search = (collection: HIDCollectionInfo): boolean =>
       (collection.usagePage === 0xff02 && collection.usage === 0x0002)
       || collection.children.some(search);
-    return device.vendorId === VENDOR_ID.atk && device.collections.some(search);
+    if (!device.collections.some(search)) return false;
+    if (device.vendorId === VENDOR_ID.atk) return true;
+    return device.vendorId === VENDOR_ID.vgn && ATK_COMPX_PRODUCT_IDS.includes(device.productId);
   }
 
   async open(): Promise<void> {
@@ -117,6 +131,9 @@ export class AtkHidClient {
 
   async close(): Promise<void> {
     this.lastStatus = null;
+    this.product = null;
+    this.identified = false;
+    this.identifyAttempts = 0;
     if (this.device.opened) await this.device.close();
   }
 
@@ -126,9 +143,14 @@ export class AtkHidClient {
   }
 
   displayName(): string {
+    if (this.product) return `${this.product.brand} ${this.product.model}`;
     const name = this.device.productName?.trim();
     if (!name) return "ATK";
     return /^atk/i.test(name) ? name : `ATK ${name}`;
+  }
+
+  deviceBrand(): AtkProduct["brand"] {
+    return this.product?.brand ?? (/^vxe\b/i.test(this.device.productName || "") ? "VXE" : "ATK");
   }
 
   /**
@@ -142,11 +164,12 @@ export class AtkHidClient {
 
   /** VXE R1 SE/SE+ on its stock 1K receiver (Beken MCU, per OpenVXE). */
   isR1(): boolean {
-    return this.device.productId === VXE_R1_RECEIVER_PID;
+    return this.product?.family === "r1"
+      || this.usesSharedR1Transport();
   }
 
   maxDpi(): number {
-    return DPI_MAX;
+    return this.product ? ATK_SENSORS[this.product.sensor].maxDpi : DPI_MAX;
   }
 
   getSleepOptions(): readonly number[] {
@@ -168,6 +191,7 @@ export class AtkHidClient {
    * Models top out below 42,000; writes are confirmed by reading back.
    */
   getDpiOptions(): number[] {
+    if (this.product) return atkDpiOptionsForSensor(this.product.sensor);
     const options: number[] = [];
     for (let dpi = DPI_MIN; dpi <= 10000; dpi += 10) options.push(dpi);
     for (let dpi = 10050; dpi <= 30000; dpi += 50) options.push(dpi);
@@ -177,13 +201,16 @@ export class AtkHidClient {
 
   async readStatus(live = false): Promise<MouseStatus> {
     await this.open();
+    await this.identify();
     const battery = await this.readBattery();
     const system = await this.read(REGISTER.system, SYSTEM_LENGTH);
     const stage = await this.readDpiStage(this.stageIndex(system));
     if (live && this.lastStatus) {
       return this.lastStatus = {
         ...this.lastStatus,
-        batteryPercent: battery,
+        batteryPercent: battery?.percent ?? null,
+        batteryState: batteryState(battery),
+        batteryVoltageMv: battery?.millivolts ?? null,
         pollingRateHz: await this.readPollingRate(system),
         dpi: stage.x,
         dpiY: stage.y,
@@ -193,16 +220,19 @@ export class AtkHidClient {
     const liftOffDistance = await this.read(REGISTER.liftOffDistance, 2);
     const advanced = await this.read(REGISTER.advanced, ADVANCED_LENGTH);
     const angle = await this.read(REGISTER.angle, ANGLE_LENGTH).catch(() => null);
+    const angleTuning = angle ? weUnpackScalarPair(angle[0], angle[1]) : null;
+    const angleSnapping = angle ? weUnpackScalarPair(angle[2], angle[3]) : null;
     return this.lastStatus = {
-      brand: "ATK",
+      brand: this.deviceBrand(),
       name: this.displayName(),
       ui: {
         family: "atk",
         hideUnsupportedPollingRates: true,
         forceShowBattery: battery !== null,
       },
-      batteryPercent: battery,
-      batteryState: "Unknown",
+      batteryPercent: battery?.percent ?? null,
+      batteryState: batteryState(battery),
+      batteryVoltageMv: battery?.millivolts ?? null,
       dpi: stage.x,
       dpiY: stage.y,
       supportsSeparateDpiAxes: false,
@@ -215,8 +245,8 @@ export class AtkHidClient {
       motionSync: advanced[2] === 1,
       sleepTimeout: advanced[4] * SLEEP_STEP_SECONDS || null,
       rippleControl: advanced[8] === 1,
-      angleSnapping: angle ? angle[2] === 1 : null,
-      angleTuning: angle ? this.decodeAngle(angle[0]) : null,
+      angleSnapping: angleSnapping === null ? null : angleSnapping === 1,
+      angleTuning: angleTuning === null ? null : this.decodeAngle(angleTuning),
       liftOffDistance: this.decodeLiftOffDistance(liftOffDistance[0]),
       supportedLiftOffDistances: this.isR1() ? ["Low", "High"] : undefined,
       firmware,
@@ -224,6 +254,7 @@ export class AtkHidClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
+    if (!this.isR1()) await this.identify();
     if (this.isR1()) return await this.setR1PollingRate(pollingRateHz);
     const encoded = POLLING_RATES.find(([, hertz]) => hertz === pollingRateHz);
     if (!encoded) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
@@ -237,13 +268,18 @@ export class AtkHidClient {
   }
 
   async setDpi(dpi: number, dpiY: number = dpi): Promise<number> {
+    await this.identify();
+    const sensor = this.product?.sensor ?? null;
+    const options = sensor ? atkDpiOptionsForSensor(sensor) : null;
     for (const value of [dpi, dpiY]) {
-      if (!Number.isInteger(value) || value < DPI_MIN || value > DPI_MAX) {
+      if (!Number.isInteger(value) || (options ? !options.includes(value) : value < DPI_MIN || value > DPI_MAX)) {
         throw new Error(`${value.toLocaleString()} is not a supported DPI value.`);
       }
     }
     const index = this.stageIndex(await this.read(REGISTER.system, SYSTEM_LENGTH));
-    await this.write(this.dpiAddress(index), atkPackDpiStage(dpi, dpiY));
+    const stage = sensor ? atkPackDpiStageForSensor(sensor, dpi, dpiY) : atkPackDpiStage(dpi, dpiY);
+    if (!stage) throw new Error(`${dpi.toLocaleString()} DPI is not representable by this sensor.`);
+    await this.write(this.dpiAddress(index), stage);
     const confirmed = await this.readDpiStage(index);
     if (confirmed.x !== dpi || confirmed.y !== dpiY) {
       throw new Error(`The mouse kept ${confirmed.x.toLocaleString()} DPI instead of ${dpi.toLocaleString()}.`);
@@ -253,6 +289,7 @@ export class AtkHidClient {
   }
 
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
+    if (!this.isR1()) await this.identify();
     if (this.isR1()) return await this.setR1LiftOffDistance(value);
     const encoded = LIFT_OFF_CODES.find(([, name]) => name === value);
     if (!encoded) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
@@ -274,6 +311,7 @@ export class AtkHidClient {
   }
 
   async setAngleSnapping(enabled: boolean): Promise<boolean> {
+    if (!this.isR1()) await this.identify();
     if (this.isR1()) return await this.setR1AngleSnapping(enabled);
     const group = await this.read(REGISTER.angle, ANGLE_LENGTH);
     await this.write(REGISTER.angle, [group[0], enabled ? 1 : 0].flatMap((value) => wePackScalarPair(value)));
@@ -284,6 +322,7 @@ export class AtkHidClient {
   }
 
   async setDebounceTime(milliseconds: number): Promise<number> {
+    if (!this.isR1()) await this.identify();
     if (this.isR1()) return await this.setR1DebounceTime(milliseconds);
     if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > DEBOUNCE_MAX_MS) {
       throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${DEBOUNCE_MAX_MS}.`);
@@ -334,7 +373,10 @@ export class AtkHidClient {
   }
 
   private async readDpiStage(index: number): Promise<{ x: number; y: number }> {
-    const stage = atkUnpackDpiStage(await this.read(this.dpiAddress(index), DPI_STAGE_LENGTH));
+    const data = await this.read(this.dpiAddress(index), DPI_STAGE_LENGTH);
+    const stage = this.product
+      ? atkUnpackDpiStageForSensor(this.product.sensor, data)
+      : atkUnpackDpiStage(data);
     if (!stage) throw new Error("The mouse reported a DPI stage that failed its checksum.");
     return stage;
   }
@@ -385,6 +427,7 @@ export class AtkHidClient {
     if (!data) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
     await this.write(ATK_VXE_R1_SETTINGS_REGISTER, data);
     const confirmed = await this.readPollingRate();
+    await delay(R1_LIVE_WRITE_SETTLE_MS);
     this.patch({ pollingRateHz: confirmed });
     return confirmed;
   }
@@ -394,6 +437,7 @@ export class AtkHidClient {
     const encoded = R1_LIFT_OFF_CODES.find(([, name]) => name === value);
     if (!encoded) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
     await this.write(ATK_VXE_R1_SETTINGS_REGISTER, atkPackVxeR1LiveSetting(ATK_VXE_R1_LOD_SELECTOR, encoded[0]));
+    await delay(R1_LIVE_WRITE_SETTLE_MS);
     this.patch({ liftOffDistance: value });
     return value;
   }
@@ -406,6 +450,7 @@ export class AtkHidClient {
       ATK_VXE_R1_SETTINGS_REGISTER,
       atkPackVxeR1LiveSetting(ATK_VXE_R1_DEBOUNCE_SELECTOR, milliseconds),
     );
+    await delay(R1_LIVE_WRITE_SETTLE_MS);
     this.patch({ debounceMs: milliseconds });
     return milliseconds;
   }
@@ -415,12 +460,42 @@ export class AtkHidClient {
       ATK_VXE_R1_SETTINGS_REGISTER,
       atkPackVxeR1LiveSetting(ATK_VXE_R1_ANGLE_SELECTOR, enabled ? 0x10 : 0x00),
     );
+    await delay(R1_LIVE_WRITE_SETTLE_MS);
     this.patch({ angleSnapping: enabled });
     return enabled;
   }
 
   private patch(changes: Partial<MouseStatus>): void {
     if (this.lastStatus) this.lastStatus = { ...this.lastStatus, ...changes };
+  }
+
+  private async identify(): Promise<void> {
+    if (this.identified) return;
+    if (this.identifyAttempts >= MAX_IDENTIFY_ATTEMPTS) {
+      if (this.usesSharedR1Transport()) {
+        throw new Error("The VXE R1 did not answer CID/MID; refusing to use the fallback DPI codec.");
+      }
+      return;
+    }
+    this.identifyAttempts += 1;
+    const reply = await this.exchange(
+      weBuildCmdPayload(CIDMID_COMMAND),
+      (frame) => frame[0] === CIDMID_COMMAND && frame[4] >= 2,
+    ).catch(() => null);
+    if (!reply) {
+      if (this.usesSharedR1Transport()) {
+        throw new Error("The VXE R1 did not answer CID/MID; refusing to use the fallback DPI codec.");
+      }
+      return;
+    }
+    this.identified = true;
+    this.product = ATK_PRODUCTS[`${reply[DATA_OFFSET]},${reply[DATA_OFFSET + 1]}`] ?? null;
+  }
+
+  private usesSharedR1Transport(): boolean {
+    return this.device.productId === VXE_R1_RECEIVER_PID
+      || (this.device.vendorId === VENDOR_ID.vgn && this.device.productId === 0xf58f)
+      || /\bvxe\s+r1(?:\s*se\+?)?\b/i.test(this.device.productName || "");
   }
 
   /**
@@ -439,12 +514,23 @@ export class AtkHidClient {
     return [`Mouse ${Number(bcd(data[0]))}.${bcd(data[1])}`];
   }
 
-  private async readBattery(): Promise<number | null> {
+  private async readBattery(): Promise<{
+    percent: number | null;
+    charging: boolean | null;
+    millivolts: number | null;
+  } | null> {
     const reply = await this.exchange(
       weBuildCmdPayload(BATTERY_COMMAND),
       (frame) => frame[0] === BATTERY_COMMAND,
     ).catch(() => null);
-    return reply ? Math.min(reply[DATA_OFFSET], 100) : null;
+    if (!reply) return null;
+    const length = Math.min(reply[4], MAX_DATA_LENGTH);
+    const millivolts = length >= 4 ? (reply[DATA_OFFSET + 2] << 8) | reply[DATA_OFFSET + 3] : 0;
+    return {
+      percent: length >= 1 ? Math.min(reply[DATA_OFFSET], 100) : null,
+      charging: length >= 2 ? reply[DATA_OFFSET + 1] !== 0 : null,
+      millivolts: millivolts > 0 ? millivolts : null,
+    };
   }
 
   private async read(address: number, length: number): Promise<Uint8Array> {
@@ -510,6 +596,11 @@ export class AtkHidClient {
 
 function copyDataView(view: DataView): Uint8Array {
   return new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
+}
+
+function batteryState(battery: { charging: boolean | null } | null): MouseStatus["batteryState"] {
+  if (!battery || battery.charging === null) return "Unknown";
+  return battery.charging ? "Charging" : "Discharging";
 }
 
 function delay(milliseconds: number): Promise<void> {

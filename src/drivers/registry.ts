@@ -111,5 +111,6 @@ export function clientSupportScore(device: HIDDevice): number {
 export function deviceBrand(client: SupportedClient): string {
   if (client instanceof EggOp1HidClient || isEggWeClient(client)) return "Endgame Gear";
   if (client instanceof LamzuHidClient) return client.deviceBrand();
+  if (client instanceof AtkHidClient) return client.deviceBrand();
   return driverFor(client.device)?.brand ?? "Unknown";
 }

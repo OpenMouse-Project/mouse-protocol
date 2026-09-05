@@ -15,6 +15,42 @@
 
 const CHECKSUM_TOTAL = 0x55;
 
+export type AtkSensor =
+  | "PAW3950Ultra"
+  | "PAW3950"
+  | "PAW3950DM"
+  | "PAW3395Ultra"
+  | "PAW3395"
+  | "PAW3395SE"
+  | "CORE26K";
+
+export type AtkDpiFamily = "ultra" | "step50" | "paw3395se";
+
+export interface AtkSensorProfile {
+  family: AtkDpiFamily;
+  minDpi: number;
+  maxDpi: number;
+}
+
+/** Limits and encoding families transcribed from ATK HUB 3.2.21. */
+export const ATK_SENSORS: Record<AtkSensor, AtkSensorProfile> = {
+  PAW3950Ultra: { family: "ultra", minDpi: 10, maxDpi: 42000 },
+  PAW3950: { family: "step50", minDpi: 50, maxDpi: 36000 },
+  PAW3950DM: { family: "step50", minDpi: 50, maxDpi: 36000 },
+  PAW3395Ultra: { family: "step50", minDpi: 100, maxDpi: 30000 },
+  PAW3395: { family: "step50", minDpi: 100, maxDpi: 30000 },
+  PAW3395SE: { family: "paw3395se", minDpi: 200, maxDpi: 18000 },
+  CORE26K: { family: "step50", minDpi: 50, maxDpi: 26000 },
+};
+
+const PAW3395SE_INVALID_CODES = new Set([
+  7, 13, 20, 26, 33, 40, 46, 53, 60, 66, 73, 80, 86, 93, 100, 106, 113,
+  120, 126, 133, 140, 146, 153, 160, 166, 173, 180, 186, 193, 200, 206,
+  213, 220, 226, 233,
+]);
+const PAW3395SE_CODES = Array.from({ length: 235 }, (_, index) => index + 1)
+  .filter((code) => !PAW3395SE_INVALID_CODES.has(code));
+
 /**
  * Per-axis mode nibble: bits 2-3 extend the value byte, bit 1 selects the
  * 50-DPI step range above 10,000, bit 0 doubles the result above 30,000.
@@ -57,6 +93,91 @@ export function atkUnpackDpiStage(data: Uint8Array | readonly number[]): { x: nu
     x: atkDecodeDpiAxis(data[0]!, data[2]! & 0x0f),
     y: atkDecodeDpiAxis(data[1]!, (data[2]! >> 4) & 0x0f),
   };
+}
+
+function atkEncodeDpiAxisStep50(dpi: number): { byte: number; nibble: number } {
+  const doubled = dpi > 30000;
+  const count = Math.round(dpi / (doubled ? 100 : 50)) - 1;
+  return { byte: count & 0xff, nibble: (((count >> 8) & 0x03) << 2) | (doubled ? 1 : 0) };
+}
+
+function atkDecodeDpiAxisStep50(byte: number, nibble: number): number {
+  const count = (byte & 0xff) | (((nibble >> 2) & 0x03) << 8);
+  const dpi = (count + 1) * 50;
+  return (nibble & 1) !== 0 ? dpi * 2 : dpi;
+}
+
+function atkEncodeDpiAxisPaw3395Se(dpi: number): { byte: number; nibble: number } | null {
+  const doubled = dpi > 10000;
+  const baseDpi = doubled ? dpi / 2 : dpi;
+  if (!Number.isInteger(baseDpi) || baseDpi < 50 || baseDpi > 10000 || baseDpi % 50 !== 0) return null;
+  const code = PAW3395SE_CODES[baseDpi / 50 - 1];
+  return code === undefined ? null : { byte: code, nibble: doubled ? 2 : 0 };
+}
+
+function atkDecodeDpiAxisPaw3395Se(byte: number, nibble: number): number | null {
+  if ((nibble & ~2) !== 0) return null;
+  const index = PAW3395SE_CODES.indexOf(byte & 0xff);
+  if (index < 0) return null;
+  const baseDpi = (index + 1) * 50;
+  if ((nibble & 2) !== 0) return baseDpi > 5000 ? baseDpi * 2 : null;
+  return baseDpi;
+}
+
+export function atkPackDpiStageForSensor(sensor: AtkSensor | null, x: number, y: number): number[] | null {
+  if (sensor) {
+    const options = atkDpiOptionsForSensor(sensor);
+    if (!options.includes(x) || !options.includes(y)) return null;
+  }
+  const family = sensor ? ATK_SENSORS[sensor].family : "ultra";
+  const encode = family === "paw3395se"
+    ? atkEncodeDpiAxisPaw3395Se
+    : family === "step50"
+      ? atkEncodeDpiAxisStep50
+      : atkEncodeDpiAxis;
+  const encodedX = encode(x);
+  const encodedY = encode(y);
+  if (!encodedX || !encodedY) return null;
+  const mode = ((encodedY.nibble & 0x0f) << 4) | (encodedX.nibble & 0x0f);
+  const sum = (encodedX.byte + encodedY.byte + mode) & 0xff;
+  return [encodedX.byte, encodedY.byte, mode, (CHECKSUM_TOTAL - sum) & 0xff];
+}
+
+export function atkUnpackDpiStageForSensor(
+  sensor: AtkSensor | null,
+  data: Uint8Array | readonly number[],
+): { x: number; y: number } | null {
+  if (data.length < 4 || (data[0]! + data[1]! + data[2]! + data[3]!) % 0x100 !== CHECKSUM_TOTAL) return null;
+  const family = sensor ? ATK_SENSORS[sensor].family : "ultra";
+  const decode = family === "paw3395se"
+    ? atkDecodeDpiAxisPaw3395Se
+    : family === "step50"
+      ? atkDecodeDpiAxisStep50
+      : atkDecodeDpiAxis;
+  const x = decode(data[0]!, data[2]! & 0x0f);
+  const y = decode(data[1]!, (data[2]! >> 4) & 0x0f);
+  return x === null || y === null ? null : { x, y };
+}
+
+export function atkDpiOptionsForSensor(sensor: AtkSensor): number[] {
+  const profile = ATK_SENSORS[sensor];
+  if (profile.family === "ultra") {
+    const options: number[] = [];
+    for (let dpi = profile.minDpi; dpi <= 10000; dpi += 10) options.push(dpi);
+    for (let dpi = 10050; dpi <= 30000; dpi += 50) options.push(dpi);
+    for (let dpi = 30100; dpi <= profile.maxDpi; dpi += 100) options.push(dpi);
+    return options;
+  }
+  if (profile.family === "paw3395se") {
+    const options: number[] = [];
+    for (let dpi = profile.minDpi; dpi <= 10000; dpi += 50) options.push(dpi);
+    for (let dpi = 10100; dpi <= profile.maxDpi; dpi += 100) options.push(dpi);
+    return options;
+  }
+  const options: number[] = [];
+  for (let dpi = profile.minDpi; dpi <= Math.min(profile.maxDpi, 30000); dpi += 50) options.push(dpi);
+  for (let dpi = 30100; dpi <= profile.maxDpi; dpi += 100) options.push(dpi);
+  return options;
 }
 
 /** Register holds tenths of a millimetre offset by 6 (code 1 = 0.7 mm). */
@@ -111,4 +232,3 @@ export function atkPackVxeR1PollingSetting(pollingRateHz: number): number[] | nu
 export function atkDecodeVxeR1PollingCode(code: number): number | null {
   return VXE_POLLING_CODES.find(([value]) => (value & 0xff) === (code & 0xff))?.[1] ?? null;
 }
-

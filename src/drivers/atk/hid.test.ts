@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { atkPackDpiStage } from "@openmouse/protocol/atk";
 import { AtkHidClient } from "./hid.ts";
+import { PulsarHidClient } from "../pulsar/pulsar-hid.ts";
+import { createSupportedClient, deviceBrand } from "../registry.ts";
+import { SUPPORTED_HID_FILTERS } from "../vendors.ts";
 
 type Sent = { reportId: number; data: Uint8Array };
 
 /**
- * Minimal controllable stand-in for the R1 dongle: it records outgoing frames
+ * Minimal controllable stand-in for an ATK/VXE config interface: it records outgoing frames
  * and answers each incoming read with the next queued reply, dispatching the
  * input report on an idle callback so the driver's exchange promise resolves.
  */
@@ -26,6 +30,8 @@ class FakeAtkDevice {
 
   readonly sent: Sent[] = [];
   replies: number[][] = [];
+  identifyFailures = 0;
+  ignoredCommands = new Set<number>();
   private listeners = new Set<(event: HIDInputReportEvent) => void>();
 
   async open(): Promise<void> {
@@ -58,8 +64,13 @@ class FakeAtkDevice {
     const frame = new Uint8Array(data);
     this.sent.push({ reportId, data: frame });
     // EEPROM writes (0x07) are fire-and-forget; read and informational
-    // commands (0x04 battery, 0x08 EEPROM, 0x12 version) get a reply.
+    // commands (0x04 battery, 0x08 EEPROM, 0x10 identity, 0x12 version) get a reply.
     if (frame[0] === 0x07) return;
+    if (frame[0] === 0x10 && this.identifyFailures > 0) {
+      this.identifyFailures -= 1;
+      throw new Error("mouse asleep");
+    }
+    if (this.ignoredCommands.has(frame[0]!)) return;
     const reply = this.replies.shift();
     if (!reply) return;
     const payload = new Uint8Array(reply);
@@ -127,6 +138,21 @@ test("support is limited to 0x373b with the vendor config collection", () => {
   assert.equal(AtkHidClient.isSupported(device(0x1085)), true);
   assert.equal(AtkHidClient.isSupported(device(0x11d5, "ATK dongle")), true);
   assert.equal(AtkHidClient.isSupported({ ...device(), vendorId: 0x1234 }), false);
+});
+
+test("wired R1 SE+ is claimed without overlapping the Pulsar fallback", () => {
+  const wired = device(0xf58f, "VXE R1SE+");
+  Object.assign(wired, { vendorId: 0x3554 });
+  const collection = wired.collections[0]!;
+  collection.inputReports = [{ reportId: 0x08, items: [] }];
+  collection.outputReports = [{ reportId: 0x08, items: [] }];
+
+  assert.equal(AtkHidClient.isSupported(wired), true);
+  assert.equal(PulsarHidClient.isSupported(wired), false);
+  assert.ok(createSupportedClient(wired) instanceof AtkHidClient);
+  assert.equal(SUPPORTED_HID_FILTERS.some((filter) =>
+    filter.vendorId === 0x3554 && filter.productId === 0xf58f
+      && filter.usagePage === 0xff02 && filter.usage === 2), true);
 });
 
 test("R1 receiver advertises only its stock polling rates", () => {
@@ -216,26 +242,111 @@ test("NON-R1 debounce ceiling still applies on the A9 family", () => {
   assert.equal(new AtkHidClient(device(0x11d5, "ATK dongle")).getDebounceMaxMs(), 15);
 });
 
-test("R1 readStatus hides the unsupported medium lift-off level", async () => {
-  const fake = device(0x1085);
+test("wired R1 SE+ status uses identity, PAW3395SE, battery, and R1 live settings", async () => {
+  const fake = device(0xf58f, "VXE R1SE+");
+  Object.assign(fake, { vendorId: 0x3554 });
   (fake as unknown as FakeAtkDevice).replies = [
-    reply(0x04, 0x0000, [0x5f]),
-    reply(0x08, 0x0000, [0x40, 0x15, 0x02, 0x53, 0x00, 0x55]),
-    reply(0x08, 0x000c, [0x4f, 0x4f, 0x00, 0xb7]),
-    reply(0x12, 0x0000, [0x03, 0x13]),
-    reply(0x08, 0x000a, [0x04, 0x51]),
-    reply(0x08, 0x00a9, [0x08, 0x4d, 0x00, 0x55, 0x1e, 0x37, 0x00, 0x55, 0x00, 0x55]),
-    reply(0x08, 0x00bd, [0xff, 0xff, 0xff, 0xff]),
-    reply(0x08, 0x0070, [0x01, 0x10, 0x00, 0x44]),
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    reply(0x04, 0x0000, [0x5f, 0x01]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x02, 0x53, 0x00, 0x55]),
+    reply(0x08, 0x000c, [0x12, 0x12, 0x00, 0x31]),
+    reply(0x12, 0x0000, [0x03, 0x15]),
+    reply(0x08, 0x000a, [0x01, 0x54]),
+    reply(0x08, 0x00a9, [0x00, 0x55, 0x00, 0x55, 0x06, 0x4f, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00bd, [0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x0070, [0x01, 0x08, 0x00, 0x4c]),
   ];
   const client = new AtkHidClient(fake);
 
   const status = await client.readStatus();
+  assert.equal(status.brand, "VXE");
+  assert.equal(status.name, "VXE R1 SE+");
+  assert.equal(deviceBrand(client), "VXE");
+  assert.equal(status.dpi, 800);
+  assert.equal(status.batteryPercent, 95);
+  assert.equal(status.batteryState, "Charging");
+  assert.equal(status.batteryVoltageMv, null);
+  assert.deepEqual(status.firmware, ["Mouse 3.15"]);
   assert.deepEqual(status.supportedLiftOffDistances, ["Low", "High"]);
   assert.equal(status.pollingRateHz, 1000);
-  assert.equal(status.liftOffDistance, "Medium");
-  assert.equal(status.debounceMs, 8);
+  assert.equal(status.liftOffDistance, "Low");
+  assert.equal(status.debounceMs, 0);
   assert.equal(status.motionSync, false);
-  assert.equal(status.sleepTimeout, 300);
+  assert.equal(status.sleepTimeout, 60);
   assert.equal(status.angleSnapping, false);
+  assert.equal(status.angleTuning, 0);
+});
+
+test("R1 receiver readStatus fails before fallback decoding when CID/MID times out", async () => {
+  const fake = device(0x1085);
+  const client = new AtkHidClient(fake);
+
+  await assert.rejects(client.readStatus(), /did not answer CID\/MID; refusing to use the fallback DPI codec/);
+  assert.deepEqual((fake as unknown as FakeAtkDevice).sent.map(({ data }) => data[0]), [0x10]);
+});
+
+test("wired R1 setDpi fails before fallback writing when CID/MID times out", async () => {
+  const fake = device(0xf58f, "VXE R1SE+");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const client = new AtkHidClient(fake);
+
+  await assert.rejects(client.setDpi(800), /did not answer CID\/MID; refusing to use the fallback DPI codec/);
+  assert.deepEqual(raw.sent.map(({ data }) => data[0]), [0x10]);
+});
+
+test("R1 stays fail-closed after its CID/MID retry budget is exhausted", async () => {
+  const fake = device(0x1085);
+  const raw = fake as unknown as FakeAtkDevice;
+  raw.identifyFailures = 3;
+  const client = new AtkHidClient(fake);
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await assert.rejects(client.setDpi(800), /did not answer CID\/MID; refusing to use the fallback DPI codec/);
+  }
+  assert.deepEqual(raw.sent.map(({ data }) => data[0]), [0x10, 0x10, 0x10]);
+});
+
+test("generic ATK setDpi retains fallback when CID/MID does not answer", async () => {
+  const fake = device(0x11d5, "ATK dongle");
+  const raw = fake as unknown as FakeAtkDevice;
+  raw.ignoredCommands.add(0x10);
+  raw.replies = [
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x000c, atkPackDpiStage(800, 800)),
+  ];
+
+  assert.equal(await new AtkHidClient(fake).setDpi(800), 800);
+  assert.deepEqual(Array.from(wrote(fake).subarray(5, 9)), atkPackDpiStage(800, 800));
+});
+
+test("successful unknown CID/MID uses the generic fallback codec", async () => {
+  const fake = device(0x11d5, "ATK dongle");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0xfe, 0xed]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x000c, atkPackDpiStage(800, 800)),
+  ];
+
+  assert.equal(await new AtkHidClient(fake).setDpi(800), 800);
+  assert.deepEqual(Array.from(wrote(fake).subarray(5, 9)), atkPackDpiStage(800, 800));
+});
+
+test("one-byte battery reply leaves state and voltage unknown", async () => {
+  const fake = device(0x11d5, "ATK dongle");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0xfe, 0xed]),
+    reply(0x04, 0x0000, [0x5f]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x000c, atkPackDpiStage(800, 800)),
+    reply(0x12, 0x0000, [0x01, 0x23]),
+    reply(0x08, 0x000a, [0x04, 0x51]),
+    reply(0x08, 0x00a9, [0x08, 0x4d, 0x00, 0x55, 0x1e, 0x37, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00bd, [0x00, 0x55, 0x00, 0x55]),
+  ];
+
+  const status = await new AtkHidClient(fake).readStatus();
+  assert.equal(status.batteryPercent, 95);
+  assert.equal(status.batteryState, "Unknown");
+  assert.equal(status.batteryVoltageMv, null);
 });
