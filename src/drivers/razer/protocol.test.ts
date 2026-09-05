@@ -35,6 +35,8 @@ import {
   razerSetLiftOffCommand,
   razerSetTrackingDistanceCommand,
   razerEnableAsymmetricLiftOffCommand,
+  razerEnableAsymmetricLiftOffCanonicalCommand,
+  razerEnableSensorCalibrationCommand,
   razerSetLowPowerThresholdCommand,
   razerSetSleepTimeoutCommand,
   RAZER_BUTTON_CONTROLS,
@@ -522,6 +524,27 @@ test("the asymmetric unlock is the same command with setting 04", () => {
 
   assert.deepEqual([packet[5], packet[6], packet[7]], [0x04, 0x0b, 0x0b]);
   assert.deepEqual([...packet.slice(8, 12)], [0x00, 0x04, 0x04, 0x01]);
+  assert.equal(packet[88], razerChecksum(packet));
+});
+
+test("the canonical unlock is the same command with value 00", () => {
+  // The fallback arm for a unit that refuses the 0x01 form: verified on 1.14
+  // only, so it is never the shipped unlock.
+  const packet = encodeRazerRequest(razerEnableAsymmetricLiftOffCanonicalCommand());
+
+  assert.deepEqual([packet[5], packet[6], packet[7]], [0x04, 0x0b, 0x0b]);
+  assert.deepEqual([...packet.slice(8, 12)], [0x00, 0x04, 0x04, 0x00]);
+  assert.equal(packet[88], razerChecksum(packet));
+});
+
+test("the calibration-mode arm carries the sensor selector", () => {
+  // `0x0b`/`0x03` `00 04 01`, sent only as the last-resort arm before a pair
+  // write; the layout is read off the experiment notes, not verified on
+  // hardware, so the bytes are pinned here as the shipped driver sends them.
+  const packet = encodeRazerRequest(razerEnableSensorCalibrationCommand());
+
+  assert.deepEqual([packet[5], packet[6], packet[7]], [0x03, 0x0b, 0x03]);
+  assert.deepEqual([...packet.slice(8, 11)], [0x00, 0x04, 0x01]);
   assert.equal(packet[88], razerChecksum(packet));
 });
 
