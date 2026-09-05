@@ -15,5 +15,5 @@ export const ATK_PRODUCTS: Record<string, AtkProduct> = {
   "2,32": { brand: "VXE", model: "R1 SE+", sensor: "PAW3395SE", family: "r1", verified: true },
 };
 
-/** Known VXE wired transports under COMPX's shared vendor id. */
-export const ATK_COMPX_PRODUCT_IDS: readonly number[] = [0xf58f];
+/** Known VXE R1 SE+ transports under COMPX's shared vendor id. */
+export const ATK_COMPX_PRODUCT_IDS: readonly number[] = [0xf58e, 0xf58f];

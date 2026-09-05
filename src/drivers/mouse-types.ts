@@ -65,6 +65,12 @@ export interface MouseUiHints {
     maxDpi: number;
     stepDpi: number;
   };
+  /** Simple DPI indicator modes normalized as 0 off, 1 steady, 2 breathing. */
+  dpiLighting?: {
+    modes: readonly (0 | 1 | 2)[];
+    brightness: readonly number[];
+    speed: readonly number[];
+  };
 }
 
 /**
@@ -117,6 +123,26 @@ export type MouseLightingMode =
   | "Breathing single"
   | "Breathing dual";
 
+export interface AtkStoredButton {
+  id: "left" | "right" | "middle" | "back" | "forward" | "bottom";
+  name: string;
+  address: number;
+  keyClass: number;
+  value1: number;
+  value2: number;
+  checksumValid: boolean;
+  action: string;
+  raw: string;
+}
+
+export interface AtkReceiverInfo {
+  online: boolean;
+  status: number;
+  rfId: string;
+  pairingStatus: number | null;
+  pairingSecondsRemaining: number | null;
+}
+
 export interface MouseStatus {
   brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious";
   name: string;
@@ -138,6 +164,12 @@ export interface MouseStatus {
   pollingRateHz: number;
   supportedPollingRates?: number[];
   activeProfile: number | null;
+  /** Number of firmware-managed ATK configuration banks, when readable. */
+  atkProfileCount?: number;
+  /** Lossless, read-only ATK button assignments from the active configuration bank. */
+  atkButtonMappings?: AtkStoredButton[];
+  /** Receiver and pairing telemetry. Pairing controls are intentionally separate. */
+  atkReceiver?: AtkReceiverInfo;
   deviceMode?: "Onboard" | "Host" | "Unknown";
   unitId?: string | null;
   modelId?: string | null;
@@ -156,6 +188,8 @@ export interface MouseStatus {
   motionSync?: boolean | null;
   /** On-device DPI stages, where supported (Teevolution, Ninjutso, …). */
   dpiStages?: number[];
+  /** RGB colour for each DPI stage, as lowercase #rrggbb. */
+  dpiStageColors?: string[];
   /** Active DPI stage index into `dpiStages` (0-based). */
   activeDpiStage?: number;
   ninjutsoSystemMode?: "High Speed" | "Competitive" | "Ultra" | null;
@@ -195,6 +229,7 @@ export interface MouseStatus {
   napeLayerCount?: number;
   performanceMode?: boolean | null;
   hyperMode?: boolean | null;
+  longRangeMode?: boolean | null;
   sensorMode?: "Eco" | "High" | "Ultra" | null;
   sensorModeStored?: 0 | 1 | null;
   sensorModeEditable?: boolean | null;
