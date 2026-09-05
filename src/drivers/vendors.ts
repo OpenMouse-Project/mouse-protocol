@@ -77,6 +77,8 @@ export const VENDOR_ID = {
   gloriousClassicI: 0x22d4, // original Model I
   gloriousClassicIWired: 0x320f, // Model O V2 / Model I 2 wired
   gloriousO3: 0x3794, // Model O3 Wireless / receiver (newer CORE-v2 generation)
+  ksnakeUsb: 0xa8a4, // K-snake X11 wired
+  ksnakeDongle: 0xa8a5, // K-snake X11 2.4 GHz dongle
 } as const;
 
 /**
@@ -435,4 +437,8 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...STEELSERIES_RIVAL3_FILTERS,
   { vendorId: VENDOR_ID.glorious },
   ...GLORIOUS_CLASSIC_HID_FILTERS,
+  // K-snake X11 exposes its 0x55-framed control channel on 0xFF01:0x10 for
+  // both the wired USB VID and the 2.4 GHz dongle VID.
+  { vendorId: VENDOR_ID.ksnakeUsb, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
+  { vendorId: VENDOR_ID.ksnakeDongle, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
 ];

@@ -120,6 +120,10 @@
     "./glorious-classic": {
       "types": "./dist/glorious-classic/index.d.ts",
       "import": "./dist/glorious-classic/index.js"
+    },
+    "./ksnake": {
+      "types": "./dist/ksnake/index.d.ts",
+      "import": "./dist/ksnake/index.js"
     }
   },
   "scripts": {
