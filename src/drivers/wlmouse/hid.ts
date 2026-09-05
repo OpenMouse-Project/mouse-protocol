@@ -70,7 +70,7 @@ const PROFILE_READ = {
   debounce: (profile: number): WLMouseRequest =>
     ({ target: TARGET.mouse, page: PAGE.device, command: 0x88, length: 0x02, args: [profile] }),
   dpiStages: (profile: number): WLMouseRequest =>
-    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x81, length: 0x0a, args: [profile, 0x06] }),
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x81, length: 0x0a, args: [profile, DPI_STAGE_MAX] }),
   activeStage: (profile: number): WLMouseRequest =>
     ({ target: TARGET.mouse, page: PAGE.profile, command: 0x82, length: 0x02, args: [profile] }),
   pollingRate: (profile: number): WLMouseRequest =>
@@ -89,6 +89,11 @@ const PROFILE_READ = {
 
 const WRITE = {
   dpiStages: 0x01,
+  // Not seen in a capture: every other command here pairs its 0x8X read with
+  // the same byte minus the high bit, and `activeStage` reads 0x82. The
+  // read-back in `setActiveDpiStage` turns a wrong guess into a plain error,
+  // and the mouse answers an unknown command with `unsupported`.
+  activeStage: 0x02,
   pollingRate: 0x00,
   liftOffDistance: 0x08,
   sleepTimeout: 0x07,
@@ -98,6 +103,7 @@ const WRITE = {
   rippleControl: 0x0a,
 } as const;
 
+const DPI_STAGE_MAX = 6;
 const DEBOUNCE_MAX_MS = 15;
 const SLEEP_SECONDS: readonly number[] = [30, 60, 120, 300, 600, 1800];
 const NOTIFY_REPORT_ID = 4;
@@ -256,11 +262,20 @@ export class WLMouseHidClient {
         family: "wlmouse",
         hideUnsupportedPollingRates: true,
         forceShowBattery: true,
+        dpiStageEditor: {
+          maxStages: DPI_STAGE_MAX,
+          countEditable: true,
+          minDpi: DPI_STEP,
+          maxDpi: DPI_MAX,
+          stepDpi: DPI_STEP,
+        },
       },
       batteryPercent: battery[1] <= 100 ? battery[1] : null,
       batteryState: battery[0] === 1 ? "Charging" : "Discharging",
       dpi: stage.x,
       dpiY: stage.y,
+      dpiStages: stages.map((entry) => entry.x),
+      activeDpiStage: activeStage,
       supportsSeparateDpiAxes: separateAxes ? separateAxes[1] === 1 : false,
       pollingRateHz: this.decodePollingRate(pollingRate[1]),
       supportedPollingRates: this.getSupportedPollingRates(),
@@ -378,26 +393,97 @@ export class WLMouseHidClient {
   }
 
   async setDpi(dpi: number, dpiY: number = dpi): Promise<number> {
-    for (const value of [dpi, dpiY]) {
-      if (!Number.isInteger(value) || value < DPI_STEP || value > DPI_MAX || value % DPI_STEP !== 0) {
-        throw new Error(`${value.toLocaleString()} is not a supported DPI value.`);
-      }
-    }
+    this.assertDpi(dpi);
+    this.assertDpi(dpiY);
     const profile = await this.currentProfile();
-    const stages = this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile)));
+    const stages = await this.readStages(profile);
     const active = this.stageIndex((await this.request(PROFILE_READ.activeStage(profile)))[1], stages.length);
     if (!stages[active]) throw new Error("The mouse did not report any DPI stages.");
     stages[active] = { x: dpi, y: dpiY };
+    const confirmed = (await this.writeStages(profile, stages))[active];
+    if (!confirmed || confirmed.x !== dpi || confirmed.y !== dpiY) {
+      throw new Error(`The mouse kept ${confirmed ? confirmed.x.toLocaleString() : "an unknown"} DPI instead of ${dpi.toLocaleString()}.`);
+    }
+    return confirmed.x;
+  }
+
+  async setDpiStageValue(stage: number, dpi: number): Promise<number> {
+    this.assertDpi(dpi);
+    const profile = await this.currentProfile();
+    const stages = await this.readStages(profile);
+    const entry = stages[stage];
+    if (!entry) throw new Error(`This mouse does not have a DPI stage ${stage + 1}.`);
+    // A Y that already differs is the mouse's separate-axis setting, and the
+    // shared stage editor only shows one value per stage: changing X must not
+    // silently flatten it.
+    stages[stage] = { x: dpi, y: entry.y === entry.x ? dpi : entry.y };
+    const confirmed = (await this.writeStages(profile, stages))[stage];
+    if (!confirmed || confirmed.x !== dpi) {
+      throw new Error(`The mouse kept ${confirmed ? confirmed.x.toLocaleString() : "an unknown"} DPI on stage ${stage + 1} instead of ${dpi.toLocaleString()}.`);
+    }
+    return confirmed.x;
+  }
+
+  async setDpiStageCount(count: number): Promise<number> {
+    if (!Number.isInteger(count) || count < 1 || count > DPI_STAGE_MAX) {
+      throw new Error(`This mouse holds between 1 and ${DPI_STAGE_MAX} DPI stages.`);
+    }
+    const profile = await this.currentProfile();
+    const stages = await this.readStages(profile);
+    const last = stages[stages.length - 1];
+    if (!last) throw new Error("The mouse did not report any DPI stages.");
+    const next = stages.slice(0, count);
+    while (next.length < count) next.push({ ...last });
+    const confirmed = await this.writeStages(profile, next);
+    if (confirmed.length !== count) {
+      throw new Error(`The mouse kept ${confirmed.length} DPI stages instead of ${count}.`);
+    }
+    return count;
+  }
+
+  async setActiveDpiStage(stage: number): Promise<number> {
+    const profile = await this.currentProfile();
+    const stages = await this.readStages(profile);
+    if (!stages[stage]) throw new Error(`This mouse does not have a DPI stage ${stage + 1}.`);
+    await this.write(PAGE.profile, WRITE.activeStage, profile, [stage + 1]);
+    const reply = await this.request(PROFILE_READ.activeStage(profile));
+    const confirmed = this.stageIndex(reply[1], stages.length);
+    if (confirmed !== stage) {
+      throw new Error(`The mouse stayed on DPI stage ${confirmed + 1} instead of ${stage + 1}.`);
+    }
+    this.patchStages(stages, confirmed);
+    return confirmed;
+  }
+
+  private assertDpi(value: number): void {
+    if (!Number.isInteger(value) || value < DPI_STEP || value > DPI_MAX || value % DPI_STEP !== 0) {
+      throw new Error(`${value.toLocaleString()} is not a supported DPI value.`);
+    }
+  }
+
+  private async readStages(profile: number): Promise<WLMouseDpiStage[]> {
+    return this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile)));
+  }
+
+  /** Writes the whole table back, since the mouse takes count and stages as one packet. */
+  private async writeStages(profile: number, stages: readonly WLMouseDpiStage[]): Promise<WLMouseDpiStage[]> {
     await this.write(PAGE.profile, WRITE.dpiStages, profile, [
       stages.length,
       ...stages.flatMap((stage) => [stage.x >> 8 & 0xff, stage.x & 0xff, stage.y >> 8 & 0xff, stage.y & 0xff]),
     ]);
-    const confirmed = this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile)))[active];
-    if (!confirmed || confirmed.x !== dpi || confirmed.y !== dpiY) {
-      throw new Error(`The mouse kept ${confirmed ? confirmed.x.toLocaleString() : "an unknown"} DPI instead of ${dpi.toLocaleString()}.`);
-    }
-    this.patch({ dpi: confirmed.x, dpiY: confirmed.y });
-    return confirmed.x;
+    const confirmed = await this.readStages(profile);
+    this.patchStages(confirmed);
+    return confirmed;
+  }
+
+  private patchStages(stages: readonly WLMouseDpiStage[], activeStage?: number): void {
+    const active = Math.min(activeStage ?? this.lastStatus?.activeDpiStage ?? 0, stages.length - 1);
+    const entry = stages[active];
+    this.patch({
+      dpiStages: stages.map((stage) => stage.x),
+      activeDpiStage: Math.max(active, 0),
+      ...(entry ? { dpi: entry.x, dpiY: entry.y } : {}),
+    });
   }
 
   private async currentProfile(): Promise<number> {
