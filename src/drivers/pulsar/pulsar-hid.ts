@@ -15,6 +15,7 @@ import {
   pulsarVgnDpiOptions,
   pulsarVgnEncodeDpi,
 } from "@openmouse/protocol/pulsar";
+import { ATK_COMPX_PRODUCT_IDS } from "../atk/products.ts";
 
 // The Pulsar 4K Wireless Receiver is sold as a Pulsar product but enumerates
 // under the shared Teevolution/VGN vendor id (0x3554) and speaks the same
@@ -25,6 +26,7 @@ const VGN_VENDOR_ID = 0x3554;
 const CLAIMED_VGN_PRODUCT_IDS: ReadonlySet<number> = new Set([
   0xf520, 0xf523, 0xf5bb, 0xf522, // Teevolution (Terra Pro family)
   0xfb56, 0xfb57, // VGN Dragonfly F2 Master+
+  ...ATK_COMPX_PRODUCT_IDS, // VXE wired units
 ]);
 const PULSAR_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
 
