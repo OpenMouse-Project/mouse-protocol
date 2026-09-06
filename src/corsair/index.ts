@@ -225,6 +225,30 @@ export function corsairRgbHex(rgb: CorsairRgb): string {
   return `#${rgb.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
 }
 
+/** "#rrggbb" (case-insensitive, hash optional) → [r, g, b]. */
+export function corsairParseRgbHex(color: string): CorsairRgb {
+  const match = /^#?([0-9a-f]{6})$/i.exec(color.trim());
+  if (!match) throw new Error(`Corsair stage colour must be #rrggbb, got "${color}".`);
+  const value = Number.parseInt(match[1]!, 16);
+  return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
+}
+
+/**
+ * Lift-off height is a raw 1–5 byte (every value accepted on fw 3.41). The
+ * three-stop names map onto that scale until iCUE's Surface Calibration labels
+ * have been captured against it: Low = 1, Medium = 3, High = 5 on write;
+ * 1–2 → Low, 3 → Medium, 4–5 → High on read.
+ */
+export const CORSAIR_LIFT_MIN = 1;
+export const CORSAIR_LIFT_MAX = 5;
+export type CorsairLiftName = "Low" | "Medium" | "High";
+export const CORSAIR_LIFT_LEVELS: Readonly<Record<CorsairLiftName, number>> = { Low: 1, Medium: 3, High: 5 };
+
+export function corsairLiftName(raw: number): CorsairLiftName | null {
+  if (!Number.isInteger(raw) || raw < CORSAIR_LIFT_MIN || raw > CORSAIR_LIFT_MAX) return null;
+  return raw <= 2 ? "Low" : raw === 3 ? "Medium" : "High";
+}
+
 function stageIndex(stage: number): number {
   if (!Number.isInteger(stage) || stage < 0 || stage >= CORSAIR_STAGE_COUNT) {
     throw new Error(`Corsair DPI stage must be 0–${CORSAIR_STAGE_COUNT - 1}.`);
