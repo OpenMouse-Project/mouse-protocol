@@ -100,6 +100,9 @@ function fakeDevice(options: FakeOptions = {}) {
     else if (sub === 0x03) state.lift = request[4]!;
     else if (sub === 0x04) state.snap = request[4]!;
     else if ((sub! & 0xf0) === 0xd0) {
+      // Hardware ignores a stage write to a slot the mask has not enabled
+      // (observed on fw 3.41: the read-back stayed zero).
+      if (!(state.mask & (1 << (sub! & 0x0f)))) return;
       state.slots[sub! & 0x0f] = {
         x: request[5]! | (request[6]! << 8),
         y: request[7]! | (request[8]! << 8),
@@ -351,16 +354,31 @@ test("setActiveDpiStage selects the numbered slot and confirms", async () => {
   await assert.rejects(new CorsairHidClient(stuck.device).setActiveDpiStage(0), /stayed on DPI slot 2/);
 });
 
-test("setDpiStageCount grows by seeding empty slots and keeps the Sniper bit", async () => {
+test("setDpiStageCount enables the mask first, then seeds empty slots, keeping the Sniper bit", async () => {
   const { device, sent, state } = fakeDevice();
   assert.equal(await new CorsairHidClient(device).setDpiStageCount(5), 5);
   const writes = sets(sent);
-  // Slots 4 and 5 were empty: seeded from slot 3 (5700, cyan) before the mask write.
-  assert.deepEqual(writes[0], [0x07, 0x13, 0xd4, 0x00, 0x00, 0x44, 0x16, 0x44, 0x16, 0x00, 0xbf, 0xff]);
-  assert.deepEqual(writes[1], [0x07, 0x13, 0xd5, 0x00, 0x00, 0x44, 0x16, 0x44, 0x16, 0x00, 0xbf, 0xff]);
-  assert.deepEqual(writes[2], [0x07, 0x13, 0x05, 0x00, 0x3f, 0, 0, 0, 0, 0, 0, 0]);
+  // The mask goes first because the mouse drops writes to disabled slots
+  // (the 2026-09-06 hardware run failed with "kept 0 DPI on stage 4" when the
+  // seed came first). Slots 4 and 5 were empty: seeded from slot 3 (5700, cyan).
+  assert.deepEqual(writes[0], [0x07, 0x13, 0x05, 0x00, 0x3f, 0, 0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(writes[1], [0x07, 0x13, 0xd4, 0x00, 0x00, 0x44, 0x16, 0x44, 0x16, 0x00, 0xbf, 0xff]);
+  assert.deepEqual(writes[2], [0x07, 0x13, 0xd5, 0x00, 0x00, 0x44, 0x16, 0x44, 0x16, 0x00, 0xbf, 0xff]);
+  assert.equal(writes.length, 3);
   assert.equal(state.mask, 0x3f);
+  assert.deepEqual(state.slots[4], { x: 5700, y: 5700, rgb: [0x00, 0xbf, 0xff] });
   assert.deepEqual(state.slots[5], { x: 5700, y: 5700, rgb: [0x00, 0xbf, 0xff] });
+});
+
+test("setDpiStageCount leaves a re-enabled slot's old value alone", async () => {
+  const { device, sent, state } = fakeDevice();
+  const client = new CorsairHidClient(device);
+  await client.setDpiStageCount(2);
+  sent.length = 0;
+  await client.setDpiStageCount(3);
+  // Slot 3 still held 5700, so only the mask was written.
+  assert.deepEqual(sets(sent).map((bytes) => bytes.slice(0, 5)), [[0x07, 0x13, 0x05, 0x00, 0x0f]]);
+  assert.deepEqual(state.slots[3], { x: 5700, y: 5700, rgb: [0x00, 0xbf, 0xff] });
 });
 
 test("setDpiStageCount shrinks, moving the selection inside the enabled range", async () => {

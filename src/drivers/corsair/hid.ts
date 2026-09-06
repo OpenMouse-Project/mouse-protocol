@@ -157,8 +157,10 @@ export class CorsairHidClient {
   }
 
   /**
-   * Enables slots d1..d`count` and disables the rest. A slot that was never
-   * populated (0 DPI) is seeded from the last enabled stage first, since an
+   * Enables slots d1..d`count` and disables the rest. The mask is written
+   * first: the mouse ignores a stage write to a slot that is not enabled
+   * (verified on fw 3.41 — the read-back stays zero). Newly enabled slots that
+   * hold 0 DPI are then seeded from the last previously enabled stage, since an
    * enabled 0-DPI stage would freeze the cursor. The Sniper bit is preserved.
    */
   async setDpiStageCount(count: number): Promise<number> {
@@ -172,6 +174,14 @@ export class CorsairHidClient {
       const state = await this.readDpi();
       const numbered = numberedSlots(state.mask, stages);
       const template = numbered.length > 0 ? state.stages.get(numbered[numbered.length - 1]!) : undefined;
+
+      const sniperBit = state.mask & (1 << CORSAIR_SNIPER_STAGE);
+      const wanted = sniperBit | (((1 << count) - 1) << 1);
+      await this.send(corsairEncode.setDpiMask(wanted));
+      const confirmed = corsairDecode.dpiMask(await this.request(corsairEncode.dpiMask()));
+      const enabled = numberedSlots(confirmed, stages).length;
+      if (enabled !== count) throw new Error(`The mouse kept ${enabled} DPI stages instead of ${count}.`);
+
       for (let slot = 1; slot <= count; slot += 1) {
         if (numbered.includes(slot)) continue;
         const existing = corsairDecode.stage(await this.request(corsairEncode.stage(slot)));
@@ -179,12 +189,6 @@ export class CorsairHidClient {
         const seed = template ?? { x: 800, y: 800, rgb: [0x00, 0xbf, 0xff] as CorsairRgb };
         await this.writeSlot(slot, seed.x, seed.y, seed.rgb);
       }
-      const sniperBit = state.mask & (1 << CORSAIR_SNIPER_STAGE);
-      const wanted = sniperBit | (((1 << count) - 1) << 1);
-      await this.send(corsairEncode.setDpiMask(wanted));
-      const confirmed = corsairDecode.dpiMask(await this.request(corsairEncode.dpiMask()));
-      const enabled = numberedSlots(confirmed, stages).length;
-      if (enabled !== count) throw new Error(`The mouse kept ${enabled} DPI stages instead of ${count}.`);
       // Keep the selection inside the enabled range.
       if (state.current.stage > count) await this.selectSlot(count);
       return enabled;
