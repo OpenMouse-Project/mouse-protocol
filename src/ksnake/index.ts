@@ -78,6 +78,21 @@ export function ksnakeDecodePollingRate(index: number): number | null {
   return index >= 0 && index < KSNAKE_POLLING_RATES.length ? KSNAKE_POLLING_RATES[index] : null;
 }
 
+/**
+ * Lift-off mapping. The vendor panel offers two stops (lod_value 1/2,
+ * default 1, likely 1mm/2mm on the PAW3311); they map to the Low/High stops.
+ * Medium is not offered by the hardware.
+ */
+export function ksnakeDecodeLiftOff(value: number): "Low" | "High" {
+  return value === 2 ? "High" : "Low";
+}
+
+export function ksnakeEncodeLiftOff(level: string): number | null {
+  if (level === "Low") return 1;
+  if (level === "High") return 2;
+  return null;
+}
+
 export const KSNAKE_DEFAULT_CONFIG = {
   lightMode: 2,
   reportRate: 3,

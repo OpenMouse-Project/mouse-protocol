@@ -9,8 +9,10 @@ import {
   ksnakeDecodeBattery,
   ksnakeDecodeConfig,
   ksnakeDecodeKeys,
+  ksnakeDecodeLiftOff,
   ksnakeDecodePollingRate,
   ksnakeDecodeVersion,
+  ksnakeEncodeLiftOff,
   ksnakeEncodePollingRate,
   ksnakeEncodeSetConfig,
   ksnakeEncodeSetKeys,
@@ -218,7 +220,8 @@ export class KsnakeHidClient {
       activeProfile: null,
       connectionType: this.device.vendorId === KSNAKE_USB_VENDOR_ID ? "Wired" : "Wireless",
       connectionDetail: this.device.vendorId === KSNAKE_USB_VENDOR_ID ? "Wired USB" : "2.4 GHz receiver",
-      liftOffDistance: null,
+      liftOffDistance: config ? ksnakeDecodeLiftOff(config.lodValue) : null,
+      supportedLiftOffDistances: ["Low", "High"],
       firmware: version ? [`X11 ${version}`] : ["K-snake X11"],
     };
   }
@@ -318,6 +321,22 @@ export class KsnakeHidClient {
       if (keys) return keys;
     }
     return null;
+  }
+
+  async setLiftOffDistance(
+    value: NonNullable<MouseStatus["liftOffDistance"]>,
+  ): Promise<NonNullable<MouseStatus["liftOffDistance"]>> {
+    const encoded = ksnakeEncodeLiftOff(value);
+    if (encoded === null) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
+    const raw = await this.exchangeRetrying(ksnakeGetConfigRequest(), 3).catch(() => null);
+    const config = raw ? ksnakeDecodeConfig(raw) : null;
+    if (!config) throw new Error("Could not read the current config from the mouse.");
+    await this.exchangeRetrying(ksnakeEncodeSetConfig({ ...config, lodValue: encoded }), 2);
+    await sleep(this.settleAfterWriteMs);
+    const confirmed = await this.readBackConfig(3);
+    const back = confirmed ? ksnakeDecodeLiftOff(confirmed.lodValue) : null;
+    if (back !== value) throw new Error(`The mouse kept a ${String(back).toLowerCase()} lift-off distance instead of ${value.toLowerCase()}.`);
+    return value;
   }
 
   async setPollingRate(rate: number): Promise<number> {

@@ -123,7 +123,7 @@ describe("KsnakeHidClient", () => {
 
 type FakeListener = (event: { data: DataView }) => void;
 
-function configReply(stages: number[], reportRate: number, dpiIndex: number): Uint8Array {
+function configReply(stages: number[], reportRate: number, dpiIndex: number, lodValue = 1): Uint8Array {
   const reply = new Uint8Array(64);
   reply[9] = 2;
   reply[10] = reportRate + 1;
@@ -134,7 +134,7 @@ function configReply(stages: number[], reportRate: number, dpiIndex: number): Ui
     reply[14 + i * 2] = (stage >> 8) & 0xff;
   });
   reply[48] = 0;
-  reply[49] = 1;
+  reply[49] = lodValue;
   reply[50] = 53;
   reply[51] = 2;
   reply[52] = 10;
@@ -153,6 +153,7 @@ class FakeKsnakeDevice {
   stages = [800, 1200, 1600, 3200, 5000, 12000];
   reportRate = 3;
   dpiIndex = 2;
+  lodValue = 1;
   /** 7 key slots, mirroring a retail dump (slot 4 = macro reference). */
   keys = [
     { type: 32, code1: 1, code2: 0, code3: 0 },
@@ -236,8 +237,9 @@ class FakeKsnakeDevice {
         }
         this.reportRate = body[10] - 1;
         this.dpiIndex = body[12] - 1;
+        this.lodValue = body[49];
       }
-      reply = configReply(this.stages, this.reportRate, this.dpiIndex);
+      reply = configReply(this.stages, this.reportRate, this.dpiIndex, this.lodValue);
     }
     queueMicrotask(() => {
       if (this.dropReplies > 0) {
@@ -311,6 +313,19 @@ describe("KsnakeHidClient writes", () => {
     const status = await fastClient(device).readStatus();
     assert.deepEqual(status.firmware, ["X11 2.1.7"]);
     assert.equal(status.batteryPercent, 81);
+    assert.equal(status.liftOffDistance, "Low");
+    assert.deepEqual(status.supportedLiftOffDistances, ["Low", "High"]);
+  });
+
+  it("writes the lift-off distance and confirms it", async () => {
+    const device = new FakeKsnakeDevice();
+    assert.equal(await fastClient(device).setLiftOffDistance("High"), "High");
+    assert.equal(device.lodValue, 2);
+  });
+
+  it("rejects the unsupported medium lift-off distance", async () => {
+    const device = new FakeKsnakeDevice();
+    await assert.rejects(() => fastClient(device).setLiftOffDistance("Medium"), /does not support a medium/);
   });
 
   it("decodes the 7 button slots from a keys reply", () => {
