@@ -53,6 +53,10 @@
       "types": "./dist/logitech/index.d.ts",
       "import": "./dist/logitech/index.js"
     },
+    "./microsoft": {
+      "types": "./dist/microsoft/index.d.ts",
+      "import": "./dist/microsoft/index.js"
+    },
     "./moddo": {
       "types": "./dist/moddo/index.d.ts",
       "import": "./dist/moddo/index.js"
