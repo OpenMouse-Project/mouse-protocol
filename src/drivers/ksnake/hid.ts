@@ -211,6 +211,43 @@ export class KsnakeHidClient {
     return dpi;
   }
 
+  async setActiveDpiStage(stage: number): Promise<number> {
+    const raw = await this.exchangeRetrying(ksnakeGetConfigRequest(), 3).catch(() => null);
+    const config = raw ? ksnakeDecodeConfig(raw) : null;
+    if (!config) throw new Error("Could not read the current config from the mouse.");
+    if (!Number.isInteger(stage) || stage < 0 || stage >= config.stages.length) {
+      throw new Error(`DPI stage must be between 1 and ${config.stages.length}.`);
+    }
+    await this.exchangeRetrying(ksnakeEncodeSetConfig({ ...config, dpiIndex: stage }), 2);
+    await sleep(this.settleAfterWriteMs);
+    const confirmed = await this.readBackConfig(3);
+    if (confirmed?.dpiIndex !== stage) {
+      throw new Error(`The mouse kept DPI stage ${(confirmed?.dpiIndex ?? 0) + 1} instead of ${stage + 1}.`);
+    }
+    return stage;
+  }
+
+  async setDpiStageValue(stage: number, dpi: number): Promise<number> {
+    if (!ksnakeIsValidDpi(dpi)) {
+      throw new Error(`DPI must be a whole number between 200 and 12000 for the K-snake X11 (got ${dpi}).`);
+    }
+    const raw = await this.exchangeRetrying(ksnakeGetConfigRequest(), 3).catch(() => null);
+    const config = raw ? ksnakeDecodeConfig(raw) : null;
+    if (!config) throw new Error("Could not read the current config from the mouse.");
+    if (!Number.isInteger(stage) || stage < 0 || stage >= config.stages.length) {
+      throw new Error(`DPI stage must be between 1 and ${config.stages.length}.`);
+    }
+    const stages = [...config.stages];
+    stages[stage] = dpi;
+    await this.exchangeRetrying(ksnakeEncodeSetConfig({ ...config, stages }), 2);
+    await sleep(this.settleAfterWriteMs);
+    const confirmed = await this.readBackConfig(3);
+    if (confirmed?.stages[stage] !== dpi) {
+      throw new Error(`The mouse kept ${confirmed?.stages[stage] ?? "?"} DPI instead of ${dpi}.`);
+    }
+    return dpi;
+  }
+
   async setPollingRate(rate: number): Promise<number> {
     const index = ksnakeEncodePollingRate(rate);
     if (index === null) throw new Error(`This mouse does not support ${rate} Hz.`);

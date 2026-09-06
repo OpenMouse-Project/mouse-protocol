@@ -232,6 +232,26 @@ describe("KsnakeHidClient writes", () => {
     assert.equal(device.reportRate, 2);
   });
 
+  it("switches the active DPI stage and confirms it", async () => {
+    const device = new FakeKsnakeDevice();
+    assert.equal(await fastClient(device).setActiveDpiStage(4), 4);
+    assert.equal(device.dpiIndex, 4);
+    assert.deepEqual(device.sent, [0x0e, 0x0f, 0x0e]);
+  });
+
+  it("rejects out-of-range DPI stages without writing", async () => {
+    const device = new FakeKsnakeDevice();
+    await assert.rejects(() => fastClient(device).setActiveDpiStage(6), /between 1 and 6/);
+    await assert.rejects(() => fastClient(device).setDpiStageValue(0, 100), /between 200 and 12000/);
+    assert.ok(!device.sent.includes(0x0f), "no SET must be sent");
+  });
+
+  it("edits a single DPI stage value and confirms it", async () => {
+    const device = new FakeKsnakeDevice();
+    assert.equal(await fastClient(device).setDpiStageValue(0, 600), 600);
+    assert.equal(device.stages[0], 600);
+  });
+
   it("rejects out-of-range DPI without touching the mouse", async () => {
     const device = new FakeKsnakeDevice();
     await assert.rejects(() => fastClient(device).setDpi(100), /between 200 and 12000/);
