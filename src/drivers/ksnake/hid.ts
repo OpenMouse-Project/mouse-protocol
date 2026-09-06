@@ -8,15 +8,20 @@ import {
   KSNAKE_USB_VENDOR_ID,
   ksnakeDecodeBattery,
   ksnakeDecodeConfig,
+  ksnakeDecodeKeys,
   ksnakeDecodePollingRate,
   ksnakeDecodeVersion,
   ksnakeEncodePollingRate,
   ksnakeEncodeSetConfig,
+  ksnakeEncodeSetKeys,
   ksnakeGetBatteryRequest,
   ksnakeGetConfigRequest,
+  ksnakeGetKeysRequest,
   ksnakeGetVersionRequest,
+  ksnakeIsKnownKeyType,
   ksnakeIsValidDpi,
   type KsnakeConfig,
+  type KsnakeKeyBinding,
 } from "../../ksnake/index.js";
 import { VENDOR_ID } from "../vendors.ts";
 
@@ -273,6 +278,48 @@ export class KsnakeHidClient {
     return dpi;
   }
 
+  /** Read-only dump of the 7 button slots (GET_KEYS, reply[8..35]). */
+  async getKeys(): Promise<KsnakeKeyBinding[] | null> {
+    const reply = await this.exchangeRetrying(ksnakeGetKeysRequest(), 3).catch(() => null);
+    return reply ? ksnakeDecodeKeys(reply) : null;
+  }
+
+  /**
+   * Remap slots 0-5 (SET_KEYS). Only catalog types (mouse/special/media) are
+   * accepted — macro references and other opaque bindings are rejected rather
+   * than risk bricking them. Confirms by reading the map back.
+   */
+  async setKeys(keys: readonly KsnakeKeyBinding[]): Promise<KsnakeKeyBinding[]> {
+    const slots = [...keys].slice(0, 6);
+    if (slots.length !== 6) throw new Error(`Exactly 6 button bindings are required (got ${keys.length}).`);
+    for (const [index, key] of slots.entries()) {
+      const bytes = [key.type, key.code1, key.code2, key.code3];
+      if (!bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) {
+        throw new Error(`Button ${index + 1}: binding bytes must be 0-255.`);
+      }
+      if (!ksnakeIsKnownKeyType(key.type)) {
+        throw new Error(`Button ${index + 1}: type ${key.type} is not remappable (macro/custom bindings are preserved, not rewritten).`);
+      }
+    }
+    await this.exchangeRetrying(ksnakeEncodeSetKeys(slots), 2);
+    await sleep(this.settleAfterWriteMs);
+    const confirmed = await this.readBackKeys(3);
+    if (!confirmed || !slots.every((key, index) => equalBinding(confirmed[index], key))) {
+      throw new Error("The mouse did not keep the new button map.");
+    }
+    return slots;
+  }
+
+  /** Best-effort key-map read for post-write confirmation. */
+  private async readBackKeys(attempts: number): Promise<KsnakeKeyBinding[] | null> {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const reply = await this.exchange(ksnakeGetKeysRequest()).catch(() => null);
+      const keys = reply ? ksnakeDecodeKeys(reply) : null;
+      if (keys) return keys;
+    }
+    return null;
+  }
+
   async setPollingRate(rate: number): Promise<number> {
     const index = ksnakeEncodePollingRate(rate);
     if (index === null) throw new Error(`This mouse does not support ${rate} Hz.`);
@@ -290,4 +337,8 @@ export class KsnakeHidClient {
 
 function copyDataView(view: DataView): Uint8Array {
   return new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
+}
+
+function equalBinding(a: KsnakeKeyBinding | undefined, b: KsnakeKeyBinding): boolean {
+  return a !== undefined && a.type === b.type && a.code1 === b.code1 && a.code2 === b.code2 && a.code3 === b.code3;
 }

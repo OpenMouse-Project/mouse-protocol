@@ -48,6 +48,8 @@ export const KSNAKE_PRODUCTS: ReadonlyMap<number, KsnakeProduct> = new Map([
 
 const CMD = {
   GET_VERSION: 0x03,
+  GET_KEYS: 0x08,
+  SET_KEYS: 0x09,
   GET_CONFIG: 0x0e,
   SET_CONFIG: 0x0f,
   SET_LIGHT: 0x21,
@@ -222,5 +224,89 @@ export function ksnakeEncodeSetConfig(config: KsnakeConfig): Uint8Array {
   buf[52] = config.sleepLight & 0xff;
   buf[53] = config.highspeedMode & 0xff;
   buf[54] = ((config.wakeupFlag << 4) | (config.moveLightFlag & 15)) & 0xff;
+  return buf;
+}
+
+/** Physical button order for the 6 remappable slots (vendor panel labels). */
+export const KSNAKE_BUTTON_NAMES = ["Left", "Right", "Middle", "Macro1", "Backward", "DPI"] as const;
+
+/** Button function types from the vendor key catalog. */
+export const KSNAKE_KEY_TYPE = {
+  mouse: 32,
+  special: 33,
+  media: 48,
+} as const;
+
+/** One button slot: type 32 = mouse button (code1 = HID bitmask, 0 = disabled),
+ *  33 = special (DPI loop [85,0,0], scroll [56,1/255]), 48 = consumer/media
+ *  (code1 = consumer usage). Macro references (e.g. type 112) are preserved
+ *  opaquely — the catalog cannot rebuild them. */
+export interface KsnakeKeyBinding {
+  type: number;
+  code1: number;
+  code2: number;
+  code3: number;
+}
+
+export function ksnakeIsKnownKeyType(type: number): boolean {
+  return type === KSNAKE_KEY_TYPE.mouse || type === KSNAKE_KEY_TYPE.special || type === KSNAKE_KEY_TYPE.media;
+}
+
+/** GET_KEYS request tail observed in vendor JS: [0x55, 0x08, 0xA5, 0x0B, 0x20]. */
+export function ksnakeGetKeysRequest(): Uint8Array {
+  const buf = new Uint8Array(KSNAKE_REPORT_SIZE);
+  buf[0] = KSNAKE_MAGIC;
+  buf[1] = CMD.GET_KEYS;
+  buf[2] = 0xa5;
+  buf[3] = 0x0b;
+  buf[4] = 0x20;
+  return buf;
+}
+
+/**
+ * Decode a getKeys reply: 7 slots of 4 bytes at reply[8..35] (the vendor
+ * slices 8). Slot 6 is a fixed scroll-up entry; slots 0-5 are remappable.
+ * Verified against a retail dongle (factory map decodes to
+ * Left/Right/Middle/Backward + DPI loop in order).
+ */
+export function ksnakeDecodeKeys(reply: Uint8Array): KsnakeKeyBinding[] | null {
+  if (reply.length < 36) return null;
+  const bindings: KsnakeKeyBinding[] = [];
+  for (let i = 0; i < 7; i++) {
+    bindings.push({
+      type: reply[8 + i * 4],
+      code1: reply[9 + i * 4],
+      code2: reply[10 + i * 4],
+      code3: reply[11 + i * 4],
+    });
+  }
+  return bindings;
+}
+
+/**
+ * Encode a setKeys request, mirroring vendor `setMouseKeys()`: head
+ * [0x55, 0x09, 0xA5, 0x22, 0x20], slots 0-5 at body[9..32], fixed tail
+ * [33,56,1,0, 33,56,255,0] at body[33..40].
+ */
+export function ksnakeEncodeSetKeys(keys: readonly KsnakeKeyBinding[]): Uint8Array {
+  const buf = new Uint8Array(KSNAKE_REPORT_SIZE);
+  buf[0] = KSNAKE_MAGIC;
+  buf[1] = CMD.SET_KEYS;
+  buf[2] = 0xa5;
+  buf[3] = 0x22;
+  buf[4] = 0x20;
+  const slots = [...keys].slice(0, 6);
+  while (slots.length < 6) slots.push({ type: 32, code1: 0, code2: 0, code3: 0 });
+  for (let n = 0; n < 6; n++) {
+    const key = slots[n];
+    buf[9 + n * 4] = key.type & 0xff;
+    buf[10 + n * 4] = key.code1 & 0xff;
+    buf[11 + n * 4] = key.code2 & 0xff;
+    buf[12 + n * 4] = key.code3 & 0xff;
+  }
+  const tail = [33, 56, 1, 0, 33, 56, 255, 0];
+  tail.forEach((b, i) => {
+    buf[33 + i] = b;
+  });
   return buf;
 }
