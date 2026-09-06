@@ -46,6 +46,7 @@ checklist.
 | Keychron | `@openmouse/protocol/keychron` |
 | Lamzu / CRDRAKO / Attack Shark | `@openmouse/protocol/lamzu` |
 | Logitech | `@openmouse/protocol/logitech` |
+| Microsoft | `@openmouse/protocol/microsoft` |
 | moddoMOUSE | `@openmouse/protocol/moddo` |
 | Ninjutso | `@openmouse/protocol/ninjutso` |
 | Orbital | `@openmouse/protocol/orbital` |

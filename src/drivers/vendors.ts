@@ -1,4 +1,5 @@
 import { ATK_COMPX_PRODUCT_IDS } from "./atk/products.ts";
+import { MICROSOFT_PRODUCTS } from "../microsoft/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { LINGBAO_PRODUCTS, LINGBAO_VENDOR_ID } from "./lingbao/hid.ts";
 import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
@@ -96,6 +97,7 @@ export const VENDOR_ID = {
   mchose: 0x3837,
   ksnakeUsb: 0xa8a4, // K-snake X11 wired
   ksnakeDongle: 0xa8a5, // K-snake X11 2.4 GHz dongle
+  microsoft: 0x045E,
 } as const;
 
 /**
@@ -426,6 +428,10 @@ export const LINGBAO_HID_FILTERS: HIDDeviceFilter[] = [...LINGBAO_PRODUCTS.keys(
   (productId) => ({ vendorId: LINGBAO_VENDOR_ID, productId, usagePage: 0xffff, usage: 0x02 }),
 );
 
+export const MICROSOFT_HID_FILTERS: HIDDeviceFilter[] = [...MICROSOFT_PRODUCTS].map(
+  (productId) => ({ vendorId: VENDOR_ID.microsoft, productId, usagePage: 0x0C, usage: 0x01 }),
+);
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
@@ -500,4 +506,5 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // both the wired USB VID and the 2.4 GHz dongle VID.
   { vendorId: VENDOR_ID.ksnakeUsb, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
   { vendorId: VENDOR_ID.ksnakeDongle, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
+  ...MICROSOFT_HID_FILTERS,
 ];
