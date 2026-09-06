@@ -268,6 +268,16 @@ export function ksnakeIsKnownKeyType(type: number): boolean {
   return type === KSNAKE_KEY_TYPE.mouse || type === KSNAKE_KEY_TYPE.special || type === KSNAKE_KEY_TYPE.media;
 }
 
+/**
+ * Plausibility gate for decoded key maps. `exchange()` resolves with the next
+ * input report, so a stray report from another command can land here; those
+ * decode to zeroed/garbage slot types. Real maps always carry nonzero types
+ * (32/33/48 catalog, plus opaque refs like macro 112).
+ */
+export function ksnakeKeysLookPlausible(keys: readonly KsnakeKeyBinding[]): boolean {
+  return keys.length === 7 && keys.every((key) => key.type !== 0);
+}
+
 /** GET_KEYS request tail observed in vendor JS: [0x55, 0x08, 0xA5, 0x0B, 0x20]. */
 export function ksnakeGetKeysRequest(): Uint8Array {
   const buf = new Uint8Array(KSNAKE_REPORT_SIZE);

@@ -170,6 +170,8 @@ class FakeKsnakeDevice {
   badVersionOnce = false;
   /** Next battery reply exceeds 100% once (simulates a crossed report). */
   badBatteryOnce = false;
+  /** Next keys reply is zeroed once (simulates a stray report). */
+  badKeysOnce = false;
   sent: number[] = [];
   private listeners = new Map<string, Set<FakeListener>>();
 
@@ -213,12 +215,15 @@ class FakeKsnakeDevice {
       this.badBatteryOnce = false;
     } else if (body[1] === 0x08) {
       reply = new Uint8Array(64);
-      this.keys.forEach((key, i) => {
-        reply[8 + i * 4] = key.type;
-        reply[9 + i * 4] = key.code1;
-        reply[10 + i * 4] = key.code2;
-        reply[11 + i * 4] = key.code3;
-      });
+      if (!this.badKeysOnce) {
+        this.keys.forEach((key, i) => {
+          reply[8 + i * 4] = key.type;
+          reply[9 + i * 4] = key.code1;
+          reply[10 + i * 4] = key.code2;
+          reply[11 + i * 4] = key.code3;
+        });
+      }
+      this.badKeysOnce = false;
     } else if (body[1] === 0x09) {
       for (let i = 0; i < 6; i++) {
         this.keys[i] = { type: body[9 + i * 4], code1: body[10 + i * 4], code2: body[11 + i * 4], code3: body[12 + i * 4] };
@@ -383,6 +388,13 @@ describe("KsnakeHidClient writes", () => {
     const next = device.keys.slice(0, 6).map((key) => ({ ...key }));
     await assert.rejects(() => fastClient(device).setKeys(next), /not remappable/);
     assert.ok(!device.sent.includes(0x09));
+  });
+
+  it("skips stray zeroed reports when reading the button map", async () => {
+    const device = new FakeKsnakeDevice();
+    device.badKeysOnce = true;
+    const keys = await fastClient(device).getKeys();
+    assert.deepEqual(keys, device.keys);
   });
 
   it("rejects out-of-range DPI without touching the mouse", async () => {

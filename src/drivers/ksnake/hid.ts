@@ -22,6 +22,7 @@ import {
   ksnakeGetVersionRequest,
   ksnakeIsKnownKeyType,
   ksnakeIsValidDpi,
+  ksnakeKeysLookPlausible,
   type KsnakeConfig,
   type KsnakeKeyBinding,
 } from "../../ksnake/index.js";
@@ -283,8 +284,12 @@ export class KsnakeHidClient {
 
   /** Read-only dump of the 7 button slots (GET_KEYS, reply[8..35]). */
   async getKeys(): Promise<KsnakeKeyBinding[] | null> {
-    const reply = await this.exchangeRetrying(ksnakeGetKeysRequest(), 3).catch(() => null);
-    return reply ? ksnakeDecodeKeys(reply) : null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const reply = await this.exchange(ksnakeGetKeysRequest()).catch(() => null);
+      const keys = reply ? ksnakeDecodeKeys(reply) : null;
+      if (keys && ksnakeKeysLookPlausible(keys)) return keys;
+    }
+    return null;
   }
 
   /**
@@ -318,7 +323,7 @@ export class KsnakeHidClient {
     for (let attempt = 0; attempt < attempts; attempt++) {
       const reply = await this.exchange(ksnakeGetKeysRequest()).catch(() => null);
       const keys = reply ? ksnakeDecodeKeys(reply) : null;
-      if (keys) return keys;
+      if (keys && ksnakeKeysLookPlausible(keys)) return keys;
     }
     return null;
   }
