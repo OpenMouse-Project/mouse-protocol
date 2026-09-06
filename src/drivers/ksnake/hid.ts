@@ -313,7 +313,8 @@ export class KsnakeHidClient {
     await sleep(this.settleAfterWriteMs);
     const confirmed = await this.readBackKeys(3);
     if (!confirmed || !slots.every((key, index) => equalBinding(confirmed[index], key))) {
-      throw new Error("The mouse did not keep the new button map.");
+      const seen = confirmed ? JSON.stringify(confirmed) : "no readable reply";
+      throw new Error(`The mouse did not keep the new button map (read back ${seen}).`);
     }
     return slots;
   }
