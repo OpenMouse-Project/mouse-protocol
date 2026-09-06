@@ -226,7 +226,7 @@ class FakeKsnakeDevice {
       this.badKeysOnce = false;
     } else if (body[1] === 0x09) {
       for (let i = 0; i < 6; i++) {
-        this.keys[i] = { type: body[9 + i * 4], code1: body[10 + i * 4], code2: body[11 + i * 4], code3: body[12 + i * 4] };
+        this.keys[i] = { type: body[8 + i * 4], code1: body[9 + i * 4], code2: body[10 + i * 4], code3: body[11 + i * 4] };
       }
       reply = new Uint8Array(64);
       this.keys.forEach((key, i) => {
@@ -359,9 +359,12 @@ describe("KsnakeHidClient writes", () => {
       { type: 33, code1: 85, code2: 0, code3: 0 },
     ]);
     assert.deepEqual([...req.slice(0, 5)], [0x55, 0x09, 0xa5, 0x22, 0x20]);
-    assert.deepEqual([...req.slice(9, 13)], [32, 1, 0, 0]);
-    assert.deepEqual([...req.slice(29, 33)], [33, 85, 0, 0]);
-    assert.deepEqual([...req.slice(33, 41)], [33, 56, 1, 0, 33, 56, 255, 0]);
+    // Wire offsets (vendor t[9..] minus the t[0] report-id placeholder):
+    // slot 0 type at data[8], slot 5 at data[28..31], scroll tail at data[32..39].
+    assert.deepEqual([...req.slice(8, 12)], [32, 1, 0, 0]);
+    assert.deepEqual([...req.slice(28, 32)], [33, 85, 0, 0]);
+    assert.deepEqual([...req.slice(32, 40)], [33, 56, 1, 0, 33, 56, 255, 0]);
+    assert.deepEqual([...req.slice(40)], new Array(24).fill(0));
   });
 
   it("writes a button map and confirms it", async () => {

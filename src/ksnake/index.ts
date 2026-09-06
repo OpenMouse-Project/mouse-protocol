@@ -323,16 +323,18 @@ export function ksnakeEncodeSetKeys(keys: readonly KsnakeKeyBinding[]): Uint8Arr
   buf[4] = 0x20;
   const slots = [...keys].slice(0, 6);
   while (slots.length < 6) slots.push({ type: 32, code1: 0, code2: 0, code3: 0 });
+  // Wire offsets, NOT vendor-JS t[] indices: t[0] is the report id, so the
+  // request slots at t[9..32] land at data[8..31]. (buf[9..] bricked buttons.)
   for (let n = 0; n < 6; n++) {
     const key = slots[n];
-    buf[9 + n * 4] = key.type & 0xff;
-    buf[10 + n * 4] = key.code1 & 0xff;
-    buf[11 + n * 4] = key.code2 & 0xff;
-    buf[12 + n * 4] = key.code3 & 0xff;
+    buf[8 + n * 4] = key.type & 0xff;
+    buf[9 + n * 4] = key.code1 & 0xff;
+    buf[10 + n * 4] = key.code2 & 0xff;
+    buf[11 + n * 4] = key.code3 & 0xff;
   }
   const tail = [33, 56, 1, 0, 33, 56, 255, 0];
   tail.forEach((b, i) => {
-    buf[33 + i] = b;
+    buf[32 + i] = b;
   });
   return buf;
 }
