@@ -188,8 +188,10 @@ export function ksnakeDecodeConfig(reply: Uint8Array): KsnakeConfig | null {
     keyRespond: reply[51],
     sleepLight: reply[52],
     highspeedMode: reply[53],
-    // NOTE: vendor decode reads wakeup from the LOW nibble, but vendor encode
-    // writes `wakeup << 4 | move`. Kept as-decoded; verify on hardware.
+    // NOTE: the vendor panel itself is asymmetric here — its decode reads
+    // wakeup from the LOW nibble (`15 & t[55]`) but its encode writes
+    // `wakeup << 4 | move`. This codec mirrors the vendor byte-for-byte, so
+    // states round-trip exactly like the vendor panel does.
     wakeupFlag: reply[55] & 15,
     moveLightFlag: (reply[55] >> 4) & 15,
   };
