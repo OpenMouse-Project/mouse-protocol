@@ -1,0 +1,8 @@
+# GET 0e 13 (d0|n) 00 with the iCUE software profile loaded (stage 2 active)
+# @5 X u16 BE, @7 Y u16 BE, @9 R, @10 G, @11 B
+0e 13 d0 00 00 01 90 01 90 ff ff 00
+0e 13 d1 00 00 03 20 03 20 00 bf ff
+0e 13 d2 00 00 09 60 09 60 00 bf ff
+0e 13 d3 00 00 16 44 16 44 00 bf ff
+0e 13 d4 00
+0e 13 d5 00

@@ -109,6 +109,10 @@
       "types": "./dist/zaunkoenig/index.d.ts",
       "import": "./dist/zaunkoenig/index.js"
     },
+    "./corsair": {
+      "types": "./dist/corsair/index.d.ts",
+      "import": "./dist/corsair/index.js"
+    },
     "./drivers": {
       "types": "./dist/drivers/index.d.ts",
       "import": "./dist/drivers/index.js"

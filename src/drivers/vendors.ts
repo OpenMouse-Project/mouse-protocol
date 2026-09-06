@@ -35,6 +35,12 @@ import {
   ZAUNKOENIG_VENDOR_ID,
 } from "@openmouse/protocol/zaunkoenig";
 import {
+  CORSAIR_CONFIG_USAGE,
+  CORSAIR_PRODUCT_IDS,
+  CORSAIR_USAGE_PAGE,
+  CORSAIR_VENDOR_ID,
+} from "@openmouse/protocol/corsair";
+import {
   TEEVOLUTION_LCD_USAGE,
   TEEVOLUTION_LCD_USAGE_PAGE,
 } from "@openmouse/protocol/teevolution";
@@ -80,6 +86,7 @@ export const VENDOR_ID = {
   ninjutsoLegacy: NINJUTSO_LEGACY_VENDOR_ID,
   ninjutso: NINJUTSO_VENDOR_ID,
   zaunkoenig: ZAUNKOENIG_VENDOR_ID,
+  corsair: CORSAIR_VENDOR_ID,
   fantech: 0x3151,
   wooting: WOOTING_VENDOR_ID,
   wallhack: WALLHACK_VENDOR_ID,
@@ -426,12 +433,24 @@ export const LINGBAO_HID_FILTERS: HIDDeviceFilter[] = [...LINGBAO_PRODUCTS.keys(
   (productId) => ({ vendorId: LINGBAO_VENDOR_ID, productId, usagePage: 0xffff, usage: 0x02 }),
 );
 
+// Corsair NXP-family mice answer on the interface whose collection is usage
+// page 0xffc2, usage 4 (64-byte feature reports on id 0). MI_00 also carries
+// an 0xffc2 collection (usage 3) that never answers, so the usage is required
+// or the picker lists the same mouse twice.
+export const CORSAIR_HID_FILTERS: HIDDeviceFilter[] = CORSAIR_PRODUCT_IDS.map((productId) => ({
+  vendorId: CORSAIR_VENDOR_ID,
+  productId,
+  usagePage: CORSAIR_USAGE_PAGE,
+  usage: CORSAIR_CONFIG_USAGE,
+}));
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
     productId,
     usagePage: ZAUNKOENIG_USAGE_PAGE,
   })),
+  ...CORSAIR_HID_FILTERS,
   { vendorId: VENDOR_ID.finalmouse, productId: 0x0100, usagePage: 0xff00, usage: 0x0001 },
   { vendorId: VENDOR_ID.pulsar },
   ...PULSAR_XS1_HID_FILTERS,
