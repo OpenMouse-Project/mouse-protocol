@@ -16,6 +16,7 @@ included.
 | `snap.hex` | Reply to `0e 13 04 00`: angle snapping off. |
 | `stages-icue.hex` | Replies to `0e 13 d0..d5 00` with iCUE's software profile loaded: d0 = Sniper 400 (yellow), d1–d3 = iCUE Stage 1–3 at 800 / 2400 / 5700 (cyan), d4–d5 empty. |
 | `stages-factory.hex` | Replies to `0e 13 d0..d5 00` after replug with iCUE stopped (onboard profile): d0 = Sniper 800, d1–d3 = 1500 / 3000 / 6000. Slot 1 (Stage 1) was active, mask `0x0f`, lift 5, snap 0. |
+| `write-probe.txt` | Live SET probe with read-backs: stage select (`07 13 02`) switches live, angle snap (`07 13 04`) works with and without the trailing `0x05`, lift height (`07 13 03`) accepts 1–5. All restored afterwards. |
 
 Each `.hex` file holds one reply per line as spaced hex, request bytes 0–3
 echoed at the front, trailing zeros of the 64-byte buffer omitted. Lines

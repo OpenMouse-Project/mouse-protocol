@@ -174,7 +174,7 @@ export const corsairEncode = {
   },
   setLift: (height: number): Uint8Array =>
     corsairPacket(CORSAIR_COMMAND.set, CORSAIR_FIELD.mouse, CORSAIR_MOUSE.lift, CORSAIR_LIVE_PROFILE, byteValue(height)),
-  /** Trailing 0x05 mirrors ckb-next; unverified on hardware. */
+  /** Trailing 0x05 mirrors ckb-next; hardware accepts the write with or without it. */
   setSnap: (enabled: boolean): Uint8Array =>
     corsairPacket(CORSAIR_COMMAND.set, CORSAIR_FIELD.mouse, CORSAIR_MOUSE.snap, CORSAIR_LIVE_PROFILE, enabled ? 1 : 0, 0x05),
   /** The device re-enumerates after this; the WebHID handle closes. */

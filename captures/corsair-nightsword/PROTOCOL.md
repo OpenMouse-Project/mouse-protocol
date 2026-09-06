@@ -108,24 +108,34 @@ RX: 0e 15 00 00 5c 1b 00 00 02 00 … @20 01   (contents not yet interpreted)
 ## Write commands (phase 2)
 
 ```
-Select stage:      07 13 02 00 <stage>
+Select stage:      07 13 02 00 <stage>                  CONFIRMED live (cursor speed changes)
 Enabled mask:      07 13 05 00 <mask>
 Stage values:      07 13 (d0|n) 00 <xyIndependent 0/1> <xLo> <xHi> <yLo> <yHi> <r> <g> <b>   (LE; RGB required)
-Lift height:       07 13 03 00 <height>
-Angle snap:        07 13 04 00 <0/1> 05          ← trailing 0x05 in ckb-next; unverified
+Lift height:       07 13 03 00 <height>                 CONFIRMED, 1–5 all accepted
+Angle snap:        07 13 04 00 <0/1> [05]               CONFIRMED with and without the trailing 0x05
 Poll rate:         07 0a 00 00 <interval ms: 1|2|4|8>
 ```
 
 No reply on SET; read back with GET to confirm. Byte 3 = 0 writes are live/non-persistent (survive until power cycle at most). Persisting to the hardware profile uses the file-based format and is out of scope.
 
+### Write probe — 2026‑09‑06, iCUE app + service running
+
+Run from the OpenMouse origin in Chrome 152 against the usage‑4 interface (`write-probe.txt` has the raw log):
+
+- `07 13 02 00 01` → `0e 13 02 00 01 03 20 03 20`: slot 1 (800) selected, cursor noticeably slower for the 10 s hold; iCUE did not override it in that window. `07 13 02 00 02` restored slot 2 (2400).
+- `07 13 04 00 01 05` → snap reads `01`; `07 13 04 00 00` (no trailing byte) → reads `00`. The ckb-next trailing `0x05` is harmless and not required.
+- `07 13 03 00 h` for h = 1…5 → each reads back as written. Mapping of raw height to iCUE's Surface Calibration lift-off labels still to be recorded.
+
 **Poll-rate caveat:** ckb-next notes the device re-enumerates after `FIELD_POLLRATE`; the driver must handle the WebHID device closing and reconnect.
 
 ## Still to confirm
 
-1. Whether `07 13 02 00 <n>` switches stage live (cursor speed changes).
-3. `MOUSE_SNAP` trailing `0x05` byte.
+1. ~~Whether `07 13 02 00 <n>` switches stage live~~ — confirmed 2026‑09‑06.
+2. Raw lift height (1–5) → iCUE Surface Calibration lift-off label mapping.
+3. ~~`MOUSE_SNAP` trailing `0x05` byte~~ — confirmed optional 2026‑09‑06.
 4. Poll-rate write and reconnect behaviour.
 5. Profile-ID reply layout (optional).
+6. `MOUSE_DPIMASK` and `MOUSE_DPIPROF` writes (encoded and unit-tested, not yet sent to hardware).
 
 A USBPcap capture of iCUE is now only needed if any of the above misbehave, or for phase 3 (hardware-profile persistence via `0x17` / `0xff`).
 
