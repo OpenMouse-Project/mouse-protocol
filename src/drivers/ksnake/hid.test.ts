@@ -152,6 +152,10 @@ class FakeKsnakeDevice {
   dpiIndex = 2;
   /** Upcoming replies to swallow (simulates a sleeping dongle). */
   dropReplies = 0;
+  /** Next version reply decodes to null once (simulates a crossed report). */
+  badVersionOnce = false;
+  /** Next battery reply exceeds 100% once (simulates a crossed report). */
+  badBatteryOnce = false;
   sent: number[] = [];
   private listeners = new Map<string, Set<FakeListener>>();
 
@@ -179,14 +183,30 @@ class FakeKsnakeDevice {
   async sendReport(_reportId: number, payload: ArrayBuffer): Promise<void> {
     const body = new Uint8Array(payload);
     this.sent.push(body[1]);
-    if (body[1] === 0x0f) {
-      for (let i = 0; i < 6; i++) {
-        this.stages[i] = body[13 + i * 2] | (body[14 + i * 2] << 8);
+    let reply: Uint8Array;
+    if (body[1] === 0x03) {
+      reply = new Uint8Array(64);
+      if (!this.badVersionOnce) {
+        reply[23] = 50; // "2"
+        reply[24] = 49; // "1"
+        reply[25] = 55; // "7"
       }
-      this.reportRate = body[10] - 1;
-      this.dpiIndex = body[12] - 1;
+      this.badVersionOnce = false;
+    } else if (body[1] === 0x30) {
+      reply = new Uint8Array(64);
+      reply[8] = this.badBatteryOnce ? 200 : 81;
+      reply[9] = 0;
+      this.badBatteryOnce = false;
+    } else {
+      if (body[1] === 0x0f) {
+        for (let i = 0; i < 6; i++) {
+          this.stages[i] = body[13 + i * 2] | (body[14 + i * 2] << 8);
+        }
+        this.reportRate = body[10] - 1;
+        this.dpiIndex = body[12] - 1;
+      }
+      reply = configReply(this.stages, this.reportRate, this.dpiIndex);
     }
-    const reply = configReply(this.stages, this.reportRate, this.dpiIndex);
     queueMicrotask(() => {
       if (this.dropReplies > 0) {
         this.dropReplies -= 1;
@@ -250,6 +270,15 @@ describe("KsnakeHidClient writes", () => {
     const device = new FakeKsnakeDevice();
     assert.equal(await fastClient(device).setDpiStageValue(0, 600), 600);
     assert.equal(device.stages[0], 600);
+  });
+
+  it("retries status reads that fail validation", async () => {
+    const device = new FakeKsnakeDevice();
+    device.badVersionOnce = true;
+    device.badBatteryOnce = true;
+    const status = await fastClient(device).readStatus();
+    assert.deepEqual(status.firmware, ["X11 2.1.7"]);
+    assert.equal(status.batteryPercent, 81);
   });
 
   it("rejects out-of-range DPI without touching the mouse", async () => {

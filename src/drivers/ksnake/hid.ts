@@ -149,12 +149,37 @@ export class KsnakeHidClient {
     return null;
   }
 
+  /**
+   * Reads with one retry when the reply fails validation. The dongle can emit
+   * unsolicited reports that a queued exchange mistakes for its answer, so a
+   * single failed decode is worth one resend before giving up.
+   */
+  private async readValidated<T>(
+    read: () => Promise<T | null>,
+    valid: (value: T) => boolean,
+  ): Promise<T | null> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const value = await read().catch(() => null);
+      if (value !== null && valid(value)) return value;
+    }
+    return null;
+  }
+
   async readStatus(): Promise<MouseStatus> {
     await this.open();
     const [config, battery, version] = await Promise.all([
-      this.exchange(ksnakeGetConfigRequest()).then((r) => ksnakeDecodeConfig(r)).catch(() => null),
-      this.exchange(ksnakeGetBatteryRequest()).then((r) => ksnakeDecodeBattery(r)).catch(() => null),
-      this.exchange(ksnakeGetVersionRequest()).then((r) => ksnakeDecodeVersion(r)).catch(() => null),
+      this.readValidated(
+        () => this.exchange(ksnakeGetConfigRequest()).then((r) => ksnakeDecodeConfig(r)),
+        (c) => ksnakeDecodePollingRate(c.reportRate) !== null && c.dpiIndex >= 0 && c.dpiIndex < c.stages.length,
+      ),
+      this.readValidated(
+        () => this.exchange(ksnakeGetBatteryRequest()).then((r) => ksnakeDecodeBattery(r)),
+        (b) => b.percent <= 100,
+      ),
+      this.readValidated(
+        () => this.exchange(ksnakeGetVersionRequest()).then((r) => ksnakeDecodeVersion(r)),
+        (v) => v.length > 0,
+      ),
     ]);
     const stages = config?.stages ?? [];
     const activeStage = config ? Math.min(Math.max(config.dpiIndex, 0), Math.max(stages.length - 1, 0)) : 0;
