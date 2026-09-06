@@ -1,0 +1,2 @@
+# GET 0e 13 02 00 -> current stage index, X u16 BE, Y u16 BE
+0e 13 02 00 02 09 60 09 60

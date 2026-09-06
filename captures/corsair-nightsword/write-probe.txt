@@ -1,0 +1,24 @@
+# Live SET probe, 2026-09-06, fw 3.41, Chrome 152, iCUE app + service running.
+# Each SET was followed by the matching GET after ~20 ms; only the GET replies are
+# listed (first 12 bytes). Writes use profile byte 0 (live) and were restored.
+
+stageBefore     0e 13 02 00 02 09 60 09 60 00 00 00
+snapBefore      0e 13 04 00 00 00 00 00 00 00 00 00
+liftBefore      0e 13 03 00 05 00 00 00 00 00 00 00
+
+# SET 07 13 02 00 01  (select slot 1) -> cursor noticeably slower for the 10 s hold
+stageAfterSet1  0e 13 02 00 01 03 20 03 20 00 00 00
+# SET 07 13 02 00 02  (restore slot 2)
+stageRestored   0e 13 02 00 02 09 60 09 60 00 00 00
+
+# SET 07 13 04 00 01 05  (angle snap on, ckb-next trailing byte)
+snapOnWith05    0e 13 04 00 01 00 00 00 00 00 00 00
+# SET 07 13 04 00 00     (angle snap off, no trailing byte)
+snapOffNo05     0e 13 04 00 00 00 00 00 00 00 00 00
+
+# SET 07 13 03 00 <h> for h = 1..5, each read back
+lift1           0e 13 03 00 01 00 00 00 00 00 00 00
+lift2           0e 13 03 00 02 00 00 00 00 00 00 00
+lift3           0e 13 03 00 03 00 00 00 00 00 00 00
+lift4           0e 13 03 00 04 00 00 00 00 00 00 00
+lift5           0e 13 03 00 05 00 00 00 00 00 00 00

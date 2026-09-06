@@ -1,0 +1,2 @@
+# GET ident: 0e 01 00 -> fw 3.41, bl 3.08, VID 1b1c, PID 1b5c, poll 1 ms
+0e 01 00 00 01 01 00 01 41 03 08 03 1c 1b 5c 1b 01
