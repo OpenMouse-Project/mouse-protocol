@@ -25,6 +25,16 @@ export const KSNAKE_REPORT_ID = 0x00;
 export const KSNAKE_MAGIC = 0x55;
 export const KSNAKE_REPORT_SIZE = 64;
 
+/** DPI range. Vendor panel slider allows 200–12000 (step 100); the manual's
+ *  factory steps are 800–12000 and 600 was observed in stage 0 on retail
+ *  hardware (user-customized via the vendor panel). */
+export const KSNAKE_DPI_MIN = 200;
+export const KSNAKE_DPI_MAX = 12000;
+
+export function ksnakeIsValidDpi(dpi: number): boolean {
+  return Number.isInteger(dpi) && dpi >= KSNAKE_DPI_MIN && dpi <= KSNAKE_DPI_MAX;
+}
+
 export interface KsnakeProduct {
   model: string;
   wireless: boolean;
@@ -50,8 +60,9 @@ const GET_BATTERY_TAIL = [0xa5, 0x0b, 0x2e, 0x01, 0x01, 0x00, 0x00, 0x00] as con
 
 /**
  * Polling-rate index ↔ Hz.
- * Confirmed by vendor panel screenshot + PAW3311 spec: X11 offers
- * 125/250/500/1000 Hz only (1000 Hz in 2.4G/wired, 125 Hz in BT).
+ * Endpoints confirmed by the X11 user manual: 1000 Hz in 2.4G/wired,
+ * 125 Hz in BT. Middle steps (250/500) come from the vendor panel screenshot
+ * + PAW3311 spec — keep until a hardware capture says otherwise.
  * Default index 3 = 1000 Hz.
  */
 export const KSNAKE_POLLING_RATES = [125, 250, 500, 1000] as const;
@@ -69,7 +80,8 @@ export const KSNAKE_DEFAULT_CONFIG = {
   lightMode: 2,
   reportRate: 3,
   dpiIndex: 2,
-  dpiCount: 5,
+  // Hardware reports 6 (retail 2.4 GHz dongle, FW 2.1.7).
+  dpiCount: 6,
   stages: [800, 1200, 1600, 3200, 5000, 12000],
   scrollFlag: 0,
   lodValue: 1,
