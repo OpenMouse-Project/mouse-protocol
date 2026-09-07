@@ -1,5 +1,7 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import {
+  KSNAKE_BUTTON_ACTIONS,
+  KSNAKE_BUTTON_NAMES,
   KSNAKE_PRODUCT_ID,
   KSNAKE_POLLING_RATES,
   KSNAKE_REPORT_ID,
@@ -20,6 +22,8 @@ import {
   ksnakeGetConfigRequest,
   ksnakeGetKeysRequest,
   ksnakeGetVersionRequest,
+  ksnakeBindingLabel,
+  ksnakeFindButtonAction,
   ksnakeIsKnownKeyType,
   ksnakeIsValidDpi,
   ksnakeKeysLookPlausible,
@@ -231,7 +235,18 @@ export class KsnakeHidClient {
       connectionDetail: this.device.vendorId === KSNAKE_USB_VENDOR_ID ? "Wired USB" : "2.4 GHz receiver",
       liftOffDistance: config ? ksnakeDecodeLiftOff(config.lodValue) : null,
       supportedLiftOffDistances: ["Low", "High"],
-      ksnakeButtonMappings: keys,
+      // Generic remap interface: the shared ButtonMappingCard renders these
+      // with no brand-specific code. Opaque slots surface as "Custom (…)" and
+      // stay selectable-visible; setButtonMapping refuses to rewrite them.
+      buttonMappings: keys
+        ? Object.fromEntries(
+            keys.slice(0, KSNAKE_BUTTON_NAMES.length).map((binding, index) => [
+              KSNAKE_BUTTON_NAMES[index] as string,
+              ksnakeBindingLabel(binding) ?? `Custom (${binding.type},${binding.code1},${binding.code2},${binding.code3})`,
+            ]),
+          )
+        : undefined,
+      buttonOptions: KSNAKE_BUTTON_ACTIONS.map((action) => action.label),
       firmware: version ? [`X11 ${version}`] : ["K-snake X11"],
     };
   }
@@ -341,6 +356,26 @@ export class KsnakeHidClient {
       if (keys && ksnakeKeysLookPlausible(keys)) return keys;
     }
     return null;
+  }
+
+  /**
+   * Remap one button by display label (generic `setButtonMapping` interface).
+   * SET_KEYS always carries all six remappable slots, so the current map is
+   * re-read and the single slot replaced — confirmed by setKeys' read-back.
+   * Slot "Left" is locked (the vendor panel refuses drops there too); opaque
+   * slots elsewhere abort the write rather than risk bricking macros.
+   */
+  async setButtonMapping(button: string, actionLabel: string): Promise<void> {
+    const index = KSNAKE_BUTTON_NAMES.indexOf(button as (typeof KSNAKE_BUTTON_NAMES)[number]);
+    if (index < 0) throw new Error(`This mouse has no "${button}" button.`);
+    if (index === 0) throw new Error("Left Click is fixed and cannot be reassigned.");
+    const binding = ksnakeFindButtonAction(actionLabel);
+    if (!binding) throw new Error(`Unknown button action "${actionLabel}".`);
+    const current = await this.getKeys();
+    if (!current) throw new Error("Could not read the current button map from the mouse.");
+    const slots = current.slice(0, KSNAKE_BUTTON_NAMES.length).map((slot) => ({ ...slot }));
+    slots[index] = binding;
+    await this.setKeys(slots);
   }
 
   async setLiftOffDistance(

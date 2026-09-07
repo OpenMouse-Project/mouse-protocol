@@ -415,10 +415,43 @@ describe("KsnakeHidClient writes", () => {
     assert.deepEqual(keys, device.keys);
   });
 
-  it("publishes the button map on readStatus", async () => {
+  it("publishes the generic button map on readStatus", async () => {
     const status = await fastClient(new FakeKsnakeDevice()).readStatus();
-    assert.equal(status.ksnakeButtonMappings?.length, 7);
-    assert.deepEqual(status.ksnakeButtonMappings?.[0], { type: 32, code1: 1, code2: 0, code3: 0 });
+    assert.deepEqual(status.buttonMappings, {
+      Left: "Left click",
+      Right: "Right click",
+      Middle: "Middle click",
+      Backward: "Backward",
+      // The fake ships a macro reference here: opaque slots surface as-is.
+      Forward: "Custom (112,0,1,3)",
+      DPI: "DPI loop",
+    });
+    assert.ok(status.buttonOptions?.includes("Backward"));
+    assert.ok(status.buttonOptions?.includes("DPI loop"));
+  });
+
+  it("remaps one button by label through setButtonMapping", async () => {
+    const device = new FakeKsnakeDevice();
+    device.keys = [
+      { type: 32, code1: 1, code2: 0, code3: 0 },
+      { type: 32, code1: 2, code2: 0, code3: 0 },
+      { type: 32, code1: 4, code2: 0, code3: 0 },
+      { type: 32, code1: 8, code2: 0, code3: 0 },
+      { type: 32, code1: 16, code2: 0, code3: 0 },
+      { type: 33, code1: 85, code2: 0, code3: 0 },
+      { type: 33, code1: 56, code2: 1, code3: 0 },
+    ];
+    await fastClient(device).setButtonMapping("Forward", "Backward");
+    assert.deepEqual(device.keys[4], { type: 32, code1: 8, code2: 0, code3: 0 });
+    assert.ok(device.sent.includes(0x09));
+  });
+
+  it("locks Left and rejects unknown buttons and actions", async () => {
+    const device = new FakeKsnakeDevice();
+    await assert.rejects(() => fastClient(device).setButtonMapping("Left", "Backward"), /fixed/);
+    await assert.rejects(() => fastClient(device).setButtonMapping("Side", "Backward"), /no "Side" button/);
+    await assert.rejects(() => fastClient(device).setButtonMapping("Forward", "Turbo"), /Unknown button action/);
+    assert.ok(!device.sent.includes(0x09));
   });
 
   it("reuses the last good config when a poll read fails", async () => {
