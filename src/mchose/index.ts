@@ -540,6 +540,7 @@ export function mchosePollingRates(
 
 export * from "./buttons.ts";
 export * from "./dock.ts";
+export * from "./a5-gen1.ts";
 
 /**
  * Profile names, read one at a time with `0x12 0x68 <index>`. The reply is the
