@@ -265,9 +265,10 @@ export const LINGBAO_M5_PRO_PROFILE: GearHubProfile = {
 /**
  * Attack Shark R2. Same GearHub-V5 platform and VID:PID as the M5 Pro,
  * distinguished only by device id 1893 (Attack Shark's own web driver shows it
- * as `ID1893_v201`). Verified on retail hardware over the 2.4 GHz receiver:
- * identity, firmware v2.01, the six-stage DPI table (top stage ~42000),
- * 8000 Hz polling, DPI read + write. Wired mode (PID 0x4026) was not tested.
+ * as `ID1893_v201`). Verified on retail hardware, both over the 2.4 GHz
+ * receiver and by cable (PID 0x4026): identity, firmware v2.01, the
+ * six-stage DPI table (top stage ~42000), 8000 Hz polling, DPI / lift-off /
+ * debounce / correction / sleep read + write, and 6-button remapping.
  */
 export const ATTACK_SHARK_R2_PROFILE: GearHubProfile = {
   deviceId: 1893,
