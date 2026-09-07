@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { atkPackDpiStage } from "@openmouse/protocol/atk";
+import { atkPackDpiStage, atkPackDpiStageForSensor } from "@openmouse/protocol/atk";
+import { wePackScalarPair } from "@openmouse/protocol/endgame-gear-we";
 import { AtkHidClient } from "./hid.ts";
 import { PulsarHidClient } from "../pulsar/pulsar-hid.ts";
 import { createSupportedClient, deviceBrand } from "../registry.ts";
@@ -668,9 +669,6 @@ test("one-byte battery reply leaves state and voltage unknown", async () => {
 });
 
 test("the F1 Ultimate 2.0 identity names the mouse, not its receiver", async () => {
-  // 0x373b:0x11d9 is a shared 8K receiver SKU whose USB product string names
-  // the dongle, so without the identity the status falls back to "ATK
-  // Wireless mouse 8k dongle-L".
   const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
   (fake as unknown as FakeAtkDevice).replies = [
     reply(0x10, 0x0000, [0x01, 0x08]),
@@ -689,9 +687,10 @@ test("the F1 Ultimate 2.0 identity names the mouse, not its receiver", async () 
   assert.equal(status.brand, "ATK");
   assert.equal(client.displayName(), "ATK F1 Ultimate 2.0");
   assert.equal(status.connectionType, "Wireless");
-  // PAW3950Ultra keeps the 42,000 DPI ceiling the unidentified fallback used,
-  // so naming the mouse does not narrow what the UI offers.
   assert.equal(client.maxDpi(), 42000);
+  assert.deepEqual(status.liftOffScale, {
+    value: 4, min: 1, max: 11, millimetres: 1, minMillimetres: 0.7, maxMillimetres: 1.7,
+  });
 });
 
 test("an unrecognised identity on the same receiver keeps the dongle name", async () => {
@@ -709,4 +708,68 @@ test("an unrecognised identity on the same receiver keeps the dongle name", asyn
 
   const status = await new AtkHidClient(fake).readStatus();
   assert.equal(status.name, "ATK Wireless mouse 8k dongle-L");
+  assert.equal(status.liftOffScale, undefined);
+});
+
+test("the A9 Mini + identity reads its DPI stage from the PAW3955 Master address, not the nibble layout", async () => {
+  const fake = device(0x1278, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [1, 31]),
+    reply(0x04, 0x0000, [0x5f, 0x01]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x1b00, atkPackDpiStageForSensor("PAW3955Master", 3200, 3200)!),
+    reply(0x12, 0x0000, [0x05, 0x0a]),
+    reply(0x08, 0x000a, [0x04, 0x51]),
+    reply(0x08, 0x00a9, [0x08, 0x4d, 0x00, 0x55, 0x1e, 0x37, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00bd, [0x00, 0x55, 0x00, 0x55]),
+  ];
+
+  const client = new AtkHidClient(fake);
+  const status = await client.readStatus();
+  assert.equal(status.name, "ATK A9 Mini +");
+  assert.equal(status.brand, "ATK");
+  assert.equal(status.dpi, 3200);
+  assert.equal(status.dpiY, 3200);
+  assert.equal(client.maxDpi(), 40000);
+  assert.deepEqual(status.liftOffScale, {
+    value: 4, min: 1, max: 11, millimetres: 1, minMillimetres: 0.7, maxMillimetres: 1.7,
+  });
+});
+
+test("setDpi on an identified A9 Mini + writes the six-byte row at 0x1B00, not the old four-byte layout", async () => {
+  const fake = device(0x1278, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [1, 31]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x1b00, atkPackDpiStageForSensor("PAW3955Master", 3200, 3200)!),
+  ];
+
+  assert.equal(await new AtkHidClient(fake).setDpi(3200), 3200);
+  const write = wrote(fake);
+  assert.equal(write[2], 0x1b, "written EEPROM address high byte");
+  assert.equal(write[3], 0x00, "written EEPROM address low byte");
+  assert.equal(write[4], 6, "declared payload length");
+  assert.deepEqual(Array.from(write.subarray(5, 11)), atkPackDpiStageForSensor("PAW3955Master", 3200, 3200));
+});
+
+test("setLiftOffScale writes a raw code and confirms it, for a sensor with a continuous range", async () => {
+  const fake = device(0x1278, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [1, 31]),
+    reply(0x08, 0x000a, wePackScalarPair(9)),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setLiftOffScale(9), 9);
+  const write = wrote(fake);
+  assert.equal(write[2], 0x00, "written EEPROM address high byte");
+  assert.equal(write[3], 0x0a, "written EEPROM address low byte");
+  assert.deepEqual(Array.from(write.subarray(5, 7)), wePackScalarPair(9));
+});
+
+test("setLiftOffScale is refused for a sensor without a continuous range", async () => {
+  const fake = device(0x11d5, "ATK dongle");
+  (fake as unknown as FakeAtkDevice).replies = [reply(0x10, 0x0000, [0xfe, 0xed])];
+
+  await assert.rejects(new AtkHidClient(fake).setLiftOffScale(9), /does not support a continuous lift-off range/);
 });

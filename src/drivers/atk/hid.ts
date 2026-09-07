@@ -19,6 +19,8 @@ import {
   ATK_VXE_R1_POLLING_RATES,
   ATK_VXE_R1_SETTINGS_REGISTER,
   ATK_SENSORS,
+  ATK_LIFT_OFF_MIN_CODE,
+  ATK_LIFT_OFF_MAX_CODE,
   atkBuildReceiverPairRequest,
   atkBuildSetCurrentProfile,
   atkDecodeLiftOff,
@@ -28,6 +30,7 @@ import {
   atkDecodeReceiverStatus,
   atkDecodeVxeR1PollingCode,
   atkDpiOptionsForSensor,
+  atkDpiStageLength,
   atkPackDpiStage,
   atkPackDpiStageForSensor,
   atkPackVxeR1LiveSetting,
@@ -69,6 +72,7 @@ const REGISTER = {
   liftOffDistance: 0x000a,
   // Four bytes per DPI stage.
   dpiBase: 0x000c,
+  paw3955DpiBase: 0x1b00,
   dpiColorBase: 0x002c,
   dpiLighting: 0x004c,
   // 0x00a9: debounce, motion sync, sleep timer, linear correction, ripple control.
@@ -325,6 +329,7 @@ export class AtkHidClient {
       angleTuning: angleTuning === null ? null : this.decodeAngle(angleTuning),
       liftOffDistance: this.decodeLiftOffDistance(liftOffDistance[0]),
       supportedLiftOffDistances: this.isR1() ? ["Low", "High"] : undefined,
+      liftOffScale: this.supportsLiftOffScale() ? this.liftOffScale(liftOffDistance[0]) : undefined,
       firmware,
     };
   }
@@ -589,6 +594,23 @@ export class AtkHidClient {
     return confirmed;
   }
 
+  async setLiftOffScale(code: number): Promise<number> {
+    await this.identify();
+    if (!this.supportsLiftOffScale()) {
+      throw new Error("This mouse does not support a continuous lift-off range.");
+    }
+    if (!Number.isInteger(code) || code < ATK_LIFT_OFF_MIN_CODE || code > ATK_LIFT_OFF_MAX_CODE) {
+      throw new Error(`A lift-off code runs ${ATK_LIFT_OFF_MIN_CODE} to ${ATK_LIFT_OFF_MAX_CODE}.`);
+    }
+    await this.write(REGISTER.liftOffDistance, wePackScalarPair(code));
+    const confirmed = (await this.read(REGISTER.liftOffDistance, 2))[0];
+    if (confirmed !== code) {
+      throw new Error(`The mouse kept lift-off code ${confirmed} instead of ${code}.`);
+    }
+    this.patch({ liftOffDistance: this.decodeLiftOffDistance(confirmed), liftOffScale: this.liftOffScale(confirmed) });
+    return confirmed;
+  }
+
   async setMotionSync(enabled: boolean): Promise<boolean> {
     await this.identify();
     return await this.setAdvancedFlag(2, enabled, "motionSync", "Motion Sync");
@@ -744,11 +766,16 @@ export class AtkHidClient {
   }
 
   private dpiAddress(index: number): number {
+    const sensor = this.product?.sensor ?? null;
+    if (sensor && ATK_SENSORS[sensor].family === "paw3955master") {
+      return REGISTER.paw3955DpiBase + index * atkDpiStageLength(sensor);
+    }
     return REGISTER.dpiBase + index * DPI_STAGE_LENGTH;
   }
 
   private async readDpiStage(index: number): Promise<{ x: number; y: number }> {
-    const data = await this.read(this.dpiAddress(index), DPI_STAGE_LENGTH);
+    const sensor = this.product?.sensor ?? null;
+    const data = await this.read(this.dpiAddress(index), atkDpiStageLength(sensor));
     const stage = this.product
       ? atkUnpackDpiStageForSensor(this.product.sensor, data)
       : atkUnpackDpiStage(data);
@@ -778,6 +805,23 @@ export class AtkHidClient {
     if (millimetres === null) return null;
     if (millimetres < 1) return "Low";
     return millimetres < 1.5 ? "Medium" : "High";
+  }
+
+  private supportsLiftOffScale(): boolean {
+    return this.product?.sensor === "PAW3950Ultra" || this.product?.sensor === "PAW3955Master";
+  }
+
+  private liftOffScale(code: number): MouseStatus["liftOffScale"] {
+    const millimetres = atkDecodeLiftOff(code);
+    if (millimetres === null) return null;
+    return {
+      value: code,
+      min: ATK_LIFT_OFF_MIN_CODE,
+      max: ATK_LIFT_OFF_MAX_CODE,
+      millimetres,
+      minMillimetres: atkDecodeLiftOff(ATK_LIFT_OFF_MIN_CODE)!,
+      maxMillimetres: atkDecodeLiftOff(ATK_LIFT_OFF_MAX_CODE)!,
+    };
   }
 
   private decodeAngle(byte: number): number {
