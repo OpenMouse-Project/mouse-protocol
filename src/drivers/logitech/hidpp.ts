@@ -1,10 +1,11 @@
 import type { MouseLighting, MouseStatus } from "../mouse-types.ts";
-import { LOGITECH_RECEIVER_PRODUCT_IDS } from "../vendors.ts";
+import { LOGITECH_BLUETOOTH_FILTERS, LOGITECH_RECEIVER_FILTERS, LOGITECH_RECEIVER_PRODUCT_IDS } from "../vendors.ts";
 import {
   BOLT_INDEX_PROBE_TIMEOUT_MS,
   boltSupportScore,
   classifyHidpp20Probe,
   collapseBoltPeers,
+  hasHidppBluetoothCollection,
   hasHidppLongCollection,
   hasHidppShortCollection,
   resolveBoltReportDevice,
@@ -73,6 +74,7 @@ import {
 
 export {
   collapseBoltPeers,
+  hasHidppBluetoothCollection,
   hasHidppLongCollection,
   hasHidppShortCollection,
 } from "./bolt.ts";
@@ -483,11 +485,20 @@ export class LogitechHidppClient {
    * field initializers before the `device` parameter property is assigned.
    */
   private get isDirectConnect(): boolean {
-    return isDirectConnection(this.resolvedDeviceIndex);
+    // A Bluetooth mouse also answers on 0xFF, because over BLE it really is the
+    // endpoint, but nothing this flag gates is true of it. Onboard-profile
+    // writes, short-report DPI and the "Wired USB" label all describe a *wired*
+    // vendor interface, so Bluetooth takes the receiver-style paths instead.
+    return !this.isBluetooth && isDirectConnection(this.resolvedDeviceIndex);
   }
 
   private get isBoltReceiver(): boolean {
     return isBoltReceiverProduct(this.device.productId);
+  }
+
+  /** @see hasHidppBluetoothCollection */
+  private get isBluetooth(): boolean {
+    return hasHidppBluetoothCollection(this.device);
   }
 
   /** HID++ device index: a receiver pairing slot, or the mouse itself. */
@@ -594,7 +605,9 @@ export class LogitechHidppClient {
    */
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== LOGITECH_VENDOR_ID) return false;
-    return hasHidppShortCollection(device) || hasHidppLongCollection(device);
+    return hasHidppShortCollection(device)
+      || hasHidppLongCollection(device)
+      || hasHidppBluetoothCollection(device);
   }
 
   /**
@@ -621,11 +634,10 @@ export class LogitechHidppClient {
       throw new Error("WebHID is unavailable. Use Chrome or Edge on desktop.");
     }
 
+    // The shared lists, not a second copy: a Bluetooth filter added to one and
+    // not the other is how the mouse stayed invisible on this path.
     const devices = await navigator.hid.requestDevice({
-      filters: [
-        { vendorId: LOGITECH_VENDOR_ID, usagePage: 0xff00, usage: 0x0001 },
-        { vendorId: LOGITECH_VENDOR_ID, usagePage: 0xff00, usage: 0x0002 },
-      ],
+      filters: [...LOGITECH_RECEIVER_FILTERS, ...LOGITECH_BLUETOOTH_FILTERS],
     });
     const ranked = [...devices]
       .filter((device) => this.isSupported(device))
@@ -846,9 +858,11 @@ export class LogitechHidppClient {
       // for Logi Bolt (BLE-based) versus Lightspeed.
       connectionDetail: this.isDirectConnect
         ? "Wired USB"
-        : this.isBoltReceiver
-          ? "Logi Bolt"
-          : undefined,
+        : this.isBluetooth
+          ? "Bluetooth"
+          : this.isBoltReceiver
+            ? "Logi Bolt"
+            : undefined,
       activeProfile: profileState.activeProfile,
       deviceMode: profileState.deviceMode,
       unitId: identity.unitId,
@@ -3168,10 +3182,12 @@ export class LogitechHidppClient {
     parameters: number[],
     options: { timeoutMs?: number } = {},
   ): Promise<Uint8Array> {
-    // Bolt feature traffic only answers on long reports. Lightspeed and wired
-    // mice keep the short form for the three-parameter path they were verified
-    // with; longer payloads still go through requestLong.
-    if (this.isBoltReceiver) {
+    // Bolt feature traffic only answers on long reports, and Bluetooth has no
+    // short report at all: its descriptor declares report 0x11 alone, so a
+    // sendReport(0x10) is rejected outright. Lightspeed and wired mice keep the
+    // short form for the three-parameter path they were verified with; longer
+    // payloads still go through requestLong.
+    if (this.isBoltReceiver || this.isBluetooth) {
       return this.requestLong(featureIndex, functionId, parameters, options.timeoutMs);
     }
     if (parameters.length > 3) {
@@ -3228,7 +3244,7 @@ export class LogitechHidppClient {
         }
         reject(new HidppTimeoutError(this.isDirectConnect
           ? "The mouse did not answer. Close Logitech G HUB or Logitech Gaming Software, then try again."
-          : this.isBoltReceiver
+          : this.isBoltReceiver || this.isBluetooth
             ? "The mouse did not answer. Move it, close Logi Options+, then try again."
             : "The mouse did not answer. Move it or click a button, then try again."));
       }, timeoutMs);
