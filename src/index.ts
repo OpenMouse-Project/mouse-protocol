@@ -19,6 +19,7 @@ export * as vgn from "./vgn/index.js";
 export * as wlmouse from "./wlmouse/index.js";
 export * as zaunkoenig from "./zaunkoenig/index.js";
 export * as corsair from "./corsair/index.js";
+export * as dareu from "./dareu/index.js";
 export * as gwolves from "./gwolves/index.js";
 export * as glorious from "./glorious/index.js";
 export * as ksnake from "./ksnake/index.js";
