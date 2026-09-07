@@ -3,7 +3,7 @@ import { AtkHidClient } from "./atk/hid.ts";
 import { AttackSharkHidClient } from "./attackshark/hid.ts";
 import { EggOp1HidClient } from "./endgame/egg-op1-hid.ts";
 import { FantechHidClient } from "./fantech/hid.ts";
-import { LingbaoHidClient } from "./lingbao/hid.ts";
+import { GearHubHidClient } from "./gearhub/hid.ts";
 import { eggWeCreate, eggWeIsSupported, eggWeSupportScore, isEggWeClient, type EggWeHidClient } from "./endgame/egg-we-control.ts";
 import { FinalmouseHidClient } from "./finalmouse/hid.ts";
 import { KeychronM6HidClient } from "./keychron/m6-hid.ts";
@@ -49,7 +49,7 @@ import { KsnakeHidClient } from "./ksnake/hid.ts";
 import { MicrosoftHidClient } from "./microsoft/hid.ts";
 
 export type PulsarClient = PulsarHidClient | PulsarProHidClient | PulsarXs1HidClient;
-export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | AtkBitmouseHidClient | VgnF2HidClient | KeychronM6HidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | CorsairHidClient | AttackSharkHidClient | FantechHidClient | LingbaoHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | SteelSeriesRival3HidClient | SteelSeriesAerox3HidClient | SteelSeriesRival3WirelessHidClient | SteelSeriesAerox5HidClient | SteelSeriesAerox5WirelessHidClient | SteelSeriesRival650HidClient | SteelSeriesAerox9WirelessHidClient | SteelSeriesRival310HidClient | SteelSeriesPrimePlusHidClient | SteelSeriesPrimeMiniWirelessHidClient | SteelSeriesSenseiTenHidClient | GloriousHidClient | GloriousClassicHidClient | MchoseHidClient | MchoseDockHidClient | KsnakeHidClient | MicrosoftHidClient;
+export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | AtkBitmouseHidClient | VgnF2HidClient | KeychronM6HidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | CorsairHidClient | AttackSharkHidClient | FantechHidClient | GearHubHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | SteelSeriesRival3HidClient | SteelSeriesAerox3HidClient | SteelSeriesRival3WirelessHidClient | SteelSeriesAerox5HidClient | SteelSeriesAerox5WirelessHidClient | SteelSeriesRival650HidClient | SteelSeriesAerox9WirelessHidClient | SteelSeriesRival310HidClient | SteelSeriesPrimePlusHidClient | SteelSeriesPrimeMiniWirelessHidClient | SteelSeriesSenseiTenHidClient | GloriousHidClient | GloriousClassicHidClient | MchoseHidClient | MchoseDockHidClient | KsnakeHidClient | MicrosoftHidClient;
 
 export interface DeviceDriver {
   brand: string;
@@ -85,12 +85,14 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Razer", supports: (device) => RazerViperV4ProHidClient.isSupported(device), create: (device) => new RazerViperV4ProHidClient(device), score: () => 7 },
   { brand: "Keychron", supports: (device) => KeychronM6HidClient.isSupported(device), create: (device) => new KeychronM6HidClient(device), score: () => 7 },
   { brand: "Keychron", supports: (device) => KeychronNapeHidClient.isSupported(device), create: (device) => new KeychronNapeHidClient(device), score: () => 6 },
-  // Ahead of Fantech: the Lingbao M5 Pro answers on the same VID 0x3151,
-  // usage page 0xFFFF, usage 0x02 interface that FantechHidClient claims, but
-  // needs the 2.4G relay handshake and the Bit7 checksum that driver has no
-  // notion of. Scoped to the M5 Pro's two product ids so it cannot shadow
-  // Fantech's own hardware.
-  { brand: "Lingbao", supports: (device) => LingbaoHidClient.isSupported(device), create: (device) => new LingbaoHidClient(device), score: () => 7 },
+  // Ahead of Fantech: GearHub-V5 mice (Lingbao M5 Pro, Attack Shark R2, …)
+  // answer on the same VID 0x3151, usage page 0xFFFF, usage 0x02 interface
+  // that FantechHidClient claims, but need the 2.4G relay handshake and the
+  // Bit7 checksum that driver has no notion of. Scoped to the two receiver
+  // product ids so it cannot shadow Fantech's own hardware. The client
+  // identifies the specific model from the device id after connecting; the
+  // registry label is the M5 Pro's brand (the fallback identity).
+  { brand: "Lingbao", supports: (device) => GearHubHidClient.isSupported(device), create: (device) => new GearHubHidClient(device), score: () => 7 },
   { brand: "Fantech", supports: (device) => FantechHidClient.isSupported(device), create: (device) => new FantechHidClient(device), score: () => 5 },
   { brand: "Wooting", supports: (device) => WootingHidClient.isSupported(device), create: (device) => new WootingHidClient(device), score: () => 6 },
   { brand: "WALLHACK", supports: (device) => WallhackMouseHidClient.isSupported(device), create: (device) => new WallhackMouseHidClient(device), score: () => 8 },
