@@ -67,6 +67,8 @@ export class KsnakeHidClient {
   private queue: Promise<unknown> = Promise.resolve();
   private readonly replyTimeoutMs: number;
   private readonly settleAfterWriteMs: number;
+  /** Last config that passed validation (see readStatus). */
+  private lastGoodConfig: KsnakeConfig | null = null;
 
   constructor(device: HIDDevice, options: KsnakeClientOptions = {}) {
     this.device = device;
@@ -175,7 +177,7 @@ export class KsnakeHidClient {
 
   async readStatus(): Promise<MouseStatus> {
     await this.open();
-    const [config, battery, version] = await Promise.all([
+    const [freshConfig, battery, version] = await Promise.all([
       this.readValidated(
         () => this.exchange(ksnakeGetConfigRequest()).then((r) => ksnakeDecodeConfig(r)),
         (c) => ksnakeDecodePollingRate(c.reportRate) !== null && c.dpiIndex >= 0 && c.dpiIndex < c.stages.length,
@@ -192,6 +194,10 @@ export class KsnakeHidClient {
     // Sequential on purpose: parallel reads on this dongle collide into
     // crossed reports, and keys are the least critical of the four.
     const keys = await this.getKeys().catch(() => null);
+    // Last-good cache: a failed poll read must not blank the stages/DPI in
+    // the UI until the next poll (the panel re-renders on every change).
+    if (freshConfig) this.lastGoodConfig = freshConfig;
+    const config = freshConfig ?? this.lastGoodConfig;
     const stages = config?.stages ?? [];
     const activeStage = config ? Math.min(Math.max(config.dpiIndex, 0), Math.max(stages.length - 1, 0)) : 0;
     const dpi = stages[activeStage] ?? 1600;

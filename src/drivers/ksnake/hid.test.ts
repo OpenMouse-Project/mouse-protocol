@@ -421,6 +421,17 @@ describe("KsnakeHidClient writes", () => {
     assert.deepEqual(status.ksnakeButtonMappings?.[0], { type: 32, code1: 1, code2: 0, code3: 0 });
   });
 
+  it("reuses the last good config when a poll read fails", async () => {
+    const device = new FakeKsnakeDevice();
+    const client = fastClient(device);
+    const first = await client.readStatus();
+    assert.deepEqual(first.dpiStages?.slice(0, 3), [800, 1200, 1600]);
+    device.dropReplies = 99;
+    const second = await client.readStatus();
+    assert.deepEqual(second.dpiStages?.slice(0, 3), [800, 1200, 1600]);
+    assert.equal(second.dpi, first.dpi);
+  });
+
   it("rejects out-of-range DPI without touching the mouse", async () => {
     const device = new FakeKsnakeDevice();
     await assert.rejects(() => fastClient(device).setDpi(100), /between 200 and 12000/);
