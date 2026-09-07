@@ -138,7 +138,7 @@ Run from the OpenMouse origin in Chrome 152 against the usage‑4 interface (`wr
 ## Still to confirm
 
 1. ~~Whether `07 13 02 00 <n>` switches stage live~~ — confirmed 2026‑09‑06.
-2. ~~Raw lift height (1–5) → iCUE lift-off label mapping~~ — moot: iCUE (checked 2026‑09‑06) has no manual lift-off control for the NIGHTSWORD, only the spiral Surface Calibration pass, so there are no labels. The 1–5 scale is ckb-next's slider range; OpenMouse maps Low/Medium/High to 1/3/5. Still open: whether the calibration pass writes `MOUSE_LIFT` or a separate field.
+2. ~~Raw lift height (1–5) → iCUE lift-off label mapping~~ — moot: iCUE (checked 2026‑09‑06) has no manual lift-off control for the NIGHTSWORD, only the spiral Surface Calibration pass, so there are no labels. The 1–5 scale is ckb-next's slider range; OpenMouse maps Low/Medium/High to 1/3/5. **iCUE's spiral Surface Calibration does not write `MOUSE_LIFT`**: polled `0e 13 03 00` twice a second through a full pass to 100 % (2026‑09‑06) and the byte never left 5. Surface tuning is a separate command; finding it needs a USBPcap of the calibration pass.
 3. ~~`MOUSE_SNAP` trailing `0x05` byte~~ — confirmed optional 2026‑09‑06.
 4. Poll-rate write and reconnect behaviour.
 5. Profile-ID reply layout (optional).
