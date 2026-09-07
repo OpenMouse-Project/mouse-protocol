@@ -12,7 +12,7 @@ export interface MchoseA5Gen1Product {
 /** A5 Pro Max identities exercised by the standalone WebHID driver. */
 export const MCHOSE_A5_GEN1_PRODUCTS: ReadonlyMap<number, MchoseA5Gen1Product> = new Map([
   [0xf019, { name: "MCHOSE A5 Pro Max", connection: "Wired", verified: true }],
-  [0xf013, { name: "MCHOSE A5 Pro Max (1K receiver)", connection: "Wireless", verified: false }],
+  [0xf013, { name: "MCHOSE A5 Pro Max (1K receiver)", connection: "Wireless", verified: true }],
   [0xf015, { name: "MCHOSE A5 Pro Max (4K receiver)", connection: "Wireless", verified: false }],
 ]);
 

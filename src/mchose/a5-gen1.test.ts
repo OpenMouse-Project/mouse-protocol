@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  MCHOSE_A5_GEN1_PRODUCTS,
   mchoseA5Gen1DecodeDpi,
   mchoseA5Gen1DecodeReply,
   mchoseA5Gen1EncodeRequest,
@@ -9,6 +10,12 @@ import {
 } from "./a5-gen1.ts";
 
 describe("MCHOSE A5 first-generation codec", () => {
+  it("records verification only for hardware paths that were exercised", () => {
+    assert.equal(MCHOSE_A5_GEN1_PRODUCTS.get(0xf019)?.verified, true);
+    assert.equal(MCHOSE_A5_GEN1_PRODUCTS.get(0xf013)?.verified, true);
+    assert.equal(MCHOSE_A5_GEN1_PRODUCTS.get(0xf015)?.verified, false);
+  });
+
   it("builds the captured XVI request header", () => {
     const packet = mchoseA5Gen1EncodeRequest({ length: 2, page: 1, command: 0x88, data: [1, 4] });
     assert.equal(packet.length, 64);
