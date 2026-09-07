@@ -121,6 +121,19 @@ test("the verified R1 SE+ identity selects PAW3395SE", () => {
   assert.equal(ATK_SENSORS.PAW3395SE.maxDpi, 18000);
 });
 
+test("the F1 Ultimate 2.0 identity selects PAW3950Ultra and no R1 family", () => {
+  assert.deepEqual(ATK_PRODUCTS["1,8"], {
+    brand: "ATK",
+    model: "F1 Ultimate 2.0",
+    sensor: "PAW3950Ultra",
+    verified: false,
+  });
+  // The R1 live-settings and wired-EEPROM paths key off `family`, so an F1
+  // must not carry it: a stray "r1" would reroute its polling and DPI writes.
+  assert.equal(ATK_PRODUCTS["1,8"]!.family, undefined);
+  assert.equal(ATK_SENSORS.PAW3950Ultra.maxDpi, 42000);
+});
+
 test("Lift-off codes decode to millimetres", () => {
   assert.equal(atkDecodeLiftOff(1), 0.7);
   assert.equal(atkDecodeLiftOff(4), 1);
