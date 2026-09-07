@@ -37,6 +37,10 @@
       "types": "./dist/fantech/index.d.ts",
       "import": "./dist/fantech/index.js"
     },
+    "./gearhub": {
+      "types": "./dist/gearhub/index.d.ts",
+      "import": "./dist/gearhub/index.js"
+    },
     "./keychron": {
       "types": "./dist/keychron/index.d.ts",
       "import": "./dist/keychron/index.js"

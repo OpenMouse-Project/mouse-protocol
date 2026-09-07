@@ -1,7 +1,7 @@
 import { ATK_COMPX_PRODUCT_IDS } from "./atk/products.ts";
 import { MICROSOFT_PRODUCTS } from "../microsoft/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
-import { LINGBAO_PRODUCTS, LINGBAO_VENDOR_ID } from "./lingbao/hid.ts";
+import { GEARHUB_PRODUCTS, GEARHUB_VENDOR_ID } from "@openmouse/protocol/gearhub";
 import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
 import { LAMZU_INCA_PRODUCTS, LAMZU_INCA_VENDOR_ID } from "@openmouse/protocol/lamzu";
 import {
@@ -427,12 +427,13 @@ export const LAMZU_INCA_HID_FILTERS: HIDDeviceFilter[] = [...LAMZU_INCA_PRODUCTS
 );
 
 /**
- * The Lingbao M5 Pro's 2.4G receiver and its wired product id. 0x3151 is the
- * MicLink/mlzn ODM vendor id, shared with unrelated keyboards and mice, so
- * these are requested per product id rather than vendor-wide.
+ * GearHub-V5 receivers (Lingbao M5 Pro, Attack Shark R2, …) and the wired
+ * product id. 0x3151 is the MicLink/mlzn ODM vendor id, shared with unrelated
+ * keyboards and mice, so these are requested per product id rather than
+ * vendor-wide.
  */
-export const LINGBAO_HID_FILTERS: HIDDeviceFilter[] = [...LINGBAO_PRODUCTS.keys()].map(
-  (productId) => ({ vendorId: LINGBAO_VENDOR_ID, productId, usagePage: 0xffff, usage: 0x02 }),
+export const GEARHUB_HID_FILTERS: HIDDeviceFilter[] = [...GEARHUB_PRODUCTS.keys()].map(
+  (productId) => ({ vendorId: GEARHUB_VENDOR_ID, productId, usagePage: 0xffff, usage: 0x02 }),
 );
 
 // Corsair NXP-family mice answer on the interface whose collection is usage
@@ -513,7 +514,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...[...NINJUTSO_MOUSE_PRODUCT_IDS, ...NINJUTSO_RECEIVER_PRODUCT_IDS]
     .map((productId) => ({ vendorId: NINJUTSO_VENDOR_ID, productId })),
   ...LOGITECH_RECEIVER_FILTERS,
-  ...LINGBAO_HID_FILTERS,
+  ...GEARHUB_HID_FILTERS,
   // Fantech mice use vendor usage page 0xFFFF, usage 0x02 for configuration.
   { vendorId: VENDOR_ID.fantech, usagePage: 0xffff, usage: 0x02 },
   ...WALLHACK_HID_FILTERS,

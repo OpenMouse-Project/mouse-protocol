@@ -1,6 +1,6 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
-import { LINGBAO_PRODUCTS } from "../lingbao/hid.ts";
+import { GEARHUB_PRODUCTS } from "@openmouse/protocol/gearhub";
 
 // Fantech command IDs (from GearHub qmk.top protocol)
 export const CMD = {
@@ -97,11 +97,12 @@ export class FantechHidClient {
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== VENDOR_ID.fantech) return false;
     // 0x3151 is the MicLink/mlzn ODM vendor id, not Fantech's own, and the
-    // Lingbao M5 Pro answers on the identical 0xFFFF/0x02 interface while
-    // speaking a different dialect entirely (2.4G relay + checksum). It has
-    // its own driver; leave its product ids to it, or driverFor() would hand
-    // this one a device it cannot read.
-    if (LINGBAO_PRODUCTS.has(device.productId)) return false;
+    // GearHub-V5 mice (Lingbao M5 Pro, Attack Shark R2, …) answer on the
+    // identical 0xFFFF/0x02 interface while speaking a different dialect
+    // entirely (2.4G relay + Bit7 checksum). They have their own driver;
+    // leave their product ids to it, or driverFor() would hand this one a
+    // device it cannot read.
+    if (GEARHUB_PRODUCTS.has(device.productId)) return false;
     const hasVendorConfig = (collections: readonly HIDCollectionInfo[]): boolean =>
       collections.some(
         (collection) =>
