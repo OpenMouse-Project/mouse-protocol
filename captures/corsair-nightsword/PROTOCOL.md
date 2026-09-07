@@ -126,12 +126,19 @@ Run from the OpenMouse origin in Chrome 152 against the usage‑4 interface (`wr
 - `07 13 04 00 01 05` → snap reads `01`; `07 13 04 00 00` (no trailing byte) → reads `00`. The ckb-next trailing `0x05` is harmless and not required.
 - `07 13 03 00 h` for h = 1…5 → each reads back as written. Mapping of raw height to iCUE's Surface Calibration lift-off labels still to be recorded.
 
+### Phase-2 driver run — 2026‑09‑06, OpenMouse app, iCUE running
+
+- `07 13 d2 00 …` stage rewrites (400, 1600, 3200 on the selected slot), `07 13 03 00 1|3|5` lift, `07 13 04 00 0|1 05` snap: all took effect and read back.
+- **A `MOUSE_DPIPROF` write to a slot that is not enabled in `MOUSE_DPIMASK` is ignored** — writing `07 13 d4 00 00 44 16 44 16 00 bf ff` with mask `0x0f` read back all zeros. Enable the mask bit first, then write the slot.
+- One stale reply seen in the wild: a GET for `d3` returned the previous `d2` buffer once; the echo check caught it and the retry succeeded.
+- iCUE does not read live state back from the mouse, so its DPI panel keeps showing its own stored profile after an OpenMouse write. It re-pushes that profile on its own triggers (profile switch, reconnect), overwriting live changes.
+
 **Poll-rate caveat:** ckb-next notes the device re-enumerates after `FIELD_POLLRATE`; the driver must handle the WebHID device closing and reconnect.
 
 ## Still to confirm
 
 1. ~~Whether `07 13 02 00 <n>` switches stage live~~ — confirmed 2026‑09‑06.
-2. Raw lift height (1–5) → iCUE Surface Calibration lift-off label mapping.
+2. ~~Raw lift height (1–5) → iCUE lift-off label mapping~~ — moot: iCUE (checked 2026‑09‑06) has no manual lift-off control for the NIGHTSWORD, only the spiral Surface Calibration pass, so there are no labels. The 1–5 scale is ckb-next's slider range; OpenMouse maps Low/Medium/High to 1/3/5. **iCUE's spiral Surface Calibration does not write `MOUSE_LIFT`**: polled `0e 13 03 00` twice a second through a full pass to 100 % (2026‑09‑06) and the byte never left 5. Surface tuning is a separate command; finding it needs a USBPcap of the calibration pass.
 3. ~~`MOUSE_SNAP` trailing `0x05` byte~~ — confirmed optional 2026‑09‑06.
 4. Poll-rate write and reconnect behaviour.
 5. Profile-ID reply layout (optional).

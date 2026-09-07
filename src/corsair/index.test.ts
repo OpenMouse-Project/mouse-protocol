@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   CORSAIR_CONFIG_USAGE,
+  CORSAIR_LIFT_LEVELS,
   CORSAIR_NIGHTSWORD_PRODUCT_ID,
   CORSAIR_PRODUCTS,
   CORSAIR_USAGE_PAGE,
@@ -12,6 +13,8 @@ import {
   corsairEncode as encode,
   corsairFormatVersion,
   corsairIsEcho,
+  corsairLiftName,
+  corsairParseRgbHex,
   corsairRgbHex,
 } from "./index.ts";
 
@@ -179,6 +182,21 @@ test("isEcho matches on the first four request bytes only", () => {
   // A stale buffer from the previous GET must not pass for a new request.
   assert.equal(corsairIsEcho(encode.dpiMask(), CURRENT_STAGE), false);
   assert.equal(corsairIsEcho(encode.ident(), new Uint8Array(3)), false);
+});
+
+test("parses #rrggbb colours and maps the lift scale to three stops", () => {
+  assert.deepEqual(corsairParseRgbHex("#00bfff"), [0x00, 0xbf, 0xff]);
+  assert.deepEqual(corsairParseRgbHex("FF8000"), [0xff, 0x80, 0x00]);
+  assert.throws(() => corsairParseRgbHex("#fff"), /#rrggbb/);
+  assert.throws(() => corsairParseRgbHex("red"), /#rrggbb/);
+  assert.deepEqual(CORSAIR_LIFT_LEVELS, { Low: 1, Medium: 3, High: 5 });
+  assert.deepEqual([1, 2, 3, 4, 5].map(corsairLiftName), ["Low", "Low", "Medium", "High", "High"]);
+  assert.equal(corsairLiftName(0), null);
+  assert.equal(corsairLiftName(6), null);
+  // Writing a named stop and reading it back lands on the same name.
+  for (const name of ["Low", "Medium", "High"] as const) {
+    assert.equal(corsairLiftName(CORSAIR_LIFT_LEVELS[name]), name);
+  }
 });
 
 function hex(value: number): string {
