@@ -172,6 +172,8 @@ class FakeKsnakeDevice {
   badBatteryOnce = false;
   /** Next keys reply is zeroed once (simulates a stray report). */
   badKeysOnce = false;
+  /** Next keys reply is plausible-but-wrong once (simulates a crossed report). */
+  garbageKeysOnce = false;
   sent: number[] = [];
   private listeners = new Map<string, Set<FakeListener>>();
 
@@ -215,7 +217,12 @@ class FakeKsnakeDevice {
       this.badBatteryOnce = false;
     } else if (body[1] === 0x08) {
       reply = new Uint8Array(64);
-      if (!this.badKeysOnce) {
+      if (this.garbageKeysOnce) {
+        for (let i = 0; i < 7; i++) {
+          reply[8 + i * 4] = 99;
+          reply[9 + i * 4] = i;
+        }
+      } else if (!this.badKeysOnce) {
         this.keys.forEach((key, i) => {
           reply[8 + i * 4] = key.type;
           reply[9 + i * 4] = key.code1;
@@ -224,6 +231,7 @@ class FakeKsnakeDevice {
         });
       }
       this.badKeysOnce = false;
+      this.garbageKeysOnce = false;
     } else if (body[1] === 0x09) {
       for (let i = 0; i < 6; i++) {
         this.keys[i] = { type: body[8 + i * 4], code1: body[9 + i * 4], code2: body[10 + i * 4], code3: body[11 + i * 4] };
@@ -396,6 +404,13 @@ describe("KsnakeHidClient writes", () => {
   it("skips stray zeroed reports when reading the button map", async () => {
     const device = new FakeKsnakeDevice();
     device.badKeysOnce = true;
+    const keys = await fastClient(device).getKeys();
+    assert.deepEqual(keys, device.keys);
+  });
+
+  it("ignores a plausible stray until two reads agree", async () => {
+    const device = new FakeKsnakeDevice();
+    device.garbageKeysOnce = true;
     const keys = await fastClient(device).getKeys();
     assert.deepEqual(keys, device.keys);
   });

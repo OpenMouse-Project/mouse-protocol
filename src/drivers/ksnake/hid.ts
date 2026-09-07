@@ -287,10 +287,15 @@ export class KsnakeHidClient {
 
   /** Read-only dump of the 7 button slots (GET_KEYS, reply[8..35]). */
   async getKeys(): Promise<KsnakeKeyBinding[] | null> {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Consensus, not first-plausible: a crossed report from another command
+    // can decode to plausible-but-wrong slots, and two strays never agree.
+    const seen: KsnakeKeyBinding[][] = [];
+    for (let attempt = 0; attempt < 5; attempt++) {
       const reply = await this.exchange(ksnakeGetKeysRequest()).catch(() => null);
       const keys = reply ? ksnakeDecodeKeys(reply) : null;
-      if (keys && ksnakeKeysLookPlausible(keys)) return keys;
+      if (!keys || !ksnakeKeysLookPlausible(keys)) continue;
+      if (seen.some((prev) => equalKeyMaps(prev, keys))) return keys;
+      seen.push(keys);
     }
     return null;
   }
@@ -369,4 +374,8 @@ function copyDataView(view: DataView): Uint8Array {
 
 function equalBinding(a: KsnakeKeyBinding | undefined, b: KsnakeKeyBinding): boolean {
   return a !== undefined && a.type === b.type && a.code1 === b.code1 && a.code2 === b.code2 && a.code3 === b.code3;
+}
+
+function equalKeyMaps(a: readonly KsnakeKeyBinding[], b: readonly KsnakeKeyBinding[]): boolean {
+  return a.length === b.length && a.every((key, index) => equalBinding(key, b[index] as KsnakeKeyBinding));
 }
