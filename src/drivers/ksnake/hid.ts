@@ -199,7 +199,6 @@ export class KsnakeHidClient {
       ui: {
         family: "ksnake",
         settingsReady: config !== null,
-        hideLodLow: true,
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
         defaultDisplayName: this.device.productName || "K-snake X11",
