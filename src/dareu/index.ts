@@ -23,11 +23,13 @@ export interface DareuProduct {
   model: string;
   name: string;
   transport: "wired" | "receiver";
+  /** True only for a transport exercised against the retail A950 PRO Mg. */
+  verified: boolean;
 }
 
 export const DAREU_PRODUCTS: ReadonlyMap<number, DareuProduct> = new Map([
-  [DAREU_DIRECT_PRODUCT_ID, { model: "TM271F", name: "A950 PRO Mg", transport: "wired" }],
-  [DAREU_RECEIVER_PRODUCT_ID, { model: "TM265Dongle", name: "2.4G Receiver", transport: "receiver" }],
+  [DAREU_DIRECT_PRODUCT_ID, { model: "TM271F", name: "A950 PRO Mg", transport: "wired", verified: false }],
+  [DAREU_RECEIVER_PRODUCT_ID, { model: "TM265Dongle", name: "2.4G Receiver", transport: "receiver", verified: true }],
 ]);
 
 export const DAREU_REPORT_ID = 0x08;

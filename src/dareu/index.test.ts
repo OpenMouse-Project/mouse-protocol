@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   DAREU_DIRECT_PRODUCT_ID,
   DAREU_MAX_BUFFER_CHUNK,
+  DAREU_PRODUCTS,
   DAREU_RECEIVER_PRODUCT_ID,
   DAREU_REPORT_SIZE,
   dareuCheckActiveRequest,
@@ -37,6 +38,8 @@ import {
 test("Dareu catalog keeps direct mouse and receiver distinct", () => {
   assert.equal(DAREU_DIRECT_PRODUCT_ID, 0x1117);
   assert.equal(DAREU_RECEIVER_PRODUCT_ID, 0x1114);
+  assert.equal(DAREU_PRODUCTS.get(DAREU_RECEIVER_PRODUCT_ID)?.verified, true);
+  assert.equal(DAREU_PRODUCTS.get(DAREU_DIRECT_PRODUCT_ID)?.verified, false);
 });
 
 test("Dareu Jm frames include report ID 8 in their checksum", () => {
