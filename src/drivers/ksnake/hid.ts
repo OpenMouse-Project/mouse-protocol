@@ -1,5 +1,7 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import {
+  KSNAKE_BUTTON_ACTIONS,
+  KSNAKE_BUTTON_NAMES,
   KSNAKE_PRODUCT_ID,
   KSNAKE_POLLING_RATES,
   KSNAKE_REPORT_ID,
@@ -20,6 +22,8 @@ import {
   ksnakeGetConfigRequest,
   ksnakeGetKeysRequest,
   ksnakeGetVersionRequest,
+  ksnakeBindingLabel,
+  ksnakeFindButtonAction,
   ksnakeIsKnownKeyType,
   ksnakeIsValidDpi,
   ksnakeKeysLookPlausible,
@@ -67,6 +71,8 @@ export class KsnakeHidClient {
   private queue: Promise<unknown> = Promise.resolve();
   private readonly replyTimeoutMs: number;
   private readonly settleAfterWriteMs: number;
+  /** Last config that passed validation (see readStatus). */
+  private lastGoodConfig: KsnakeConfig | null = null;
 
   constructor(device: HIDDevice, options: KsnakeClientOptions = {}) {
     this.device = device;
@@ -175,7 +181,7 @@ export class KsnakeHidClient {
 
   async readStatus(): Promise<MouseStatus> {
     await this.open();
-    const [config, battery, version] = await Promise.all([
+    const [freshConfig, battery, version] = await Promise.all([
       this.readValidated(
         () => this.exchange(ksnakeGetConfigRequest()).then((r) => ksnakeDecodeConfig(r)),
         (c) => ksnakeDecodePollingRate(c.reportRate) !== null && c.dpiIndex >= 0 && c.dpiIndex < c.stages.length,
@@ -189,6 +195,13 @@ export class KsnakeHidClient {
         (v) => v.length > 0,
       ),
     ]);
+    // Sequential on purpose: parallel reads on this dongle collide into
+    // crossed reports, and keys are the least critical of the four.
+    const keys = await this.getKeys().catch(() => null);
+    // Last-good cache: a failed poll read must not blank the stages/DPI in
+    // the UI until the next poll (the panel re-renders on every change).
+    if (freshConfig) this.lastGoodConfig = freshConfig;
+    const config = freshConfig ?? this.lastGoodConfig;
     const stages = config?.stages ?? [];
     const activeStage = config ? Math.min(Math.max(config.dpiIndex, 0), Math.max(stages.length - 1, 0)) : 0;
     const dpi = stages[activeStage] ?? 1600;
@@ -199,7 +212,6 @@ export class KsnakeHidClient {
       ui: {
         family: "ksnake",
         settingsReady: config !== null,
-        hideLodLow: true,
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
         defaultDisplayName: this.device.productName || "K-snake X11",
@@ -223,6 +235,18 @@ export class KsnakeHidClient {
       connectionDetail: this.device.vendorId === KSNAKE_USB_VENDOR_ID ? "Wired USB" : "2.4 GHz receiver",
       liftOffDistance: config ? ksnakeDecodeLiftOff(config.lodValue) : null,
       supportedLiftOffDistances: ["Low", "High"],
+      // Generic remap interface: the shared ButtonMappingCard renders these
+      // with no brand-specific code. Opaque slots surface as "Custom (…)" and
+      // stay selectable-visible; setButtonMapping refuses to rewrite them.
+      buttonMappings: keys
+        ? Object.fromEntries(
+            keys.slice(0, KSNAKE_BUTTON_NAMES.length).map((binding, index) => [
+              KSNAKE_BUTTON_NAMES[index] as string,
+              ksnakeBindingLabel(binding) ?? `Custom (${binding.type},${binding.code1},${binding.code2},${binding.code3})`,
+            ]),
+          )
+        : undefined,
+      buttonOptions: KSNAKE_BUTTON_ACTIONS.map((action) => action.label),
       firmware: version ? [`X11 ${version}`] : ["K-snake X11"],
     };
   }
@@ -284,10 +308,15 @@ export class KsnakeHidClient {
 
   /** Read-only dump of the 7 button slots (GET_KEYS, reply[8..35]). */
   async getKeys(): Promise<KsnakeKeyBinding[] | null> {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Consensus, not first-plausible: a crossed report from another command
+    // can decode to plausible-but-wrong slots, and two strays never agree.
+    const seen: KsnakeKeyBinding[][] = [];
+    for (let attempt = 0; attempt < 5; attempt++) {
       const reply = await this.exchange(ksnakeGetKeysRequest()).catch(() => null);
       const keys = reply ? ksnakeDecodeKeys(reply) : null;
-      if (keys && ksnakeKeysLookPlausible(keys)) return keys;
+      if (!keys || !ksnakeKeysLookPlausible(keys)) continue;
+      if (seen.some((prev) => equalKeyMaps(prev, keys))) return keys;
+      seen.push(keys);
     }
     return null;
   }
@@ -329,6 +358,26 @@ export class KsnakeHidClient {
     return null;
   }
 
+  /**
+   * Remap one button by display label (generic `setButtonMapping` interface).
+   * SET_KEYS always carries all six remappable slots, so the current map is
+   * re-read and the single slot replaced — confirmed by setKeys' read-back.
+   * Slot "Left" is locked (the vendor panel refuses drops there too); opaque
+   * slots elsewhere abort the write rather than risk bricking macros.
+   */
+  async setButtonMapping(button: string, actionLabel: string): Promise<void> {
+    const index = KSNAKE_BUTTON_NAMES.indexOf(button as (typeof KSNAKE_BUTTON_NAMES)[number]);
+    if (index < 0) throw new Error(`This mouse has no "${button}" button.`);
+    if (index === 0) throw new Error("Left Click is fixed and cannot be reassigned.");
+    const binding = ksnakeFindButtonAction(actionLabel);
+    if (!binding) throw new Error(`Unknown button action "${actionLabel}".`);
+    const current = await this.getKeys();
+    if (!current) throw new Error("Could not read the current button map from the mouse.");
+    const slots = current.slice(0, KSNAKE_BUTTON_NAMES.length).map((slot) => ({ ...slot }));
+    slots[index] = binding;
+    await this.setKeys(slots);
+  }
+
   async setLiftOffDistance(
     value: NonNullable<MouseStatus["liftOffDistance"]>,
   ): Promise<NonNullable<MouseStatus["liftOffDistance"]>> {
@@ -366,4 +415,8 @@ function copyDataView(view: DataView): Uint8Array {
 
 function equalBinding(a: KsnakeKeyBinding | undefined, b: KsnakeKeyBinding): boolean {
   return a !== undefined && a.type === b.type && a.code1 === b.code1 && a.code2 === b.code2 && a.code3 === b.code3;
+}
+
+function equalKeyMaps(a: readonly KsnakeKeyBinding[], b: readonly KsnakeKeyBinding[]): boolean {
+  return a.length === b.length && a.every((key, index) => equalBinding(key, b[index] as KsnakeKeyBinding));
 }

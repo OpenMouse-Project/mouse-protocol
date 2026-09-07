@@ -268,6 +268,48 @@ export function ksnakeIsKnownKeyType(type: number): boolean {
   return type === KSNAKE_KEY_TYPE.mouse || type === KSNAKE_KEY_TYPE.special || type === KSNAKE_KEY_TYPE.media;
 }
 
+/** Remappable actions from the vendor key catalog (display label + bytes). */
+export const KSNAKE_BUTTON_ACTIONS: ReadonlyArray<{
+  label: string;
+  type: number;
+  code1: number;
+  code2: number;
+  code3: number;
+}> = [
+  { label: "Left click", type: 32, code1: 1, code2: 0, code3: 0 },
+  { label: "Right click", type: 32, code1: 2, code2: 0, code3: 0 },
+  { label: "Middle click", type: 32, code1: 4, code2: 0, code3: 0 },
+  { label: "Backward", type: 32, code1: 8, code2: 0, code3: 0 },
+  { label: "Forward", type: 32, code1: 16, code2: 0, code3: 0 },
+  { label: "Disabled", type: 32, code1: 0, code2: 0, code3: 0 },
+  { label: "DPI loop", type: 33, code1: 85, code2: 0, code3: 0 },
+  { label: "Scroll up", type: 33, code1: 56, code2: 1, code3: 0 },
+  { label: "Scroll down", type: 33, code1: 56, code2: 255, code3: 0 },
+  { label: "Volume +", type: 48, code1: 233, code2: 0, code3: 0 },
+  { label: "Volume −", type: 48, code1: 234, code2: 0, code3: 0 },
+  { label: "Mute", type: 48, code1: 226, code2: 0, code3: 0 },
+  { label: "Play/Pause", type: 48, code1: 205, code2: 0, code3: 0 },
+  { label: "Prev track", type: 48, code1: 182, code2: 0, code3: 0 },
+  { label: "Next track", type: 48, code1: 181, code2: 0, code3: 0 },
+];
+
+/** Display label for a binding, or null when the catalog cannot name it. */
+export function ksnakeBindingLabel(binding: KsnakeKeyBinding): string | null {
+  return KSNAKE_BUTTON_ACTIONS.find(
+    (action) =>
+      action.type === binding.type &&
+      action.code1 === binding.code1 &&
+      action.code2 === binding.code2 &&
+      action.code3 === binding.code3,
+  )?.label ?? null;
+}
+
+/** Catalog binding for a display label, or null for unknown labels. */
+export function ksnakeFindButtonAction(label: string): KsnakeKeyBinding | null {
+  const action = KSNAKE_BUTTON_ACTIONS.find((entry) => entry.label === label);
+  return action ? { type: action.type, code1: action.code1, code2: action.code2, code3: action.code3 } : null;
+}
+
 /**
  * Plausibility gate for decoded key maps. `exchange()` resolves with the next
  * input report, so a stray report from another command can land here; those
