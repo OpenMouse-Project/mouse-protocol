@@ -242,9 +242,9 @@ export function ksnakeEncodeSetConfig(config: KsnakeConfig): Uint8Array {
   return buf;
 }
 
-/** Physical button order for the 6 remappable slots. Labels follow the vendor
- *  panel diagram; the Macro1 button ships with the Forward function. */
-export const KSNAKE_BUTTON_NAMES = ["Left", "Right", "Middle", "Backward", "Macro1", "DPI"] as const;
+/** Physical button order for the 6 remappable slots. Labels follow the factory
+ *  functions; the side button ships as Forward (user-renameable to Macro1). */
+export const KSNAKE_BUTTON_NAMES = ["Left", "Right", "Middle", "Backward", "Forward", "DPI"] as const;
 
 /** Button function types from the vendor key catalog. */
 export const KSNAKE_KEY_TYPE = {
