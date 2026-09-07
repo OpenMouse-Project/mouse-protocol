@@ -220,17 +220,35 @@ function hidppResponder(roles: Record<number, "mouse" | "keyboard">) {
   };
 }
 
+const fakeCollection = (usagePage: number, usage: number): HIDCollectionInfo =>
+  ({ usagePage, usage, children: [] }) as unknown as HIDCollectionInfo;
+
+/** What a receiver or wired vendor interface exposes: HID++ short and long. */
+const USB_HIDPP_COLLECTIONS = [fakeCollection(0xff00, 0x0001), fakeCollection(0xff00, 0x0002)];
+
+/** What a Bluetooth-paired mouse exposes instead: one vendor collection, no 0xFF00. */
+const BLUETOOTH_HIDPP_COLLECTIONS = [fakeCollection(0xff43, 0x0202)];
+
 class FakeHidDevice {
   readonly productId: number;
   readonly productName: string;
+  // The driver reads these to tell a Bluetooth endpoint from a USB one, so a
+  // double without them silently answers "not Bluetooth" at best and throws at
+  // worst.
+  readonly collections: HIDCollectionInfo[];
   opened = false;
   readonly probed: Array<{ reportId: number; data: Uint8Array }> = [];
   private listeners = new Map<string, (event: unknown) => void>();
   onRequest: (request: Uint8Array) => Uint8Array | null = () => null;
 
-  constructor(productId: number, productName = "USB Receiver") {
+  constructor(
+    productId: number,
+    productName = "USB Receiver",
+    collections: HIDCollectionInfo[] = USB_HIDPP_COLLECTIONS,
+  ) {
     this.productId = productId;
     this.productName = productName;
+    this.collections = collections;
   }
 
   addEventListener(type: string, listener: (event: unknown) => void): void {
@@ -262,11 +280,15 @@ class FakeHidDevice {
   }
 }
 
-function harness(productId: number, roles: Record<number, "mouse" | "keyboard">): {
+function harness(
+  productId: number,
+  roles: Record<number, "mouse" | "keyboard">,
+  collections?: HIDCollectionInfo[],
+): {
   client: LogitechHidppClient;
   device: FakeHidDevice;
 } {
-  const device = new FakeHidDevice(productId);
+  const device = new FakeHidDevice(productId, "USB Receiver", collections);
   device.onRequest = hidppResponder(roles);
   return { client: new LogitechHidppClient(device as unknown as HIDDevice), device };
 }
@@ -366,4 +388,26 @@ test("a direct-connect product with no sensor anywhere is reported as not a mous
   assert.equal(await resolveIndex(client), 0xff, "the fast path still trusts the first answer with no probe");
   const error = await resolveIndexExcluding(client, new Set([0xff])).catch((reason) => reason);
   assert.equal((error as Error).name, "NotAMouseError");
+});
+
+test("a Bluetooth mouse is addressed on long reports only", async () => {
+  // BLE declares report 0x11 and nothing else, so the short-report path that
+  // Lightspeed and wired mice use would be rejected by the device outright.
+  const { client, device } = harness(0xb042, { 0xff: "mouse" }, BLUETOOTH_HIDPP_COLLECTIONS);
+  assert.equal(await resolveIndex(client), 0xff);
+  assert.ok(device.probed.length > 0, "the index probe must have sent something");
+  assert.deepEqual(
+    [...new Set(device.probed.map(({ reportId }) => reportId))],
+    [0x11],
+    "every request over Bluetooth must go out as a long report",
+  );
+});
+
+test("a receiver-attached mouse keeps using short reports", async () => {
+  const { client, device } = harness(0xc547, { 0x01: "mouse" });
+  assert.equal(await resolveIndex(client), 0x01);
+  assert.ok(
+    device.probed.some(({ reportId }) => reportId === 0x10),
+    "the 0xFF00 short path is unchanged for receivers",
+  );
 });

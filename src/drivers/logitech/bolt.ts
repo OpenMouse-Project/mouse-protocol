@@ -8,30 +8,45 @@ import {
   BOLT_PAIRING_SLOTS,
   DEVICE_INDEX_DIRECT,
   DEVICE_INDEX_RECEIVER,
+  HIDPP_BLUETOOTH_USAGE_PAGE,
+  HIDPP_USAGE_PAGE,
   isBoltReceiverProduct,
 } from "@openmouse/protocol/logitech";
 
 /** Index probe on empty Bolt slots should fail fast; feature I/O keeps longer. */
 export const BOLT_INDEX_PROBE_TIMEOUT_MS = 800;
 
-/** True when a collection (or nested child) is an HID++ short- or long-report endpoint. */
-function collectionHasHidppUsage(
+/** True when a collection, or any nested child, matches. */
+function anyCollection(
   collections: readonly HIDCollectionInfo[],
-  usage: number,
+  matches: (collection: HIDCollectionInfo) => boolean,
 ): boolean {
   return collections.some((collection) =>
-    (collection.usagePage === 0xff00 && collection.usage === usage)
-    || collectionHasHidppUsage(collection.children, usage));
+    matches(collection) || anyCollection(collection.children, matches));
 }
 
 /** Short-report HID++ collection (Lightspeed, Bolt receiver registers). */
 export function hasHidppShortCollection(device: HIDDevice): boolean {
-  return collectionHasHidppUsage(device.collections, 0x0001);
+  return anyCollection(device.collections, (collection) =>
+    collection.usagePage === HIDPP_USAGE_PAGE && collection.usage === 0x0001);
 }
 
 /** Long-report HID++ collection (required for Bolt device feature traffic). */
 export function hasHidppLongCollection(device: HIDDevice): boolean {
-  return collectionHasHidppUsage(device.collections, 0x0002);
+  return anyCollection(device.collections, (collection) =>
+    collection.usagePage === HIDPP_USAGE_PAGE && collection.usage === 0x0002);
+}
+
+/**
+ * HID++ over Bluetooth, which lives on its own vendor page instead of the
+ * 0xFF00 short/long pair. Kept separate from those two so Bolt peer collapsing
+ * and report-device selection keep reasoning only about 0xFF00 interfaces.
+ *
+ * @see HIDPP_BLUETOOTH_USAGE_PAGE
+ */
+export function hasHidppBluetoothCollection(device: HIDDevice): boolean {
+  return anyCollection(device.collections, (collection) =>
+    collection.usagePage === HIDPP_BLUETOOTH_USAGE_PAGE);
 }
 
 /**
