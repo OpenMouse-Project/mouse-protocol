@@ -234,10 +234,12 @@ export function corsairParseRgbHex(color: string): CorsairRgb {
 }
 
 /**
- * Lift-off height is a raw 1–5 byte (every value accepted on fw 3.41). The
- * three-stop names map onto that scale until iCUE's Surface Calibration labels
- * have been captured against it: Low = 1, Medium = 3, High = 5 on write;
- * 1–2 → Low, 3 → Medium, 4–5 → High on read.
+ * Lift-off height is a raw 1–5 byte (every value accepted on fw 3.41). iCUE
+ * offers no manual lift-off control for this mouse — only its spiral surface
+ * calibration — so there are no vendor labels to match; the 1–5 scale is the
+ * one ckb-next exposes as a slider. The three-stop names are this driver's own
+ * mapping onto it: Low = 1, Medium = 3, High = 5 on write; 1–2 → Low,
+ * 3 → Medium, 4–5 → High on read.
  */
 export const CORSAIR_LIFT_MIN = 1;
 export const CORSAIR_LIFT_MAX = 5;
