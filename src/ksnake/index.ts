@@ -25,6 +25,16 @@ export const KSNAKE_REPORT_ID = 0x00;
 export const KSNAKE_MAGIC = 0x55;
 export const KSNAKE_REPORT_SIZE = 64;
 
+/** DPI range. Vendor panel slider allows 200–12000 (step 100); the manual's
+ *  factory steps are 800–12000 and 600 was observed in stage 0 on retail
+ *  hardware (user-customized via the vendor panel). */
+export const KSNAKE_DPI_MIN = 200;
+export const KSNAKE_DPI_MAX = 12000;
+
+export function ksnakeIsValidDpi(dpi: number): boolean {
+  return Number.isInteger(dpi) && dpi >= KSNAKE_DPI_MIN && dpi <= KSNAKE_DPI_MAX;
+}
+
 export interface KsnakeProduct {
   model: string;
   wireless: boolean;
@@ -38,6 +48,8 @@ export const KSNAKE_PRODUCTS: ReadonlyMap<number, KsnakeProduct> = new Map([
 
 const CMD = {
   GET_VERSION: 0x03,
+  GET_KEYS: 0x08,
+  SET_KEYS: 0x09,
   GET_CONFIG: 0x0e,
   SET_CONFIG: 0x0f,
   SET_LIGHT: 0x21,
@@ -50,8 +62,9 @@ const GET_BATTERY_TAIL = [0xa5, 0x0b, 0x2e, 0x01, 0x01, 0x00, 0x00, 0x00] as con
 
 /**
  * Polling-rate index ↔ Hz.
- * Confirmed by vendor panel screenshot + PAW3311 spec: X11 offers
- * 125/250/500/1000 Hz only (1000 Hz in 2.4G/wired, 125 Hz in BT).
+ * Endpoints confirmed by the X11 user manual: 1000 Hz in 2.4G/wired,
+ * 125 Hz in BT. Middle steps (250/500) come from the vendor panel screenshot
+ * + PAW3311 spec — keep until a hardware capture says otherwise.
  * Default index 3 = 1000 Hz.
  */
 export const KSNAKE_POLLING_RATES = [125, 250, 500, 1000] as const;
@@ -65,11 +78,27 @@ export function ksnakeDecodePollingRate(index: number): number | null {
   return index >= 0 && index < KSNAKE_POLLING_RATES.length ? KSNAKE_POLLING_RATES[index] : null;
 }
 
+/**
+ * Lift-off mapping. The vendor panel offers two stops (lod_value 1/2,
+ * default 1, likely 1mm/2mm on the PAW3311); they map to the Low/High stops.
+ * Medium is not offered by the hardware.
+ */
+export function ksnakeDecodeLiftOff(value: number): "Low" | "High" {
+  return value === 2 ? "High" : "Low";
+}
+
+export function ksnakeEncodeLiftOff(level: string): number | null {
+  if (level === "Low") return 1;
+  if (level === "High") return 2;
+  return null;
+}
+
 export const KSNAKE_DEFAULT_CONFIG = {
   lightMode: 2,
   reportRate: 3,
   dpiIndex: 2,
-  dpiCount: 5,
+  // Hardware reports 6 (retail 2.4 GHz dongle, FW 2.1.7).
+  dpiCount: 6,
   stages: [800, 1200, 1600, 3200, 5000, 12000],
   scrollFlag: 0,
   lodValue: 1,
@@ -176,8 +205,10 @@ export function ksnakeDecodeConfig(reply: Uint8Array): KsnakeConfig | null {
     keyRespond: reply[51],
     sleepLight: reply[52],
     highspeedMode: reply[53],
-    // NOTE: vendor decode reads wakeup from the LOW nibble, but vendor encode
-    // writes `wakeup << 4 | move`. Kept as-decoded; verify on hardware.
+    // NOTE: the vendor panel itself is asymmetric here — its decode reads
+    // wakeup from the LOW nibble (`15 & t[55]`) but its encode writes
+    // `wakeup << 4 | move`. This codec mirrors the vendor byte-for-byte, so
+    // states round-trip exactly like the vendor panel does.
     wakeupFlag: reply[55] & 15,
     moveLightFlag: (reply[55] >> 4) & 15,
   };
@@ -208,5 +239,102 @@ export function ksnakeEncodeSetConfig(config: KsnakeConfig): Uint8Array {
   buf[52] = config.sleepLight & 0xff;
   buf[53] = config.highspeedMode & 0xff;
   buf[54] = ((config.wakeupFlag << 4) | (config.moveLightFlag & 15)) & 0xff;
+  return buf;
+}
+
+/** Physical button order for the 6 remappable slots. Labels follow the factory
+ *  functions; the side button ships as Forward (user-renameable to Macro1). */
+export const KSNAKE_BUTTON_NAMES = ["Left", "Right", "Middle", "Backward", "Forward", "DPI"] as const;
+
+/** Button function types from the vendor key catalog. */
+export const KSNAKE_KEY_TYPE = {
+  mouse: 32,
+  special: 33,
+  media: 48,
+} as const;
+
+/** One button slot: type 32 = mouse button (code1 = HID bitmask, 0 = disabled),
+ *  33 = special (DPI loop [85,0,0], scroll [56,1/255]), 48 = consumer/media
+ *  (code1 = consumer usage). Macro references (e.g. type 112) are preserved
+ *  opaquely — the catalog cannot rebuild them. */
+export interface KsnakeKeyBinding {
+  type: number;
+  code1: number;
+  code2: number;
+  code3: number;
+}
+
+export function ksnakeIsKnownKeyType(type: number): boolean {
+  return type === KSNAKE_KEY_TYPE.mouse || type === KSNAKE_KEY_TYPE.special || type === KSNAKE_KEY_TYPE.media;
+}
+
+/**
+ * Plausibility gate for decoded key maps. `exchange()` resolves with the next
+ * input report, so a stray report from another command can land here; those
+ * decode to zeroed/garbage slot types. Real maps always carry nonzero types
+ * (32/33/48 catalog, plus opaque refs like macro 112).
+ */
+export function ksnakeKeysLookPlausible(keys: readonly KsnakeKeyBinding[]): boolean {
+  return keys.length === 7 && keys.every((key) => key.type !== 0);
+}
+
+/** GET_KEYS request tail observed in vendor JS: [0x55, 0x08, 0xA5, 0x0B, 0x20]. */
+export function ksnakeGetKeysRequest(): Uint8Array {
+  const buf = new Uint8Array(KSNAKE_REPORT_SIZE);
+  buf[0] = KSNAKE_MAGIC;
+  buf[1] = CMD.GET_KEYS;
+  buf[2] = 0xa5;
+  buf[3] = 0x0b;
+  buf[4] = 0x20;
+  return buf;
+}
+
+/**
+ * Decode a getKeys reply: 7 slots of 4 bytes at reply[8..35] (the vendor
+ * slices 8). Slot 6 is a fixed scroll-up entry; slots 0-5 are remappable.
+ * Verified against a retail dongle (factory map decodes to
+ * Left/Right/Middle/Backward + DPI loop in order).
+ */
+export function ksnakeDecodeKeys(reply: Uint8Array): KsnakeKeyBinding[] | null {
+  if (reply.length < 36) return null;
+  const bindings: KsnakeKeyBinding[] = [];
+  for (let i = 0; i < 7; i++) {
+    bindings.push({
+      type: reply[8 + i * 4],
+      code1: reply[9 + i * 4],
+      code2: reply[10 + i * 4],
+      code3: reply[11 + i * 4],
+    });
+  }
+  return bindings;
+}
+
+/**
+ * Encode a setKeys request, mirroring vendor `setMouseKeys()`: head
+ * [0x55, 0x09, 0xA5, 0x22, 0x20], slots 0-5 at body[9..32], fixed tail
+ * [33,56,1,0, 33,56,255,0] at body[33..40].
+ */
+export function ksnakeEncodeSetKeys(keys: readonly KsnakeKeyBinding[]): Uint8Array {
+  const buf = new Uint8Array(KSNAKE_REPORT_SIZE);
+  buf[0] = KSNAKE_MAGIC;
+  buf[1] = CMD.SET_KEYS;
+  buf[2] = 0xa5;
+  buf[3] = 0x22;
+  buf[4] = 0x20;
+  const slots = [...keys].slice(0, 6);
+  while (slots.length < 6) slots.push({ type: 32, code1: 0, code2: 0, code3: 0 });
+  // Wire offsets, NOT vendor-JS t[] indices: t[0] is the report id, so the
+  // request slots at t[9..32] land at data[8..31]. (buf[9..] bricked buttons.)
+  for (let n = 0; n < 6; n++) {
+    const key = slots[n];
+    buf[8 + n * 4] = key.type & 0xff;
+    buf[9 + n * 4] = key.code1 & 0xff;
+    buf[10 + n * 4] = key.code2 & 0xff;
+    buf[11 + n * 4] = key.code3 & 0xff;
+  }
+  const tail = [33, 56, 1, 0, 33, 56, 255, 0];
+  tail.forEach((b, i) => {
+    buf[32 + i] = b;
+  });
   return buf;
 }
