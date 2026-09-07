@@ -97,6 +97,10 @@
       "types": "./dist/teevolution/index.d.ts",
       "import": "./dist/teevolution/index.js"
     },
+    "./valkyrie": {
+      "types": "./dist/valkyrie/index.d.ts",
+      "import": "./dist/valkyrie/index.js"
+    },
     "./vgn": {
       "types": "./dist/vgn/index.d.ts",
       "import": "./dist/vgn/index.js"

@@ -1,0 +1,25 @@
+{
+  "model": "VK M3 Lite",
+  "modelCode": "M220",
+  "connection": "2.4 GHz receiver",
+  "vendorId": "0x249A",
+  "productId": "0x5C2F",
+  "interfaceNumber": 2,
+  "source": "Vendor startup transport trace independently matched by hidapi identity queries",
+  "reportId": 0,
+  "txIncludesReportId": true,
+  "rxIncludesReportId": false,
+  "packets": [
+    {
+      "type": "TX",
+      "length": 33,
+      "bytes": "00 10 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+    },
+    {
+      "type": "RX",
+      "length": 32,
+      "requested": 33,
+      "bytes": "10 00 01 0b 4d 32 32 30 84 01 11 01 00 4e 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 c7"
+    }
+  ]
+}

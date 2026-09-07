@@ -1,0 +1,37 @@
+{
+  "date": "2026-09-07",
+  "connection": "2.4 GHz receiver",
+  "vendorId": "249A",
+  "productId": "5C2F",
+  "model": "M220",
+  "sensorSelector": "11",
+  "source": "hidapi 0.15.0 read-only retry after wired comparison and wireless reconnection",
+  "exchanges": [
+    {
+      "txNativeHex": "00 10 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "rxPayloadHex": "10 00 01 0b 4d 32 32 30 84 01 11 01 00 5a 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 d3"
+    },
+    {
+      "txNativeHex": "00 11 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "rxPayloadHex": "11 00 01 12 10 01 00 10 02 00 10 04 00 10 08 00 10 10 00 40 01 00 00 00 00 00 00 00 00 00 00 b0"
+    },
+    {
+      "txNativeHex": "00 12 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "rxPayloadHex": "12 00 01 01 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01"
+    },
+    {
+      "txNativeHex": "00 13 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "rxPayloadHex": "13 00 01 19 24 31 00 31 00 42 00 42 00 4a 00 4a 00 65 00 65 00 a0 00 a0 00 dc 00 dc 00 00 00 60"
+    }
+  ],
+  "writeVerification": {
+    "source": "Built TypeScript codecs through node-hid 3.4.0; result log, not raw write capture",
+    "dpi": "Stage 0 raw 49/49 -> 50/50; read-back matched; complete original DPI packet restored and verified",
+    "polling": "Code 1 -> 2; read-back matched; complete original polling packet restored and verified"
+  },
+  "limitations": [
+    "Earlier malformed receiver replies recovered after reconnection; root cause unknown",
+    "No USB bus capture",
+    "No power-cycle persistence or physical CPI/report-rate measurement"
+  ]
+}

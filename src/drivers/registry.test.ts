@@ -183,3 +183,18 @@ test("the grandfathered list only names directories that still exist", () => {
   const stale = [...WITHOUT_TESTS].filter((name) => !present.has(name));
   assert.deepEqual(stale, [], "Remove stale entries from WITHOUT_TESTS as devices gain coverage.");
 });
+
+test("every exported HID filter list is offered in the picker", async () => {
+  const vendors = await import("./vendors.ts") as Record<string, unknown>;
+  const offered = new Set(SUPPORTED_HID_FILTERS.map((filter) => JSON.stringify(filter)));
+  const orphans: string[] = [];
+  for (const [name, value] of Object.entries(vendors)) {
+    if (name === "SUPPORTED_HID_FILTERS" || !name.endsWith("FILTERS") || !Array.isArray(value)) continue;
+    if (!value.every((filter) => offered.has(JSON.stringify(filter)))) orphans.push(name);
+  }
+  assert.deepEqual(
+    orphans,
+    [],
+    "These filters are defined but never spread into SUPPORTED_HID_FILTERS, so the browser picker never offers the device and it is simply never detected.",
+  );
+});

@@ -13,6 +13,25 @@ export function withSoftwareId(functionId: number): number {
   return (functionId & 0xf0) | SOFTWARE_ID;
 }
 
+/**
+ * Usage page carrying HID++ over USB: a receiver, or a mouse's own wired
+ * vendor interface. Usage 1 is the short-report collection, usage 2 the long.
+ */
+export const HIDPP_USAGE_PAGE = 0xff00;
+
+/**
+ * Usage page carrying HID++ over Bluetooth. BLE devices do not expose the
+ * 0xFF00 pair at all: Logitech moves the protocol to its own vendor page
+ * (usage 0x0202) and carries long reports only, which is why an MX Master
+ * paired over Bluetooth shows a single `Vendor (0xFF43)` interface and was
+ * never offered by a 0xFF00-only picker filter.
+ *
+ * The page is Logitech's alone, so both the filter and the support check match
+ * the whole page rather than a single usage, keeping firmware that numbers the
+ * collection differently within reach.
+ */
+export const HIDPP_BLUETOOTH_USAGE_PAGE = 0xff43;
+
 /** Receiver-attached mice answer on the receiver's first pairing slot. */
 export const DEVICE_INDEX_RECEIVER = 0x01;
 /** A mouse addressed over its own USB interface answers on 0xFF. */

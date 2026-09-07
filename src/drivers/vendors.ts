@@ -12,6 +12,8 @@ import {
   MCHOSE_DOCK_USAGE_PAGE,
 } from "@openmouse/protocol/mchose";
 import {
+  HIDPP_BLUETOOTH_USAGE_PAGE,
+  HIDPP_USAGE_PAGE,
   LOGITECH_BOLT_PRODUCT_IDS,
   LOGITECH_DIRECT_PRODUCT_IDS,
 } from "@openmouse/protocol/logitech";
@@ -353,8 +355,21 @@ export const LOGITECH_PRODUCT_IDS = [
  * 2.0 feature traffic. The driver decides mouse-vs-keyboard after connecting.
  */
 export const LOGITECH_RECEIVER_FILTERS: HIDDeviceFilter[] = [
-  { vendorId: VENDOR_ID.logitech, usagePage: 0xff00, usage: 0x0001 },
-  { vendorId: VENDOR_ID.logitech, usagePage: 0xff00, usage: 0x0002 },
+  { vendorId: VENDOR_ID.logitech, usagePage: HIDPP_USAGE_PAGE, usage: 0x0001 },
+  { vendorId: VENDOR_ID.logitech, usagePage: HIDPP_USAGE_PAGE, usage: 0x0002 },
+];
+
+/**
+ * The same protocol reached over Bluetooth, where none of the filters above
+ * match: a paired MX Master exposes one vendor collection on 0xFF43 and nothing
+ * on 0xFF00, so it was listed by the diagnostics scan (which filters by vendor
+ * id alone) while never appearing in the picker at all.
+ *
+ * Matched by page, without a usage, because 0xFF43 is Logitech's own page and
+ * the collection is numbered differently across firmware.
+ */
+export const LOGITECH_BLUETOOTH_FILTERS: HIDDeviceFilter[] = [
+  { vendorId: VENDOR_ID.logitech, usagePage: HIDPP_BLUETOOTH_USAGE_PAGE },
 ];
 
 // Retained for existing imports; points at the first supported receiver.
@@ -504,6 +519,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...RAZER_DEATHADDER_ESSENTIAL_FILTERS,
   ...RAZER_COBRA_FILTERS,
   ...KEYCHRON_NAPE_HID_FILTERS,
+  ...KEYCHRON_M6_HID_FILTERS,
   ...RAZER_REGISTRY_FILTERS,
   ...RAZER_DEATHADDER_V2_FILTERS,
   ...EGG_WE_HID_FILTERS,
@@ -514,6 +530,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...[...NINJUTSO_MOUSE_PRODUCT_IDS, ...NINJUTSO_RECEIVER_PRODUCT_IDS]
     .map((productId) => ({ vendorId: NINJUTSO_VENDOR_ID, productId })),
   ...LOGITECH_RECEIVER_FILTERS,
+  ...LOGITECH_BLUETOOTH_FILTERS,
   ...GEARHUB_HID_FILTERS,
   // Fantech mice use vendor usage page 0xFFFF, usage 0x02 for configuration.
   { vendorId: VENDOR_ID.fantech, usagePage: 0xffff, usage: 0x02 },

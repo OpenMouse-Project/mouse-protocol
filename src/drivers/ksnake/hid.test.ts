@@ -172,6 +172,8 @@ class FakeKsnakeDevice {
   badBatteryOnce = false;
   /** Next keys reply is zeroed once (simulates a stray report). */
   badKeysOnce = false;
+  /** Next keys reply is plausible-but-wrong once (simulates a crossed report). */
+  garbageKeysOnce = false;
   sent: number[] = [];
   private listeners = new Map<string, Set<FakeListener>>();
 
@@ -215,7 +217,12 @@ class FakeKsnakeDevice {
       this.badBatteryOnce = false;
     } else if (body[1] === 0x08) {
       reply = new Uint8Array(64);
-      if (!this.badKeysOnce) {
+      if (this.garbageKeysOnce) {
+        for (let i = 0; i < 7; i++) {
+          reply[8 + i * 4] = 99;
+          reply[9 + i * 4] = i;
+        }
+      } else if (!this.badKeysOnce) {
         this.keys.forEach((key, i) => {
           reply[8 + i * 4] = key.type;
           reply[9 + i * 4] = key.code1;
@@ -224,6 +231,7 @@ class FakeKsnakeDevice {
         });
       }
       this.badKeysOnce = false;
+      this.garbageKeysOnce = false;
     } else if (body[1] === 0x09) {
       for (let i = 0; i < 6; i++) {
         this.keys[i] = { type: body[8 + i * 4], code1: body[9 + i * 4], code2: body[10 + i * 4], code3: body[11 + i * 4] };
@@ -398,6 +406,63 @@ describe("KsnakeHidClient writes", () => {
     device.badKeysOnce = true;
     const keys = await fastClient(device).getKeys();
     assert.deepEqual(keys, device.keys);
+  });
+
+  it("ignores a plausible stray until two reads agree", async () => {
+    const device = new FakeKsnakeDevice();
+    device.garbageKeysOnce = true;
+    const keys = await fastClient(device).getKeys();
+    assert.deepEqual(keys, device.keys);
+  });
+
+  it("publishes the generic button map on readStatus", async () => {
+    const status = await fastClient(new FakeKsnakeDevice()).readStatus();
+    assert.deepEqual(status.buttonMappings, {
+      Left: "Left click",
+      Right: "Right click",
+      Middle: "Middle click",
+      Backward: "Backward",
+      // The fake ships a macro reference here: opaque slots surface as-is.
+      Forward: "Custom (112,0,1,3)",
+      DPI: "DPI loop",
+    });
+    assert.ok(status.buttonOptions?.includes("Backward"));
+    assert.ok(status.buttonOptions?.includes("DPI loop"));
+  });
+
+  it("remaps one button by label through setButtonMapping", async () => {
+    const device = new FakeKsnakeDevice();
+    device.keys = [
+      { type: 32, code1: 1, code2: 0, code3: 0 },
+      { type: 32, code1: 2, code2: 0, code3: 0 },
+      { type: 32, code1: 4, code2: 0, code3: 0 },
+      { type: 32, code1: 8, code2: 0, code3: 0 },
+      { type: 32, code1: 16, code2: 0, code3: 0 },
+      { type: 33, code1: 85, code2: 0, code3: 0 },
+      { type: 33, code1: 56, code2: 1, code3: 0 },
+    ];
+    await fastClient(device).setButtonMapping("Forward", "Backward");
+    assert.deepEqual(device.keys[4], { type: 32, code1: 8, code2: 0, code3: 0 });
+    assert.ok(device.sent.includes(0x09));
+  });
+
+  it("locks Left and rejects unknown buttons and actions", async () => {
+    const device = new FakeKsnakeDevice();
+    await assert.rejects(() => fastClient(device).setButtonMapping("Left", "Backward"), /fixed/);
+    await assert.rejects(() => fastClient(device).setButtonMapping("Side", "Backward"), /no "Side" button/);
+    await assert.rejects(() => fastClient(device).setButtonMapping("Forward", "Turbo"), /Unknown button action/);
+    assert.ok(!device.sent.includes(0x09));
+  });
+
+  it("reuses the last good config when a poll read fails", async () => {
+    const device = new FakeKsnakeDevice();
+    const client = fastClient(device);
+    const first = await client.readStatus();
+    assert.deepEqual(first.dpiStages?.slice(0, 3), [800, 1200, 1600]);
+    device.dropReplies = 99;
+    const second = await client.readStatus();
+    assert.deepEqual(second.dpiStages?.slice(0, 3), [800, 1200, 1600]);
+    assert.equal(second.dpi, first.dpi);
   });
 
   it("rejects out-of-range DPI without touching the mouse", async () => {
