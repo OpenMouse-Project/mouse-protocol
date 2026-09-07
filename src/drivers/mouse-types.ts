@@ -246,6 +246,14 @@ export interface MouseStatus {
    * omitted rather than guessed at.
    */
   razerButtonMappings?: Record<string, string>;
+  /**
+   * K-snake X11 button slots 0-6 as read by GET_KEYS (7 slots of 4 bytes at
+   * reply[8..35]). The panel remaps slots 0-5 and treats 6 as fixed scroll.
+   * Opaque slots (macro references, keyboard combos the catalog cannot
+   * rebuild) are preserved as-is — the panel renders them locked rather than
+   * guessed at. Null/undefined when the keys reply was not answered.
+   */
+  ksnakeButtonMappings?: Array<{ type: number; code1: number; code2: number; code3: number }> | null;
   /** Keychron Nape Pro user layer currently running on the device (1–8).
    * Matches firmware get/set. Undefined when the layer commands were not answered.
    */

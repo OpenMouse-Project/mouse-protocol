@@ -400,6 +400,12 @@ describe("KsnakeHidClient writes", () => {
     assert.deepEqual(keys, device.keys);
   });
 
+  it("publishes the button map on readStatus", async () => {
+    const status = await fastClient(new FakeKsnakeDevice()).readStatus();
+    assert.equal(status.ksnakeButtonMappings?.length, 7);
+    assert.deepEqual(status.ksnakeButtonMappings?.[0], { type: 32, code1: 1, code2: 0, code3: 0 });
+  });
+
   it("rejects out-of-range DPI without touching the mouse", async () => {
     const device = new FakeKsnakeDevice();
     await assert.rejects(() => fastClient(device).setDpi(100), /between 200 and 12000/);

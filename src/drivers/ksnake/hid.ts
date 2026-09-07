@@ -189,6 +189,9 @@ export class KsnakeHidClient {
         (v) => v.length > 0,
       ),
     ]);
+    // Sequential on purpose: parallel reads on this dongle collide into
+    // crossed reports, and keys are the least critical of the four.
+    const keys = await this.getKeys().catch(() => null);
     const stages = config?.stages ?? [];
     const activeStage = config ? Math.min(Math.max(config.dpiIndex, 0), Math.max(stages.length - 1, 0)) : 0;
     const dpi = stages[activeStage] ?? 1600;
@@ -222,6 +225,7 @@ export class KsnakeHidClient {
       connectionDetail: this.device.vendorId === KSNAKE_USB_VENDOR_ID ? "Wired USB" : "2.4 GHz receiver",
       liftOffDistance: config ? ksnakeDecodeLiftOff(config.lodValue) : null,
       supportedLiftOffDistances: ["Low", "High"],
+      ksnakeButtonMappings: keys,
       firmware: version ? [`X11 ${version}`] : ["K-snake X11"],
     };
   }
