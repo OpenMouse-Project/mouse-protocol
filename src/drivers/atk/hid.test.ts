@@ -666,3 +666,47 @@ test("one-byte battery reply leaves state and voltage unknown", async () => {
   assert.equal(status.batteryState, "Unknown");
   assert.equal(status.batteryVoltageMv, null);
 });
+
+test("the F1 Ultimate 2.0 identity names the mouse, not its receiver", async () => {
+  // 0x373b:0x11d9 is a shared 8K receiver SKU whose USB product string names
+  // the dongle, so without the identity the status falls back to "ATK
+  // Wireless mouse 8k dongle-L".
+  const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x01, 0x08]),
+    reply(0x04, 0x0000, [0x5f, 0x01]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x000c, atkPackDpiStage(1600, 1600)),
+    reply(0x12, 0x0000, [0x03, 0x00]),
+    reply(0x08, 0x000a, [0x04, 0x51]),
+    reply(0x08, 0x00a9, [0x08, 0x4d, 0x00, 0x55, 0x1e, 0x37, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00bd, [0x00, 0x55, 0x00, 0x55]),
+  ];
+
+  const client = new AtkHidClient(fake);
+  const status = await client.readStatus();
+  assert.equal(status.name, "ATK F1 Ultimate 2.0");
+  assert.equal(status.brand, "ATK");
+  assert.equal(client.displayName(), "ATK F1 Ultimate 2.0");
+  assert.equal(status.connectionType, "Wireless");
+  // PAW3950Ultra keeps the 42,000 DPI ceiling the unidentified fallback used,
+  // so naming the mouse does not narrow what the UI offers.
+  assert.equal(client.maxDpi(), 42000);
+});
+
+test("an unrecognised identity on the same receiver keeps the dongle name", async () => {
+  const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x01, 0xfe]),
+    reply(0x04, 0x0000, [0x5f, 0x01]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x000c, atkPackDpiStage(1600, 1600)),
+    reply(0x12, 0x0000, [0x03, 0x00]),
+    reply(0x08, 0x000a, [0x04, 0x51]),
+    reply(0x08, 0x00a9, [0x08, 0x4d, 0x00, 0x55, 0x1e, 0x37, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00bd, [0x00, 0x55, 0x00, 0x55]),
+  ];
+
+  const status = await new AtkHidClient(fake).readStatus();
+  assert.equal(status.name, "ATK Wireless mouse 8k dongle-L");
+});
