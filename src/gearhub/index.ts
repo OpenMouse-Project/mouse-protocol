@@ -269,6 +269,12 @@ export const LINGBAO_M5_PRO_PROFILE: GearHubProfile = {
  * receiver and by cable (PID 0x4026): identity, firmware v2.01, the
  * six-stage DPI table (top stage ~42000), 8000 Hz polling, DPI / lift-off /
  * debounce / correction / sleep read + write, and 6-button remapping.
+ *
+ * qmk.top's catalog carries three R2 device ids: 1893 and 3009 on the
+ * original 0x40xx MCU (PID 0x4026 / 0x402D), and 3016 on the newer 0x50xx
+ * MCU (PID 0x5043). 1893 and 3009 share this profile; 3016 is not handled
+ * here - its PID is not in GEARHUB_PRODUCTS and it is most likely the
+ * individual-command firmware this block-protocol driver cannot drive.
  */
 export const ATTACK_SHARK_R2_PROFILE: GearHubProfile = {
   deviceId: 1893,
@@ -281,9 +287,16 @@ export const ATTACK_SHARK_R2_PROFILE: GearHubProfile = {
   dpiStep: 50,
 };
 
-export const GEARHUB_DEVICE_PROFILES: ReadonlyMap<number, GearHubProfile> = new Map(
-  [LINGBAO_M5_PRO_PROFILE, ATTACK_SHARK_R2_PROFILE].map((profile) => [profile.deviceId, profile]),
-);
+export const GEARHUB_DEVICE_PROFILES: ReadonlyMap<number, GearHubProfile> = new Map<
+  number,
+  GearHubProfile
+>([
+  [LINGBAO_M5_PRO_PROFILE.deviceId, LINGBAO_M5_PRO_PROFILE],
+  [ATTACK_SHARK_R2_PROFILE.deviceId, ATTACK_SHARK_R2_PROFILE],
+  // A later R2 firmware batch on the same 0x40xx silicon, PID and PAW3950
+  // sensor as 1893. Block protocol assumed identical; not hardware-verified.
+  [3009, ATTACK_SHARK_R2_PROFILE],
+]);
 
 /**
  * Identity for an unrecognised GearHub-V5 sibling: the M5 Pro, which is what

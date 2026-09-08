@@ -487,6 +487,20 @@ describe("GearHubHidClient", () => {
     assert.equal(await client.setLiftOffDistance("Medium"), "Medium");
   });
 
+  it("maps the later R2 firmware batch (device id 3009) to the R2 profile", async () => {
+    const { device } = fakeReceiver({
+      deviceId: 3009,
+      replies: {
+        [CMD.GET_DPI]: dpiReply([400, 800, 1600, 5600, 8000, 42000], 2),
+        [CMD.GET_OPTIONPARAM0]: opt0Reply({ rate: 1, lod: 2 }),
+      },
+    });
+    const status = await new GearHubHidClient(device).readStatus();
+
+    assert.equal(status.name, "Attack Shark R2");
+    assert.ok(status.firmware.includes("PixArt PAW3950"));
+  });
+
   it("falls back to the M5 Pro profile for an unknown device id", async () => {
     const { device } = fakeReceiver({
       deviceId: 9999,
