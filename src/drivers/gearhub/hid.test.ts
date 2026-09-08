@@ -238,8 +238,8 @@ describe("GearHubHidClient", () => {
   });
 
   it("sets the lift-off distance by patching OPTIONPARAM0 byte 52", async () => {
-    // No readStatus() first, so the fallback profile (M5 Pro / PAW3395) is in
-    // effect: two stops, Low (index 0) and High (index 1).
+    // No readStatus() first, so the generic fallback profile is in effect:
+    // the common three stops, Low (0) / Medium (1) / High (2).
     const { device, sent } = fakeReceiver({
       replies: { [CMD.GET_OPTIONPARAM0]: opt0Reply({ rate: 3, lod: 0 }) },
     });
@@ -247,7 +247,7 @@ describe("GearHubHidClient", () => {
 
     const write = sent.filter((buf) => buf[0] === CMD.SET_OPTIONPARAM0).at(-1);
     assert.ok(write, "a SET_OPTIONPARAM0 report should have been sent");
-    assert.equal(write![OPT0_SILENT_HEIGHT], 1, "High maps to index 1 on a two-stop sensor");
+    assert.equal(write![OPT0_SILENT_HEIGHT], 2, "High maps to index 2 on a three-stop list");
     assert.equal(write![OPT0_REPORT_RATE], 3, "report rate carried over");
   });
 
@@ -398,12 +398,15 @@ describe("GearHubHidClient", () => {
   });
 
   it("rejects a lift-off level the model does not offer", async () => {
+    // Resolve the M5 Pro profile (device id 2285, PAW3395): two stops, no "Medium".
     const { device } = fakeReceiver({
-      replies: { [CMD.GET_OPTIONPARAM0]: opt0Reply() },
+      replies: { [CMD.GET_DPI]: dpiReply([800, 1600], 0), [CMD.GET_OPTIONPARAM0]: opt0Reply() },
     });
-    // PAW3395 fallback has no "Medium".
+    const client = new GearHubHidClient(device);
+    await client.readStatus();
+
     await assert.rejects(
-      () => new GearHubHidClient(device).setLiftOffDistance("Medium"),
+      () => client.setLiftOffDistance("Medium"),
       /not available on this model/,
     );
   });
@@ -501,7 +504,7 @@ describe("GearHubHidClient", () => {
     assert.ok(status.firmware.includes("PixArt PAW3950"));
   });
 
-  it("falls back to the M5 Pro profile for an unknown device id", async () => {
+  it("falls back to the generic profile for an unknown device id", async () => {
     const { device } = fakeReceiver({
       deviceId: 9999,
       replies: { [CMD.GET_DPI]: dpiReply([400, 800, 1600], 0), [CMD.GET_OPTIONPARAM0]: opt0Reply() },
@@ -509,9 +512,9 @@ describe("GearHubHidClient", () => {
     const client = new GearHubHidClient(device);
     const status = await client.readStatus();
 
-    assert.equal(status.brand, "Lingbao");
-    assert.equal(status.name, "Lingbao M5 Pro");
-    assert.equal(client.getDpiOptions().at(-1), 26000, "DPI stops stay at the PAW3395 ceiling");
+    assert.equal(status.brand, "GearHub");
+    assert.equal(status.name, "GearHub V5 mouse");
+    assert.equal(client.getDpiOptions().at(-1), 42000, "DPI stops are not clamped below the platform ceiling");
   });
 
   it("survives a device that will not answer GET_USB_VERSION", async () => {
@@ -524,8 +527,8 @@ describe("GearHubHidClient", () => {
     });
     const status = await new GearHubHidClient(device).readStatus();
 
-    assert.equal(status.brand, "Lingbao");
-    assert.equal(status.name, "Lingbao M5 Pro");
+    assert.equal(status.brand, "GearHub");
+    assert.equal(status.name, "GearHub V5 mouse");
   });
 
   it("keeps working when OPTIONPARAM0 cannot be read", async () => {
@@ -553,6 +556,61 @@ describe("GearHubHidClient", () => {
     assert.equal(write![40], 0x10);       // indicator colours carried over
     assert.equal(write![43], 0x11);
     assert.equal(write![46], 0x12);
+  });
+
+  it("setDpiStageColor recolours one stage and keeps the other stages", async () => {
+    const { device, sent } = fakeReceiver({
+      replies: { [CMD.GET_DPI]: dpiReply([800, 1600, 3200], 0, [0x111111, 0x222222, 0x333333]) },
+    });
+    const confirmed = await new GearHubHidClient(device).setDpiStageColor(1, "#40c8ff");
+
+    assert.equal(confirmed, "#40c8ff");
+    const write = sent.filter((buf) => buf[0] === CMD.SET_DPI).at(-1);
+    assert.ok(write, "a SET_DPI report should have been sent");
+    const u16 = (buf: Uint8Array, i: number) => buf[i] | (buf[i + 1] << 8);
+    assert.equal(u16(write!, 8), 800);    // stage 0 resolution untouched
+    assert.equal(u16(write!, 10), 1600);  // stage 1 resolution untouched
+    assert.deepEqual([write![40], write![41], write![42]], [0x11, 0x11, 0x11]); // stage 0 colour kept
+    assert.deepEqual([write![43], write![44], write![45]], [0x40, 0xc8, 0xff]); // stage 1 recoloured
+    assert.deepEqual([write![46], write![47], write![48]], [0x33, 0x33, 0x33]); // stage 2 colour kept
+    assert.equal(write![2], 0, "active stage kept, not moved to the edited one");
+  });
+
+  it("setActiveDpiStage re-sends the table with the new active index", async () => {
+    const { device, sent } = fakeReceiver({
+      replies: { [CMD.GET_DPI]: dpiReply([800, 1600, 3200], 0, [0x111111, 0x222222, 0x333333]) },
+    });
+    const at = await new GearHubHidClient(device).setActiveDpiStage(2);
+
+    assert.equal(at, 2);
+    const write = sent.filter((buf) => buf[0] === CMD.SET_DPI).at(-1);
+    assert.ok(write, "a SET_DPI report should have been sent");
+    assert.equal(write![2], 2, "active index moved to stage 3");
+    const u16 = (buf: Uint8Array, i: number) => buf[i] | (buf[i + 1] << 8);
+    assert.equal(u16(write!, 8), 800);    // resolutions untouched
+    assert.equal(u16(write!, 12), 3200);
+    assert.deepEqual([write![40], write![43], write![46]], [0x11, 0x22, 0x33]); // colours untouched
+  });
+
+  it("setActiveDpiStage clamps an out-of-range index", async () => {
+    const { device, sent } = fakeReceiver({
+      replies: { [CMD.GET_DPI]: dpiReply([800, 1600], 0) },
+    });
+    assert.equal(await new GearHubHidClient(device).setActiveDpiStage(9), 1);
+    assert.equal(sent.filter((buf) => buf[0] === CMD.SET_DPI).at(-1)![2], 1);
+  });
+
+  it("readStatus reports every DPI stage colour as #rrggbb", async () => {
+    const { device } = fakeReceiver({
+      deviceId: 1893,
+      replies: {
+        [CMD.GET_DPI]: dpiReply([400, 800, 1600], 1, [0x000000, 0xff8000, 0x00ff00]),
+        [CMD.GET_OPTIONPARAM0]: opt0Reply({ rate: 1, lod: 2 }),
+      },
+    });
+    const status = await new GearHubHidClient(device).readStatus();
+
+    assert.deepEqual(status.dpiStageColors, ["#000000", "#ff8000", "#00ff00"]);
   });
 
   it("refuses a rate the wired mode cannot reach", async () => {

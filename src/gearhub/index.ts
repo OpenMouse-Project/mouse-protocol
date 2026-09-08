@@ -131,6 +131,9 @@ export const GEARHUB_LIFT_OFF_LEVELS: Record<string, readonly LiftOffLevel[]> = 
   "PixArt PAW3950": ["Low", "Medium", "High"],
   "PixArt PAW3955": ["Low", "Medium", "High"],
   "PixArt PAW3395": ["Low", "High"],
+  // Unidentified GearHub-V5 device: offer the common three stops. The
+  // firmware clamps the index if its sensor only has two.
+  "PixArt (GearHub-V5)": ["Low", "Medium", "High"],
 };
 
 // ── Button remapping (keymatrix) ───────────────────────────────────────────
@@ -235,7 +238,7 @@ export const GEARHUB_PRODUCTS: ReadonlyMap<number, GearHubTransport> = new Map([
  */
 export interface GearHubProfile {
   deviceId: number;
-  brand: "Lingbao" | "Attack Shark";
+  brand: "Lingbao" | "Attack Shark" | "GearHub";
   model: string;
   sensor: string;
   maxPollingHz: number;
@@ -299,10 +302,23 @@ export const GEARHUB_DEVICE_PROFILES: ReadonlyMap<number, GearHubProfile> = new 
 ]);
 
 /**
- * Identity for an unrecognised GearHub-V5 sibling: the M5 Pro, which is what
- * this driver always reported before it learned to ask for the device id.
+ * Identity for a GearHub-V5 device this driver reached but could not name:
+ * GET_USB_VERSION failed, or it answered a device id not in the catalog.
+ * Deliberately generic - naming a concrete model here (it used to borrow the
+ * M5 Pro's) is a guess that is wrong for every sibling that is not an M5 Pro.
+ * The DPI/polling bounds are the platform ceilings so a real device's range
+ * is never clamped; the live DPI stages still come from the device's table.
  */
-export const GEARHUB_FALLBACK_PROFILE = LINGBAO_M5_PRO_PROFILE;
+export const GEARHUB_FALLBACK_PROFILE: GearHubProfile = {
+  deviceId: 0,
+  brand: "GearHub",
+  model: "V5 mouse",
+  sensor: "PixArt (GearHub-V5)",
+  maxPollingHz: 8000,
+  minDpi: 50,
+  maxDpi: 42000,
+  dpiStep: 50,
+};
 
 /** Resolve a device id to its profile, or the fallback. */
 export function gearHubProfileFor(deviceId: number | null | undefined): GearHubProfile {
