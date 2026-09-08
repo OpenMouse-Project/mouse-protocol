@@ -148,6 +148,10 @@
     "./ksnake": {
       "types": "./dist/ksnake/index.d.ts",
       "import": "./dist/ksnake/index.js"
+    },
+    "./incott": {
+      "types": "./dist/incott/index.d.ts",
+      "import": "./dist/incott/index.js"
     }
   },
   "scripts": {

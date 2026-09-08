@@ -1,5 +1,6 @@
 import { ATK_COMPX_PRODUCT_IDS } from "./atk/products.ts";
 import { MICROSOFT_PRODUCTS } from "../microsoft/index.ts";
+import { INCOTT_PRODUCT_IDS, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../incott/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { GEARHUB_PRODUCTS, GEARHUB_VENDOR_ID } from "@openmouse/protocol/gearhub";
 import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
@@ -107,6 +108,10 @@ export const VENDOR_ID = {
   ksnakeUsb: 0xa8a4, // K-snake X11 wired
   ksnakeDongle: 0xa8a5, // K-snake X11 2.4 GHz dongle
   microsoft: 0x045E,
+  // Shares 0x093a with Glorious's Pixart-based Model O 2 / I 2 family (see
+  // `glorious` above); GloriousHidClient.isSupported() only claims its own
+  // catalogued product ids, so the two never overlap.
+  incott: INCOTT_VENDOR_ID,
 } as const;
 
 /**
@@ -466,6 +471,19 @@ export const MICROSOFT_HID_FILTERS: HIDDeviceFilter[] = [...MICROSOFT_PRODUCTS].
   (productId) => ({ vendorId: VENDOR_ID.microsoft, productId, usagePage: 0x0C, usage: 0x01 }),
 );
 
+/**
+ * The Incott 8K wireless mouse (and its charging-state product id) answer the
+ * vendor protocol on usage page 0xFF05. Narrowed per product id and usage
+ * page, like the other 0x093a filter above, so the picker offers the
+ * protocol-carrying collection specifically rather than relying only on the
+ * broad Glorious VID-only filter that already happens to admit this VID.
+ */
+export const INCOTT_HID_FILTERS: HIDDeviceFilter[] = INCOTT_PRODUCT_IDS.map((productId) => ({
+  vendorId: INCOTT_VENDOR_ID,
+  productId,
+  usagePage: INCOTT_USAGE_PAGE,
+}));
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
@@ -544,4 +562,5 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.ksnakeUsb, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
   { vendorId: VENDOR_ID.ksnakeDongle, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
   ...MICROSOFT_HID_FILTERS,
+  ...INCOTT_HID_FILTERS,
 ];
