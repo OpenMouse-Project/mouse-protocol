@@ -61,6 +61,8 @@ const MAX_IDENTIFY_ATTEMPTS = 3;
 // (Beken MCU). It shares the A9 EEPROM map for DPI/advanced/lod, but the poll
 // rate lives in the live-settings row; see the codec for the full story.
 const VXE_R1_RECEIVER_PID = 0x1085;
+const VXE_R1_PRO_MAX_RECEIVER_PID = 0xf58a;
+const VXE_R1_PRO_MAX_MOUSE_PID = 0xf58c;
 const VXE_R1_COMPX_RECEIVER_PID = 0xf58e;
 const VXE_R1_COMPX_MOUSE_PID = 0xf58f;
 const R1_SETTINGS_LENGTH = 4;
@@ -189,11 +191,13 @@ export class AtkHidClient {
    */
   isWireless(): boolean {
     return this.device.productId === VXE_R1_RECEIVER_PID
-      || (this.device.vendorId === VENDOR_ID.vgn && this.device.productId === VXE_R1_COMPX_RECEIVER_PID)
+      || (this.device.vendorId === VENDOR_ID.vgn
+        && (this.device.productId === VXE_R1_PRO_MAX_RECEIVER_PID
+          || this.device.productId === VXE_R1_COMPX_RECEIVER_PID))
       || /receiver|dongle/i.test(this.device.productName || "");
   }
 
-  /** VXE R1 SE/SE+ on its stock 1K receiver (Beken MCU, per OpenVXE). */
+  /** VXE R1-family devices using the shared EEPROM command framing. */
   isR1(): boolean {
     return this.product?.family === "r1"
       || this.usesSharedR1Transport();
@@ -277,6 +281,7 @@ export class AtkHidClient {
       : null;
     const angleTuning = angle ? weUnpackScalarPair(angle[0], angle[1]) : null;
     const angleSnapping = angle ? weUnpackScalarPair(angle[2], angle[3]) : null;
+    const sensorProfile = this.product ? ATK_SENSORS[this.product.sensor] : null;
     return this.lastStatus = {
       brand: this.deviceBrand(),
       name: this.displayName(),
@@ -287,8 +292,8 @@ export class AtkHidClient {
         dpiStageEditor: this.usesVerifiedR1WiredTransport() ? {
           maxStages: R1_MAX_DPI_STAGES,
           countEditable: false,
-          minDpi: ATK_SENSORS.PAW3395SE.minDpi,
-          maxDpi: ATK_SENSORS.PAW3395SE.maxDpi,
+          minDpi: sensorProfile?.minDpi ?? DPI_MIN,
+          maxDpi: sensorProfile?.maxDpi ?? DPI_MAX,
           stepDpi: 50,
         } : undefined,
         dpiLighting: r1Extras ? {
@@ -305,7 +310,7 @@ export class AtkHidClient {
       dpiStages: dpiStages.map(({ x }) => x),
       dpiStageColors: r1Extras?.dpiStageColors,
       activeDpiStage,
-      supportsSeparateDpiAxes: false,
+      supportsSeparateDpiAxes: this.isR1ProMax(),
       pollingRateHz: await this.readPollingRate(system),
       supportedPollingRates: this.getSupportedPollingRates(),
       activeProfile: stored?.activeProfile ?? null,
@@ -465,7 +470,7 @@ export class AtkHidClient {
   async setActiveDpiStage(index: number): Promise<number> {
     await this.identify();
     if (this.isR1() && !this.usesVerifiedR1WiredTransport()) {
-      throw new Error("R1 DPI stage selection is available only over the verified R1 SE+ wired transport.");
+      throw new Error("R1 DPI stage selection is available only over a verified wired transport.");
     }
     const system = await this.read(REGISTER.system, SYSTEM_LENGTH);
     const count = this.stageCount(system);
@@ -484,7 +489,7 @@ export class AtkHidClient {
   async setDpiStageValue(index: number, dpi: number): Promise<number> {
     await this.identify();
     if (this.isR1() && !this.usesVerifiedR1WiredTransport()) {
-      throw new Error("R1 DPI stage editing is available only over the verified R1 SE+ wired transport.");
+      throw new Error("R1 DPI stage editing is available only over a verified wired transport.");
     }
     const system = await this.read(REGISTER.system, SYSTEM_LENGTH);
     const count = this.stageCount(system);
@@ -935,18 +940,25 @@ export class AtkHidClient {
 
   private usesSharedR1Transport(): boolean {
     return this.device.productId === VXE_R1_RECEIVER_PID
-      || (this.device.vendorId === VENDOR_ID.vgn
-        && (this.device.productId === VXE_R1_COMPX_RECEIVER_PID || this.device.productId === VXE_R1_COMPX_MOUSE_PID))
-      || /\bvxe\s+r1(?:\s*se\+?)?\b/i.test(this.device.productName || "");
+      || (this.device.vendorId === VENDOR_ID.vgn && ATK_COMPX_PRODUCT_IDS.includes(this.device.productId))
+      || /\bvxe\s+r1(?:\s*(?:se\+?|pro\s+max))?\b/i.test(this.device.productName || "");
   }
 
+  /** Only the SE/SE+ receiver family uses the selector-based 0x0070 live row. */
   private usesR1LiveSettings(): boolean {
-    return this.isR1() && this.isWireless();
+    return this.isR1()
+      && (this.device.productId === VXE_R1_RECEIVER_PID
+        || (this.device.vendorId === VENDOR_ID.vgn && this.device.productId === VXE_R1_COMPX_RECEIVER_PID));
+  }
+
+  private isR1ProMax(): boolean {
+    return this.product === ATK_PRODUCTS["2,27"];
   }
 
   private usesVerifiedR1WiredTransport(): boolean {
-    return this.device.vendorId === VENDOR_ID.vgn && this.device.productId === VXE_R1_COMPX_MOUSE_PID
-      && this.product === ATK_PRODUCTS["2,32"] && !this.isWireless();
+    if (this.device.vendorId !== VENDOR_ID.vgn || this.isWireless()) return false;
+    return (this.device.productId === VXE_R1_COMPX_MOUSE_PID && this.product === ATK_PRODUCTS["2,32"])
+      || (this.device.productId === VXE_R1_PRO_MAX_MOUSE_PID && this.isR1ProMax());
   }
 
   /**
@@ -999,7 +1011,7 @@ export class AtkHidClient {
 
   private async write(address: number, data: readonly number[]): Promise<void> {
     if (this.isR1() && !this.usesR1LiveSettings() && !this.usesVerifiedR1WiredTransport()) {
-      throw new Error("Persistent R1 EEPROM writes are available only over the verified R1 SE+ wired transport.");
+      throw new Error("Persistent R1 EEPROM writes are available only over a verified wired transport.");
     }
     const payload = weBuildCmdPayload(
       WE_CMD_WRITE_EEPROM,
