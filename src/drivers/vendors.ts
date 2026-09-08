@@ -535,6 +535,9 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   // MCHOSE ships keyboards and audio devices under 0x3837 too, so this stays
   // narrowed to the mouse configuration collection rather than the whole VID.
+  // Both mouse generations answer on this collection — the A7 V2 with inverted
+  // feature reports, the A7 V3 with its own output-report protocol — so one
+  // filter offers the whole mouse line and the drivers split it by product id.
   { vendorId: VENDOR_ID.mchose, usagePage: MCHOSE_CONFIG_USAGE_PAGE, usage: MCHOSE_CONFIG_USAGE },
   // The MagDock is a separate device on its own usage page; it carries the RGB.
   { vendorId: VENDOR_ID.mchose, productId: MCHOSE_DOCK_PRODUCT_ID, usagePage: MCHOSE_DOCK_USAGE_PAGE, usage: MCHOSE_DOCK_USAGE },

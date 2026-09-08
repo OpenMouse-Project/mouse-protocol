@@ -38,6 +38,7 @@ import {
   MCHOSE_BUTTONS,
   MCHOSE_BUTTON_ACTIONS,
   mchoseFindProduct,
+  mchoseV3IsProductId,
   mchosePollingRates,
   type MchoseBattery,
   type MchoseConfig,
@@ -100,6 +101,11 @@ export class MchoseHidClient {
       // The MagDock is the same vendor but a different protocol entirely, and
       // has its own driver; it must never be claimed as a mouse.
       && device.productId !== MCHOSE_DOCK_PRODUCT_ID
+      // The A7 V3 generation puts a *different* protocol on this same usage
+      // page, so the collection alone no longer identifies a V2. Subtracting
+      // the known V3 ids rather than listing the V2's keeps this open to
+      // unlisted V2-era models, which is how it found the test hardware.
+      && !mchoseV3IsProductId(device.productId)
       && device.collections.some(search);
   }
 
