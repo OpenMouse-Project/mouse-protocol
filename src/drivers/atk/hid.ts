@@ -276,7 +276,7 @@ export class AtkHidClient {
     const r1Extras = this.usesR1ProMaxUiTransport()
       ? await this.readR1Extras(stageCount)
       : null;
-    const stored = this.usesVerifiedR1WiredTransport()
+    const stored = this.usesR1ProMaxUiTransport()
       ? await this.readR1StoredConfiguration().catch(() => null)
       : null;
     const receiver = this.usesR1LiveSettings()
@@ -348,8 +348,8 @@ export class AtkHidClient {
     buttons: NonNullable<MouseStatus["atkButtonMappings"]>;
   }> {
     await this.identify();
-    if (!this.usesVerifiedR1WiredTransport()) {
-      throw new Error("Stored R1 configuration inspection is available only over the verified wired transport.");
+    if (!this.usesR1ProMaxUiTransport()) {
+      throw new Error("Stored R1 configuration inspection is not available on this connection.");
     }
     const activeProfile = await this.readR1CurrentProfile();
 
@@ -378,19 +378,38 @@ export class AtkHidClient {
     return { activeProfile: activeProfile + 1, buttons };
   }
 
-  /** Select one of the four verified wired R1 banks and require readback. */
+  /** Select one of the four verified R1 banks and require readback. */
   async setR1ActiveProfile(profile: number): Promise<number> {
     await this.identify();
-    if (!this.usesVerifiedR1WiredTransport()) {
-      throw new Error("R1 profile switching is available only over the verified wired transport.");
+
+    const receiver = this.usesVerifiedR1ProMaxReceiverTransport();
+    if (!this.usesVerifiedR1WiredTransport() && !receiver) {
+      throw new Error("R1 profile switching is not available on this connection.");
     }
+
     if (!Number.isInteger(profile) || profile < 1 || profile > ATK_R1_PROFILE_COUNT) {
       throw new Error(`R1 profile must be between 1 and ${ATK_R1_PROFILE_COUNT}.`);
     }
-    await this.send(atkBuildSetCurrentProfile(profile - 1));
+
+    const frame = atkBuildSetCurrentProfile(profile - 1);
+
+    if (receiver) {
+      await this.exchange(
+        frame,
+        (reply) => reply.length === frame.length
+          && reply.every((byte, index) => byte === frame[index]),
+      );
+    } else {
+      await this.send(frame);
+    }
+
     await delay(R1_PROFILE_SWITCH_SETTLE_MS);
+
     const confirmed = (await this.readR1CurrentProfile()) + 1;
-    if (confirmed !== profile) throw new Error(`The mouse kept profile ${confirmed} instead of ${profile}.`);
+    if (confirmed !== profile) {
+      throw new Error(`The mouse kept profile ${confirmed} instead of ${profile}.`);
+    }
+
     this.lastStatus = null;
     return confirmed;
   }

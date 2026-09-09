@@ -705,6 +705,27 @@ test("R1 Pro Max receiver writes polling with the vendor-captured full system ro
   assert.equal(writes(fake).some((frame) => frame[3] === 0x70), false);
 });
 
+test("R1 Pro Max receiver switches profiles through the captured 0x0f command", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x0f, 0, [0x01]),
+    reply(0x0e, 0, [0x01]),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setR1ActiveProfile(2), 2);
+
+  const sent = hardware.sent.find(
+    ({ reportId, data }) => reportId === 8 && data[0] === 0x0f,
+  );
+
+  assert.ok(sent);
+  assert.deepEqual([...sent!.data], reply(0x0f, 0, [0x01]));
+});
+
 test("R1 Pro Max wired transport edits DPI stage count and clamps the active stage", async () => {
   const fake = device(0xf58c, "VXE R1 Pro Max");
   const stage = atkPackDpiStageForSensor("PAW3395", 1600, 1600)!;
