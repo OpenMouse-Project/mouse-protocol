@@ -104,10 +104,19 @@ export const LAMZU_ATLANTIS_MAX_TIMER_SECONDS = 0xff * LAMZU_ATLANTIS_TIMER_STEP
 /** Sleep timeouts Lamzu's own configurator offers, in seconds. */
 export const LAMZU_ATLANTIS_SLEEP_OPTIONS = [10, 30, 60, 300, 600, 1800] as const;
 
+/**
+ * Which of the two encodings of 1,000 Hz a transport wants. Stored per product
+ * rather than derived from the rate ceiling: the 1K receiver tops out at
+ * 1,000 Hz like the cable does, so a ceiling test would silently decide its
+ * encoding for it, and no 1K receiver has been on hand to check.
+ */
+export type LamzuAtlantisRateFamily = "wired" | "receiver";
+
 export interface LamzuAtlantisProduct {
   model: string;
   wireless: boolean;
   pollingRates: readonly number[];
+  rateFamily: LamzuAtlantisRateFamily;
   /** False until this exact product id has been exercised on hardware. */
   verified: boolean;
 }
@@ -124,15 +133,16 @@ const RATES_4K = [500, 1000, 2000, 4000] as const;
  * by making the user pick the model from a list, so this catalog names the
  * family rather than pretending to identify one model.
  *
- * 0xf50f (the mouse on its cable) is confirmed on hardware. The receivers come
- * from Lamzu's shipped device table; the protocol is the same either way, so
- * the risk on those is a wrong rate list rather than a dead device.
+ * 0xf50f (the mouse on its cable) is confirmed on hardware. The three receiver
+ * ids come from Lamzu's shipped device table and nothing more: no receiver has
+ * been exercised, so neither their rate lists nor the transport itself is
+ * established, and they stay `verified: false` until one is.
  */
 export const LAMZU_ATLANTIS_PRODUCTS: ReadonlyMap<number, LamzuAtlantisProduct> = new Map([
-  [0xf50f, { model: "Atlantis", wireless: false, pollingRates: RATES_WIRED, verified: true }],
-  [0xf50d, { model: "Atlantis", wireless: true, pollingRates: RATES_WIRED, verified: false }],
-  [0xf510, { model: "Atlantis", wireless: true, pollingRates: RATES_4K, verified: false }],
-  [0xf517, { model: "Atlantis", wireless: true, pollingRates: RATES_4K, verified: false }],
+  [0xf50f, { model: "Atlantis", wireless: false, pollingRates: RATES_WIRED, rateFamily: "wired", verified: true }],
+  [0xf50d, { model: "Atlantis", wireless: true, pollingRates: RATES_WIRED, rateFamily: "wired", verified: false }],
+  [0xf510, { model: "Atlantis", wireless: true, pollingRates: RATES_4K, rateFamily: "receiver", verified: false }],
+  [0xf517, { model: "Atlantis", wireless: true, pollingRates: RATES_4K, rateFamily: "receiver", verified: false }],
 ]);
 
 /**
@@ -242,20 +252,46 @@ export function lamzuAtlantisSealField(values: readonly number[]): number[] {
   return [...values, (0x55 - sum) & 0xff];
 }
 
+export interface LamzuAtlantisDpiStage {
+  x: number;
+  y: number;
+}
+
+/**
+ * Decodes a DPI stage field: `[x, y, flags, checksum]`, where the flags byte
+ * carries each axis's ninth and tenth bits — bits 2-3 for x, bits 6-7 for y,
+ * which is how `pulsarVgnEncodeDpi` lays them out.
+ *
+ * `pulsarVgnDecodeDpi` cannot be used for reads here: it returns null unless
+ * the two axis bytes are identical, because the Pulsar driver only ever
+ * writes them in lockstep. A Lamzu configured with separate axes stores a
+ * perfectly valid field that would then read as corrupt.
+ */
+export function lamzuAtlantisDecodeDpiStage(field: Uint8Array): LamzuAtlantisDpiStage | null {
+  if (field.length < LAMZU_ATLANTIS_STAGE_STRIDE || !lamzuAtlantisFieldIsIntact(field)) return null;
+  const flags = field[2] ?? 0;
+  const axis = (low: number, high: number) => (((high & 0x03) << 8) + low + 1) * LAMZU_ATLANTIS_DPI_STEP;
+  return {
+    x: axis(field[0] ?? 0, flags >> 2),
+    y: axis(field[1] ?? 0, flags >> 6),
+  };
+}
+
 export function lamzuAtlantisDecodePollingRate(raw: number): number | null {
   return LAMZU_ATLANTIS_POLLING_RATES.find(([encoded]) => encoded === raw)?.[1] ?? null;
 }
 
 /**
- * Picks the byte for a rate. 1,000 Hz has two encodings; the wired family's
- * 0x01 is used unless the product's rate list reaches past 1,000 Hz, which
- * only the receivers do.
+ * Picks the byte for a rate. Only 1,000 Hz is ambiguous, and the transport's
+ * declared family decides it rather than anything inferred from the rate list.
  */
-export function lamzuAtlantisEncodePollingRate(hertz: number, supported: readonly number[]): number | null {
+export function lamzuAtlantisEncodePollingRate(
+  hertz: number,
+  family: LamzuAtlantisRateFamily,
+): number | null {
   const candidates = LAMZU_ATLANTIS_POLLING_RATES.filter(([, rate]) => rate === hertz);
   if (candidates.length === 0) return null;
-  const receiverFamily = supported.some((rate) => rate > 1000);
-  const preferred = receiverFamily
+  const preferred = family === "receiver"
     ? candidates.find(([encoded]) => encoded >= 0x10)
     : candidates.find(([encoded]) => encoded <= 0x08);
   return (preferred ?? candidates[0])?.[0] ?? null;

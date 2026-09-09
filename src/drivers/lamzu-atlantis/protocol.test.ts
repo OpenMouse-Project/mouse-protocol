@@ -9,6 +9,7 @@ import {
   LAMZU_ATLANTIS_VENDOR_ID,
   LAMZU_ATLANTIS_WRITE_ACTIVE_PROFILE,
   lamzuAtlantisDecodeBattery,
+  lamzuAtlantisDecodeDpiStage,
   lamzuAtlantisDecodeFirmware,
   lamzuAtlantisDecodeLiftOffDistance,
   lamzuAtlantisDecodePollingRate,
@@ -137,14 +138,43 @@ test("polling rates decode from both encodings of 1,000 Hz", () => {
   assert.equal(lamzuAtlantisDecodePollingRate(0x7f), null);
 });
 
-test("encoding 1,000 Hz picks the family the connection actually uses", () => {
-  const wired = LAMZU_ATLANTIS_PRODUCTS.get(0xf50f)!.pollingRates;
-  const receiver = LAMZU_ATLANTIS_PRODUCTS.get(0xf510)!.pollingRates;
-  assert.equal(lamzuAtlantisEncodePollingRate(1000, wired), 0x01);
-  assert.equal(lamzuAtlantisEncodePollingRate(1000, receiver), 0x10);
-  assert.equal(lamzuAtlantisEncodePollingRate(500, wired), 0x02);
-  assert.equal(lamzuAtlantisEncodePollingRate(4000, receiver), 0x40);
-  assert.equal(lamzuAtlantisEncodePollingRate(3000, receiver), null);
+test("encoding 1,000 Hz follows the transport's declared family", () => {
+  assert.equal(lamzuAtlantisEncodePollingRate(1000, "wired"), 0x01);
+  assert.equal(lamzuAtlantisEncodePollingRate(1000, "receiver"), 0x10);
+  assert.equal(lamzuAtlantisEncodePollingRate(500, "wired"), 0x02);
+  assert.equal(lamzuAtlantisEncodePollingRate(4000, "receiver"), 0x40);
+  assert.equal(lamzuAtlantisEncodePollingRate(3000, "receiver"), null);
+});
+
+test("the rate family is declared per product, not guessed from the rate list", () => {
+  // The 1K receiver tops out at 1,000 Hz exactly like the cable, so a ceiling
+  // test would quietly decide its encoding. It is wireless and unverified.
+  const oneK = LAMZU_ATLANTIS_PRODUCTS.get(0xf50d)!;
+  assert.equal(oneK.wireless, true);
+  assert.equal(oneK.verified, false);
+  assert.equal(oneK.rateFamily, "wired");
+  assert.equal(LAMZU_ATLANTIS_PRODUCTS.get(0xf510)!.rateFamily, "receiver");
+});
+
+test("a DPI stage decodes both axes, including one Lamzu set separately", () => {
+  // 07 07 00 47 is the captured 400 DPI stage; x and y match there.
+  const symmetric = lamzuAtlantisDecodeDpiStage(bytes("07 07 00 47"));
+  assert.deepEqual(symmetric, { x: 400, y: 400 });
+
+  // Separate axes are a valid, correctly checksummed field. pulsarVgnDecodeDpi
+  // returns null for these because the Pulsar driver only writes axes in
+  // lockstep, which would make a perfectly good stage read as corrupt.
+  const asymmetric = lamzuAtlantisSealField([0x07, 0x0f, 0x00]);
+  assert.equal(pulsarVgnDecodeDpi(new Uint8Array(asymmetric)), null);
+  assert.deepEqual(lamzuAtlantisDecodeDpiStage(new Uint8Array(asymmetric)), { x: 400, y: 800 });
+
+  // The flags byte carries each axis's high bits: 2-3 for x, 6-7 for y.
+  const high = lamzuAtlantisSealField([0xff, 0xff, (1 << 2) | (1 << 6)]);
+  assert.deepEqual(lamzuAtlantisDecodeDpiStage(new Uint8Array(high)), { x: 25600, y: 25600 });
+
+  // A corrupt field stays null rather than decoding to something plausible.
+  assert.equal(lamzuAtlantisDecodeDpiStage(bytes("07 07 00 48")), null);
+  assert.equal(lamzuAtlantisDecodeDpiStage(bytes("07 07 00")), null);
 });
 
 test("lift-off is 1 mm or 2 mm on this generation, not Pulsar's three stops", () => {

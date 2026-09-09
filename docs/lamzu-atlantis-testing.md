@@ -137,10 +137,13 @@ equal, so the last column says what it actually is:
 | 183 | Competition timeout | units of ten seconds | round-trip; the unit is inferred from 173 |
 | 185 | High performance | 0/1 | round-trip |
 
-A DPI stage stores x and y separately, but the shared `pulsarVgnEncodeDpi`
-writes the same byte to both, so a per-axis DPI set in Lamzu's app is
-flattened to a single value the first time this driver changes that stage.
-Reads report the x axis.
+A DPI stage stores x and y separately, and the flags byte carries each axis's
+high bits — 2-3 for x, 6-7 for y. Reads decode both axes; `pulsarVgnDecodeDpi`
+cannot be used for them, because it returns null unless the two axis bytes are
+identical and would report a Lamzu configured with separate axes as corrupt.
+Writes go through the shared `pulsarVgnEncodeDpi`, which writes one value to
+both axes, so a per-axis stage is flattened the first time this driver changes
+it; asymmetric writes are not attempted without hardware to confirm them.
 
 A field is stored with a trailing checksum byte, so the value bytes and that
 byte together sum to `0x55`. Reads ask for one byte more than the field is
