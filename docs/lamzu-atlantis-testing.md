@@ -93,26 +93,39 @@ Two details that cost time and are easy to get wrong:
 
 ### Flash fields
 
-Every offset below was read on hardware and cross-checked against what Lamzu's
-configurator displayed for the same mouse at the same moment.
+Every offset below was read on hardware. The evidence behind each is not
+equal, so the last column says what it actually is:
 
-| Address | Field | Encoding |
-| --- | --- | --- |
-| 0 | Polling rate | see below |
-| 2 | DPI stage count | 1-8 |
-| 4 | Active DPI stage | 0-based |
-| 10 | Lift-off distance | `1` = 1 mm, `2` = 2 mm |
-| 12 + 4n | DPI stage n | `low, low, flags, checksum` |
-| 44 + 4n | DPI stage n colour | `r, g, b, checksum` |
-| 96 | Button actions | 4 bytes per button |
-| 169 | Debounce | milliseconds, 0-15 |
-| 171 | Motion sync | 0/1 |
-| 173 | Sleep timeout | **units of ten seconds** |
-| 175 | Angle snapping | 0/1 |
-| 177 | Ripple control | 0/1 |
-| 181 | Competition mode | 0/1 |
-| 183 | Competition timeout | units of ten seconds |
-| 185 | High performance | 0/1 |
+- **vendor UI** — the value was displayed by Lamzu's configurator for this
+  mouse at the same moment, so both the address and its meaning are confirmed.
+- **UI diff** — the byte was watched changing as that setting was changed in
+  the vendor UI, which is the strongest evidence here.
+- **round-trip** — the field was written and read back through this driver.
+  That proves the address is writable and stable; it does **not** independently
+  confirm the label, which comes from lamzu-cfg's map.
+
+| Address | Field | Encoding | Evidence |
+| --- | --- | --- | --- |
+| 0 | Polling rate | see below | UI diff |
+| 2 | DPI stage count | 1-8 | vendor UI (5 stages) |
+| 4 | Active DPI stage | 0-based | vendor UI |
+| 10 | Lift-off distance | `1` = 1 mm, `2` = 2 mm | vendor UI |
+| 12 + 4n | DPI stage n | `x, y, flags, checksum` | vendor UI |
+| 44 + 4n | DPI stage n colour | `r, g, b, checksum` | vendor UI |
+| 96 | Button actions | 4 bytes per button | vendor UI (bottom button = DPI Loop) |
+| 169 | Debounce | milliseconds, 0-15 | vendor UI |
+| 171 | Motion sync | 0/1 | vendor UI |
+| 173 | Sleep timeout | **units of ten seconds** | UI diff |
+| 175 | Angle snapping | 0/1 | vendor UI |
+| 177 | Ripple control | 0/1 | round-trip |
+| 181 | Competition mode | 0/1 | vendor UI |
+| 183 | Competition timeout | units of ten seconds | round-trip; the unit is inferred from 173 |
+| 185 | High performance | 0/1 | round-trip |
+
+A DPI stage stores x and y separately, but the shared `pulsarVgnEncodeDpi`
+writes the same byte to both, so a per-axis DPI set in Lamzu's app is
+flattened to a single value the first time this driver changes that stage.
+Reads report the x axis.
 
 A field is stored with a trailing checksum byte, so the value bytes and that
 byte together sum to `0x55`. Reads ask for one byte more than the field is
@@ -159,7 +172,15 @@ ripple control, competition mode, high performance, active DPI stage
 (2 → 0 → 2), DPI stage value (2000 → 1600 → 2000), profile (1 → 2 → 1). A full
 re-read afterwards showed no drift in any other field.
 
+Onboard profiles were probed by writing each index and reading it back:
+0 through 3 are accepted, 4 and above are rejected with status 1 and leave the
+mouse where it was. Hence four profiles, and the mouse was restored to its
+original one afterwards.
+
 Not exercised: the three receiver product ids, button remapping, macros, and
-the pairing and factory-reset controls the vendor app exposes. No command id
-outside the table above was sent — the write path on this firmware includes a
+the pairing and factory-reset controls the vendor app exposes. DPI above
+12,800 — where the stage count no longer fits one byte and the high bits ride
+in the flags byte — is covered by a unit test round trip but was never set on
+this hardware; the stages exercised were 1,600 and 2,000. No command id
+outside the table above was sent: the write path on this firmware includes a
 factory reset, so unknown ids were not probed.

@@ -7,6 +7,7 @@ import {
   LAMZU_ATLANTIS_MAX_PAYLOAD as MAX_PAYLOAD,
   LAMZU_ATLANTIS_MAX_TIMER_SECONDS as MAX_TIMER_SECONDS,
   LAMZU_ATLANTIS_MIN_DPI as DPI_MIN,
+  LAMZU_ATLANTIS_PROFILE_COUNT as PROFILE_COUNT,
   LAMZU_ATLANTIS_REPORT_ID as REPORT_ID,
   LAMZU_ATLANTIS_SLEEP_OPTIONS as SLEEP_OPTIONS,
   LAMZU_ATLANTIS_STAGE_STRIDE as STAGE_STRIDE,
@@ -56,6 +57,7 @@ export class LamzuAtlantisHidClient {
   private queue: Promise<unknown> = Promise.resolve();
   private pending: ((body: Uint8Array) => void) | null = null;
   private listener: ((event: HIDInputReportEvent) => void) | null = null;
+  private opening: Promise<void> | null = null;
   private lastStatus: MouseStatus | null = null;
   private firmware: string | null = null;
 
@@ -77,7 +79,20 @@ export class LamzuAtlantisHidClient {
     return lamzuAtlantisProduct(this.device.vendorId, this.device.productId);
   }
 
+  /**
+   * Memoized: two concurrent reads would otherwise both see a closed device,
+   * and the second `device.open()` rejects while both callers go on to attach
+   * their own listener, of which `close()` removes one.
+   */
   async open(): Promise<void> {
+    this.opening ??= this.openOnce().catch((error: unknown) => {
+      this.opening = null;
+      throw error;
+    });
+    await this.opening;
+  }
+
+  private async openOnce(): Promise<void> {
     if (!this.device.opened) await this.device.open();
     if (this.listener) return;
     this.listener = (event: HIDInputReportEvent) => {
@@ -91,6 +106,7 @@ export class LamzuAtlantisHidClient {
   async close(): Promise<void> {
     this.lastStatus = null;
     this.pending = null;
+    this.opening = null;
     if (this.listener) this.device.removeEventListener("inputreport", this.listener);
     this.listener = null;
     if (this.device.opened) await this.device.close();
@@ -151,8 +167,12 @@ export class LamzuAtlantisHidClient {
     const stages: number[] = [];
     const colors: string[] = [];
     for (let stage = 0; stage < stageCount; stage += 1) {
-      const raw = await this.readRaw(FLASH.dpiValues + stage * STAGE_STRIDE, STAGE_STRIDE);
-      stages.push(pulsarVgnDecodeDpi(raw) ?? DPI_MIN);
+      const address = FLASH.dpiValues + stage * STAGE_STRIDE;
+      const dpi = pulsarVgnDecodeDpi(await this.readRaw(address, STAGE_STRIDE));
+      // A stage carries its own checksum, so a failed decode means a corrupt
+      // read. Reporting a plausible-looking 50 DPI instead would be a lie.
+      if (dpi === null) throw new Error(`The mouse returned a corrupt DPI stage from address ${address}.`);
+      stages.push(dpi);
       const color = await this.readField(FLASH.dpiStageColors + stage * STAGE_STRIDE, 3);
       colors.push(`#${[...color].map((value) => value.toString(16).padStart(2, "0")).join("")}`);
     }
@@ -195,6 +215,7 @@ export class LamzuAtlantisHidClient {
       supportedPollingRates: this.getSupportedPollingRates(),
       // The profile byte is 0-based on the wire and 1-based in Lamzu's UI.
       activeProfile: activeProfile + 1,
+      profileCount: PROFILE_COUNT,
       connectionType: wireless ? "Wireless" : "Wired",
       connectionDetail: wireless ? "2.4 GHz receiver" : "Wired USB",
       debounceMs,
@@ -349,9 +370,20 @@ export class LamzuAtlantisHidClient {
     if (confirmed !== count) {
       throw new Error(`The mouse kept ${confirmed} DPI stages instead of ${count}.`);
     }
-    // Dropping stages can strand the active index past the end of the list.
+    // Dropping stages can strand the active index past the end of the list,
+    // and the cached status must shrink with it — `setDpi` trusts the cached
+    // active index and would otherwise write to a stage that is now disabled.
     const active = (await this.readField(FLASH.currentDpi, 1))[0] ?? 0;
-    if (active >= confirmed) await this.writeByte(FLASH.currentDpi, confirmed - 1);
+    const activeStage = active >= confirmed ? await this.writeByte(FLASH.currentDpi, confirmed - 1) : active;
+    if (this.lastStatus) {
+      this.patch({
+        activeDpiStage: activeStage,
+        ...(this.lastStatus.dpiStages ? { dpiStages: this.lastStatus.dpiStages.slice(0, confirmed) } : {}),
+        ...(this.lastStatus.dpiStageColors
+          ? { dpiStageColors: this.lastStatus.dpiStageColors.slice(0, confirmed) }
+          : {}),
+      });
+    }
     return confirmed;
   }
 
@@ -371,7 +403,9 @@ export class LamzuAtlantisHidClient {
   }
 
   async setProfile(profile: number): Promise<number> {
-    if (!Number.isInteger(profile) || profile < 1) throw new Error(`There is no profile ${profile}.`);
+    if (!Number.isInteger(profile) || profile < 1 || profile > PROFILE_COUNT) {
+      throw new Error(`This mouse has profiles 1 to ${PROFILE_COUNT}.`);
+    }
     await this.request(WRITE_ACTIVE_PROFILE, 0, [profile - 1]);
     const confirmed = ((await this.request(COMMAND.getCurrentConfig))[0] ?? 0) + 1;
     if (confirmed !== profile) {
@@ -442,7 +476,7 @@ export class LamzuAtlantisHidClient {
     await this.open();
     const request = lamzuAtlantisEncodeRequest({ command, address, payload });
     for (let attempt = 0; attempt < RESPONSE_ATTEMPTS; attempt += 1) {
-      const reply = await this.sendAndWait(request, command);
+      const reply = await this.sendAndWait(request, command, address);
       if (!reply) continue;
       if (reply.error !== 0) {
         throw new Error(`Command 0x${command.toString(16).padStart(2, "0")} failed with status ${reply.error}.`);
@@ -455,10 +489,18 @@ export class LamzuAtlantisHidClient {
   }
 
   /**
-   * This firmware emits unsolicited reports on the same id, so a reply for a
-   * different command is skipped rather than treated as a failure.
+   * This firmware emits unsolicited reports on the same id, so a reply that
+   * does not match is skipped rather than treated as a failure.
+   *
+   * Matching on the command alone is not enough: every flash access shares
+   * command 0x08 (or 0x07), so after a timed-out attempt a late reply would
+   * satisfy the *next* request for a different address — a read of the
+   * debounce byte could return the motion-sync byte, and a setter's read-back
+   * would then verify against the wrong field. Every reply echoes the address
+   * it was asked for, so flash replies are matched on it too.
    */
-  private async sendAndWait(request: Uint8Array<ArrayBuffer>, command: number) {
+  private async sendAndWait(request: Uint8Array<ArrayBuffer>, command: number, address: number) {
+    const addressed = command === COMMAND.readFlashData || command === COMMAND.writeFlashData;
     return await new Promise<ReturnType<typeof lamzuAtlantisDecodeReply>>((resolve) => {
       let settled = false;
       const finish = (value: ReturnType<typeof lamzuAtlantisDecodeReply>) => {
@@ -471,7 +513,9 @@ export class LamzuAtlantisHidClient {
       const timer = window.setTimeout(() => finish(null), RESPONSE_TIMEOUT_MS);
       this.pending = (body) => {
         const reply = lamzuAtlantisDecodeReply(body);
-        if (reply && reply.command === command) finish(reply);
+        if (!reply || reply.command !== command) return;
+        if (addressed && reply.address !== address) return;
+        finish(reply);
       };
       this.device.sendReport(REPORT_ID, request).catch(() => finish(null));
     });

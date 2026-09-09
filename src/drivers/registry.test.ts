@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { DEVICE_DRIVERS } from "./registry.ts";
 import { SUPPORTED_HID_FILTERS, VENDOR_ID } from "./vendors.ts";
-import { LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
+import { LAMZU_ATLANTIS_PRODUCTS, LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
 import { ORBITAL_DEVICES } from "@openmouse/protocol/orbital";
 
 const DEVICES_DIR = dirname(fileURLToPath(import.meta.url));
@@ -67,6 +67,7 @@ function candidateProductIds(): number[] {
     0x1234,
     0xffff,
     ...LAMZU_PRODUCTS.keys(),
+    ...LAMZU_ATLANTIS_PRODUCTS.keys(),
     ...ORBITAL_DEVICES.keys(),
   ]);
   for (const filter of SUPPORTED_HID_FILTERS) {

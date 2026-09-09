@@ -41,11 +41,15 @@ export const LAMZU_ATLANTIS_PAYLOAD_OFFSET = 5;
 export const LAMZU_ATLANTIS_MAX_PAYLOAD = 10;
 
 /**
- * The commands are CompX's, not Lamzu's. Confirmed answered by an Atlantis
- * Mini 4K: 0x04 battery, 0x07/0x08 flash write/read, 0x0e active profile,
- * 0x12 firmware version (returned 0x01 0x24 — v1.24, matching both the USB
- * bcdDevice and the version Lamzu's download page lists for this model).
- * The dongle-only commands (0x15, 0x1d, 0x2b) answer status 1 over the cable.
+ * The commands are CompX's, not Lamzu's, so the whole Pulsar set is aliased
+ * here rather than a Lamzu-specific subset. Only six have been exercised on
+ * Atlantis hardware: 0x04 battery, 0x07/0x08 flash write/read, 0x0e active
+ * profile, 0x0f set active profile, and 0x12 firmware version (returned
+ * 0x01 0x24 — v1.24, matching both the USB bcdDevice and the version Lamzu's
+ * download page lists for this model). The dongle-only commands (0x15, 0x1d,
+ * 0x2b) answer status 1 over the cable; the rest — `encryptionData`,
+ * `deviceOnline`, `setDongleRgb` — are inherited names this driver never
+ * sends and are unverified on this family.
  */
 export const LAMZU_ATLANTIS_COMMAND = PULSAR_COMMAND;
 
@@ -77,6 +81,13 @@ export const LAMZU_ATLANTIS_FLASH = {
 
 export const LAMZU_ATLANTIS_STAGE_STRIDE = 4;
 export const LAMZU_ATLANTIS_MAX_DPI_STAGES = 8;
+
+/**
+ * Onboard profiles, 1-based in Lamzu's UI and 0-based on the wire. Probed on
+ * hardware: writing indices 0-3 is accepted and reads back, while 4 and above
+ * are rejected with status 1 and leave the mouse on its previous profile.
+ */
+export const LAMZU_ATLANTIS_PROFILE_COUNT = 4;
 
 /** PAW3395: 50-26,000 DPI in 50 DPI steps, per Lamzu's own device table. */
 export const LAMZU_ATLANTIS_DPI_STEP = 50;
