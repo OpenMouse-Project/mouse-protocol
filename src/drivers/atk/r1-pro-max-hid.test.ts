@@ -150,6 +150,41 @@ test("R1 Pro Max wired transport accepts PAW3395 30K DPI with independent X/Y va
   assert.deepEqual([...write!.subarray(5, 9)], packed);
 });
 
+test("R1 Pro Max receiver writes active DPI as the vendor-captured two-stage group", async () => {
+  const target = atkPackDpiStageForSensor("PAW3395", 3200, 3200)!;
+  const previous = atkPackDpiStageForSensor("PAW3395", 4000, 4000)!;
+  const neighbour = atkPackDpiStageForSensor("PAW3395", 3200, 3200)!;
+
+  assert.deepEqual(target, [0x3f, 0x3f, 0x00, 0xd7]);
+  assert.deepEqual(previous, [0x4f, 0x4f, 0x00, 0xb7]);
+
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+  const beforeGroup = [...previous, ...neighbour];
+  const afterGroup = [...target, ...neighbour];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x0000, SYSTEM_1000_HZ_ONE_STAGE),
+    reply(0x08, 0x000c, beforeGroup),
+    reply(0x08, 0x000c, target),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x000c, afterGroup),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setDpi(3200), 3200);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0x0c,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x08);
+  assert.deepEqual([...write!.subarray(5, 13)], afterGroup);
+});
+
 test("R1 Pro Max receiver writes polling with the vendor-captured full system row", async () => {
   const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
   const hardware = fake as unknown as FakeR1ProMaxDevice;

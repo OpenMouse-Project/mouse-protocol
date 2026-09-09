@@ -468,7 +468,12 @@ export class AtkHidClient {
     const index = this.stageIndex(await this.read(REGISTER.system, SYSTEM_LENGTH));
     const stage = sensor ? atkPackDpiStageForSensor(sensor, dpi, dpiY) : atkPackDpiStage(dpi, dpiY);
     if (!stage) throw new Error(`${dpi.toLocaleString()} DPI is not representable by this sensor.`);
-    await this.write(this.dpiAddress(index), stage);
+    if (this.usesVerifiedR1ProMaxReceiverTransport()) {
+      await this.writeR1ProMaxReceiverDpiStage(index, stage);
+    } else {
+      await this.write(this.dpiAddress(index), stage);
+    }
+
     const confirmed = await this.readDpiStage(index);
     if (confirmed.x !== dpi || confirmed.y !== dpiY) {
       throw new Error(`The mouse kept ${confirmed.x.toLocaleString()} DPI instead of ${dpi.toLocaleString()}.`);
@@ -1128,6 +1133,57 @@ export class AtkHidClient {
       await this.device.sendReport(WE_REPORT_ID, new Uint8Array(payload).buffer);
       await delay(WRITE_SETTLE_MS);
     });
+  }
+
+  /**
+   * ATK Hub writes F58A DPI records as an 8-byte pair of adjacent stages.
+   * Preserve the neighbouring stage and require the receiver to echo the
+   * complete group before the normal DPI readback confirms the active stage.
+   */
+  private async writeR1ProMaxReceiverDpiStage(
+    index: number,
+    stage: readonly number[],
+  ): Promise<void> {
+    await this.identify();
+    if (!this.usesVerifiedR1ProMaxReceiverTransport()) {
+      throw new Error("R1 Pro Max receiver DPI writes are not available on this connection.");
+    }
+    if (stage.length !== DPI_STAGE_LENGTH) {
+      throw new Error("R1 Pro Max receiver DPI records must contain four bytes.");
+    }
+
+    const groupLength = DPI_STAGE_LENGTH * 2;
+    const groupIndex = Math.floor(index / 2);
+    const address = REGISTER.dpiBase + groupIndex * groupLength;
+    const group = Array.from(await this.read(address, groupLength));
+
+    group.splice(
+      (index % 2) * DPI_STAGE_LENGTH,
+      DPI_STAGE_LENGTH,
+      ...stage,
+    );
+
+    const payload = weBuildCmdPayload(
+      WE_CMD_WRITE_EEPROM,
+      [
+        0,
+        (address >> 8) & 0xff,
+        address & 0xff,
+        group.length,
+        ...group,
+      ],
+    );
+
+    await this.exchange(
+      payload,
+      (frame) => frame[0] === WE_CMD_WRITE_EEPROM
+        && frame[1] === 0
+        && frame[2] === ((address >> 8) & 0xff)
+        && frame[3] === (address & 0xff)
+        && frame[4] === group.length
+        && this.hasValidChecksum(frame)
+        && group.every((byte, offset) => frame[DATA_OFFSET + offset] === byte),
+    );
   }
 
   /**
