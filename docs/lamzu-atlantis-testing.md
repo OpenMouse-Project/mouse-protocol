@@ -40,6 +40,21 @@ from a list. The catalog therefore names the family, `Lamzu Atlantis`.
 | MI_01 | Col06 | 0xff04 | 0x0002 | no | Vendor — feature report 6 only |
 | MI_02 | — | 0x0001 | 0x0002 | no | Mouse |
 
+Chrome's own view of the same mouse, from `navigator.hid.getDevices()`, is
+what the driver's `isSupported` actually gates on. It differs from the
+platform view above — Windows exposes no report ids for several collections
+that Chrome does — and it confirms report 8 is declared in both directions on
+the config collection:
+
+| Usage page | Usage | Input | Output | Feature |
+| --- | --- | --- | --- | --- |
+| 0xff05 | 0x00 | 16 | — | — |
+| 0xff03 | 0x00 | 2 | — | — |
+| 0x000c | 0x01 | 5 | — | — |
+| 0x0001 | 0x80 | — | — | — |
+| **0xff02** | **0x02** | **8** | **8** | — |
+| 0xff04 | 0x02 | — | — | 6 |
+
 The config channel is the `0xff02`/`0x0002` collection, which matches the
 `Interfaceid=1` in the shipped `Config.ini` of Lamzu's Windows app. Every
 other vendor collection rejects `WriteFile` with `Incorrect function`.
