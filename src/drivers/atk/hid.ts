@@ -582,7 +582,10 @@ export class AtkHidClient {
 
   async setDpiStageColor(index: number, color: string): Promise<string> {
     await this.identify();
-    if (!this.usesVerifiedR1WiredTransport()) {
+    if (
+      !this.usesVerifiedR1WiredTransport()
+      && !this.usesVerifiedR1ProMaxReceiverTransport()
+    ) {
       throw new Error("DPI stage colors are not available on this connection.");
     }
     const rgb = parseHexColor(color);
@@ -593,7 +596,13 @@ export class AtkHidClient {
     const groupAddress = REGISTER.dpiColorBase + Math.floor(index / 2) * R1_DPI_COLOR_GROUP_LENGTH;
     const group = Array.from(await this.read(groupAddress, R1_DPI_COLOR_GROUP_LENGTH));
     group.splice((index % 2) * 4, 4, ...packRgb(rgb));
-    await this.write(groupAddress, group);
+
+    if (this.usesVerifiedR1ProMaxReceiverTransport()) {
+      await this.writeR1ProMaxReceiverDpiColorGroup(groupAddress, group);
+    } else {
+      await this.write(groupAddress, group);
+    }
+
     const confirmedGroup = await this.read(groupAddress, R1_DPI_COLOR_GROUP_LENGTH);
     const confirmed = unpackRgb(confirmedGroup.subarray((index % 2) * 4, (index % 2 + 1) * 4));
     if (confirmed !== color.toLowerCase()) throw new Error(`The mouse kept ${confirmed ?? "an invalid colour"} instead of ${color}.`);
@@ -627,7 +636,12 @@ export class AtkHidClient {
 
   async setDpiLighting(mode: number, brightness: number, speed: number): Promise<void> {
     await this.identify();
-    if (!this.usesVerifiedR1WiredTransport()) throw new Error("DPI lighting is not available on this connection.");
+    if (
+      !this.usesVerifiedR1WiredTransport()
+      && !this.usesVerifiedR1ProMaxReceiverTransport()
+    ) {
+      throw new Error("DPI lighting is not available on this connection.");
+    }
     if (![0, 1, 2].includes(mode) || ![0, 1, 2].includes(brightness) || ![0, 1, 2].includes(speed)) {
       throw new Error("The DPI lighting setting is invalid.");
     }
@@ -653,7 +667,11 @@ export class AtkHidClient {
     block.splice(2, 2, ...expectedBrightness);
     block.splice(4, 2, ...wePackScalarPair(R1_DPI_SPEED[speed]!));
     block.splice(6, 2, ...wePackScalarPair(mode === 0 ? 0 : 1));
-    await this.write(REGISTER.dpiLighting, block);
+    if (this.usesVerifiedR1ProMaxReceiverTransport()) {
+      await this.writeR1ProMaxReceiverDpiLighting(block);
+    } else {
+      await this.write(REGISTER.dpiLighting, block);
+    }
 
     const raw = await this.read(REGISTER.dpiLighting, R1_DPI_LIGHTING_LENGTH);
     const expectedSpeed = wePackScalarPair(R1_DPI_SPEED[speed]!);
@@ -847,6 +865,83 @@ export class AtkHidClient {
     group.splice(offset, 2, ...wePackScalarPair(value));
     await this.write(REGISTER.advanced, group);
     return (await this.read(REGISTER.advanced, ADVANCED_LENGTH))[offset];
+  }
+
+  /**
+   * F58A DPI stage colours are stored as two 4-byte colour records per
+   * 8-byte EEPROM group, matching the captured receiver write/echo path.
+   */
+  private async writeR1ProMaxReceiverDpiColorGroup(
+    address: number,
+    block: readonly number[],
+  ): Promise<void> {
+    await this.identify();
+
+    if (!this.usesVerifiedR1ProMaxReceiverTransport()) {
+      throw new Error("DPI stage colors are not available on this connection.");
+    }
+
+    if (block.length !== R1_DPI_COLOR_GROUP_LENGTH) {
+      throw new Error("The DPI stage colour block has an invalid length.");
+    }
+
+    const payload = weBuildCmdPayload(
+      WE_CMD_WRITE_EEPROM,
+      [
+        0,
+        (address >> 8) & 0xff,
+        address & 0xff,
+        block.length,
+        ...block,
+      ],
+    );
+
+    await this.exchange(
+      payload,
+      (frame) => frame[0] === WE_CMD_WRITE_EEPROM
+        && frame[1] === 0
+        && frame[2] === ((address >> 8) & 0xff)
+        && frame[3] === (address & 0xff)
+        && frame[4] === block.length
+        && this.hasValidChecksum(frame)
+        && block.every((byte, index) => frame[DATA_OFFSET + index] === byte),
+    );
+  }
+
+  /**
+   * F58A DPI lighting uses the same complete 8-byte 0x004c row as wired.
+   */
+  private async writeR1ProMaxReceiverDpiLighting(
+    block: readonly number[],
+  ): Promise<void> {
+    await this.identify();
+
+    if (!this.usesVerifiedR1ProMaxReceiverTransport()) {
+      throw new Error("DPI lighting is not available on this connection.");
+    }
+
+    const address = REGISTER.dpiLighting;
+    const payload = weBuildCmdPayload(
+      WE_CMD_WRITE_EEPROM,
+      [
+        0,
+        (address >> 8) & 0xff,
+        address & 0xff,
+        block.length,
+        ...block,
+      ],
+    );
+
+    await this.exchange(
+      payload,
+      (frame) => frame[0] === WE_CMD_WRITE_EEPROM
+        && frame[1] === 0
+        && frame[2] === ((address >> 8) & 0xff)
+        && frame[3] === (address & 0xff)
+        && frame[4] === block.length
+        && this.hasValidChecksum(frame)
+        && block.every((byte, index) => frame[DATA_OFFSET + index] === byte),
+    );
   }
 
   private async readR1Extras(stageCount: number): Promise<{

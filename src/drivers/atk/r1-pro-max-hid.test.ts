@@ -150,6 +150,79 @@ test("R1 Pro Max wired transport accepts PAW3395 30K DPI with independent X/Y va
   assert.deepEqual([...write!.subarray(5, 9)], packed);
 });
 
+test("R1 Pro Max receiver writes DPI stage colour through the captured two-stage group", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const before = [
+    0xff, 0x00, 0x00, 0x56,
+    0xff, 0x00, 0xff, 0x57,
+  ];
+  const after = [
+    0x00, 0xff, 0x00, 0x56,
+    0xff, 0x00, 0xff, 0x57,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x0000, SYSTEM_1000_HZ_ONE_STAGE),
+    reply(0x08, 0x002c, before),
+    reply(0x08, 0x002c, after),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x002c, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setDpiStageColor(0, "#00ff00"), "#00ff00");
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0x2c,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x08);
+  assert.deepEqual([...write!.subarray(5, 13)], after);
+});
+
+test("R1 Pro Max receiver writes DPI lighting mode through the captured 0x004c row", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const steady = [
+    0x01, 0x54,
+    0x80, 0xd5,
+    0x01, 0x54,
+    0x01, 0x54,
+  ];
+  const breathing = [
+    0x02, 0x53,
+    0x80, 0xd5,
+    0x01, 0x54,
+    0x01, 0x54,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x004c, steady),
+    reply(0x08, 0x004c, breathing),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x004c, breathing),
+  ];
+
+  const client = new AtkHidClient(fake);
+  await client.setDpiLighting(2, 1, 0);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0x4c,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x08);
+  assert.deepEqual([...write!.subarray(5, 13)], breathing);
+});
+
 test("R1 Pro Max receiver writes sleep timeout through the captured advanced block", async () => {
   const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
   const hardware = fake as unknown as FakeR1ProMaxDevice;
