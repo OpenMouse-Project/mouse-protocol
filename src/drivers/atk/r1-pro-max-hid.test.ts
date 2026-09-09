@@ -223,6 +223,42 @@ test("R1 Pro Max receiver writes DPI lighting mode through the captured 0x004c r
   assert.deepEqual([...write!.subarray(5, 13)], breathing);
 });
 
+test("R1 Pro Max receiver writes Performance Mode through the captured 0x00b5 row", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const before = [
+    0x01, 0x54,
+    0x12, 0x43,
+    0x01, 0x54,
+  ];
+  const after = [
+    0x01, 0x54,
+    0x12, 0x43,
+    0x00, 0x55,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x00b5, before),
+    reply(0x08, 0x00b5, after),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x00b5, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setPerformanceMode(false), false);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0xb5,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x06);
+  assert.deepEqual([...write!.subarray(5, 11)], after);
+});
+
 test("R1 Pro Max receiver writes sleep timeout through the captured advanced block", async () => {
   const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
   const hardware = fake as unknown as FakeR1ProMaxDevice;

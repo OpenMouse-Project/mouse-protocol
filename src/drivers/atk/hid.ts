@@ -273,7 +273,9 @@ export class AtkHidClient {
     const liftOffDistance = await this.read(REGISTER.liftOffDistance, 2);
     const advanced = await this.read(REGISTER.advanced, ADVANCED_LENGTH);
     const angle = await this.read(REGISTER.angle, ANGLE_LENGTH).catch(() => null);
-    const r1Extras = this.usesVerifiedR1WiredTransport() ? await this.readR1Extras(stageCount) : null;
+    const r1Extras = this.usesR1ProMaxUiTransport()
+      ? await this.readR1Extras(stageCount)
+      : null;
     const stored = this.usesVerifiedR1WiredTransport()
       ? await this.readR1StoredConfiguration().catch(() => null)
       : null;
@@ -290,7 +292,7 @@ export class AtkHidClient {
         family: "atk",
         hideUnsupportedPollingRates: true,
         forceShowBattery: battery !== null,
-        dpiStageEditor: this.usesVerifiedR1WiredTransport() ? {
+        dpiStageEditor: this.usesR1ProMaxUiTransport() ? {
           maxStages: R1_MAX_DPI_STAGES,
           countEditable: true,
           minDpi: sensorProfile?.minDpi ?? DPI_MIN,
@@ -614,9 +616,16 @@ export class AtkHidClient {
   }
 
   async setPerformanceMode(enabled: boolean): Promise<boolean> {
-    const confirmed = await this.writeR1PerformanceBlock((block) => {
+    await this.identify();
+
+    const change = (block: number[]): void => {
       block.splice(4, 2, ...wePackScalarPair(enabled ? 1 : 0));
-    });
+    };
+
+    const confirmed = this.usesVerifiedR1ProMaxReceiverTransport()
+      ? await this.writeR1ProMaxReceiverPerformanceBlock(change)
+      : await this.writeR1PerformanceBlock(change);
+
     const value = weUnpackScalarPair(confirmed[4]!, confirmed[5]!) === 1;
     if (value !== enabled) throw new Error(`The mouse left performance mode ${value ? "on" : "off"}.`);
     this.patch({ performanceMode: value });
@@ -1030,6 +1039,50 @@ export class AtkHidClient {
     return reply[DATA_OFFSET] === 1;
   }
 
+  /**
+   * F58A Performance Mode uses the same 6-byte 0x00b5 row as wired, but
+   * receiver writes are enabled only after their write/echo path was captured.
+   */
+  private async writeR1ProMaxReceiverPerformanceBlock(
+    change: (block: number[]) => void,
+  ): Promise<Uint8Array> {
+    await this.identify();
+
+    if (!this.usesVerifiedR1ProMaxReceiverTransport()) {
+      throw new Error("Performance mode is not available on this connection.");
+    }
+
+    const address = REGISTER.sensorPerformance;
+    const block = Array.from(
+      await this.read(address, R1_SENSOR_PERFORMANCE_LENGTH),
+    );
+    change(block);
+
+    const payload = weBuildCmdPayload(
+      WE_CMD_WRITE_EEPROM,
+      [
+        0,
+        (address >> 8) & 0xff,
+        address & 0xff,
+        block.length,
+        ...block,
+      ],
+    );
+
+    await this.exchange(
+      payload,
+      (frame) => frame[0] === WE_CMD_WRITE_EEPROM
+        && frame[1] === 0
+        && frame[2] === ((address >> 8) & 0xff)
+        && frame[3] === (address & 0xff)
+        && frame[4] === block.length
+        && this.hasValidChecksum(frame)
+        && block.every((byte, index) => frame[DATA_OFFSET + index] === byte),
+    );
+
+    return await this.read(address, R1_SENSOR_PERFORMANCE_LENGTH);
+  }
+
   private async writeR1PerformanceBlock(change: (block: number[]) => void): Promise<Uint8Array> {
     await this.identify();
     if (!this.usesVerifiedR1WiredTransport()) {
@@ -1230,6 +1283,15 @@ export class AtkHidClient {
     return this.device.vendorId === VENDOR_ID.vgn
       && this.device.productId === VXE_R1_PRO_MAX_RECEIVER_PID
       && this.isR1ProMax();
+  }
+
+  /**
+   * Wired F58C and receiver F58A expose the same R1 Pro Max settings surface.
+   * This predicate is for reads/UI only; write paths remain individually gated.
+   */
+  private usesR1ProMaxUiTransport(): boolean {
+    return this.usesVerifiedR1WiredTransport()
+      || this.usesVerifiedR1ProMaxReceiverTransport();
   }
 
   private usesVerifiedR1WiredTransport(): boolean {
