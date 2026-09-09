@@ -44,9 +44,23 @@ class FakeAtlantis extends EventTarget {
   mute = false;
   /** Adds a leading byte to the input DataView, as a real event can. */
   offsetReplies = false;
+  /** Replies queued while held, released by releaseReplies(). */
+  private held: Array<() => void> = [];
+  holdReplies = false;
+  /** Resolves once the device has received a report. */
+  reportSeen: Promise<void>;
+  private announceReport!: () => void;
+
+  releaseReplies(): void {
+    this.holdReplies = false;
+    const queued = this.held;
+    this.held = [];
+    for (const deliver of queued) deliver();
+  }
 
   constructor(productId = 0xf50f) {
     super();
+    this.reportSeen = new Promise<void>((resolve) => { this.announceReport = resolve; });
     this.productId = productId;
     this.writeField(FLASH.reportRate, [0x02]);
     this.writeField(FLASH.dpiStageCount, [2]);
@@ -85,6 +99,7 @@ class FakeAtlantis extends EventTarget {
       : new Uint8Array(data as ArrayBuffer);
     assert.equal(body.length, PACKET, "the body excludes the report id");
     this.sent.push(Uint8Array.from(body));
+    this.announceReport();
     if (this.mute) return;
 
     const reply = new Uint8Array(PACKET);
@@ -115,7 +130,7 @@ class FakeAtlantis extends EventTarget {
     for (let i = 0; i < PACKET - 1; i += 1) sum += reply[i]!;
     reply[PACKET - 1] = (0x55 - (sum & 0xff)) & 0xff;
 
-    queueMicrotask(() => {
+    const deliver = () => {
       const buffer = this.offsetReplies
         ? new Uint8Array([0xaa, ...reply]).buffer.slice(0)
         : reply.buffer.slice(0);
@@ -123,7 +138,9 @@ class FakeAtlantis extends EventTarget {
         ? new DataView(buffer, 1, PACKET)
         : new DataView(buffer, 0, PACKET);
       this.dispatchEvent(Object.assign(new Event("inputreport"), { reportId: REPORT_ID, data: view }));
-    });
+    };
+    if (this.holdReplies) this.held.push(deliver);
+    else queueMicrotask(deliver);
   }
 }
 
@@ -205,17 +222,61 @@ test("an out-of-range stage index never reaches the device", async () => {
   await client.close();
 });
 
-test("concurrent setters do not verify against each other's writes", async () => {
+test("a setter that arrives mid-operation waits its turn", async () => {
   const device = new FakeAtlantis();
   const client = clientFor(device);
   await client.readStatus();
-  // Serialized per packet rather than per operation, these interleave as
-  // write(4), write(6), read(6), read(6) and the first call throws about a
-  // value the mouse did accept.
-  const [first, second] = await Promise.all([client.setDebounceTime(4), client.setDebounceTime(6)]);
-  assert.equal(first, 4);
-  assert.equal(second, 6);
+
+  // The second setter must start only once the first is genuinely in flight,
+  // with its reply withheld. Starting both synchronously proves nothing: they
+  // queue before the first has sent anything.
+  device.holdReplies = true;
+  const first = client.setDebounceTime(4);
+  await device.reportSeen;
+  const second = client.setDebounceTime(6);
+  await Promise.resolve();
+  device.releaseReplies();
+
+  assert.equal(await first, 4, "the first setter verifies its own write, not the second's");
+  assert.equal(await second, 6);
   assert.equal(device.flash[FLASH.debounceTime], 6);
+  await client.close();
+});
+
+test("a read arriving mid-setter cannot steal the in-flight reply", async () => {
+  const device = new FakeAtlantis();
+  const client = clientFor(device);
+  await client.readStatus();
+
+  device.holdReplies = true;
+  const write = client.setPollingRate(125);
+  await device.reportSeen;
+  const read = client.readStatus();
+  await Promise.resolve();
+  device.releaseReplies();
+
+  assert.equal(await write, 125);
+  assert.equal((await read).pollingRateHz, 125);
+  await client.close();
+});
+
+test("both DPI axes stay consistent across a stage write and a stage switch", async () => {
+  const device = new FakeAtlantis();
+  const client = clientFor(device);
+  const initial = await client.readStatus();
+  assert.equal(initial.dpi, 400);
+  assert.equal(initial.dpiY, 400);
+
+  // The encoder writes one value to both axes, so the cached Y has to follow.
+  await client.setDpiStageValue(0, 800);
+  const written = await client.readStatus(true);
+  assert.equal(written.dpi, 800);
+  assert.equal(written.dpiY, 800, "Y moved with X");
+
+  await client.setActiveDpiStage(1);
+  const switched = await client.readStatus(true);
+  assert.equal(switched.dpi, 1600);
+  assert.equal(switched.dpiY, 1600, "Y belongs to the newly selected stage");
   await client.close();
 });
 
@@ -256,17 +317,39 @@ test("changing the stage count invalidates the cached list in both directions", 
   await client.close();
 });
 
-test("closing settles an in-flight request instead of letting it retry", async () => {
+test("closing settles a request already on the wire", async () => {
   const device = new FakeAtlantis();
   const client = clientFor(device);
   await client.readStatus();
 
+  // Wait until the device has actually received a report, so close() lands on
+  // an exchange waiting for a reply rather than on one that has not sent yet.
   device.mute = true;
+  const started = Date.now();
   const pending = client.readStatus().then(() => "resolved", (error: Error) => error.message);
+  await device.reportSeen;
   await client.close();
+
   const outcome = await pending;
-  assert.match(String(outcome), /closed|no answer/);
-  assert.equal(device.opened, false, "the device stays closed");
+  assert.match(String(outcome), /closed/, "cancelled, not left to time out");
+  assert.ok(Date.now() - started < 600, "close did not wait for the response timeout");
+  assert.equal(device.opened, false);
+});
+
+test("closing and reopening leaves the client usable", async () => {
+  const device = new FakeAtlantis();
+  const client = clientFor(device);
+  await client.readStatus();
+
+  // Overlapping these let the reopen memoize a resolved open while the close
+  // was still about to remove the listener, wedging every later open.
+  const closing = client.close();
+  const reopening = client.open();
+  await Promise.all([closing, reopening]);
+
+  await client.open();
+  assert.equal(device.opened, true, "the device is open again");
+  assert.equal((await client.readStatus()).pollingRateHz, 500, "and still answers");
   await client.close();
 });
 

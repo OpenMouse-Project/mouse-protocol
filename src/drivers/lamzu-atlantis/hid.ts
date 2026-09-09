@@ -56,7 +56,7 @@ export class LamzuAtlantisHidClient {
   readonly device: HIDDevice;
 
   private queue: Promise<unknown> = Promise.resolve();
-  private busy = false;
+  private lifecycleQueue: Promise<unknown> = Promise.resolve();
   private pending: ((body: Uint8Array) => void) | null = null;
   private abortPending: (() => void) | null = null;
   private listener: ((event: HIDInputReportEvent) => void) | null = null;
@@ -65,6 +65,12 @@ export class LamzuAtlantisHidClient {
   private closed = false;
   private lastStatus: MouseStatus | null = null;
   private firmware: string | null = null;
+  /**
+   * Y values per stage. MouseStatus carries dpiY only for the active stage, so
+   * without this a stage switch would report the new stage's X beside the old
+   * stage's Y.
+   */
+  private stagesY: number[] = [];
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -90,8 +96,23 @@ export class LamzuAtlantisHidClient {
    * their own listener, of which `close()` removes one.
    */
   async open(): Promise<void> {
-    this.closed = false;
-    await this.ensureOpen();
+    await this.lifecycle(async () => {
+      this.closed = false;
+      await this.ensureOpen();
+    });
+  }
+
+  /**
+   * Opens and closes take turns. Overlapping them lets a reopen inspect the
+   * device while a close is still mid-flight: it finds the device open and the
+   * listener installed, memoizes a resolved promise, and then the close
+   * removes that listener — leaving every later open awaiting a promise that
+   * will never reinstall anything.
+   */
+  private async lifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.lifecycleQueue.then(operation, operation);
+    this.lifecycleQueue = run.catch(() => undefined);
+    return await run;
   }
 
   /**
@@ -124,6 +145,10 @@ export class LamzuAtlantisHidClient {
    * behind the caller's back.
    */
   async close(): Promise<void> {
+    await this.lifecycle(() => this.closeOnce());
+  }
+
+  private async closeOnce(): Promise<void> {
     this.closed = true;
     this.lastStatus = null;
     this.pending = null;
@@ -229,6 +254,7 @@ export class LamzuAtlantisHidClient {
       const hyperMode = (await this.readField(FLASH.highPerformance, 1))[0] === 1;
 
       const wireless = this.isWireless();
+      this.stagesY = stagesY;
       return this.lastStatus = {
         brand: "Lamzu",
         name: this.displayName(),
@@ -287,57 +313,65 @@ export class LamzuAtlantisHidClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
-    const supported = this.getSupportedPollingRates();
-    const encoded = lamzuAtlantisEncodePollingRate(pollingRateHz, this.product()?.rateFamily ?? "wired");
-    if (encoded === null || !supported.includes(pollingRateHz)) {
-      throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
-    }
-    const confirmed = lamzuAtlantisDecodePollingRate(await this.writeByte(FLASH.reportRate, encoded));
-    if (confirmed !== pollingRateHz) {
-      throw new Error(`The mouse kept ${confirmed ?? "an unknown rate"} instead of ${pollingRateHz} Hz.`);
-    }
-    this.patch({ pollingRateHz: confirmed });
-    return confirmed;
+    return await this.transaction(async () => {
+      const supported = this.getSupportedPollingRates();
+      const encoded = lamzuAtlantisEncodePollingRate(pollingRateHz, this.product()?.rateFamily ?? "wired");
+      if (encoded === null || !supported.includes(pollingRateHz)) {
+        throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
+      }
+      const confirmed = lamzuAtlantisDecodePollingRate(await this.writeByte(FLASH.reportRate, encoded));
+      if (confirmed !== pollingRateHz) {
+        throw new Error(`The mouse kept ${confirmed ?? "an unknown rate"} instead of ${pollingRateHz} Hz.`);
+      }
+      this.patch({ pollingRateHz: confirmed });
+      return confirmed;
+    });
   }
 
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
-    const encoded = lamzuAtlantisEncodeLiftOffDistance(value);
-    if (encoded === null) {
-      throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
-    }
-    const confirmed = lamzuAtlantisDecodeLiftOffDistance(await this.writeByte(FLASH.liftOffDistance, encoded));
-    if (confirmed !== value) {
-      throw new Error(`The mouse kept a ${String(confirmed).toLowerCase()} lift-off distance instead of ${value.toLowerCase()}.`);
-    }
-    this.patch({ liftOffDistance: confirmed });
-    return confirmed;
+    return await this.transaction(async () => {
+      const encoded = lamzuAtlantisEncodeLiftOffDistance(value);
+      if (encoded === null) {
+        throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
+      }
+      const confirmed = lamzuAtlantisDecodeLiftOffDistance(await this.writeByte(FLASH.liftOffDistance, encoded));
+      if (confirmed !== value) {
+        throw new Error(`The mouse kept a ${String(confirmed).toLowerCase()} lift-off distance instead of ${value.toLowerCase()}.`);
+      }
+      this.patch({ liftOffDistance: confirmed });
+      return confirmed;
+    });
   }
 
   async setDebounceTime(milliseconds: number): Promise<number> {
-    if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > DEBOUNCE_MAX_MS) {
-      throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${DEBOUNCE_MAX_MS}.`);
-    }
-    const confirmed = await this.writeByte(FLASH.debounceTime, milliseconds);
-    if (confirmed !== milliseconds) {
-      throw new Error(`The mouse kept ${confirmed} ms of debounce instead of ${milliseconds} ms.`);
-    }
-    this.patch({ debounceMs: confirmed });
-    return confirmed;
+    return await this.transaction(async () => {
+      if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > DEBOUNCE_MAX_MS) {
+        throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${DEBOUNCE_MAX_MS}.`);
+      }
+      const confirmed = await this.writeByte(FLASH.debounceTime, milliseconds);
+      if (confirmed !== milliseconds) {
+        throw new Error(`The mouse kept ${confirmed} ms of debounce instead of ${milliseconds} ms.`);
+      }
+      this.patch({ debounceMs: confirmed });
+      return confirmed;
+    });
   }
 
   async setSleepTimeout(seconds: number): Promise<number> {
-    if (!Number.isInteger(seconds)
-      || seconds < TIMER_STEP_SECONDS
-      || seconds > MAX_TIMER_SECONDS
-      || seconds % TIMER_STEP_SECONDS !== 0) {
-      throw new Error(`The sleep timeout must be a whole number of ${TIMER_STEP_SECONDS}-second steps up to ${MAX_TIMER_SECONDS} seconds.`);
-    }
-    const confirmed = (await this.writeByte(FLASH.sleepTime, seconds / TIMER_STEP_SECONDS)) * TIMER_STEP_SECONDS;
-    if (confirmed !== seconds) {
-      throw new Error(`The mouse kept a ${confirmed} second sleep timeout instead of ${seconds} seconds.`);
-    }
-    this.patch({ sleepTimeout: confirmed });
-    return confirmed;
+    return await this.transaction(async () => {
+      if (!Number.isInteger(seconds)
+        || seconds < TIMER_STEP_SECONDS
+        || seconds > MAX_TIMER_SECONDS
+        || seconds % TIMER_STEP_SECONDS !== 0) {
+        throw new Error(`The sleep timeout must be a whole number of ${TIMER_STEP_SECONDS}-second steps up to ${MAX_TIMER_SECONDS} seconds.`);
+      }
+      const confirmed = (await this.writeByte(FLASH.sleepTime, seconds / TIMER_STEP_SECONDS)) * TIMER_STEP_SECONDS;
+      if (confirmed !== seconds) {
+        throw new Error(`The mouse kept a ${confirmed} second sleep timeout instead of ${seconds} seconds.`);
+      }
+      this.patch({ sleepTimeout: confirmed });
+      return confirmed;
+    });
   }
 
   async setMotionSync(enabled: boolean): Promise<boolean> {
@@ -361,55 +395,66 @@ export class LamzuAtlantisHidClient {
   }
 
   async setDpi(dpi: number): Promise<number> {
-    const stage = this.lastStatus?.activeDpiStage
-      ?? (await this.readField(FLASH.currentDpi, 1))[0]
-      ?? 0;
-    return await this.setDpiStageValue(stage, dpi);
+    return await this.transaction(async () => {
+      const stage = this.lastStatus?.activeDpiStage
+        ?? (await this.readField(FLASH.currentDpi, 1))[0]
+        ?? 0;
+      return await this.writeStage(stage, dpi);
+    });
   }
 
   async setDpiStageValue(stage: number, dpi: number): Promise<number> {
-    return await this.transaction(async () => {
-      if (!Number.isInteger(stage) || stage < 0 || stage >= MAX_STAGES) {
-        throw new Error(`This mouse has no DPI stage ${stage + 1}.`);
-      }
-      const address = FLASH.dpiValues + stage * STAGE_STRIDE;
-      // pulsarVgnEncodeDpi returns the stage's four bytes with its checksum
-      // already in place, so this writes them as-is rather than re-sealing.
-      // It writes one value to both axes, so a stage Lamzu's own app had set to
-      // separate x and y is flattened here; asymmetric writes are not attempted
-      // without hardware to confirm the flags layout for them.
-      await this.write(address, [...pulsarVgnEncodeDpi(dpi)]);
-      const stored = lamzuAtlantisDecodeDpiStage(await this.readRaw(address, STAGE_STRIDE));
-      const confirmed = stored?.x ?? null;
-      if (confirmed !== dpi) {
-        throw new Error(`The mouse kept ${confirmed?.toLocaleString() ?? "an unknown DPI"} instead of ${dpi.toLocaleString()}.`);
-      }
-      const stages = this.lastStatus?.dpiStages?.slice();
-      if (stages && stage < stages.length) stages[stage] = confirmed;
-      this.patch({
-        ...(stages ? { dpiStages: stages } : {}),
-        ...(this.lastStatus?.activeDpiStage === stage ? { dpi: confirmed } : {}),
+    return await this.transaction(() => this.writeStage(stage, dpi));
+  }
+
+  private async writeStage(stage: number, dpi: number): Promise<number> {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= MAX_STAGES) {
+      throw new Error(`This mouse has no DPI stage ${stage + 1}.`);
+    }
+    const address = FLASH.dpiValues + stage * STAGE_STRIDE;
+    // pulsarVgnEncodeDpi returns the stage's four bytes with its checksum
+    // already in place, so this writes them as-is rather than re-sealing.
+    // It writes one value to both axes, so a stage Lamzu's own app had set to
+    // separate x and y is flattened here; asymmetric writes are not attempted
+    // without hardware to confirm the flags layout for them.
+    await this.write(address, [...pulsarVgnEncodeDpi(dpi)]);
+    const stored = lamzuAtlantisDecodeDpiStage(await this.readRaw(address, STAGE_STRIDE));
+    const confirmed = stored?.x ?? null;
+    if (confirmed !== dpi) {
+      throw new Error(`The mouse kept ${confirmed?.toLocaleString() ?? "an unknown DPI"} instead of ${dpi.toLocaleString()}.`);
+    }
+    const stages = this.lastStatus?.dpiStages?.slice();
+    if (stages && stage < stages.length) stages[stage] = confirmed;
+    // The encoder wrote one value to both axes, so Y moved with X.
+    if (stage < this.stagesY.length) this.stagesY[stage] = confirmed;
+    this.patch({
+      ...(stages ? { dpiStages: stages } : {}),
+      ...(this.lastStatus?.activeDpiStage === stage ? { dpi: confirmed, dpiY: confirmed } : {}),
     });
     return confirmed;
-   });
   }
 
   async setActiveDpiStage(stage: number): Promise<number> {
-    const count = (await this.readField(FLASH.dpiStageCount, 1))[0] ?? 1;
-    if (!Number.isInteger(stage) || stage < 0 || stage >= count) {
-      throw new Error(`This mouse has no DPI stage ${stage + 1}.`);
-    }
-    const confirmed = await this.writeByte(FLASH.currentDpi, stage);
-    if (confirmed !== stage) {
-      throw new Error(`The mouse stayed on DPI stage ${confirmed + 1} instead of ${stage + 1}.`);
-    }
-    this.patch({
-      activeDpiStage: confirmed,
-      ...(this.lastStatus?.dpiStages?.[confirmed] !== undefined
-        ? { dpi: this.lastStatus.dpiStages[confirmed] }
-        : {}),
+    return await this.transaction(async () => {
+      const count = (await this.readField(FLASH.dpiStageCount, 1))[0] ?? 1;
+      if (!Number.isInteger(stage) || stage < 0 || stage >= count) {
+        throw new Error(`This mouse has no DPI stage ${stage + 1}.`);
+      }
+      const confirmed = await this.writeByte(FLASH.currentDpi, stage);
+      if (confirmed !== stage) {
+        throw new Error(`The mouse stayed on DPI stage ${confirmed + 1} instead of ${stage + 1}.`);
+      }
+      // Both axes belong to the newly selected stage; carrying the old Y over
+      // would report this stage's X beside the previous stage's Y.
+      this.patch({
+        activeDpiStage: confirmed,
+        ...(this.lastStatus?.dpiStages?.[confirmed] !== undefined
+          ? { dpi: this.lastStatus.dpiStages[confirmed] }
+          : {}),
+        ...(this.stagesY[confirmed] !== undefined ? { dpiY: this.stagesY[confirmed] } : {}),
+      });
+      return confirmed;
     });
-    return confirmed;
   }
 
   async setDpiStageCount(count: number): Promise<number> {
@@ -417,6 +462,11 @@ export class LamzuAtlantisHidClient {
       if (!Number.isInteger(count) || count < 1 || count > MAX_STAGES) {
         throw new Error(`This mouse supports between 1 and ${MAX_STAGES} DPI stages.`);
       }
+      // Dropped before the write, not after: if the verification read fails
+      // the mouse has still changed, and a cache kept through that failure
+      // would describe a stage list that no longer exists.
+      this.lastStatus = null;
+      this.stagesY = [];
       const confirmed = await this.writeByte(FLASH.dpiStageCount, count);
       if (confirmed !== count) {
         throw new Error(`The mouse kept ${confirmed} DPI stages instead of ${count}.`);
@@ -424,34 +474,31 @@ export class LamzuAtlantisHidClient {
       // Dropping stages can strand the active index past the end of the list.
       const active = (await this.readField(FLASH.currentDpi, 1))[0] ?? 0;
       if (active >= confirmed) await this.writeByte(FLASH.currentDpi, confirmed - 1);
-      // The cached list is now the wrong length either way: shorter than the
-      // device when stages were added (and the new stages' DPI and colours have
-      // never been read), longer when they were removed. `setDpi` trusts the
-      // cached active index, so serve nothing rather than something stale.
-      this.lastStatus = null;
       return confirmed;
     });
   }
 
   async setDpiStageColor(stage: number, color: string): Promise<string> {
-    // Without this bound the stage index scales straight into a flash address:
-    // stage -8 lands on the DPI stages at 12, stage 13 on the button actions
-    // at 96, and the colour reads back cleanly from wherever it landed.
-    if (!Number.isInteger(stage) || stage < 0 || stage >= MAX_STAGES) {
-      throw new Error(`This mouse has no DPI stage ${stage + 1}.`);
-    }
-    const match = /^#?([0-9a-f]{6})$/i.exec(color.trim());
-    if (!match) throw new Error(`${color} is not a #rrggbb colour.`);
-    const wanted = match[1]!.toLowerCase();
-    const address = FLASH.dpiStageColors + stage * STAGE_STRIDE;
-    await this.writeField(address, [0, 2, 4].map((offset) => Number.parseInt(wanted.slice(offset, offset + 2), 16)));
-    const stored = await this.readField(address, 3);
-    const confirmed = `#${[...stored].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
-    if (confirmed !== `#${wanted}`) throw new Error(`The mouse kept ${confirmed} instead of #${wanted}.`);
-    const colors = this.lastStatus?.dpiStageColors?.slice();
-    if (colors && stage < colors.length) colors[stage] = confirmed;
-    if (colors) this.patch({ dpiStageColors: colors });
-    return confirmed;
+    return await this.transaction(async () => {
+      // Without this bound the stage index scales straight into a flash address:
+      // stage -8 lands on the DPI stages at 12, stage 13 on the button actions
+      // at 96, and the colour reads back cleanly from wherever it landed.
+      if (!Number.isInteger(stage) || stage < 0 || stage >= MAX_STAGES) {
+        throw new Error(`This mouse has no DPI stage ${stage + 1}.`);
+      }
+      const match = /^#?([0-9a-f]{6})$/i.exec(color.trim());
+      if (!match) throw new Error(`${color} is not a #rrggbb colour.`);
+      const wanted = match[1]!.toLowerCase();
+      const address = FLASH.dpiStageColors + stage * STAGE_STRIDE;
+      await this.writeField(address, [0, 2, 4].map((offset) => Number.parseInt(wanted.slice(offset, offset + 2), 16)));
+      const stored = await this.readField(address, 3);
+      const confirmed = `#${[...stored].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+      if (confirmed !== `#${wanted}`) throw new Error(`The mouse kept ${confirmed} instead of #${wanted}.`);
+      const colors = this.lastStatus?.dpiStageColors?.slice();
+      if (colors && stage < colors.length) colors[stage] = confirmed;
+      if (colors) this.patch({ dpiStageColors: colors });
+      return confirmed;
+    });
   }
 
   async setProfile(profile: number): Promise<number> {
@@ -459,13 +506,14 @@ export class LamzuAtlantisHidClient {
       if (!Number.isInteger(profile) || profile < 1 || profile > PROFILE_COUNT) {
         throw new Error(`This mouse has profiles 1 to ${PROFILE_COUNT}.`);
       }
+      // Every cached field — DPI stages, colours, active stage, the toggles —
+      // describes the profile we are leaving, and setDpi trusts the cached
+      // active stage. Dropped before the write, so a failed verification read
+      // cannot leave the old profile's settings looking current.
+      this.lastStatus = null;
+      this.stagesY = [];
       await this.request(WRITE_ACTIVE_PROFILE, 0, [profile - 1]);
       const confirmed = ((await this.request(COMMAND.getCurrentConfig))[0] ?? 0) + 1;
-      // Every cached field — DPI stages, colours, active stage, the toggles —
-      // describes the profile we just left, and a live read would keep serving
-      // them. Worse, setDpi trusts the cached active stage, so a stale index
-      // would write to the wrong stage of the new profile. Drop the lot.
-      this.lastStatus = null;
       if (confirmed !== profile) {
         throw new Error(`The mouse stayed on profile ${confirmed} instead of ${profile}.`);
       }
@@ -479,10 +527,12 @@ export class LamzuAtlantisHidClient {
     field: "motionSync" | "angleSnapping" | "rippleControl" | "performanceMode" | "hyperMode",
     label: string,
   ): Promise<boolean> {
-    const confirmed = (await this.writeByte(address, enabled ? 1 : 0)) === 1;
-    if (confirmed !== enabled) throw new Error(`The mouse left ${label} ${confirmed ? "on" : "off"}.`);
-    this.patch({ [field]: confirmed });
-    return confirmed;
+    return await this.transaction(async () => {
+      const confirmed = (await this.writeByte(address, enabled ? 1 : 0)) === 1;
+      if (confirmed !== enabled) throw new Error(`The mouse left ${label} ${confirmed ? "on" : "off"}.`);
+      this.patch({ [field]: confirmed });
+      return confirmed;
+    });
   }
 
   private patch(changes: Partial<MouseStatus>): void {
@@ -496,10 +546,8 @@ export class LamzuAtlantisHidClient {
    * and report a failure the mouse never made.
    */
   private async writeByte(address: number, value: number): Promise<number> {
-    return await this.transaction(async () => {
-      await this.writeField(address, [value]);
-      return (await this.readField(address, 1))[0] ?? 0;
-    });
+    await this.writeField(address, [value]);
+    return (await this.readField(address, 1))[0] ?? 0;
   }
 
   private async writeField(address: number, values: readonly number[]): Promise<void> {
@@ -507,7 +555,7 @@ export class LamzuAtlantisHidClient {
   }
 
   private async write(address: number, bytes: readonly number[]): Promise<void> {
-    await this.request(COMMAND.writeFlashData, address, bytes);
+    await this.exchange(COMMAND.writeFlashData, address, bytes);
   }
 
   /**
@@ -524,7 +572,7 @@ export class LamzuAtlantisHidClient {
 
   private async readRaw(address: number, length: number): Promise<Uint8Array> {
     if (length > MAX_PAYLOAD) throw new Error("A CompX flash read spans at most 10 bytes.");
-    const payload = await this.request(COMMAND.readFlashData, address, new Array(length).fill(0));
+    const payload = await this.exchange(COMMAND.readFlashData, address, new Array(length).fill(0));
     return payload.subarray(0, length);
   }
 
@@ -532,34 +580,26 @@ export class LamzuAtlantisHidClient {
    * Serializes a whole public operation, not a single packet.
    *
    * Queueing per exchange is not enough: a setter is a write followed by a
-   * read-back, and two concurrent setters for the same field interleave as
-   * write(a), write(b), read(b), read(b) — the first setter then throws about
-   * a value the mouse did accept. Nested requests run inline, since the outer
-   * transaction already holds the lock.
+   * read-back, and two concurrent setters for the same field would interleave
+   * as write(a), write(b), read(b), read(b) — the first setter then throws
+   * about a value the mouse did accept.
+   *
+   * Every public method holds this exactly once and works through the
+   * unqueued helpers below it, so there is no reentrancy to detect. An
+   * "am I nested?" flag cannot work here: it says only that *someone* owns
+   * the lock, so an unrelated caller arriving mid-operation would read it as
+   * nesting, run inline, and overwrite the in-flight exchange's reply
+   * callback.
    */
   private async transaction<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.busy) return await operation();
-    const run = this.queue.then(async () => {
-      this.busy = true;
-      try {
-        return await operation();
-      } finally {
-        this.busy = false;
-      }
-    }, async () => {
-      this.busy = true;
-      try {
-        return await operation();
-      } finally {
-        this.busy = false;
-      }
-    });
+    const run = this.queue.then(operation, operation);
     this.queue = run.catch(() => undefined);
     return await run;
   }
 
+  /** Unqueued: the caller already holds the transaction lock. */
   private async request(command: number, address = 0, payload: readonly number[] = []): Promise<Uint8Array> {
-    return await this.transaction(() => this.exchange(command, address, payload));
+    return await this.exchange(command, address, payload);
   }
 
   private async exchange(command: number, address: number, payload: readonly number[]): Promise<Uint8Array> {
