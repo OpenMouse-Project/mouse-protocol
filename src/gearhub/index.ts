@@ -290,6 +290,34 @@ export const ATTACK_SHARK_R2_PROFILE: GearHubProfile = {
   dpiStep: 50,
 };
 
+/**
+ * Attack Shark R3. Same GearHub-V5 platform, VID:PID and block protocol as
+ * the R2. qmk.top's catalog carries it under four device ids: 1643 and 3485
+ * with the PixArt PAW3395 (26000 DPI), 3309 and 3310 with the PAW3950
+ * (42000 DPI). Device id 1643 confirmed from a user diagnostic - firmware
+ * v3.00, on 0x3151:0x402D, every relay read (D3/D4/D0/8F/80) answering and
+ * a full status; it was falling back to the M5 Pro name only. The other
+ * three ids are catalog-derived.
+ */
+export const ATTACK_SHARK_R3_PROFILE: GearHubProfile = {
+  deviceId: 1643,
+  brand: "Attack Shark",
+  model: "R3",
+  sensor: "PixArt PAW3395",
+  maxPollingHz: 8000,
+  minDpi: 50,
+  maxDpi: 26000,
+  dpiStep: 50,
+};
+
+/** The PixArt PAW3950 R3 revision (device ids 3309 / 3310, catalog-derived). */
+export const ATTACK_SHARK_R3_3950_PROFILE: GearHubProfile = {
+  ...ATTACK_SHARK_R3_PROFILE,
+  deviceId: 3309,
+  sensor: "PixArt PAW3950",
+  maxDpi: 42000,
+};
+
 export const GEARHUB_DEVICE_PROFILES: ReadonlyMap<number, GearHubProfile> = new Map<
   number,
   GearHubProfile
@@ -299,6 +327,10 @@ export const GEARHUB_DEVICE_PROFILES: ReadonlyMap<number, GearHubProfile> = new 
   // A later R2 firmware batch on the same 0x40xx silicon, PID and PAW3950
   // sensor as 1893. Block protocol assumed identical; not hardware-verified.
   [3009, ATTACK_SHARK_R2_PROFILE],
+  [ATTACK_SHARK_R3_PROFILE.deviceId, ATTACK_SHARK_R3_PROFILE],
+  [3485, ATTACK_SHARK_R3_PROFILE],
+  [ATTACK_SHARK_R3_3950_PROFILE.deviceId, ATTACK_SHARK_R3_3950_PROFILE],
+  [3310, ATTACK_SHARK_R3_3950_PROFILE],
 ]);
 
 /**

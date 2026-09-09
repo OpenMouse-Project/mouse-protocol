@@ -504,6 +504,39 @@ describe("GearHubHidClient", () => {
     assert.ok(status.firmware.includes("PixArt PAW3950"));
   });
 
+  it("identifies the Attack Shark R3 (device id 1643, PAW3395)", async () => {
+    const { device } = fakeReceiver({
+      deviceId: 1643,
+      replies: {
+        [CMD.GET_DPI]: dpiReply([1200, 26000], 0),
+        [CMD.GET_OPTIONPARAM0]: opt0Reply({ rate: 129, lod: 0 }),
+      },
+    });
+    const client = new GearHubHidClient(device);
+    const status = await client.readStatus();
+
+    assert.equal(status.brand, "Attack Shark");
+    assert.equal(status.name, "Attack Shark R3");
+    assert.ok(status.firmware.includes("PixArt PAW3395"));
+    assert.equal(client.getDpiOptions().at(-1), 26000, "PAW3395 DPI ceiling");
+  });
+
+  it("maps the PAW3950 R3 revision (device id 3310) to the 42000 DPI profile", async () => {
+    const { device } = fakeReceiver({
+      deviceId: 3310,
+      replies: {
+        [CMD.GET_DPI]: dpiReply([800, 1600, 42000], 0),
+        [CMD.GET_OPTIONPARAM0]: opt0Reply({ rate: 1, lod: 2 }),
+      },
+    });
+    const client = new GearHubHidClient(device);
+    const status = await client.readStatus();
+
+    assert.equal(status.name, "Attack Shark R3");
+    assert.ok(status.firmware.includes("PixArt PAW3950"));
+    assert.ok(client.getDpiOptions().includes(42000), "PAW3950 DPI ceiling");
+  });
+
   it("falls back to the generic profile for an unknown device id", async () => {
     const { device } = fakeReceiver({
       deviceId: 9999,
