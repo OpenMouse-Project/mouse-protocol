@@ -198,3 +198,27 @@ test("R1 Pro Max DPI lighting writes the vendor-captured rows", async () => {
     assert.deepEqual([...write!.subarray(5, 13)], sample.expected);
   }
 });
+
+test("R1 Pro Max accepts firmware-normalized Breathing state after reconnect", () => {
+  const fake = device(0xf58c, "VXE R1 Pro Max");
+  const client = new AtkHidClient(fake);
+
+  const decoded = (client as unknown as {
+    decodeR1DpiLighting(block: Uint8Array): {
+      dpiLedMode: number;
+      dpiLedBrightness: number;
+      dpiLedSpeed: number;
+    } | null;
+  }).decodeR1DpiLighting(Uint8Array.from([
+    0x02, 0x53,
+    0x80, 0xd5,
+    0x01, 0x54,
+    0x00, 0x55,
+  ]));
+
+  assert.deepEqual(decoded, {
+    dpiLedMode: 2,
+    dpiLedBrightness: 1,
+    dpiLedSpeed: 0,
+  });
+});

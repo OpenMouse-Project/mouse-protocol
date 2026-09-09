@@ -819,16 +819,24 @@ export class AtkHidClient {
     const speedIndex = R1_DPI_SPEED.indexOf(speed as typeof R1_DPI_SPEED[number]);
 
     if (brightnessIndex < 0 || speedIndex < 0 || (enabled !== 0 && enabled !== 1)) return null;
-    if (enabled === 0) {
-      if (effect !== 0 && effect !== 1) return null;
+
+    // R1 Pro Max may report the trailing flag as 0 after reconnect even when
+    // the stored effect is Breathing. Treat the effect field as authoritative.
+    // Keep effect=1 + enabled=0 as the legacy Off encoding used by other R1s.
+    if (effect === 0) {
       return { dpiLedMode: 0, dpiLedBrightness: brightnessIndex, dpiLedSpeed: speedIndex };
     }
-    if (effect !== 1 && effect !== 2) return null;
-    return {
-      dpiLedMode: effect === 2 ? 2 : 1,
-      dpiLedBrightness: brightnessIndex,
-      dpiLedSpeed: speedIndex,
-    };
+    if (effect === 2) {
+      return { dpiLedMode: 2, dpiLedBrightness: brightnessIndex, dpiLedSpeed: speedIndex };
+    }
+    if (effect === 1) {
+      return {
+        dpiLedMode: enabled === 0 ? 0 : 1,
+        dpiLedBrightness: brightnessIndex,
+        dpiLedSpeed: speedIndex,
+      };
+    }
+    return null;
   }
 
   private async readLongRangeMode(): Promise<boolean> {
