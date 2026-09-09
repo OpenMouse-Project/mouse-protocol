@@ -691,11 +691,36 @@ export class AtkHidClient {
 
   async setLongRangeMode(enabled: boolean): Promise<boolean> {
     await this.identify();
-    if (!this.usesVerifiedR1WiredTransport()) throw new Error("Long-range mode is not available on this connection.");
-    await this.send(weBuildCmdPayload(SET_LONG_RANGE_COMMAND, [0, 0, 0, 10, enabled ? 1 : 0]));
+
+    const receiver = this.usesVerifiedR1ProMaxReceiverTransport();
+    if (!this.usesVerifiedR1WiredTransport() && !receiver) {
+      throw new Error("Long-range mode is not available on this connection.");
+    }
+
+    const frame = weBuildCmdPayload(
+      SET_LONG_RANGE_COMMAND,
+      [0, 0, 0, 10, enabled ? 1 : 0],
+    );
+
+    if (receiver) {
+      await this.exchange(
+        frame,
+        (reply) => reply.length === frame.length
+          && reply.every((byte, index) => byte === frame[index]),
+      );
+    } else {
+      await this.send(frame);
+    }
+
     await delay(WRITE_SETTLE_MS);
+
     const confirmed = await this.readLongRangeMode();
-    if (confirmed !== enabled) throw new Error(`The mouse left long-range mode ${confirmed ? "on" : "off"}.`);
+    if (confirmed !== enabled) {
+      throw new Error(
+        `The mouse left long-range mode ${confirmed ? "on" : "off"}.`,
+      );
+    }
+
     this.patch({ longRangeMode: confirmed });
     return confirmed;
   }
