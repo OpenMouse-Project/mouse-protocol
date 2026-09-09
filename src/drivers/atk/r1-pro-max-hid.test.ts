@@ -150,6 +150,30 @@ test("R1 Pro Max wired transport accepts PAW3395 30K DPI with independent X/Y va
   assert.deepEqual([...write!.subarray(5, 9)], packed);
 });
 
+test("R1 Pro Max receiver writes lift-off distance through the captured EEPROM pair", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x000a, [0x02, 0x53]),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x000a, [0x02, 0x53]),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setLiftOffDistance("High"), "High");
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0x0a,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x02);
+  assert.deepEqual([...write!.subarray(5, 7)], [0x02, 0x53]);
+});
+
 test("R1 Pro Max receiver writes active DPI as the vendor-captured two-stage group", async () => {
   const target = atkPackDpiStageForSensor("PAW3395", 3200, 3200)!;
   const previous = atkPackDpiStageForSensor("PAW3395", 4000, 4000)!;

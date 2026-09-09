@@ -676,8 +676,15 @@ export class AtkHidClient {
     if (this.usesR1LiveSettings()) return await this.setR1LiftOffDistance(value);
     const encoded = (this.isR1() ? R1_LIFT_OFF_CODES : LIFT_OFF_CODES).find(([, name]) => name === value);
     if (!encoded) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
-    await this.write(REGISTER.liftOffDistance, wePackScalarPair(encoded[0]));
-    const confirmed = this.decodeLiftOffDistance((await this.read(REGISTER.liftOffDistance, 2))[0]);
+    if (this.usesVerifiedR1ProMaxReceiverTransport()) {
+      await this.writeR1ProMaxReceiverLiftOffDistance(encoded[0]);
+    } else {
+      await this.write(REGISTER.liftOffDistance, wePackScalarPair(encoded[0]));
+    }
+
+    const confirmed = this.decodeLiftOffDistance(
+      (await this.read(REGISTER.liftOffDistance, 2))[0],
+    );
     if (confirmed !== value) {
       throw new Error(`The mouse kept a ${String(confirmed).toLowerCase()} lift-off distance instead of ${value.toLowerCase()}.`);
     }
@@ -1133,6 +1140,41 @@ export class AtkHidClient {
       await this.device.sendReport(WE_REPORT_ID, new Uint8Array(payload).buffer);
       await delay(WRITE_SETTLE_MS);
     });
+  }
+
+  /**
+   * The F58A vendor path writes LOD as one checksum-protected scalar pair at
+   * EEPROM 0x000a and echoes the committed pair back on report 0x08.
+   */
+  private async writeR1ProMaxReceiverLiftOffDistance(code: number): Promise<void> {
+    await this.identify();
+    if (!this.usesVerifiedR1ProMaxReceiverTransport()) {
+      throw new Error("R1 Pro Max receiver lift-off writes are not available on this connection.");
+    }
+
+    const data = wePackScalarPair(code);
+    const address = REGISTER.liftOffDistance;
+    const payload = weBuildCmdPayload(
+      WE_CMD_WRITE_EEPROM,
+      [
+        0,
+        (address >> 8) & 0xff,
+        address & 0xff,
+        data.length,
+        ...data,
+      ],
+    );
+
+    await this.exchange(
+      payload,
+      (frame) => frame[0] === WE_CMD_WRITE_EEPROM
+        && frame[1] === 0
+        && frame[2] === ((address >> 8) & 0xff)
+        && frame[3] === (address & 0xff)
+        && frame[4] === data.length
+        && this.hasValidChecksum(frame)
+        && data.every((byte, index) => frame[DATA_OFFSET + index] === byte),
+    );
   }
 
   /**
