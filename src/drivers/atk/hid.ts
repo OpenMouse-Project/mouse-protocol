@@ -486,8 +486,11 @@ export class AtkHidClient {
 
   async setDpiStageCount(count: number): Promise<number> {
     await this.identify();
-    if (!this.usesVerifiedR1WiredTransport()) {
-      throw new Error("R1 DPI stage count editing is available only over a verified wired transport.");
+    if (
+      !this.usesVerifiedR1WiredTransport()
+      && !this.usesVerifiedR1ProMaxReceiverTransport()
+    ) {
+      throw new Error("R1 DPI stage count editing is not available on this connection.");
     }
     if (!Number.isInteger(count) || count < 1 || count > R1_MAX_DPI_STAGES) {
       throw new Error(`DPI stage count must be between 1 and ${R1_MAX_DPI_STAGES}.`);
@@ -501,7 +504,12 @@ export class AtkHidClient {
     const active = Math.min(previousActive, count - 1);
     system.splice(2, 2, ...wePackScalarPair(count));
     system.splice(4, 2, ...wePackScalarPair(active));
-    await this.write(REGISTER.system, system);
+
+    if (this.usesVerifiedR1ProMaxReceiverTransport()) {
+      await this.writeR1ProMaxReceiverSystem(system);
+    } else {
+      await this.write(REGISTER.system, system);
+    }
 
     const confirmedSystem = await this.read(REGISTER.system, 10);
     const confirmedCount = this.stageCount(confirmedSystem);
@@ -532,27 +540,71 @@ export class AtkHidClient {
 
   async setActiveDpiStage(index: number): Promise<number> {
     await this.identify();
-    if (this.isR1() && !this.usesVerifiedR1WiredTransport()) {
-      throw new Error("R1 DPI stage selection is available only over a verified wired transport.");
+
+    if (
+      this.isR1()
+      && !this.usesVerifiedR1WiredTransport()
+      && !this.usesVerifiedR1ProMaxReceiverTransport()
+    ) {
+      throw new Error("R1 DPI stage selection is not available on this connection.");
     }
-    const system = await this.read(REGISTER.system, SYSTEM_LENGTH);
+
+    const receiver = this.usesVerifiedR1ProMaxReceiverTransport();
+    const system = await this.read(
+      REGISTER.system,
+      receiver ? R1_SYSTEM_ROW_LENGTH : SYSTEM_LENGTH,
+    );
     const count = this.stageCount(system);
+
     if (!Number.isInteger(index) || index < 0 || index >= count) {
       throw new Error(`DPI stage must be between 1 and ${count}.`);
     }
-    await this.write(REGISTER.system + 4, wePackScalarPair(index));
-    const pair = await this.read(REGISTER.system + 4, 2);
-    const confirmed = weUnpackScalarPair(pair[0]!, pair[1]!);
-    if (confirmed !== index) throw new Error(`The mouse kept DPI stage ${(confirmed ?? 0) + 1} instead of ${index + 1}.`);
+
+    let confirmed: number | null;
+
+    if (receiver) {
+      const row = Array.from(system);
+      row.splice(4, 2, ...wePackScalarPair(index));
+
+      await this.writeR1ProMaxReceiverSystem(row);
+
+      const confirmedSystem = await this.read(
+        REGISTER.system,
+        R1_SYSTEM_ROW_LENGTH,
+      );
+      confirmed = weUnpackScalarPair(
+        confirmedSystem[4]!,
+        confirmedSystem[5]!,
+      );
+    } else {
+      await this.write(REGISTER.system + 4, wePackScalarPair(index));
+      const pair = await this.read(REGISTER.system + 4, 2);
+      confirmed = weUnpackScalarPair(pair[0]!, pair[1]!);
+    }
+
+    if (confirmed !== index) {
+      throw new Error(
+        `The mouse kept DPI stage ${(confirmed ?? 0) + 1} instead of ${index + 1}.`,
+      );
+    }
+
     const stage = await this.readDpiStage(index);
-    this.patch({ activeDpiStage: confirmed, dpi: stage.x, dpiY: stage.y });
+    this.patch({
+      activeDpiStage: confirmed,
+      dpi: stage.x,
+      dpiY: stage.y,
+    });
     return confirmed;
   }
 
   async setDpiStageValue(index: number, dpi: number): Promise<number> {
     await this.identify();
-    if (this.isR1() && !this.usesVerifiedR1WiredTransport()) {
-      throw new Error("R1 DPI stage editing is available only over a verified wired transport.");
+    if (
+      this.isR1()
+      && !this.usesVerifiedR1WiredTransport()
+      && !this.usesVerifiedR1ProMaxReceiverTransport()
+    ) {
+      throw new Error("R1 DPI stage editing is not available on this connection.");
     }
     const system = await this.read(REGISTER.system, SYSTEM_LENGTH);
     const count = this.stageCount(system);
@@ -566,7 +618,12 @@ export class AtkHidClient {
     }
     const packed = sensor ? atkPackDpiStageForSensor(sensor, dpi, dpi) : atkPackDpiStage(dpi, dpi);
     if (!packed) throw new Error(`${dpi.toLocaleString()} DPI is not representable by this sensor.`);
-    await this.write(this.dpiAddress(index), packed);
+    if (this.usesVerifiedR1ProMaxReceiverTransport()) {
+      await this.writeR1ProMaxReceiverDpiStage(index, packed);
+    } else {
+      await this.write(this.dpiAddress(index), packed);
+    }
+
     const confirmed = await this.readDpiStage(index);
     if (confirmed.x !== dpi || confirmed.y !== dpi) {
       throw new Error(`The mouse kept ${confirmed.x.toLocaleString()} DPI instead of ${dpi.toLocaleString()}.`);

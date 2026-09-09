@@ -150,6 +150,129 @@ test("R1 Pro Max wired transport accepts PAW3395 30K DPI with independent X/Y va
   assert.deepEqual([...write!.subarray(5, 9)], packed);
 });
 
+test("R1 Pro Max receiver writes a non-active DPI stage through the captured two-stage group", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const before = [
+    0x4f, 0x4f, 0x00, 0xb7,
+    0x3f, 0x3f, 0x00, 0xd7,
+  ];
+  const after = [
+    0x4f, 0x4f, 0x00, 0xb7,
+    0x1f, 0x1f, 0x00, 0x17,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x0000, [
+      0x01, 0x54,
+      0x02, 0x53,
+      0x00, 0x55,
+    ]),
+    reply(0x08, 0x000c, before),
+    reply(0x08, 0x0010, [
+      0x1f, 0x1f, 0x00, 0x17,
+    ]),
+  ];
+
+  hardware.writeReplies = [
+    reply(0x07, 0x000c, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setDpiStageValue(1, 1600), 1600);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0x0c,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x08);
+  assert.deepEqual([...write!.subarray(5, 13)], after);
+});
+
+test("R1 Pro Max receiver selects the active DPI stage through the captured full system row", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const stage1 = [
+    0x01, 0x54,
+    0x02, 0x53,
+    0x00, 0x55,
+    0x00, 0x00, 0x00, 0x55,
+  ];
+
+  const stage2 = [
+    0x01, 0x54,
+    0x02, 0x53,
+    0x01, 0x54,
+    0x00, 0x00, 0x00, 0x55,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x0000, stage1),
+    reply(0x08, 0x0000, stage2),
+    reply(0x08, 0x0010, [0x3f, 0x3f, 0x00, 0xd7]),
+  ];
+
+  hardware.writeReplies = [
+    reply(0x07, 0x0000, stage2),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setActiveDpiStage(1), 1);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0x00,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x0a);
+  assert.deepEqual([...write!.subarray(5, 15)], stage2);
+});
+
+test("R1 Pro Max receiver writes DPI stage count through the captured full system row", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const oneStage = [
+    0x01, 0x54,
+    0x01, 0x54,
+    0x00, 0x55,
+    0x00, 0x00, 0x00, 0x55,
+  ];
+  const twoStages = [
+    0x01, 0x54,
+    0x02, 0x53,
+    0x00, 0x55,
+    0x00, 0x00, 0x00, 0x55,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x0000, oneStage),
+    reply(0x08, 0x0000, twoStages),
+    reply(0x08, 0x000c, [0x4f, 0x4f, 0x00, 0xb7]),
+    reply(0x08, 0x0010, [0x3f, 0x3f, 0x00, 0xd7]),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x0000, twoStages),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setDpiStageCount(2), 2);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0x00,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x0a);
+  assert.deepEqual([...write!.subarray(5, 15)], twoStages);
+});
+
 test("R1 Pro Max receiver writes DPI stage colour through the captured two-stage group", async () => {
   const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
   const hardware = fake as unknown as FakeR1ProMaxDevice;
@@ -554,20 +677,6 @@ test("R1 Pro Max receiver writes polling with the vendor-captured full system ro
   assert.deepEqual([...write!.subarray(5, 15)], after);
   assert.equal(writes(fake).some((frame) => frame[3] === 0x70), false);
 });
-
-test("R1 Pro Max receiver keeps unverified persistent writes blocked", async () => {
-  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
-  (fake as unknown as FakeR1ProMaxDevice).replies = [
-    reply(0x10, 0, [0x02, 0x1b]),
-  ];
-
-  await assert.rejects(
-    new AtkHidClient(fake).setDpiStageValue(0, 800),
-    /verified wired transport/,
-  );
-  assert.equal(writes(fake).length, 0);
-});
-
 
 test("R1 Pro Max wired transport edits DPI stage count and clamps the active stage", async () => {
   const fake = device(0xf58c, "VXE R1 Pro Max");
