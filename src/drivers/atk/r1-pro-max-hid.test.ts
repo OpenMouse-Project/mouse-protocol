@@ -158,3 +158,43 @@ test("R1 Pro Max receiver stays read-only for persistent EEPROM until its write 
   );
   assert.equal(writes(fake).length, 0);
 });
+
+
+test("R1 Pro Max wired transport edits DPI stage count and clamps the active stage", async () => {
+  const fake = device(0xf58c, "VXE R1 Pro Max");
+  const stage = atkPackDpiStageForSensor("PAW3395", 1600, 1600)!;
+  (fake as unknown as FakeR1ProMaxDevice).replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x0000, [0x02, 0x53, 0x03, 0x52, 0x02, 0x53, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x0000, [0x02, 0x53, 0x02, 0x53, 0x01, 0x54, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x000c, stage),
+    reply(0x08, 0x0010, stage),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setDpiStageCount(2), 2);
+
+  const write = writes(fake).find((frame) => frame[2] === 0x00 && frame[3] === 0x00 && frame[4] === 0x0a);
+  assert.ok(write);
+  assert.deepEqual([...write!.subarray(5, 11)], [0x02, 0x53, 0x02, 0x53, 0x01, 0x54]);
+});
+
+test("R1 Pro Max DPI lighting writes the vendor-captured rows", async () => {
+  for (const sample of [
+    { mode: 0, brightness: 1, speed: 1, expected: [0x00, 0x00, 0x00, 0x00, 0x03, 0x52, 0x00, 0x55] },
+    { mode: 1, brightness: 1, speed: 1, expected: [0x01, 0x54, 0x80, 0xd5, 0x03, 0x52, 0x01, 0x54] },
+    { mode: 2, brightness: 1, speed: 1, expected: [0x02, 0x53, 0x80, 0xd5, 0x03, 0x52, 0x01, 0x54] },
+  ]) {
+    const fake = device(0xf58c, "VXE R1 Pro Max");
+    (fake as unknown as FakeR1ProMaxDevice).replies = [
+      reply(0x10, 0, [0x02, 0x1b]),
+      reply(0x08, 0x004c, [0x01, 0x54, 0x80, 0xd5, 0x03, 0x52, 0x01, 0x54]),
+      reply(0x08, 0x004c, sample.expected),
+    ];
+
+    await new AtkHidClient(fake).setDpiLighting(sample.mode, sample.brightness, sample.speed);
+    const write = writes(fake).find((frame) => frame[2] === 0x00 && frame[3] === 0x4c);
+    assert.ok(write);
+    assert.deepEqual([...write!.subarray(5, 13)], sample.expected);
+  }
+});

@@ -1,4 +1,4 @@
-import {
+﻿import {
   WE_CMD_READ_EEPROM,
   WE_CMD_WRITE_EEPROM,
   WE_REPORT_ID,
@@ -41,7 +41,7 @@ import {
 import { type AtkProduct, ATK_COMPX_PRODUCT_IDS, ATK_PRODUCTS } from "./products.ts";
 
 // ATK mice (A9 family and siblings) use the same OEM framing as the Endgame
-// Gear WE series — 16-byte EEPROM commands on report 0x08 — but carry them on
+// Gear WE series â€” 16-byte EEPROM commands on report 0x08 â€” but carry them on
 // output/input reports rather than feature reports.
 const BATTERY_COMMAND = 0x04;
 const VERSION_COMMAND = 0x12;
@@ -291,7 +291,7 @@ export class AtkHidClient {
         forceShowBattery: battery !== null,
         dpiStageEditor: this.usesVerifiedR1WiredTransport() ? {
           maxStages: R1_MAX_DPI_STAGES,
-          countEditable: false,
+          countEditable: true,
           minDpi: sensorProfile?.minDpi ?? DPI_MIN,
           maxDpi: sensorProfile?.maxDpi ?? DPI_MAX,
           stepDpi: 50,
@@ -467,6 +467,52 @@ export class AtkHidClient {
     return confirmed.x;
   }
 
+  async setDpiStageCount(count: number): Promise<number> {
+    await this.identify();
+    if (!this.usesVerifiedR1WiredTransport()) {
+      throw new Error("R1 DPI stage count editing is available only over a verified wired transport.");
+    }
+    if (!Number.isInteger(count) || count < 1 || count > R1_MAX_DPI_STAGES) {
+      throw new Error(`DPI stage count must be between 1 and ${R1_MAX_DPI_STAGES}.`);
+    }
+
+    // The vendor writes the complete 10-byte system row when changing the
+    // stage count. Preserve the unknown tail and clamp the active stage in the
+    // same transaction so the row can never temporarily point past the end.
+    const system = Array.from(await this.read(REGISTER.system, 10));
+    const previousActive = Math.min(system[4]!, Math.max(system[2]!, 1) - 1);
+    const active = Math.min(previousActive, count - 1);
+    system.splice(2, 2, ...wePackScalarPair(count));
+    system.splice(4, 2, ...wePackScalarPair(active));
+    await this.write(REGISTER.system, system);
+
+    const confirmedSystem = await this.read(REGISTER.system, 10);
+    const confirmedCount = this.stageCount(confirmedSystem);
+    const confirmedActive = this.stageIndex(confirmedSystem);
+    if (confirmedCount !== count || confirmedActive !== active) {
+      throw new Error(
+        `The mouse kept ${confirmedCount} DPI stages with stage ${confirmedActive + 1} active instead of ${count}.`,
+      );
+    }
+
+    const stages: number[] = [];
+    let activeStage: { x: number; y: number } | null = null;
+    for (let index = 0; index < confirmedCount; index += 1) {
+      const stage = await this.readDpiStage(index);
+      stages.push(stage.x);
+      if (index === confirmedActive) activeStage = stage;
+    }
+    if (!activeStage) throw new Error("The active DPI stage could not be read back.");
+
+    this.patch({
+      dpiStages: stages,
+      activeDpiStage: confirmedActive,
+      dpi: activeStage.x,
+      dpiY: activeStage.y,
+    });
+    return confirmedCount;
+  }
+
   async setActiveDpiStage(index: number): Promise<number> {
     await this.identify();
     if (this.isR1() && !this.usesVerifiedR1WiredTransport()) {
@@ -570,17 +616,42 @@ export class AtkHidClient {
     if (![0, 1, 2].includes(mode) || ![0, 1, 2].includes(brightness) || ![0, 1, 2].includes(speed)) {
       throw new Error("The DPI lighting setting is invalid.");
     }
+
+    // Captured R1 Pro Max rows use literal 00 00 for fields that are inactive:
+    // Off       = 00 00 | 00 00 | speed | 00 55
+    // Always On = 01 54 | brightness | speed | 01 54
+    // Breathing = 02 53 | 00 00 | speed | 01 54
     const block = Array.from(await this.read(REGISTER.dpiLighting, R1_DPI_LIGHTING_LENGTH));
-    const effect = mode === 2 ? 2 : 1;
-    block.splice(0, 2, ...wePackScalarPair(effect));
-    block.splice(2, 2, ...wePackScalarPair(R1_DPI_BRIGHTNESS[brightness]!));
+    const proMax = this.isR1ProMax();
+
+    const expectedEffect = proMax && mode === 0
+      ? [0, 0]
+      : wePackScalarPair(mode === 2 ? 2 : 1);
+
+    const expectedBrightness = proMax && mode === 2
+      ? [block[2]!, block[3]!]
+      : mode === 0
+        ? [0, 0]
+        : wePackScalarPair(R1_DPI_BRIGHTNESS[brightness]!);
+
+    block.splice(0, 2, ...expectedEffect);
+    block.splice(2, 2, ...expectedBrightness);
     block.splice(4, 2, ...wePackScalarPair(R1_DPI_SPEED[speed]!));
     block.splice(6, 2, ...wePackScalarPair(mode === 0 ? 0 : 1));
     await this.write(REGISTER.dpiLighting, block);
-    const confirmed = this.decodeR1DpiLighting(await this.read(REGISTER.dpiLighting, R1_DPI_LIGHTING_LENGTH));
-    if (!confirmed || confirmed.dpiLedMode !== mode
-      || confirmed.dpiLedBrightness !== brightness || confirmed.dpiLedSpeed !== speed) {
+
+    const raw = await this.read(REGISTER.dpiLighting, R1_DPI_LIGHTING_LENGTH);
+    const expectedSpeed = wePackScalarPair(R1_DPI_SPEED[speed]!);
+    const expectedEnabled = wePackScalarPair(mode === 0 ? 0 : 1);
+    const expected = [...expectedEffect, ...expectedBrightness, ...expectedSpeed, ...expectedEnabled];
+    if (!expected.every((byte, index) => raw[index] === byte)) {
       throw new Error("The mouse did not retain its DPI lighting settings.");
+    }
+
+    const confirmed = this.decodeR1DpiLighting(raw);
+    if (!confirmed || confirmed.dpiLedMode !== mode || confirmed.dpiLedSpeed !== speed
+      || (mode === 1 && confirmed.dpiLedBrightness !== brightness)) {
+      throw new Error("The mouse returned an invalid DPI lighting state.");
     }
     this.patch(confirmed);
   }
@@ -735,16 +806,26 @@ export class AtkHidClient {
     dpiLedSpeed: number;
   } | null {
     if (block.length < R1_DPI_LIGHTING_LENGTH) return null;
-    const effect = weUnpackScalarPair(block[0]!, block[1]!);
-    const brightness = weUnpackScalarPair(block[2]!, block[3]!);
+
+    const effectIsZero = block[0] === 0 && block[1] === 0;
+    const brightnessIsZero = block[2] === 0 && block[3] === 0;
+    const effect = effectIsZero ? 0 : weUnpackScalarPair(block[0]!, block[1]!);
+    const brightness = brightnessIsZero ? null : weUnpackScalarPair(block[2]!, block[3]!);
     const speed = weUnpackScalarPair(block[4]!, block[5]!);
     const enabled = weUnpackScalarPair(block[6]!, block[7]!);
-    const brightnessIndex = R1_DPI_BRIGHTNESS.indexOf(brightness as typeof R1_DPI_BRIGHTNESS[number]);
+    const brightnessIndex = brightness === null
+      ? 1 // inactive brightness is not persisted; vendor UI defaults it to Medium
+      : R1_DPI_BRIGHTNESS.indexOf(brightness as typeof R1_DPI_BRIGHTNESS[number]);
     const speedIndex = R1_DPI_SPEED.indexOf(speed as typeof R1_DPI_SPEED[number]);
-    if ((effect !== 1 && effect !== 2) || brightnessIndex < 0 || speedIndex < 0
-      || (enabled !== 0 && enabled !== 1)) return null;
+
+    if (brightnessIndex < 0 || speedIndex < 0 || (enabled !== 0 && enabled !== 1)) return null;
+    if (enabled === 0) {
+      if (effect !== 0 && effect !== 1) return null;
+      return { dpiLedMode: 0, dpiLedBrightness: brightnessIndex, dpiLedSpeed: speedIndex };
+    }
+    if (effect !== 1 && effect !== 2) return null;
     return {
-      dpiLedMode: enabled === 0 ? 0 : effect === 2 ? 2 : 1,
+      dpiLedMode: effect === 2 ? 2 : 1,
       dpiLedBrightness: brightnessIndex,
       dpiLedSpeed: speedIndex,
     };
@@ -1043,7 +1124,7 @@ export class AtkHidClient {
         };
         const timer = setTimeout(() => {
           finish();
-          reject(new Error("The mouse did not answer — it may be asleep or out of range."));
+          reject(new Error("The mouse did not answer â€” it may be asleep or out of range."));
         }, REPLY_TIMEOUT_MS);
         const listener = (event: HIDInputReportEvent) => {
           if (event.reportId !== WE_REPORT_ID) return;
