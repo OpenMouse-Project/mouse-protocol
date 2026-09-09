@@ -131,6 +131,9 @@ export const GEARHUB_LIFT_OFF_LEVELS: Record<string, readonly LiftOffLevel[]> = 
   "PixArt PAW3950": ["Low", "Medium", "High"],
   "PixArt PAW3955": ["Low", "Medium", "High"],
   "PixArt PAW3395": ["Low", "High"],
+  // Unidentified GearHub-V5 device: offer the common three stops. The
+  // firmware clamps the index if its sensor only has two.
+  "PixArt (GearHub-V5)": ["Low", "Medium", "High"],
 };
 
 // ── Button remapping (keymatrix) ───────────────────────────────────────────
@@ -235,7 +238,7 @@ export const GEARHUB_PRODUCTS: ReadonlyMap<number, GearHubTransport> = new Map([
  */
 export interface GearHubProfile {
   deviceId: number;
-  brand: "Lingbao" | "Attack Shark";
+  brand: "Lingbao" | "Attack Shark" | "GearHub";
   model: string;
   sensor: string;
   maxPollingHz: number;
@@ -269,6 +272,12 @@ export const LINGBAO_M5_PRO_PROFILE: GearHubProfile = {
  * receiver and by cable (PID 0x4026): identity, firmware v2.01, the
  * six-stage DPI table (top stage ~42000), 8000 Hz polling, DPI / lift-off /
  * debounce / correction / sleep read + write, and 6-button remapping.
+ *
+ * qmk.top's catalog carries three R2 device ids: 1893 and 3009 on the
+ * original 0x40xx MCU (PID 0x4026 / 0x402D), and 3016 on the newer 0x50xx
+ * MCU (PID 0x5043). 1893 and 3009 share this profile; 3016 is not handled
+ * here - its PID is not in GEARHUB_PRODUCTS and it is most likely the
+ * individual-command firmware this block-protocol driver cannot drive.
  */
 export const ATTACK_SHARK_R2_PROFILE: GearHubProfile = {
   deviceId: 1893,
@@ -281,15 +290,67 @@ export const ATTACK_SHARK_R2_PROFILE: GearHubProfile = {
   dpiStep: 50,
 };
 
-export const GEARHUB_DEVICE_PROFILES: ReadonlyMap<number, GearHubProfile> = new Map(
-  [LINGBAO_M5_PRO_PROFILE, ATTACK_SHARK_R2_PROFILE].map((profile) => [profile.deviceId, profile]),
-);
+/**
+ * Attack Shark R3. Same GearHub-V5 platform, VID:PID and block protocol as
+ * the R2. qmk.top's catalog carries it under four device ids: 1643 and 3485
+ * with the PixArt PAW3395 (26000 DPI), 3309 and 3310 with the PAW3950
+ * (42000 DPI). Device id 1643 confirmed from a user diagnostic - firmware
+ * v3.00, on 0x3151:0x402D, every relay read (D3/D4/D0/8F/80) answering and
+ * a full status; it was falling back to the M5 Pro name only. The other
+ * three ids are catalog-derived.
+ */
+export const ATTACK_SHARK_R3_PROFILE: GearHubProfile = {
+  deviceId: 1643,
+  brand: "Attack Shark",
+  model: "R3",
+  sensor: "PixArt PAW3395",
+  maxPollingHz: 8000,
+  minDpi: 50,
+  maxDpi: 26000,
+  dpiStep: 50,
+};
+
+/** The PixArt PAW3950 R3 revision (device ids 3309 / 3310, catalog-derived). */
+export const ATTACK_SHARK_R3_3950_PROFILE: GearHubProfile = {
+  ...ATTACK_SHARK_R3_PROFILE,
+  deviceId: 3309,
+  sensor: "PixArt PAW3950",
+  maxDpi: 42000,
+};
+
+export const GEARHUB_DEVICE_PROFILES: ReadonlyMap<number, GearHubProfile> = new Map<
+  number,
+  GearHubProfile
+>([
+  [LINGBAO_M5_PRO_PROFILE.deviceId, LINGBAO_M5_PRO_PROFILE],
+  [ATTACK_SHARK_R2_PROFILE.deviceId, ATTACK_SHARK_R2_PROFILE],
+  // A later R2 firmware batch on the same 0x40xx silicon, PID and PAW3950
+  // sensor as 1893. Block protocol assumed identical; not hardware-verified.
+  [3009, ATTACK_SHARK_R2_PROFILE],
+  [ATTACK_SHARK_R3_PROFILE.deviceId, ATTACK_SHARK_R3_PROFILE],
+  [3485, ATTACK_SHARK_R3_PROFILE],
+  [ATTACK_SHARK_R3_3950_PROFILE.deviceId, ATTACK_SHARK_R3_3950_PROFILE],
+  [3310, ATTACK_SHARK_R3_3950_PROFILE],
+]);
 
 /**
- * Identity for an unrecognised GearHub-V5 sibling: the M5 Pro, which is what
- * this driver always reported before it learned to ask for the device id.
+ * Identity for a GearHub-V5 device this driver reached but could not name:
+ * GET_USB_VERSION failed, or it answered a device id not in the catalog.
+ * Deliberately generic - naming a concrete model here (it used to borrow the
+ * M5 Pro's) is a guess that is wrong for every sibling that is not an M5 Pro.
+ * The DPI/polling bounds are the platform ceilings so a real device's range
+ * is never clamped; the live DPI stages still come from the device's table.
  */
-export const GEARHUB_FALLBACK_PROFILE = LINGBAO_M5_PRO_PROFILE;
+export const GEARHUB_FALLBACK_PROFILE: GearHubProfile = {
+  deviceId: 0,
+  brand: "GearHub",
+  model: "V5 mouse",
+  sensor: "PixArt (GearHub-V5)",
+  maxPollingHz: 8000,
+  minDpi: 50,
+  maxDpi: 42000,
+  dpiStep: 50,
+};
 
 /** Resolve a device id to its profile, or the fallback. */
 export function gearHubProfileFor(deviceId: number | null | undefined): GearHubProfile {

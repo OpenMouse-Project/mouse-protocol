@@ -498,19 +498,52 @@ export class GearHubHidClient {
   }
 
   /**
-   * Replace one DPI stage. SET_DPI carries the whole stage table, so the other
-   * stages — and every stage's indicator colour — are read back and echoed
-   * unchanged rather than zeroed.
+   * Replace one DPI stage's resolution. SET_DPI carries the whole stage table,
+   * so the other stages — and every stage's indicator colour — are read back
+   * and echoed unchanged rather than zeroed.
    */
   async setDpiForStage(x: number, y: number, index: number): Promise<number> {
     const { stages, activeIndex } = await this.getDpi();
     const target = index >= 0 && index < stages.length ? index : activeIndex;
     stages[target] = { ...stages[target], x, y };
+    await this.writeDpiTable(stages, activeIndex);
+    return x;
+  }
 
+  /**
+   * Recolour one DPI stage's indicator LED. Same whole-table write as
+   * `setDpiForStage`, changing `rgb` instead of the resolution. `color` is
+   * `#rrggbb`; returns it normalised.
+   */
+  async setDpiStageColor(index: number, color: string): Promise<string> {
+    const rgb = Number.parseInt(color.replace(/^#/, ""), 16);
+    if (!Number.isFinite(rgb)) throw new Error(`Invalid DPI stage colour "${color}".`);
+
+    const { stages, activeIndex } = await this.getDpi();
+    const target = index >= 0 && index < stages.length ? index : activeIndex;
+    stages[target] = { ...stages[target], rgb: rgb & 0xffffff };
+    await this.writeDpiTable(stages, activeIndex);
+    return `#${(rgb & 0xffffff).toString(16).padStart(6, "0")}`;
+  }
+
+  /**
+   * Switch which DPI stage the mouse is on. SET_DPI's byte 2 is the active
+   * index; re-send the unchanged table with it moved.
+   */
+  async setActiveDpiStage(index: number): Promise<number> {
+    const { stages } = await this.getDpi();
+    if (stages.length === 0) throw new Error("GearHub reported no DPI stages.");
+    const target = Math.max(0, Math.min(index, stages.length - 1));
+    await this.writeDpiTable(stages, target);
+    return target;
+  }
+
+  /** Encode the full stage table into one SET_DPI report and send it. */
+  private async writeDpiTable(stages: GearHubDpiStage[], active: number): Promise<void> {
     const cmd = new Uint8Array(GEARHUB_REPORT_SIZE);
     cmd[0] = CMD.SET_DPI;
     cmd[1] = this.currentProfile;
-    cmd[2] = target;
+    cmd[2] = active;
     cmd[3] = stages.length;
     stages.forEach((stage, i) => {
       cmd[DPI_X_OFFSET + i * 2] = stage.x & 0xff;
@@ -522,7 +555,6 @@ export class GearHubHidClient {
       cmd[DPI_RGB_OFFSET + 2 + i * 3] = stage.rgb & 0xff;
     });
     await this.sendWrite(cmd);
-    return x;
   }
 
   /** A write takes the same relay path as a read, minus the read-back. */
@@ -625,6 +657,7 @@ export class GearHubHidClient {
         ? this.buttonMappingsFrom(keyMatrixResult.value)
         : undefined;
 
+
     return {
       brand: profile.brand,
       name: displayName,
@@ -632,6 +665,15 @@ export class GearHubHidClient {
         family: "gearhub",
         settingsReady: true,
         defaultDisplayName: displayName,
+        // Stage-list DPI editor: per-stage resolution + indicator colour, the
+        // way GearHub itself shows it. Stage count is fixed (no SET for it), so
+        // countEditable is left off and the count picker stays hidden.
+        dpiStageEditor: {
+          maxStages: dpi.stages.length,
+          minDpi: profile.minDpi,
+          maxDpi: profile.maxDpi,
+          stepDpi: profile.dpiStep,
+        },
       },
       batteryPercent: battery,
       batteryState: battery === null ? "Unknown" : "Discharging",
@@ -639,6 +681,9 @@ export class GearHubHidClient {
       dpiY: active.y,
       supportsSeparateDpiAxes: true,
       dpiStages: dpi.stages.map((stage) => stage.x),
+      dpiStageColors: dpi.stages.map(
+        (stage) => `#${(stage.rgb & 0xffffff).toString(16).padStart(6, "0")}`,
+      ),
       activeDpiStage: dpi.activeIndex,
       pollingRateHz,
       supportedPollingRates: this.supportedPollingRates,
