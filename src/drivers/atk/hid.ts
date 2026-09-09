@@ -85,6 +85,7 @@ const REGISTER = {
 } as const;
 
 const SYSTEM_LENGTH = 6;
+const R1_SYSTEM_ROW_LENGTH = 10;
 const ADVANCED_LENGTH = 10;
 const ANGLE_LENGTH = 4;
 const DPI_STAGE_LENGTH = 4;
@@ -436,7 +437,16 @@ export class AtkHidClient {
     if (this.usesR1LiveSettings()) return await this.setR1PollingRate(pollingRateHz);
     const encoded = POLLING_RATES.find(([, hertz]) => hertz === pollingRateHz);
     if (!encoded) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
-    await this.write(REGISTER.system, wePackScalarPair(encoded[0]));
+    if (this.usesVerifiedR1ProMaxReceiverTransport()) {
+      // ATK Hub writes the complete 10-byte system row through the F58A
+      // receiver. Preserve stage count, active stage, and the unknown tail.
+      const system = Array.from(await this.read(REGISTER.system, R1_SYSTEM_ROW_LENGTH));
+      system.splice(0, 2, ...wePackScalarPair(encoded[0]));
+      await this.writeR1ProMaxReceiverSystem(system);
+    } else {
+      await this.write(REGISTER.system, wePackScalarPair(encoded[0]));
+    }
+
     if (this.isR1()) await delay(R1_LIVE_WRITE_SETTLE_MS);
     const confirmed = this.decodePollingRate((await this.read(REGISTER.system, SYSTEM_LENGTH))[0]);
     if (confirmed !== pollingRateHz) {
@@ -1044,6 +1054,12 @@ export class AtkHidClient {
     return this.product === ATK_PRODUCTS["2,27"];
   }
 
+  private usesVerifiedR1ProMaxReceiverTransport(): boolean {
+    return this.device.vendorId === VENDOR_ID.vgn
+      && this.device.productId === VXE_R1_PRO_MAX_RECEIVER_PID
+      && this.isR1ProMax();
+  }
+
   private usesVerifiedR1WiredTransport(): boolean {
     if (this.device.vendorId !== VENDOR_ID.vgn || this.isWireless()) return false;
     return (this.device.productId === VXE_R1_COMPX_MOUSE_PID && this.product === ATK_PRODUCTS["2,32"])
@@ -1112,6 +1128,39 @@ export class AtkHidClient {
       await this.device.sendReport(WE_REPORT_ID, new Uint8Array(payload).buffer);
       await delay(WRITE_SETTLE_MS);
     });
+  }
+
+  /**
+   * The verified F58A polling path writes the complete system row and echoes
+   * the committed row back on report 0x08. No other receiver EEPROM writes
+   * are enabled through this helper.
+   */
+  private async writeR1ProMaxReceiverSystem(data: readonly number[]): Promise<void> {
+    await this.identify();
+    if (!this.usesVerifiedR1ProMaxReceiverTransport()) {
+      throw new Error("R1 Pro Max receiver system writes are not available on this connection.");
+    }
+    if (data.length !== R1_SYSTEM_ROW_LENGTH) {
+      throw new Error(
+        `R1 Pro Max receiver system writes must preserve the complete ${R1_SYSTEM_ROW_LENGTH}-byte row.`,
+      );
+    }
+
+    const payload = weBuildCmdPayload(
+      WE_CMD_WRITE_EEPROM,
+      [0, 0x00, 0x00, data.length, ...data],
+    );
+
+    await this.exchange(
+      payload,
+      (frame) => frame[0] === WE_CMD_WRITE_EEPROM
+        && frame[1] === 0
+        && frame[2] === 0
+        && frame[3] === 0
+        && frame[4] === data.length
+        && this.hasValidChecksum(frame)
+        && data.every((byte, index) => frame[DATA_OFFSET + index] === byte),
+    );
   }
 
   private async send(frame: Uint8Array): Promise<void> {

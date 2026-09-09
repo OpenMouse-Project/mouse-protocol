@@ -22,6 +22,7 @@ class FakeR1ProMaxDevice {
 
   readonly sent: Sent[] = [];
   replies: number[][] = [];
+  writeReplies: number[][] = [];
   private listeners = new Set<(event: HIDInputReportEvent) => void>();
 
   constructor(productId: number, productName: string) {
@@ -58,8 +59,9 @@ class FakeR1ProMaxDevice {
   async sendReport(reportId: number, data: ArrayBuffer): Promise<void> {
     const frame = new Uint8Array(data);
     this.sent.push({ reportId, data: frame });
-    if (frame[0] === 0x07) return;
-    const reply = this.replies.shift();
+    const reply = frame[0] === 0x07
+      ? this.writeReplies.shift()
+      : this.replies.shift();
     if (!reply) return;
     const payload = new Uint8Array(reply);
     queueMicrotask(() => {
@@ -148,12 +150,51 @@ test("R1 Pro Max wired transport accepts PAW3395 30K DPI with independent X/Y va
   assert.deepEqual([...write!.subarray(5, 9)], packed);
 });
 
-test("R1 Pro Max receiver stays read-only for persistent EEPROM until its write path is verified", async () => {
+test("R1 Pro Max receiver writes polling with the vendor-captured full system row", async () => {
   const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
-  (fake as unknown as FakeR1ProMaxDevice).replies = [reply(0x10, 0, [0x02, 0x1b])];
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+  const before = [
+    0x01, 0x54,
+    0x01, 0x54,
+    0x00, 0x55,
+    0x00, 0x00, 0x00, 0x55,
+  ];
+  const after = [
+    0x02, 0x53,
+    0x01, 0x54,
+    0x00, 0x55,
+    0x00, 0x00, 0x00, 0x55,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x0000, before),
+    reply(0x08, 0x0000, after),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x0000, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setPollingRate(500), 500);
+
+  const write = writes(fake)[0];
+  assert.ok(write);
+  assert.equal(write![2], 0x00);
+  assert.equal(write![3], 0x00);
+  assert.equal(write![4], 0x0a);
+  assert.deepEqual([...write!.subarray(5, 15)], after);
+  assert.equal(writes(fake).some((frame) => frame[3] === 0x70), false);
+});
+
+test("R1 Pro Max receiver keeps unverified persistent writes blocked", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  (fake as unknown as FakeR1ProMaxDevice).replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+  ];
 
   await assert.rejects(
-    new AtkHidClient(fake).setPollingRate(500),
+    new AtkHidClient(fake).setDpiStageValue(0, 800),
     /verified wired transport/,
   );
   assert.equal(writes(fake).length, 0);
