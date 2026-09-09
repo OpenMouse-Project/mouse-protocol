@@ -150,6 +150,206 @@ test("R1 Pro Max wired transport accepts PAW3395 30K DPI with independent X/Y va
   assert.deepEqual([...write!.subarray(5, 9)], packed);
 });
 
+test("R1 Pro Max receiver writes sleep timeout through the captured advanced block", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const before = [
+    0x04, 0x51,
+    0x00, 0x55,
+    0x06, 0x4f,
+    0x00, 0x55,
+    0x01, 0x54,
+  ];
+  const after = [
+    0x04, 0x51,
+    0x00, 0x55,
+    0x0c, 0x49,
+    0x00, 0x55,
+    0x01, 0x54,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x00a9, before),
+    reply(0x08, 0x00a9, after),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x00a9, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setSleepTimeout(120), 120);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0xa9,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x0a);
+  assert.deepEqual([...write!.subarray(5, 15)], after);
+});
+
+test("R1 Pro Max receiver writes angle snapping through the captured advanced block", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const before = [
+    0x04, 0x51,
+    0x00, 0x55,
+    0x06, 0x4f,
+    0x01, 0x54,
+    0x01, 0x54,
+  ];
+  const after = [
+    0x04, 0x51,
+    0x00, 0x55,
+    0x06, 0x4f,
+    0x00, 0x55,
+    0x01, 0x54,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x00a9, before),
+    reply(0x08, 0x00a9, after),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x00a9, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setAngleSnapping(false), false);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0xa9,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x0a);
+  assert.deepEqual([...write!.subarray(5, 15)], after);
+});
+
+test("R1 Pro Max receiver writes ripple control through the captured advanced block", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const before = [
+    0x04, 0x51,
+    0x01, 0x54,
+    0x06, 0x4f,
+    0x01, 0x54,
+    0x01, 0x54,
+  ];
+  const after = [
+    0x04, 0x51,
+    0x01, 0x54,
+    0x06, 0x4f,
+    0x01, 0x54,
+    0x00, 0x55,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x00a9, before),
+    reply(0x08, 0x00a9, after),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x00a9, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setRippleControl(false), false);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0xa9,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x0a);
+  assert.deepEqual([...write!.subarray(5, 15)], after);
+});
+
+test("R1 Pro Max receiver writes Motion Sync through the captured advanced block", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const before = [
+    0x04, 0x51,
+    0x01, 0x54,
+    0x06, 0x4f,
+    0x01, 0x54,
+    0x01, 0x54,
+  ];
+  const after = [
+    0x04, 0x51,
+    0x00, 0x55,
+    0x06, 0x4f,
+    0x01, 0x54,
+    0x01, 0x54,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x00a9, before),
+    reply(0x08, 0x00a9, after),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x00a9, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setMotionSync(false), false);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0xa9,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x0a);
+  assert.deepEqual([...write!.subarray(5, 15)], after);
+});
+
+test("R1 Pro Max receiver writes debounce through the captured advanced block", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+
+  const before = [
+    0x04, 0x51,
+    0x01, 0x54,
+    0x06, 0x4f,
+    0x01, 0x54,
+    0x01, 0x54,
+  ];
+  const after = [
+    0x08, 0x4d,
+    0x01, 0x54,
+    0x06, 0x4f,
+    0x01, 0x54,
+    0x01, 0x54,
+  ];
+
+  hardware.replies = [
+    reply(0x10, 0, [0x02, 0x1b]),
+    reply(0x08, 0x00a9, before),
+    reply(0x08, 0x00a9, after),
+  ];
+  hardware.writeReplies = [
+    reply(0x07, 0x00a9, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setDebounceTime(8), 8);
+
+  const write = writes(fake).find(
+    (frame) => frame[2] === 0x00 && frame[3] === 0xa9,
+  );
+
+  assert.ok(write);
+  assert.equal(write![4], 0x0a);
+  assert.deepEqual([...write!.subarray(5, 15)], after);
+});
+
 test("R1 Pro Max receiver writes lift-off distance through the captured EEPROM pair", async () => {
   const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
   const hardware = fake as unknown as FakeR1ProMaxDevice;

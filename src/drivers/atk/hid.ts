@@ -711,18 +711,76 @@ export class AtkHidClient {
 
   async setMotionSync(enabled: boolean): Promise<boolean> {
     await this.identify();
+
+    if (this.usesVerifiedR1ProMaxReceiverTransport()) {
+      const confirmed = await this.writeR1ProMaxReceiverAdvanced(
+        2,
+        enabled ? 1 : 0,
+      ) === 1;
+
+      if (confirmed !== enabled) {
+        throw new Error(
+          `The mouse left Motion Sync ${confirmed ? "on" : "off"}.`,
+        );
+      }
+
+      this.patch({ motionSync: confirmed });
+      return confirmed;
+    }
+
     return await this.setAdvancedFlag(2, enabled, "motionSync", "Motion Sync");
   }
 
   async setRippleControl(enabled: boolean): Promise<boolean> {
     await this.identify();
+
+    if (this.usesVerifiedR1ProMaxReceiverTransport()) {
+      const confirmed = await this.writeR1ProMaxReceiverAdvanced(
+        8,
+        enabled ? 1 : 0,
+      ) === 1;
+
+      if (confirmed !== enabled) {
+        throw new Error(
+          `The mouse left ripple control ${confirmed ? "on" : "off"}.`,
+        );
+      }
+
+      this.patch({ rippleControl: confirmed });
+      return confirmed;
+    }
+
     return await this.setAdvancedFlag(8, enabled, "rippleControl", "ripple control");
   }
 
   async setAngleSnapping(enabled: boolean): Promise<boolean> {
     if (!this.usesR1LiveSettings()) await this.identify();
     if (this.usesR1LiveSettings()) return await this.setR1AngleSnapping(enabled);
-    if (this.isR1()) return await this.setAdvancedFlag(6, enabled, "angleSnapping", "straight-line correction");
+
+    if (this.usesVerifiedR1ProMaxReceiverTransport()) {
+      const confirmed = await this.writeR1ProMaxReceiverAdvanced(
+        6,
+        enabled ? 1 : 0,
+      ) === 1;
+
+      if (confirmed !== enabled) {
+        throw new Error(
+          `The mouse left angle snapping ${confirmed ? "on" : "off"}.`,
+        );
+      }
+
+      this.patch({ angleSnapping: confirmed });
+      return confirmed;
+    }
+
+    if (this.isR1()) {
+      return await this.setAdvancedFlag(
+        6,
+        enabled,
+        "angleSnapping",
+        "straight-line correction",
+      );
+    }
     const group = await this.read(REGISTER.angle, ANGLE_LENGTH);
     await this.write(REGISTER.angle, [group[0], enabled ? 1 : 0].flatMap((value) => wePackScalarPair(value)));
     const confirmed = (await this.read(REGISTER.angle, ANGLE_LENGTH))[2] === 1;
@@ -738,7 +796,10 @@ export class AtkHidClient {
     if (!Number.isInteger(milliseconds) || !options.includes(milliseconds)) {
       throw new Error(`This mouse does not support ${milliseconds} ms debounce.`);
     }
-    const confirmed = await this.writeAdvanced(0, milliseconds);
+    const confirmed = this.usesVerifiedR1ProMaxReceiverTransport()
+      ? await this.writeR1ProMaxReceiverAdvanced(0, milliseconds)
+      : await this.writeAdvanced(0, milliseconds);
+
     if (confirmed !== milliseconds) {
       throw new Error(`The mouse kept ${confirmed} ms of debounce instead of ${milliseconds} ms.`);
     }
@@ -756,7 +817,11 @@ export class AtkHidClient {
       throw new Error(`This mouse does not support a ${seconds} second sleep timeout.`);
     }
     const units = Math.round(seconds / SLEEP_STEP_SECONDS);
-    const confirmed = await this.writeAdvanced(4, units) * SLEEP_STEP_SECONDS;
+    const confirmedUnits = this.usesVerifiedR1ProMaxReceiverTransport()
+      ? await this.writeR1ProMaxReceiverAdvanced(4, units)
+      : await this.writeAdvanced(4, units);
+    const confirmed = confirmedUnits * SLEEP_STEP_SECONDS;
+
     if (confirmed !== units * SLEEP_STEP_SECONDS) {
       throw new Error(`The mouse kept a ${confirmed} second sleep timeout instead of ${seconds} seconds.`);
     }
@@ -1140,6 +1205,49 @@ export class AtkHidClient {
       await this.device.sendReport(WE_REPORT_ID, new Uint8Array(payload).buffer);
       await delay(WRITE_SETTLE_MS);
     });
+  }
+
+  /**
+   * F58A advanced settings are written as the complete 10-byte EEPROM row.
+   * Callers remain individually gated until each field is hardware-verified.
+   */
+  private async writeR1ProMaxReceiverAdvanced(
+    offset: number,
+    value: number,
+  ): Promise<number> {
+    await this.identify();
+
+    if (!this.usesVerifiedR1ProMaxReceiverTransport()) {
+      throw new Error("R1 Pro Max receiver advanced writes are not available on this connection.");
+    }
+
+    const address = REGISTER.advanced;
+    const block = Array.from(await this.read(address, ADVANCED_LENGTH));
+    block.splice(offset, 2, ...wePackScalarPair(value));
+
+    const payload = weBuildCmdPayload(
+      WE_CMD_WRITE_EEPROM,
+      [
+        0,
+        (address >> 8) & 0xff,
+        address & 0xff,
+        block.length,
+        ...block,
+      ],
+    );
+
+    await this.exchange(
+      payload,
+      (frame) => frame[0] === WE_CMD_WRITE_EEPROM
+        && frame[1] === 0
+        && frame[2] === ((address >> 8) & 0xff)
+        && frame[3] === (address & 0xff)
+        && frame[4] === block.length
+        && this.hasValidChecksum(frame)
+        && block.every((byte, index) => frame[DATA_OFFSET + index] === byte),
+    );
+
+    return (await this.read(address, ADVANCED_LENGTH))[offset]!;
   }
 
   /**
