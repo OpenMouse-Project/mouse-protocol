@@ -1,4 +1,4 @@
-﻿import {
+import {
   WE_CMD_READ_EEPROM,
   WE_CMD_WRITE_EEPROM,
   WE_REPORT_ID,
@@ -41,7 +41,7 @@ import {
 import { type AtkProduct, ATK_COMPX_PRODUCT_IDS, ATK_PRODUCTS } from "./products.ts";
 
 // ATK mice (A9 family and siblings) use the same OEM framing as the Endgame
-// Gear WE series â€” 16-byte EEPROM commands on report 0x08 â€” but carry them on
+// Gear WE series — 16-byte EEPROM commands on report 0x08 — but carry them on
 // output/input reports rather than feature reports.
 const BATTERY_COMMAND = 0x04;
 const VERSION_COMMAND = 0x12;
@@ -617,10 +617,10 @@ export class AtkHidClient {
       throw new Error("The DPI lighting setting is invalid.");
     }
 
-    // Captured R1 Pro Max rows use literal 00 00 for fields that are inactive:
+    // R1 Pro Max uses its own DPI-lighting row encoding:
     // Off       = 00 00 | 00 00 | speed | 00 55
     // Always On = 01 54 | brightness | speed | 01 54
-    // Breathing = 02 53 | 00 00 | speed | 01 54
+    // Breathing = 02 53 | preserve brightness | speed | 01 54
     const block = Array.from(await this.read(REGISTER.dpiLighting, R1_DPI_LIGHTING_LENGTH));
     const proMax = this.isR1ProMax();
 
@@ -1124,7 +1124,7 @@ export class AtkHidClient {
         };
         const timer = setTimeout(() => {
           finish();
-          reject(new Error("The mouse did not answer â€” it may be asleep or out of range."));
+          reject(new Error("The mouse did not answer — it may be asleep or out of range."));
         }, REPLY_TIMEOUT_MS);
         const listener = (event: HIDInputReportEvent) => {
           if (event.reportId !== WE_REPORT_ID) return;
