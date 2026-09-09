@@ -112,6 +112,17 @@ export class LamzuAtlantisHidClient {
     if (this.device.opened) await this.device.close();
   }
 
+  /**
+   * No push channel is known on this generation: the only report the config
+   * collection carries is 8, which is the request/reply channel, and nothing
+   * unsolicited was seen arriving on it while settings were changed in Lamzu's
+   * own configurator. Returning false leaves the app on its polling path,
+   * which is the honest answer until a notification report turns up.
+   */
+  async startNotifications(): Promise<boolean> {
+    return false;
+  }
+
   displayName(): string {
     const known = this.product();
     return known ? `Lamzu ${known.model}` : this.device.productName || "Lamzu";
@@ -489,8 +500,7 @@ export class LamzuAtlantisHidClient {
   }
 
   /**
-   * This firmware emits unsolicited reports on the same id, so a reply that
-   * does not match is skipped rather than treated as a failure.
+   * A reply that does not match is skipped rather than treated as a failure.
    *
    * Matching on the command alone is not enough: every flash access shares
    * command 0x08 (or 0x07), so after a timed-out attempt a late reply would
