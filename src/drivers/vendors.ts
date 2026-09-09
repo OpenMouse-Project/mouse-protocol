@@ -3,7 +3,14 @@ import { MICROSOFT_PRODUCTS } from "../microsoft/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { GEARHUB_PRODUCTS, GEARHUB_VENDOR_ID } from "@openmouse/protocol/gearhub";
 import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
-import { LAMZU_INCA_PRODUCTS, LAMZU_INCA_VENDOR_ID } from "@openmouse/protocol/lamzu";
+import {
+  LAMZU_ATLANTIS_PRODUCTS,
+  LAMZU_ATLANTIS_USAGE,
+  LAMZU_ATLANTIS_USAGE_PAGE,
+  LAMZU_ATLANTIS_VENDOR_ID,
+  LAMZU_INCA_PRODUCTS,
+  LAMZU_INCA_VENDOR_ID,
+} from "@openmouse/protocol/lamzu";
 import {
   MCHOSE_CONFIG_USAGE,
   MCHOSE_CONFIG_USAGE_PAGE,
@@ -74,6 +81,7 @@ export const VENDOR_ID = {
   wlmouse: 0x36a7,
   lamzu: 0x373e,
   lamzuInca: LAMZU_INCA_VENDOR_ID,
+  lamzuAtlantis: LAMZU_ATLANTIS_VENDOR_ID,
   attackshark: 0x373e,
   logitech: 0x046d,
   orbital: 0x1915,
@@ -442,6 +450,23 @@ export const LAMZU_INCA_HID_FILTERS: HIDDeviceFilter[] = [...LAMZU_INCA_PRODUCTS
 );
 
 /**
+ * Lamzu's Atlantis generation shares CompX's 0x3554 vendor id with the VXE R1
+ * SE+ transports in ATK_COMPX_PRODUCT_IDS, so these are requested per product
+ * id rather than vendor-wide; a VID-only filter would offer those ATK
+ * receivers as Lamzu entries. The usage narrows the request further to the one
+ * collection that carries report 8 — the other five vendor collections on the
+ * same interface answer nothing. See docs/lamzu-atlantis-testing.md.
+ */
+export const LAMZU_ATLANTIS_HID_FILTERS: HIDDeviceFilter[] = [...LAMZU_ATLANTIS_PRODUCTS.keys()].map(
+  (productId) => ({
+    vendorId: VENDOR_ID.lamzuAtlantis,
+    productId,
+    usagePage: LAMZU_ATLANTIS_USAGE_PAGE,
+    usage: LAMZU_ATLANTIS_USAGE,
+  }),
+);
+
+/**
  * GearHub-V5 receivers (Lingbao M5 Pro, Attack Shark R2, …) and the wired
  * product id. 0x3151 is the MicLink/mlzn ODM vendor id, shared with unrelated
  * keyboards and mice, so these are requested per product id rather than
@@ -487,6 +512,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // interfaces that lack the feature-report-0 control channel.
   { vendorId: VENDOR_ID.lamzu },
   ...LAMZU_INCA_HID_FILTERS,
+  ...LAMZU_ATLANTIS_HID_FILTERS,
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   // MCHOSE ships keyboards and audio devices under 0x3837 too, so this stays
   // narrowed to the mouse configuration collection rather than the whole VID.

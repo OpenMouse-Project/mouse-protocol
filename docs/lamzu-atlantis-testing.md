@@ -1,0 +1,165 @@
+# Lamzu Atlantis (0x3554) — capture notes
+
+Hardware report from a **Lamzu Atlantis Mini 4K**, firmware `1.24`, on its
+cable, Windows 11. Serial numbers are redacted. Reads were captured first; the
+setter pass at the end changed one value at a time and restored each.
+
+## Enumeration
+
+`LAMZU Atlantis Pro`, manufacturer `compx`, release `0x0124` (BCD — firmware
+1.24, the version Lamzu's download page lists for "ATLANTIS MINI PRO/4K").
+The 4K receiver enumerates separately as `LAMZU 4K Receiver`, release `0x0128`,
+matching that page's "4K DONGLE 1.28".
+
+Vendor id `0x3554` is CompX's shared ODM id — the same one the Pulsar 4K
+receiver, VGN and Teevolution units already in this repository use, and the
+one `ATK_COMPX_PRODUCT_IDS` covers for VXE. It is **not** either of the Lamzu
+ids the other driver handles (`0x373e`, `0x37b0`).
+
+| Product id | Role | Verified |
+| --- | --- | --- |
+| `0xf50f` | Mouse on its cable | On hardware |
+| `0xf50d` | 1K receiver | Vendor table only |
+| `0xf510` | 4K receiver | Vendor table only |
+| `0xf517` | Receiver | Vendor table only |
+
+Six models share these ids: Atlantis OG V2, Atlantis Mini, Atlantis Mini Pro,
+Thorn, Maya and Paro of this generation. Nothing on the wire separates them —
+same product id, same USB product string, same firmware version — and Lamzu's
+own Windows configurator resolves this by asking the user to pick the model
+from a list. The catalog therefore names the family, `Lamzu Atlantis`.
+
+| Interface | Collection | Usage page | Usage | Report 8 | Role |
+| --- | --- | --- | --- | --- | --- |
+| MI_00 | — | 0x0001 | 0x0006 | no | Keyboard |
+| MI_01 | Col01 | 0xff05 | 0x0000 | no | Vendor — rejects writes |
+| MI_01 | Col02 | 0xff03 | 0x0000 | no | Vendor — rejects writes |
+| MI_01 | Col03 | 0x000c | 0x0001 | no | Consumer control |
+| MI_01 | Col04 | 0x0001 | 0x0080 | no | System control |
+| **MI_01** | **Col05** | **0xff02** | **0x0002** | **yes** | **Config channel** |
+| MI_01 | Col06 | 0xff04 | 0x0002 | no | Vendor — feature report 6 only |
+| MI_02 | — | 0x0001 | 0x0002 | no | Mouse |
+
+The config channel is the `0xff02`/`0x0002` collection, which matches the
+`Interfaceid=1` in the shipped `Config.ini` of Lamzu's Windows app. Every
+other vendor collection rejects `WriteFile` with `Incorrect function`.
+
+The `0xff04` collection is a red herring worth recording: it answers
+`HidD_GetFeature` on report id 6 with a 32-byte snapshot and accepts
+`HidD_SetFeature`, but it does not speak this protocol. Feature reports are
+the wrong channel entirely here — the config protocol uses interrupt
+output/input reports.
+
+## Protocol
+
+Report id 8, 17 bytes on the wire (16 to WebHID, which supplies the id).
+
+```
+ byte  0     command
+ byte  1     status, 0 on success
+ bytes 2..3  flash address, big endian
+ byte  4     payload length
+ bytes 5..14 payload
+ byte  15    checksum
+```
+
+This is the CompX report-8 protocol this repository already implements for
+Pulsar's 4K receiver (`src/pulsar/index.ts`), byte for byte: the same
+`pulsarPacketChecksum`, the same command ids, the same flash offsets, and the
+same 50-step `pulsarVgnDecodeDpi` encoding. The driver imports those rather
+than restating them.
+
+Commands answered by the mouse over the cable:
+
+| Command | Name | Reply |
+| --- | --- | --- |
+| `0x04` | Battery | `64 01 10 82` — 100%, charging, 4,226 mV |
+| `0x07` | Write flash | echoes the written field |
+| `0x08` | Read flash | up to 10 bytes from an address |
+| `0x0e` | Active profile | `00` — 0-based on the wire, 1-based in Lamzu's UI |
+| `0x0f` | Set active profile | verified by reading `0x0e` back |
+| `0x12` | Firmware version | `01 24` — v1.24 |
+| `0x15`, `0x1d`, `0x2b` | Dongle RGB, dongle version, RSSI | status 1 (rejected over the cable) |
+
+Two details that cost time and are easy to get wrong:
+
+- **The battery reply lies about its length.** Byte 4 says `0x02` while four
+  bytes follow: percent, charging flag, then the millivolts. Decoding by the
+  declared length silently drops the voltage.
+- **The percent byte is authoritative.** `lamzu-cfg` derives a percentage
+  linearly from the millivolts between 3,050 and 4,200 mV. At 4,239 mV that
+  estimate reads 100% where the mouse's own byte, and Lamzu's configurator,
+  both said 95%.
+
+### Flash fields
+
+Every offset below was read on hardware and cross-checked against what Lamzu's
+configurator displayed for the same mouse at the same moment.
+
+| Address | Field | Encoding |
+| --- | --- | --- |
+| 0 | Polling rate | see below |
+| 2 | DPI stage count | 1-8 |
+| 4 | Active DPI stage | 0-based |
+| 10 | Lift-off distance | `1` = 1 mm, `2` = 2 mm |
+| 12 + 4n | DPI stage n | `low, low, flags, checksum` |
+| 44 + 4n | DPI stage n colour | `r, g, b, checksum` |
+| 96 | Button actions | 4 bytes per button |
+| 169 | Debounce | milliseconds, 0-15 |
+| 171 | Motion sync | 0/1 |
+| 173 | Sleep timeout | **units of ten seconds** |
+| 175 | Angle snapping | 0/1 |
+| 177 | Ripple control | 0/1 |
+| 181 | Competition mode | 0/1 |
+| 183 | Competition timeout | units of ten seconds |
+| 185 | High performance | 0/1 |
+
+A field is stored with a trailing checksum byte, so the value bytes and that
+byte together sum to `0x55`. Reads ask for one byte more than the field is
+wide and reject the value if that sum is wrong.
+
+Address 173 is not in `lamzu-cfg`'s map. It was found by diffing the flash
+image across a change made in Lamzu's own configurator:
+
+| Sleep setting in the vendor UI | Byte at 173 |
+| --- | --- |
+| 1 minute | `0x06` |
+| 10 seconds | `0x01` |
+
+Addresses 6, 8 and 76-94 hold values this driver does not read and are
+deliberately left unmapped rather than guessed at.
+
+### Polling rate
+
+The rate byte carries the same double encoding of 1,000 Hz that the other
+Lamzu generations use, so `pulsarDecodePollingRate` is wrong for these units —
+it reads `0x10` as 2,000 Hz.
+
+| Byte | Rate | Evidence |
+| --- | --- | --- |
+| `0x08`, `0x04`, `0x02`, `0x01` | 125, 250, 500, 1000 | Vendor UI wrote `0x02` when set to 500 Hz |
+| `0x10` | 1000 | Read from the profile with the vendor UI showing 1000 Hz |
+| `0x20`, `0x40`, `0x80` | 2000, 4000, 8000 | Receiver family, from the shared Lamzu table |
+
+The wired path offers 125-1000 Hz; the 4K receiver's list is from Lamzu's
+device table and has not been exercised.
+
+## What was verified on hardware
+
+Read, against Lamzu's configurator open on the same mouse: name, firmware
+v1.24, battery percent and voltage, charging state, profile, all five DPI
+stages and their colours, active stage, polling rate, lift-off, debounce,
+sleep timeout, motion sync, angle snapping, ripple control, competition mode,
+high performance.
+
+Written, one at a time, each restored afterwards, each confirmed by reading
+the field back: polling rate (500 → 125 → 500), lift-off (Low → Medium → Low),
+debounce (4 → 6 → 4 ms), sleep (60 → 30 → 60 s), motion sync, angle snapping,
+ripple control, competition mode, high performance, active DPI stage
+(2 → 0 → 2), DPI stage value (2000 → 1600 → 2000), profile (1 → 2 → 1). A full
+re-read afterwards showed no drift in any other field.
+
+Not exercised: the three receiver product ids, button remapping, macros, and
+the pairing and factory-reset controls the vendor app exposes. No command id
+outside the table above was sent — the write path on this firmware includes a
+factory reset, so unknown ids were not probed.

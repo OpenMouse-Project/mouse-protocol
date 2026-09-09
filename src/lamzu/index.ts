@@ -1,4 +1,5 @@
 export * from "../compx/codec.js";
+export * from "./atlantis.js";
 export interface LamzuProduct {
   model: string;
   wireless: boolean;
