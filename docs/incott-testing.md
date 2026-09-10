@@ -403,17 +403,56 @@ tool's own `09 86 09` query (payload still unexplained). It is now
 `INCOTT_CMD_QUERY_BUTTON`; `INCOTT_CMD_SET_BUTTON` (`0x06`) is the matching
 write.
 
-**This driver implements the codec ONLY** — `incottEncodeSetButtonBinding` /
-`incottDecodeButtonBinding` in `src/incott/index.ts` — encode/decode of the
-raw three-byte binding, plus a read for each of the six buttons. It
-deliberately does **not** attempt to model key codes, macros, or remapping
-semantics: the meaning of the three bytes is not established (button 5's
-payload shape, `07 00 03`, visibly differs from the other five's `01 00 fN`,
-suggesting it is a different *kind* of action — plausibly the DPI button —
-but this is an inference, not something the capture decodes), and
-OpenMouse's shared `MouseStatus` button-mapping contract
-(`buttonMappings`/`buttonOptions`) has its own shape this driver must not
-guess at. **Nothing here is wired into `IncottHidClient` or the UI.**
+### Buttons: DECODED and shipped (2026-09-10)
+
+The binding is a **32-bit little-endian action word**, not three opaque
+bytes, and the capture above turns out to confirm the entire mouse action
+table. The inference recorded here — that button 5's odd `07 00 03` shape
+meant a different *kind* of action, plausibly DPI — was right: it is
+`0x00030007`, which the vendor's encoder returns for its DPI-cycle function.
+
+| Wire index | Bytes | Word | Action |
+| --- | --- | --- | --- |
+| 0 | `01 00 f0` | `0x00F00001` | Left click |
+| 1 | `01 00 f1` | `0x00F10001` | Right click |
+| 2 | `01 00 f2` | `0x00F20001` | Middle click |
+| 3 | `01 00 f3` | `0x00F30001` | **Back** |
+| 4 | `01 00 f4` | `0x00F40001` | **Forward** |
+| 5 | `07 00 03` | `0x00030007` | DPI cycle |
+
+**A BUG this exposed.** `incottDecodeButtonBinding` read only response bytes
+3-5 and dropped the fourth, so any action above 24 bits decoded to a value
+that was never written — "Rapid fire" (`0x0218F00A`) came back as
+`0x0018F00A`. The vendor reads all four
+(`rData[5]<<24|rData[4]<<16|rData[3]<<8|rData[2]`). Fixed, with a regression
+test.
+
+**THE WIRE INDEX IS NOT THE DISPLAY POSITION.** Note rows 3 and 4 above:
+index 3 answers `0xF3` (back) and index 4 answers `0xF4` (forward). The
+vendor addresses buttons through an explicit `matrix` field in its per-model
+key table (`setMsK(dvar.key[i].matrix, code)`), and on this family Forward
+and Back are transposed; every other button's matrix equals its position.
+Using the array position silently remaps the wrong button — and looks like
+it worked. `INCOTT_BUTTON_WIRE_INDEX` encodes this, with a test pinning it.
+
+The rest of the action table (media keys, rapid fire, profile switch,
+disable) is transcribed from the vendor's `kf_hw()` encoder; see
+`INCOTT_BUTTON_ACTIONS`. Remapping was exercised end to end on hardware by
+the device owner on 2026-09-10 and behaves correctly.
+
+**Now wired into `IncottHidClient`**: `readStatus` publishes
+`buttonMappings`/`buttonOptions` and `setButtonMapping(button, action)`
+writes with a verified read-back, so OpenMouse's shared remapper renders
+with no app-side change. All six bindings are read or none are published —
+a partial read would show fabricated defaults, and the shared UI writes back
+what it displays. A binding outside the table reports as `Unknown (0x...)`
+for the same reason.
+
+**Deliberately NOT offered:** keyboard bindings, which are parametric rather
+than a fixed list (`(keycode & 255) << 16 | (modifiers & 255) << 8`, or
+`(keycode & 255) << 8 | 128` with no modifier) and cannot be expressed in the
+flat `buttonOptions` contract; and macros (`slot << 16 | 9`), which need the
+`0x07` upload command.
 
 ### Battery (2026-09-07, DISPROVEN 2026-09-08 — see the top of this document)
 
@@ -736,16 +775,6 @@ capture session has resolved. **Do not resolve these by guessing.**
   given write. **Left unchanged pending a hardware check**: set 0.7 mm in the
   vendor tool, then read `0x84`/`0x01` (or the packed form) and see which
   value comes back.
-- **Button payload semantics — encoding now transcribed, still unverified.**
-  The three bytes `incottDecodeButtonBinding` returns (`b0`/`b1`/`b2`) remain
-  deliberately unnamed here. The vendor's bundle assembles a binding as a
-  32-bit little-endian word (`[6, index, k1, k2, k3, k4, 0, 0]`, read back at
-  frame bytes 3-6), and its semantic tables are known — categories
-  `fMouse=1, fKeyboard=2, fMedia=3, fJuji=4, fAdv=5, fCmd=6`. What is NOT
-  established is how a category/function pair maps into that word: the one
-  observed sample (`1,12` -> `07 00 03`) does not fall out of the obvious
-  packings. Needs a hardware check: bind one button to a series of known
-  functions and capture each.
 - **The remaining `0x8f` identity bytes.** Bytes 2-6 are decoded (model,
   receiver, sensor — see the model-identification section at the end of this
   document). Bytes 7-8 (`00 ff` on this device) are still unknown; a firmware
@@ -761,6 +790,9 @@ capture session has resolved. **Do not resolve these by guessing.**
 
 Resolved since this list was written (kept for the record):
 
+- ~~**Button payload semantics.**~~ A 32-bit little-endian action word; the
+  six factory bindings confirm the mouse rows against hardware. See
+  "Buttons: DECODED and shipped".
 - ~~**Which sensor is fitted.**~~ Byte 6 of the identity reply: `0xF0` =
   PAW3395, `0xF1` = PAW3950.
 - ~~**What `0x86` sub `0x09` means.**~~ The onboard profile index.
@@ -920,13 +952,10 @@ Two independent confirmations:
 
 ### Leads recovered from the same source, not yet implemented
 
-These are transcriptions, unverified against hardware:
+Buttons came from this source and are now **implemented and hardware-
+confirmed** — see "Buttons: DECODED and shipped" above. The rest are still
+transcriptions, unverified against hardware:
 
-- **Buttons** — read `0x86` sub = button index, value is a 32-bit
-  little-endian word at frame bytes 3-6 (`rData[5]<<24|rData[4]<<16|
-  rData[3]<<8|rData[2]`). Write is `0x06`:
-  `[6, index, k1, k2, k3, k4, 0, 0]`. This is the wire encoding the button
-  work was blocked on.
 - **Independent X/Y DPI** — one write per axis, distinguished by a flag at
   byte 7: `[2, ix, dpiLo, dpiHi, 0, 0, 0, flag]` with flag `0` when X == Y,
   then `1` for X and `2` for Y. There is no per-axis read, which is why a Y
