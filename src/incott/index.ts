@@ -614,9 +614,65 @@ export function incottEncodeQuery(cmd: number, sub: number = INCOTT_SUB_NONE): U
   return payload(cmd, sub);
 }
 
+/**
+ * The models that share `093A:522C`/`093A:622C`. All six enumerate under the
+ * same two product ids, so the USB descriptor cannot tell them apart — the
+ * model is carried in the identity reply instead (`incottDecodeIdentity`).
+ *
+ * "Zero 29"/"Zero 39" are the English series names the vendor's own
+ * `text_en` bundle uses (`msg94`/`msg95`); its code calls the same two models
+ * `G29` and `FM23` internally and renders them as 零29/零39.
+ */
+export type IncottModel = "Ghero" | "G23" | "G24" | "G23V2" | "Zero 29" | "Zero 39";
+
+/**
+ * Identity byte 3 -> model, transcribed from the vendor configurator's own
+ * `readDps()` dispatch. That dispatch is authoritative for all six models in
+ * a way one owner's device can never be; only the `0x0e` row is confirmed
+ * against hardware here, since this contributor has only a G23V2.
+ *
+ * `0x08` and `0x0e` BOTH mean G23V2 — the vendor tests them in a single
+ * branch (`8 == rData[2] || 14 == rData[2]`). Two hardware revisions of one
+ * model is the obvious reading, but that is an inference; what is certain is
+ * that the vendor maps both to the same name.
+ */
+const INCOTT_MODEL_BY_CODE: ReadonlyMap<number, IncottModel> = new Map<number, IncottModel>([
+  [0x01, "Ghero"],
+  [0x02, "G23"],
+  [0x03, "G24"],
+  [0x06, "Zero 29"],
+  [0x08, "G23V2"],
+  [0x09, "Zero 39"],
+  [0x0e, "G23V2"],
+]);
+
+/** PixArt PAW3395 — capped at 32000 DPI in the vendor's own DPI table. */
+export const INCOTT_SENSOR_PAW3395 = 0x3395;
+/** PixArt PAW3950 — capped at 45000 DPI, and what the "Pro" suffix means. */
+export const INCOTT_SENSOR_PAW3950 = 0x3950;
+
+/** Identity byte 2 is a fixed `0x01` guard; the vendor rejects the device otherwise. */
+const INCOTT_IDENTITY_GUARD = 0x01;
+/** Identity sensor byte: `0xF1` selects the PAW3950 profile, anything else the PAW3395. */
+const INCOTT_IDENTITY_SENSOR_PAW3950 = 0xf1;
+/** Identity byte 4 — `0x02` is the 8 KHz receiver. */
+const INCOTT_IDENTITY_8K_RECEIVER = 0x02;
+
 export interface IncottDeviceIdentity {
   /** Space-separated hex of the identity payload, for the details panel. */
   raw: string;
+  /** Decoded model, or null when byte 3 carries a code this table does not know. */
+  model: IncottModel | null;
+  /** Raw byte 3, kept even when unrecognised so an unknown model can still be reported. */
+  modelCode: number | null;
+  /** Model plus a " Pro" suffix when the PAW3950 is fitted, e.g. "G23V2 Pro". */
+  displayName: string | null;
+  /** The FITTED sensor, from byte 6: `INCOTT_SENSOR_PAW3395` or `INCOTT_SENSOR_PAW3950`. */
+  sensorId: number | null;
+  /** True when the PAW3950 is fitted — what the vendor's "Pro" suffix means. */
+  isPro: boolean;
+  /** True when byte 4 reports the 8 KHz receiver. */
+  is8KReceiver: boolean;
 }
 
 /**
@@ -899,12 +955,79 @@ export function incottDecodeButtonBinding(frame: Uint8Array, button: number): In
   return { button, b0: frame[3]!, b1: frame[4]!, b2: frame[5]! };
 }
 
+/**
+ * Decodes the identity reply (`09 8f 00` -> `09 8f 01 0e 02 f0 f1 00 ff`).
+ *
+ * Byte map, transcribed from the vendor configurator's `readDps()` and
+ * confirmed byte-for-byte against this contributor's G23V2 (capture
+ * 2026-09-07, `captures/incott-8k-wireless/query-sweep-0x80-0x8f.hex`):
+ *
+ *     byte 2  guard, always 0x01   -- the vendor abandons the device otherwise
+ *     byte 3  model code           -- 0x0e = G23V2, see INCOTT_MODEL_BY_CODE
+ *     byte 4  receiver type        -- 0x02 = 8 KHz receiver
+ *     byte 5  sensor profile, WIRED link    -- 0xF0 -> PAW3395, 0xF1 -> PAW3950
+ *     byte 6  sensor profile, WIRELESS link
+ *
+ * WHY BYTE 6 AND NOT BYTE 5: the vendor picks its sensor byte by connection
+ * (`let i = this.iswireless ? 5 : 4` over its own report-id-less buffer), and
+ * on this G23V2 the two bytes DISAGREE — `f0 f1`. Taken as hardware identity
+ * that is a contradiction: a mouse does not swap sensors when a cable goes
+ * in. Taken as a per-link CAPABILITY profile it is consistent, because the
+ * vendor feeds this value straight into `getStDPI(sensor)` to pick a DPI
+ * ceiling (PAW3395 -> 32000, PAW3950 -> 45000) — and the cable is already
+ * known to be the reduced-capability path on this device, capping polling at
+ * 1000 Hz (see `INCOTT_POLLING_STEPS_HZ_WIRED`).
+ *
+ * So the FITTED sensor is read from byte 6, the full-capability slot, and the
+ * decoded name is therefore stable across wired and wireless. The vendor's
+ * own tool is not: because it re-reads the byte by connection, it labels this
+ * one physical mouse "G23V2Pro" on the dongle and "G23V2" on the cable. That
+ * cosmetic flip is deliberately NOT mirrored — a model name that changes when
+ * you plug in a cable is a worse answer than the hardware's own.
+ *
+ * This is the one inference in this decoder rather than a transcription, and
+ * it is falsifiable: if the vendor tool ever shows "G23V2Pro" while WIRED,
+ * byte 5 is not a wired-capability profile and this reading is wrong. Byte 5
+ * is otherwise unused here — a per-link DPI ceiling is not implemented,
+ * because nothing has yet confirmed the cable actually caps DPI at 32000.
+ *
+ * Returns `null` ONLY when the report id or command echo is wrong — `open()`
+ * uses that as its collection-liveness probe. A frame that is well-formed
+ * but too short, or whose guard byte is not `0x01`, still yields an identity
+ * carrying `raw` with every decoded field left null: an unreadable model is
+ * reported as unknown, never guessed.
+ */
 export function incottDecodeIdentity(frame: Uint8Array): IncottDeviceIdentity | null {
   if (frame[0] !== INCOTT_REPORT_ID || frame[1] !== INCOTT_CMD_QUERY_IDENTITY) return null;
   const raw = Array.from(frame.slice(2, 9))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join(" ");
-  return { raw };
+  const unknown: IncottDeviceIdentity = {
+    raw,
+    model: null,
+    modelCode: null,
+    displayName: null,
+    sensorId: null,
+    isPro: false,
+    is8KReceiver: false,
+  };
+  if (frame.length < 7) return unknown;
+  if (frame[2] !== INCOTT_IDENTITY_GUARD) return unknown;
+  const modelCode = frame[3]!;
+  const model = INCOTT_MODEL_BY_CODE.get(modelCode) ?? null;
+  const sensorId = frame[6] === INCOTT_IDENTITY_SENSOR_PAW3950
+    ? INCOTT_SENSOR_PAW3950
+    : INCOTT_SENSOR_PAW3395;
+  const isPro = sensorId === INCOTT_SENSOR_PAW3950;
+  return {
+    raw,
+    model,
+    modelCode,
+    displayName: model === null ? null : isPro ? `${model} Pro` : model,
+    sensorId,
+    isPro,
+    is8KReceiver: frame[4] === INCOTT_IDENTITY_8K_RECEIVER,
+  };
 }
 
 /**
@@ -931,20 +1054,17 @@ export function incottIsWiredProduct(productId: number): boolean {
  * "incott Esports G23V2Pro mouse" -> "Esports G23V2Pro"
  * "incott 8K wireless mouse"      -> "8K wireless"
  *
- * WHY THIS EXISTS: the real model name ("Esports G23V2Pro") is only present
- * in the WIRED product string — hardware-verified 2026-09-08. The wireless
- * dongle's product string ("incott 8K wireless mouse") is a generic name
- * with no model in it at all, and there is no way to read the model while
- * connected wirelessly: this driver does NOT infer or guess a model in that
- * case, since doing so would be a fabricated value. This function only
- * TIDIES whatever raw string the device actually reported; it never invents
- * one.
+ * WHY THIS EXISTS: the product string names a model only over the CABLE
+ * ("incott Esports G23V2Pro mouse", hardware-verified 2026-09-08); the
+ * wireless dongle reports a generic "incott 8K wireless mouse" with no model
+ * in it at all. This function only TIDIES whatever raw string the device
+ * actually reported; it never invents one.
  *
- * The identity query's reply (`09 8f 00` -> `01 0e 02 f0 f1 00 ff`, see
- * `incottDecodeIdentity`) has NOT been decoded — its byte layout is unknown
- * — so it is not currently a source for the model name either, wired or
- * wireless. If a future capture decodes it, this comment is the place to
- * update.
+ * This is now the FALLBACK, not the primary source. The identity reply's
+ * byte layout has since been decoded (`incottDecodeIdentity`), so
+ * `IncottHidClient.readStatus` prefers the model read from the device —
+ * which works wirelessly too — and drops back to this function only when the
+ * identity query fails or reports a model code the table does not know.
  */
 export function incottNormalizeProductName(raw: string): string {
   const words = raw.trim().split(/\s+/).filter((word) => word.length > 0);

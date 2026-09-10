@@ -561,14 +561,14 @@ export class IncottHidClient {
     // CONNECTION is wired, and charging is a consequence of that, not what
     // the id itself encodes. See `incottIsWiredProduct`.
     const wired = incottIsWiredProduct(this.device.productId);
-    // The real model name ("Esports G23V2Pro") lives only in the WIRED
-    // product string; wireless reports a generic "incott 8K wireless mouse"
-    // with no model in it, and there is no way to read a model over the air
-    // — see `incottNormalizeProductName`'s doc comment. `this.device` stays
-    // public, so `client.device.productName` remains available as the
+    // Fallback display name only — the model read from the device wins where
+    // one is available, and `name` is settled below once the identity query
+    // has answered. The product string names a model over the cable
+    // ("incott Esports G23V2Pro mouse") but is a generic "incott 8K wireless
+    // mouse" on the dongle, so it cannot be the primary source. `this.device`
+    // stays public, so `client.device.productName` remains available as the
     // untouched raw string for anything that wants it.
     const rawName = this.device.productName || "Incott wireless mouse";
-    const name = incottNormalizeProductName(rawName);
 
     // WIRED-MODE BUG, hardware-verified 2026-09-08 (see `open()`'s class
     // comment): when `open()`'s identity probe found this collection dead,
@@ -669,11 +669,24 @@ export class IncottHidClient {
     // right now, so it is used here instead of inferring the state from the
     // connection.
     const batteryCharging = this.lastInputStatus?.charging ?? null;
-    // Section 13 of the IncottHub spec: the identity byte layout is unknown,
-    // so the raw hex is shown rather than pretending to parse a version.
+    // The identity reply carries the model, the sensor and the receiver type
+    // — see `incottDecodeIdentity` for the byte map. The raw hex is still
+    // published under `firmware` below, because the remaining bytes (7-8) are
+    // genuinely undecoded and a capture of them is what a second model's
+    // owner would need to send.
     const identity = dead
       ? null
       : incottDecodeIdentity(await this.query(INCOTT_CMD_QUERY_IDENTITY, INCOTT_SUB_NONE));
+
+    // The model READ FROM THE DEVICE is preferred over the product string:
+    // it is the only source that works on the 2.4 GHz dongle, where the
+    // product string has no model in it. All six Incott models share the
+    // same two product ids, so this is the only thing that tells them apart
+    // at all. Falls back to the tidied product string whenever the identity
+    // query failed or returned a model code outside the known table — an
+    // unrecognised model reports whatever the device called itself rather
+    // than a guess.
+    const name = identity?.displayName ?? incottNormalizeProductName(rawName);
 
     // The owner confirmed on hardware that the mouse only reaches 1000 Hz
     // over the cable — 2000/4000/8000 Hz are wireless-only (see

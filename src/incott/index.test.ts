@@ -43,6 +43,8 @@ import {
   INCOTT_POLLING_STEPS_HZ_WIRED,
   INCOTT_PRODUCT_ID,
   INCOTT_PRODUCT_ID_WIRED,
+  INCOTT_SENSOR_PAW3395,
+  INCOTT_SENSOR_PAW3950,
 } from "./index.ts";
 
 const bytes = (frame: Uint8Array): number[] => Array.from(frame);
@@ -511,6 +513,82 @@ test("identity returns the raw payload for display", () => {
 
 test("identity returns null when the frame is not an identity response", () => {
   assert.equal(incottDecodeIdentity(frame(0x84, 0x00)), null);
+});
+
+// The capture this contributor's hardware produced, wired and wireless
+// alike: 09 8f 01 0e 02 f0 f1 00 ff. Byte 3 (0x0e) is the model, byte 4
+// (0x02) the receiver, bytes 5/6 (f0/f1) the wired/wireless sensor.
+const IDENTITY_G23V2 = frame(0x8f, 0x01, 0x0e, 0x02, 0xf0, 0xf1, 0x00, 0xff);
+
+test("identity decodes the model, sensor and receiver from the G23V2 capture", () => {
+  const identity = incottDecodeIdentity(IDENTITY_G23V2);
+  assert.equal(identity?.model, "G23V2");
+  assert.equal(identity?.modelCode, 0x0e);
+  assert.equal(identity?.is8KReceiver, true);
+});
+
+test("identity reads the fitted sensor from byte 6, so the name is the same wired and wireless", () => {
+  // Bytes 5 and 6 disagree (f0/f1) on this device. The vendor picks between
+  // them by connection and so renames the same physical mouse when a cable
+  // goes in; byte 6 is the full-capability slot and is used unconditionally
+  // here. See `incottDecodeIdentity` for why, and for how to falsify it.
+  const identity = incottDecodeIdentity(IDENTITY_G23V2);
+  assert.equal(identity?.sensorId, INCOTT_SENSOR_PAW3950);
+  assert.equal(identity?.isPro, true);
+  assert.equal(identity?.displayName, "G23V2 Pro");
+});
+
+test("identity reports the PAW3395 and drops the Pro suffix when byte 6 is 0xf0", () => {
+  const identity = incottDecodeIdentity(frame(0x8f, 0x01, 0x0e, 0x02, 0xf0, 0xf0, 0x00, 0xff));
+  assert.equal(identity?.sensorId, INCOTT_SENSOR_PAW3395);
+  assert.equal(identity?.isPro, false);
+  assert.equal(identity?.displayName, "G23V2");
+});
+
+test("identity maps every model code the vendor's own dispatch knows", () => {
+  const codeToModel: ReadonlyArray<readonly [number, string]> = [
+    [0x01, "Ghero"],
+    [0x02, "G23"],
+    [0x03, "G24"],
+    [0x06, "Zero 29"],
+    [0x08, "G23V2"],
+    [0x09, "Zero 39"],
+    [0x0e, "G23V2"],
+  ];
+  for (const [code, model] of codeToModel) {
+    const identity = incottDecodeIdentity(frame(0x8f, 0x01, code, 0x02, 0xf0, 0xf0, 0x00, 0xff));
+    assert.equal(identity?.model, model, `model code 0x${code.toString(16)}`);
+    // byte 6 is 0xf0 here, so the PAW3395 profile and no "Pro" suffix.
+    assert.equal(identity?.displayName, model);
+  }
+});
+
+test("identity reports an unknown model code rather than guessing one", () => {
+  const identity = incottDecodeIdentity(frame(0x8f, 0x01, 0x7f, 0x02, 0xf0, 0xf1, 0x00, 0xff));
+  assert.notEqual(identity, null);
+  assert.equal(identity?.model, null);
+  assert.equal(identity?.displayName, null);
+  // The raw code is still surfaced, so an unrecognised device can be reported.
+  assert.equal(identity?.modelCode, 0x7f);
+});
+
+test("identity decodes no model when the guard byte is not 0x01", () => {
+  // The vendor abandons the device entirely on this; here it degrades to
+  // raw-only rather than decoding whatever happens to sit at byte 3.
+  const identity = incottDecodeIdentity(frame(0x8f, 0x00, 0x0e, 0x02, 0xf0, 0xf1, 0x00, 0xff));
+  assert.notEqual(identity, null);
+  assert.equal(identity?.model, null);
+  assert.equal(identity?.modelCode, null);
+  assert.equal(identity?.sensorId, null);
+});
+
+test("identity decodes no model from a frame too short to carry one", () => {
+  // Built directly rather than through `frame`, which always pads to 64.
+  const identity = incottDecodeIdentity(new Uint8Array([0x09, 0x8f, 0x01, 0x0e]));
+  assert.notEqual(identity, null);
+  assert.equal(identity?.model, null);
+  assert.equal(identity?.sensorId, null);
+  assert.equal(identity?.isPro, false);
 });
 
 test("incottIsWiredProduct is true only for the wired product id (0x622C), hardware-verified 2026-09-08", () => {

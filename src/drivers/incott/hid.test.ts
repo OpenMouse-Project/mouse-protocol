@@ -436,9 +436,11 @@ test("readStatus decodes every field from the device's current state", async () 
   // active.
   const status = await client.readStatus();
   assert.equal(status.brand, "Incott");
-  // Normalized for display (see incottNormalizeProductName): the raw string
-  // remains available as client.device.productName.
-  assert.equal(status.name, "8K wireless");
+  // Read FROM THE DEVICE, not from the product string: the dongle reports a
+  // generic "incott 8K wireless mouse" with no model in it, while the
+  // identity reply names the model (see `incottDecodeIdentity`). The raw
+  // string remains available as client.device.productName.
+  assert.equal(status.name, "G23V2 Pro");
   assert.equal(device.productName, "incott 8K wireless mouse", "the raw product string stays available on the device");
   assert.equal(status.connectionType, "Wireless");
   assert.equal(status.dpi, 800);
@@ -469,7 +471,7 @@ test("readStatus decodes every field from the device's current state", async () 
   assert.equal(status.ui?.family, "incott");
   assert.equal(status.ui?.showAdvancedSection, true);
   assert.equal(status.ui?.hideSignalCard, true);
-  assert.equal(status.ui?.defaultDisplayName, "8K wireless");
+  assert.equal(status.ui?.defaultDisplayName, "G23V2 Pro");
   assert.equal(status.ui?.hideUnsupportedPollingRates, true);
   assert.equal(status.ui?.pollingNote, "Up to 8,000 Hz wireless; 1,000 Hz over the cable.");
   // The mouse has a real internal battery even while wired, so the app's
@@ -599,15 +601,28 @@ test("supportedPollingRates offers the full ladder over the wireless connection"
   assert.equal(status.ui?.pollingNote, "Up to 8,000 Hz wireless; 1,000 Hz over the cable.");
 });
 
-test("readStatus normalizes the wired product string down to its real model name", async () => {
-  // Verified 2026-09-08: the real model name is only present in the wired
-  // product string. The wireless dongle's string is a generic name with no
-  // model in it — readStatus tidies whichever raw string it gets without
-  // inventing a model when wireless.
+test("readStatus reports the same model name wired as wireless", async () => {
+  // The wired product string does carry a model ("incott Esports G23V2Pro
+  // mouse", verified 2026-09-08) while the dongle's does not, so relying on
+  // it would name the mouse differently depending on how it is plugged in.
+  // The identity reply is the same either way, so the name is too. The raw
+  // string stays available for anything that wants it.
   const { device } = fakeDevice({ productId: INCOTT_PRODUCT_ID_WIRED, productName: "incott Esports G23V2Pro mouse" });
   const status = await new IncottHidClient(device, fast).readStatus();
-  assert.equal(status.name, "Esports G23V2Pro");
+  assert.equal(status.name, "G23V2 Pro");
   assert.equal(device.productName, "incott Esports G23V2Pro mouse", "the raw string stays available on the device");
+});
+
+test("readStatus falls back to the product string when the model code is unknown", async () => {
+  // An Incott model this table has never seen must report whatever the
+  // device called itself, never a guess.
+  const { device } = fakeDevice({
+    productId: INCOTT_PRODUCT_ID_WIRED,
+    productName: "incott Esports G99 mouse",
+    state: { identity: [0x01, 0x7f, 0x02, 0xf0, 0xf1, 0x00, 0xff] },
+  });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.name, "Esports G99");
 });
 
 test("firmware falls back to a plain notice when identity cannot be read", async () => {
@@ -620,7 +635,9 @@ test("readStatus degrades to identity-only fields rather than fabricate the poll
   const { device } = fakeDevice({ silent: [0x81] });
   const client = new IncottHidClient(device, fast);
   const status = await client.readStatus();
-  assert.equal(status.name, "8K wireless");
+  // The identity query still answers here — only 0x81 is silent — so the
+  // model is still read from the device.
+  assert.equal(status.name, "G23V2 Pro");
   assert.equal(status.brand, "Incott");
   assert.equal(status.pollingRateHz, 0, "inert placeholder, never rendered because settingsReady is false");
   assert.equal(status.ui?.settingsReady, false);

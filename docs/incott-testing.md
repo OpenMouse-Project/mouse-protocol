@@ -591,7 +591,7 @@ in "Unresolved unknowns" below: the fix would be finding the read the vendor
 tool itself uses to display separate X and Y DPI values, if it has one. See
 `captures/incott-8k-wireless/vendor-tool-session-2026-09-10.hex`.
 
-## Onboard profiles are NOT a device feature (2026-09-10)
+## Onboard profiles: the settings are replayed by the host (2026-09-10, corrected below)
 
 Switching the vendor UI from "Onboard 1" to "Onboard 2" was instrumented end
 to end. **It emitted no profile-select command at all.** Instead it replayed
@@ -601,23 +601,36 @@ performance mode, lift-off, the three sensor toggles, receiver LED, debounce
 and sleep, roughly 23 writes in total, indistinguishable from a user manually
 re-entering every setting by hand.
 
-**There is no on-device command to search for here.** "Onboard profiles" are
-a construct of the vendor's own configurator software, which apparently
-stores a full settings snapshot per named slot and replays it wholesale on
-selection; the mouse itself has no concept of a stored, selectable profile.
-Recording this so nobody spends time hunting for a `0x0N`/profile-select
-opcode that does not exist.
+The settings themselves are a construct of the vendor's own configurator,
+which stores a full snapshot per named slot and replays it wholesale on
+selection. Nothing in the capture suggests the mouse stores per-slot
+settings of its own.
 
-One write at the very end of each replay is not accounted for by any known
-setting: `09 06 09 <00|01>`. Button indices only run 0-5 (`INCOTT_BUTTON_COUNT`),
-so `09` here is not a button index — this is a distinct write under command
-`0x06`. **Leading hypothesis, UNCONFIRMED**: the vendor UI has an "Invert the
-left and right button" toggle, and the two onboard slots in this session
-happened to have that toggle in different states. This was not tested in
-isolation (toggling that control on its own with nothing else changed), so it
-remains a hypothesis, not a confirmed mapping — do not implement it from this
-capture alone. See
-`captures/incott-8k-wireless/vendor-tool-session-2026-09-10.hex`.
+### CORRECTION 2026-09-10: a profile-select command DOES exist
+
+The paragraph that stood here said "there is no on-device command to search
+for" and offered a hypothesis for one unexplained write. Both were wrong, and
+the vendor's own deobfuscated bundle names the write directly:
+
+```js
+setProfileIndex(index)  { [6, 9, index, 0, 0, 0, 0, 0] }   // -> 09 06 09 <index>
+readProfileIndex()      { readKEY(9) }                     // -> 09 86 09
+```
+
+That is exactly the `09 06 09 <00|01>` write logged at the end of each
+replay, and the **"invert left and right button" hypothesis recorded for it
+was wrong** — it is the profile index. The vendor also reads it back at
+connect time, so the mouse genuinely stores a selectable index.
+
+What survives from the original finding: switching slots still replays ~23
+ordinary setting writes, so the index alone does not appear to make the mouse
+swap a stored configuration. Whether the device stores anything at all
+against that index is untested.
+
+Neither command is implemented here — both are transcriptions, unverified on
+hardware. See
+`captures/incott-8k-wireless/vendor-tool-session-2026-09-10.hex` and the
+model-identification section at the end of this document.
 
 ## READS: verified on hardware
 
@@ -723,35 +736,36 @@ capture session has resolved. **Do not resolve these by guessing.**
   given write. **Left unchanged pending a hardware check**: set 0.7 mm in the
   vendor tool, then read `0x84`/`0x01` (or the packed form) and see which
   value comes back.
-- **Button payload semantics.** The three bytes `incottDecodeButtonBinding`
-  returns (`b0`/`b1`/`b2`) are deliberately unnamed: whether they encode a
-  key code, a macro reference, or a remap target is not established. Needs a
-  hardware check: write a series of known key bindings through the vendor
-  tool and see how the three bytes change.
-- **Which sensor is fitted.** PAW3395 caps at 32000 DPI, PAW3950 at 45000.
-  The 25000 DPI write confirmed on 2026-09-08 is below both known ceilings,
-  so it does not distinguish them. This driver assumes 45000 (the higher
-  ceiling) for every unit since the sensor variant cannot currently be read;
-  confirming the cap on a PAW3395 unit (and finding a way to detect which
-  sensor is fitted, if one exists) is an open question.
-- **What `0x86` sub `0x09` means.** The vendor tool queries this
-  specifically (`09 86 09`); its payload is undecoded and is not a button
-  index (buttons only go up to 5).
-- **The byte layout of the `0x8f` identity response.** The raw bytes are
-  captured and shown as-is in the details panel (see
-  `incottDecodeIdentity`), but no field within them (firmware version,
-  hardware revision, etc.) has been decoded.
-- **DPI per-axis read.** The 2026-09-10 capture found a write-side axis byte
-  (payload index 7: 0 = both, 1 = X only, 2 = Y only — see "DPI write axis
-  byte" below) but no corresponding per-axis READ: probing `0x82` with the
-  axis byte set to 0, 1 and 2 returned the identical value every time. Without
-  a read to verify a Y-only write against, this driver does not implement
-  independent X/Y DPI. Needs a hardware check: find the read the vendor tool
-  itself uses to display separate X and Y DPI values (if it does).
-- **The `09 06 09 <00|01>` write seen at the end of an onboard-profile
-  replay.** See "Onboard profiles are not a device feature" below. Leading
-  hypothesis: the vendor UI's "Invert the left and right button" toggle —
-  UNCONFIRMED, not tested in isolation.
+- **Button payload semantics — encoding now transcribed, still unverified.**
+  The three bytes `incottDecodeButtonBinding` returns (`b0`/`b1`/`b2`) remain
+  deliberately unnamed here. The vendor's bundle assembles a binding as a
+  32-bit little-endian word (`[6, index, k1, k2, k3, k4, 0, 0]`, read back at
+  frame bytes 3-6), and its semantic tables are known — categories
+  `fMouse=1, fKeyboard=2, fMedia=3, fJuji=4, fAdv=5, fCmd=6`. What is NOT
+  established is how a category/function pair maps into that word: the one
+  observed sample (`1,12` -> `07 00 03`) does not fall out of the obvious
+  packings. Needs a hardware check: bind one button to a series of known
+  functions and capture each.
+- **The remaining `0x8f` identity bytes.** Bytes 2-6 are decoded (model,
+  receiver, sensor — see the model-identification section at the end of this
+  document). Bytes 7-8 (`00 ff` on this device) are still unknown; a firmware
+  version is the obvious candidate but nothing confirms it.
+- **DPI per-axis read — probably does not exist.** The 2026-09-10 capture
+  found a write-side axis byte (payload index 7: 0 = both, 1 = X, 2 = Y) but
+  no per-axis READ: probing `0x82` with the axis byte set to 0, 1 and 2
+  returned the identical value every time. The vendor's own code matches
+  this — `setResolution` sends two writes distinguished by that flag and has
+  no per-axis read at all, so its UI must track X and Y host-side. Without a
+  read to verify a Y-only write against, this driver still does not implement
+  independent X/Y DPI.
+
+Resolved since this list was written (kept for the record):
+
+- ~~**Which sensor is fitted.**~~ Byte 6 of the identity reply: `0xF0` =
+  PAW3395, `0xF1` = PAW3950.
+- ~~**What `0x86` sub `0x09` means.**~~ The onboard profile index.
+- ~~**The `09 06 09 <00|01>` write.**~~ The profile-index write, not a
+  left/right invert toggle — see the correction under "Onboard profiles".
 
 ## Attribution
 
@@ -769,6 +783,14 @@ vendor's own WebHID configurator, and `write-roundtrip.hex` (2026-09-08)
 taken directly from hardware with node-hid while performing real,
 subsequently-restored writes — none of the three is reproduced from
 IncottHIDApp.
+
+The identity byte map (model code, receiver type, sensor) and the command
+layouts listed as transcriptions above were established by reading the
+vendor's own publicly served configurator bundle at `incott.net/mouse/js/`
+for interoperability. No vendor code is copied into this driver: what is
+reused is the wire format — which byte carries which field — reimplemented
+here with its own decoders, tests and hardware confirmation where a device
+was available to give it.
 
 ## Lift-off distance mapping — resolved 2026-09-08
 
@@ -788,43 +810,126 @@ Only the 0.7 mm point was read back directly. Hardware `0` and `1` are 1 mm and
 was testable proved correct, but neither of those two values has been read
 individually.
 
-## Model identification is not solved (searched 2026-09-10)
+## Model identification: SOLVED 2026-09-10 — it is `0x8F`
 
-The HID product string only names the model over the cable
-(`incott Esports G23V2Pro mouse`); on the 2.4 GHz dongle it reports the generic
-`incott 8K wireless mouse`. Incott's own configurator nevertheless displays
-`G23V2Pro` while wireless, so the model is derivable somehow. This is what was
-ruled out looking for it.
+The identity reply was sitting in the very first capture taken for this
+driver, undecoded for three days:
 
-**The sensor id is not in any feature report.** The vendor's device definition
-picks the DPI ceiling from a sensor id (`0x3395` PAW3395 caps at 32000,
-`0x3950` PAW3950 at 45000), and this unit's own profile export records
-`dpisensor:14672` = `0x3950`. Every query command `0x80`-`0x8F` was swept
-against sub-commands `0x00`-`0x1F` and **no response contains `0x3950` in
-either byte order**. The tool does not read it as a raw 16-bit value.
+```
+09 8f 01 0e 02 f0 f1 00 ff        captures/incott-8k-wireless/query-sweep-0x80-0x8f.hex
+```
 
-**It must therefore come from the startup reads.** The captured init sequence
-performs only six: `0x8F`, `0x8E`/`0x01`, `0x89`, `0x83`, `0x85`/`0x03` and
-`0x86`/`0x09`. The only identity-shaped response is:
+### Why the earlier search failed
 
-    09 8f 01 0e 02 f0 f1 00
+The previous section of this document (kept below in summary) recorded model
+identification as unsolved after sweeping every query command `0x80`-`0x8F`
+against sub-commands `0x00`-`0x1F` looking for the sensor id `0x3950` as a
+raw 16-bit value. **It is not transmitted as one.** The sensor is a single
+byte — `0xF0`/`0xF1` — expanded into `0x3395`/`0x3950` by a lookup on the
+host. No amount of sweeping would have found it, and the model itself is a
+different byte again.
 
-Byte 3 (`0x01`) is a plausible model code, but that is **one sample from one
-device** and it is equally consistent with a firmware major version. It is not
-implemented on that basis — an earlier battery hypothesis in this driver was
-adopted from a single coincidental match and later disproven by a charge cycle.
-One sample is not evidence.
+The first search also stopped at "the vendor's JavaScript is obfuscated".
+That was true but not an obstacle: the obfuscation is mechanical and reverses
+in a few lines — decode `\uXXXX` escapes, fold the `(A^B)` junk arithmetic to
+constants, and reverse the `"abc".split("").reverse().join("")` string
+literals. `readDps()` is then plain to read.
 
-**The vendor's JavaScript is deliberately obfuscated**, which is why static
-analysis stops here: property names appear as unicode escape sequences (for
-example `sensor` for `sensor`), control flow
-is padded with junk XOR arithmetic, and identifiers are scrambled. Nothing
-matching `sendFeatureReport` or `navigator.hid` appears literally in any shipped
-file. The derivation runs through an internal object (`getStDPI(ace.sensor)`);
-recovering it means deobfuscating the bundle, not grepping it.
+### The byte map
 
-**What would settle it cheaply:** determine whether different Incott models
-enumerate under different USB product ids. If a G23 and a G23V2 differ, model
-detection needs no protocol work at all and is trivially verifiable. If they
-share `093A:522C`, the identity response has to be decoded, which needs a
-capture from a second model — this contributor has only a G23V2Pro.
+`rData` in the vendor's code is the report **without** the report id, so
+`rData[n]` is `frame[n+1]` here. Transcribed from its `readDps()`:
+
+| Frame byte | Meaning | This device |
+| --- | --- | --- |
+| 2 | guard, must be `0x01` | `0x01` |
+| 3 | **model code** | `0x0E` = G23V2 |
+| 4 | receiver type, `0x02` = 8 KHz | `0x02` |
+| 5 | sensor profile, WIRED link | `0xF0` = PAW3395 |
+| 6 | sensor profile, WIRELESS link | `0xF1` = PAW3950 |
+| 7-8 | still undecoded | `00 ff` |
+
+Model codes, and the names the vendor's `text_en` bundle gives them:
+
+| Code | Vendor internal | Displayed |
+| --- | --- | --- |
+| `0x01` | `Ghero` | Ghero |
+| `0x02` | `G23` | G23 |
+| `0x03` | `G24` | G24 |
+| `0x06` | `G29` | Zero 29 (零29) |
+| `0x08` | `G23V2` | G23V2 |
+| `0x09` | `FM23` | Zero 39 (零39) |
+| `0x0E` | `G23V2` | G23V2 |
+
+`0x08` and `0x0E` are both G23V2 — the vendor tests them in one branch. Only
+the `0x0E` row is confirmed against hardware here; the rest are transcribed
+from a dispatch table that is authoritative for models this contributor does
+not own.
+
+The sensor decides the "Pro" suffix: the vendor appends `Pro` when the sensor
+is `0x3950`, which is how `G23V2Pro` appears for a device whose HID product
+string only ever says `incott 8K wireless mouse`.
+
+### The one inference, and how to falsify it
+
+Bytes 5 and 6 **disagree on this device** (`f0 f1`), and the vendor picks
+between them by connection (`let i = this.iswireless ? 5 : 4`). Read as
+hardware identity that is a contradiction — a mouse does not change sensors
+when a cable goes in — so the vendor's own tool necessarily labels this one
+physical mouse `G23V2Pro` on the dongle and `G23V2` on the cable.
+
+Read as a per-link **capability** profile it is consistent: the value feeds
+`getStDPI(sensor)`, which selects a DPI ceiling (PAW3395 -> 32000,
+PAW3950 -> 45000), and the cable is already the reduced-capability path on
+this device, capping polling at 1000 Hz.
+
+`incottDecodeIdentity` therefore reads the fitted sensor from **byte 6**
+unconditionally, so the decoded name is stable across connections. This is
+the only inference in that decoder rather than a transcription.
+
+**To falsify it:** connect the mouse by cable and read what the vendor tool
+displays. If it shows `G23V2Pro` while wired, byte 5 is not a wired
+capability profile and this reading is wrong. A per-link DPI ceiling is
+deliberately NOT implemented — nothing has confirmed the cable caps DPI at
+32000.
+
+### What this replaces
+
+`MouseStatus.name` now comes from the identity reply, falling back to
+`incottNormalizeProductName` only when the query fails or the model code is
+outside the table above. The product string is no longer the primary source:
+it names a model over the cable and not on the dongle, so relying on it
+renamed the mouse depending on how it was plugged in.
+
+### Product ids cannot distinguish models — confirmed
+
+All six models enumerate as `093A:522C` (wireless) / `093A:622C` (wired).
+Two independent confirmations:
+
+- The vendor's own WebHID filter, recovered from the deobfuscated bundle, is
+  exactly those two product ids plus usage page `0xFF05`, usage `0x01`:
+  ```js
+  [{vendorId: 0x093A, productId: 0x622C, usagePage: 0xFF05, usage: 0x01},
+   {vendorId: 0x093A, productId: 0x522C, usagePage: 0xFF05, usage: 0x01}]
+  ```
+  This independently confirms the `0xFF05` collection match this driver
+  already uses (see "Wired mode was completely broken" above).
+- [IncottHIDApp](https://github.com/romkazor/IncottHIDApp)'s compatibility
+  table lists Ghero, G23, G24, G23V2, Zero 29 and Zero 39 against the same
+  two ids, with three constants in `device.go` and no per-model table.
+
+### Leads recovered from the same source, not yet implemented
+
+These are transcriptions, unverified against hardware:
+
+- **Buttons** — read `0x86` sub = button index, value is a 32-bit
+  little-endian word at frame bytes 3-6 (`rData[5]<<24|rData[4]<<16|
+  rData[3]<<8|rData[2]`). Write is `0x06`:
+  `[6, index, k1, k2, k3, k4, 0, 0]`. This is the wire encoding the button
+  work was blocked on.
+- **Independent X/Y DPI** — one write per axis, distinguished by a flag at
+  byte 7: `[2, ix, dpiLo, dpiHi, 0, 0, 0, flag]` with flag `0` when X == Y,
+  then `1` for X and `2` for Y. There is no per-axis read, which is why a Y
+  write could never be verified.
+- **Profile select** — `[6, 9, index, 0, 0, 0, 0, 0]`, read back via
+  `0x86` sub `0x09`. See the correction in "Onboard profiles" above.
