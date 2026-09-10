@@ -368,15 +368,49 @@ function fakeDevice(options: FakeOptions = {}) {
 
 const fast: IncottTransactionOptions = { settleMs: 0, attempts: 3, sleep: async () => {} };
 
-test("isSupported matches the Incott vendor/product ids and a >=0xFF00 usage page", () => {
+/** A vendor collection that declares some OTHER feature report id. */
+function siblingCollection(usagePage: number, reportId: number): HIDCollectionInfo {
+  return {
+    usagePage,
+    usage: 0x01,
+    type: 1,
+    children: [],
+    featureReports: [{ reportId, items: [] }],
+    inputReports: [],
+    outputReports: [],
+  } as unknown as HIDCollectionInfo;
+}
+
+test("isSupported requires the 0xFF05 collection that declares feature report 0x09", () => {
   assert.equal(IncottHidClient.isSupported(fakeDevice().device), true);
   assert.equal(IncottHidClient.isSupported(fakeDevice({ productId: INCOTT_PRODUCT_ID_WIRED }).device), true);
   assert.equal(IncottHidClient.isSupported(fakeDevice({ productId: 0x1234 }).device), false);
   assert.equal(IncottHidClient.isSupported({ ...fakeDevice().device, vendorId: 0x1532 } as HIDDevice), false);
   assert.equal(IncottHidClient.isSupported(fakeDevice({ collections: [vendorCollection(0x0001)] }).device), false);
   assert.equal(IncottHidClient.isSupported(fakeDevice({ collections: [] }).device), false);
-  // The fallback boundary: any page >= 0xFF00, not only 0xFF05.
-  assert.equal(IncottHidClient.isSupported(fakeDevice({ collections: [vendorCollection(0xff00)] }).device), true);
+  // A vendor page alone is not enough — it must also declare report 0x09.
+  assert.equal(IncottHidClient.isSupported(fakeDevice({ collections: [vendorCollection(0xff00)] }).device), false);
+  assert.equal(
+    IncottHidClient.isSupported(fakeDevice({ collections: [siblingCollection(INCOTT_USAGE_PAGE, 0x03)] }).device),
+    false,
+  );
+});
+
+test("isSupported claims the mouse exactly once across its real collection set", () => {
+  // Enumerated from a connected G23V2Pro on 2026-09-10. The mouse presents as
+  // several HIDDevices; only the 0xFF05 collection declaring feature report
+  // 0x09 speaks the protocol. Its vendor-page siblings declare 0x03 and 0x04
+  // and never answer, so claiming them made the app list the mouse once per
+  // collection with every card but one inert.
+  const protocolDevice = fakeDevice({ collections: [vendorCollection(INCOTT_USAGE_PAGE)] }).device;
+  const siblingDevice = fakeDevice({
+    collections: [siblingCollection(0xff00, 0x03), siblingCollection(0xff01, 0x04)],
+  }).device;
+  const plainMouse = fakeDevice({ collections: [vendorCollection(0x0001)] }).device;
+
+  const claimed = [protocolDevice, siblingDevice, plainMouse].filter((d) => IncottHidClient.isSupported(d));
+  assert.equal(claimed.length, 1, "exactly one collection may be claimed");
+  assert.equal(claimed[0], protocolDevice);
 });
 
 test("filters request both product ids on the vendor usage page", () => {

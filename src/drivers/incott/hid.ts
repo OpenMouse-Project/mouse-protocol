@@ -58,7 +58,6 @@ import {
   INCOTT_SUB_SLEEP,
   INCOTT_USAGE_PAGE,
   INCOTT_VENDOR_ID,
-  INCOTT_VENDOR_USAGE_PAGE_MIN,
   type IncottInputStatus,
 } from "../../incott/index.ts";
 
@@ -212,8 +211,7 @@ export async function incottProbeCollection(
  * next one when a candidate throws, never replies, or replies with garbage.
  * Returns `null` when no candidate answers.
  *
- * Candidates must be pre-ordered by the CALLER: `0xFF05` first, then any
- * page `>= INCOTT_VENDOR_USAGE_PAGE_MIN` (`0xFF00`) as a fallback — this
+ * Candidates must be pre-ordered by the CALLER, most likely first — this
  * function only probes in the order it is given, it does not itself inspect
  * usage pages. This is the general form of the wired dead-collection fix
  * (see `incottProbeCollection`): a transport layer that genuinely has more
@@ -435,8 +433,17 @@ export class IncottHidClient {
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== INCOTT_VENDOR_ID) return false;
     if (!INCOTT_PRODUCT_IDS.includes(device.productId)) return false;
+    // Require BOTH the vendor page and a declared feature report `0x09`. The
+    // mouse exposes several vendor collections and only this one speaks the
+    // protocol: enumerated on hardware 2026-09-10, page 0xFF05 declares
+    // feature report 0x09, while 0xFF00 declares 0x03 and 0xFF01 declares
+    // 0x04. Matching on the usage page alone (or on any page >= 0xFF00)
+    // claims those siblings too, so the app lists the mouse once per
+    // collection and every card but one is inert.
     return device.collections.some(
-      (collection) => (collection.usagePage ?? 0) >= INCOTT_VENDOR_USAGE_PAGE_MIN,
+      (collection) =>
+        collection.usagePage === INCOTT_USAGE_PAGE &&
+        collection.featureReports.some((report) => report.reportId === INCOTT_REPORT_ID),
     );
   }
 
