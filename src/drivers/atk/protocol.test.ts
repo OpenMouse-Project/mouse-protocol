@@ -20,9 +20,13 @@ import {
   atkDecodeButtonAssignment,
   atkDecodeCurrentProfile,
   atkDecodeLiftOff,
+  atkEncodeLiftOff,
+  ATK_LIFT_OFF_MIN_CODE,
+  ATK_LIFT_OFF_MAX_CODE,
   atkDecodePairingStatus,
   atkDecodeReceiverStatus,
   atkDpiOptionsForSensor,
+  atkDpiStageLength,
   atkDecodeVxeR1PollingCode,
   atkPackDpiStage,
   atkPackDpiStageForSensor,
@@ -121,11 +125,78 @@ test("the verified R1 SE+ identity selects PAW3395SE", () => {
   assert.equal(ATK_SENSORS.PAW3395SE.maxDpi, 18000);
 });
 
+test("the F1 Ultimate 2.0 identity selects PAW3950Ultra and no R1 family", () => {
+  assert.deepEqual(ATK_PRODUCTS["1,8"], {
+    brand: "ATK",
+    model: "F1 Ultimate 2.0",
+    sensor: "PAW3950Ultra",
+    verified: false,
+  });
+  assert.equal(ATK_PRODUCTS["1,8"]!.family, undefined);
+  assert.equal(ATK_SENSORS.PAW3950Ultra.maxDpi, 42000);
+});
+
+test("both A9 Mini + identities select PAW3955 Master and no R1 family", () => {
+  const verifiedByCidMid: Record<string, boolean> = { "1,31": false, "1,52": true };
+  for (const [cidMid, verified] of Object.entries(verifiedByCidMid)) {
+    assert.deepEqual(ATK_PRODUCTS[cidMid], {
+      brand: "ATK",
+      model: "A9 Mini +",
+      sensor: "PAW3955Master",
+      verified,
+    });
+    assert.equal(ATK_PRODUCTS[cidMid]!.family, undefined);
+  }
+  assert.equal(ATK_SENSORS.PAW3955Master.maxDpi, 40000);
+});
+
+test("PAW3955 Master uses six-byte rows, not the four-byte mode-nibble layout", () => {
+  assert.equal(atkDpiStageLength("PAW3955Master"), 6);
+  assert.equal(atkDpiStageLength("PAW3950Ultra"), 4);
+  assert.equal(atkDpiStageLength(null), 4);
+});
+
+test("a PAW3955 Master stage packs as a raw little-endian value per axis, not a mode nibble", () => {
+  assert.deepEqual(atkPackDpiStageForSensor("PAW3955Master", 800, 800), [0x1f, 0x03, 0x1f, 0x03, 0x00, 0x11]);
+});
+
+test("PAW3955 Master DPI survives a round trip, including asymmetric axes and the 40k ceiling", () => {
+  for (const [x, y] of [[50, 50], [800, 800], [1600, 3200], [39990, 40000], [40000, 40000]]) {
+    const stage = atkPackDpiStageForSensor("PAW3955Master", x!, y!);
+    assert.ok(stage, `${x},${y} encodes`);
+    const sum = stage!.reduce((total, byte) => (total + byte) & 0xff, 0);
+    assert.equal(sum, 0x55, `${x},${y} checksum`);
+    assert.deepEqual(atkUnpackDpiStageForSensor("PAW3955Master", stage!), { x, y });
+  }
+});
+
+test("PAW3955 Master rejects a DPI above the confirmed 40,000 ceiling rather than guessing at doubling", () => {
+  assert.equal(atkPackDpiStageForSensor("PAW3955Master", 45000, 45000), null);
+  assert.equal(atkDpiOptionsForSensor("PAW3955Master").includes(45000), false);
+  assert.equal(atkDpiOptionsForSensor("PAW3955Master").at(-1), 40000);
+});
+
+test("PAW3955 Master still decodes an existing doubled stage correctly", () => {
+  const stage = [0x1f, 0x03, 0x1f, 0x03, 0x11, 0x00];
+  const sum = stage.reduce((total, byte) => (total + byte) & 0xff, 0);
+  assert.equal(sum, 0x55, "fixture checksum sanity check");
+  assert.deepEqual(atkUnpackDpiStageForSensor("PAW3955Master", stage), { x: 1600, y: 1600 });
+});
+
 test("Lift-off codes decode to millimetres", () => {
   assert.equal(atkDecodeLiftOff(1), 0.7);
   assert.equal(atkDecodeLiftOff(4), 1);
   assert.equal(atkDecodeLiftOff(11), 1.7);
   assert.equal(atkDecodeLiftOff(0), null);
+});
+
+test("lift-off millimetres and codes round trip across the full 0.7-1.7mm range", () => {
+  for (let code = ATK_LIFT_OFF_MIN_CODE; code <= ATK_LIFT_OFF_MAX_CODE; code += 1) {
+    const mm = atkDecodeLiftOff(code)!;
+    assert.equal(atkEncodeLiftOff(mm), code);
+  }
+  assert.equal(atkDecodeLiftOff(ATK_LIFT_OFF_MIN_CODE), 0.7);
+  assert.equal(atkDecodeLiftOff(ATK_LIFT_OFF_MAX_CODE), 1.7);
 });
 
 test("R1 polling pack is the 0x0b live-settings row with a checksum pair", () => {

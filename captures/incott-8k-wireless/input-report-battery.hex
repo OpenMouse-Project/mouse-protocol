@@ -1,0 +1,48 @@
+# Battery, hardware-relocated: the UNSOLICITED input report the mouse emits
+# on its vendor collection (report id 0x09) while it is actively being used —
+# NOT a feature-report reply to anything this driver sends. Captured across a
+# full charge cycle from roughly 60% to roughly 97% on 2026-09-08.
+#
+# Captured DIRECTLY with node-hid against an "incott 8K wireless mouse"
+# (093A:522C), reading raw `inputreport`-equivalent packets off the vendor
+# collection. Byte 0 is the report id; this is node-hid's raw buffer shape,
+# which INCLUDES the report id — unlike WebHID's `inputreport` event, whose
+# `data` DataView EXCLUDES it (the report id arrives separately as
+# `event.reportId`). So node-hid buf[1] here is WebHID's
+# `event.data.getUint8(0)`, and node-hid buf[2] is `event.data.getUint8(1)`.
+# See `incottDecodeInputStatus` in `src/incott/index.ts` for the codec that
+# takes the WebHID-shaped (report-id-excluded) bytes, and
+# `IncottHidClient.onInputReport` in `src/drivers/incott/hid.ts` for where the
+# WebHID event is unwrapped into that convention.
+#
+# The mouse only emits these reports while it is being used (moved or
+# clicked) — it does not emit them at rest, and there is no way to request
+# one on demand (no feature-report query answers with this data).
+
+# --- discharging, ~95% ---
+09 5f 10 04 00 0f 0f 10
+# byte 1 (node-hid) = 0x5f = 95 -> raw <= 100, so discharging: percent = 95.
+# byte 2 (node-hid) = 0x10 -> high nibble 1 = active DPI stage index,
+#   low nibble 0 = polling-rate index. Both independently confirmed at
+#   capture time via the feature reads: `09 83 06` -> stage 1, `09 81` byte 2
+#   -> wire 0 (1000 Hz).
+
+# --- charging (plugged into USB while still reporting the wireless collection), ~97% ---
+09 e1 10 04 00 0f 0f 10
+# byte 1 (node-hid) = 0xe1 = 225 -> raw > 100, so charging: percent = 225 - 128 = 97.
+# byte 2 (node-hid) unchanged at 0x10 (stage/polling did not change between
+# the two captures).
+
+# Decoding rule, hardware-verified in BOTH states above (matches
+# IncottHIDApp's parseStatus — unlike that project's other claims about this
+# device, this one is now independently confirmed on real hardware):
+#   raw = byte 1 (node-hid) / event.data.getUint8(0) (WebHID)
+#   raw > 100   -> charging,    level = raw - 128
+#   raw <= 100  -> discharging, level = raw
+#
+# This DISPROVES both earlier battery hypotheses: across this same full
+# charge cycle (~60% to ~97%), the 0x8e/sub 0x01 feature-report reply's byte 6
+# stayed the exact constant `09 8e 01 5a 04 84 38 01` (0x38 = 56) the entire
+# time — it never moved even as the real level visibly climbed. The 0x89
+# byte-8 hypothesis before it was disproven the same way (constant 0x5a = 90
+# across every capture ever taken). See docs/incott-testing.md.

@@ -25,6 +25,7 @@
       "@openmouse/protocol/endgame-gear-op1": ["./src/endgame-gear/op1.ts"],
       "@openmouse/protocol/finalmouse": ["./src/finalmouse/index.ts"],
       "@openmouse/protocol/gearhub": ["./src/gearhub/index.ts"],
+      "@openmouse/protocol/incott": ["./src/incott/index.ts"],
       "@openmouse/protocol/keychron": ["./src/keychron/index.ts"],
       "@openmouse/protocol/lamzu": ["./src/lamzu/index.ts"],
       "@openmouse/protocol/logitech": ["./src/logitech/index.ts"],

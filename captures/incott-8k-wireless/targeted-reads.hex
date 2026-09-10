@@ -1,0 +1,26 @@
+# Targeted reads: request bytes echoed as a comment, reply is the data line.
+# First 12 bytes of the 64-byte feature-report response (report ID at byte 0);
+# remaining bytes were not recorded but were zero in every capture taken.
+# Captured 2026-09-07 from an "incott 8K wireless mouse" (093A:522C) over the
+# 0xFF05 vendor collection with node-hid. Read-only: no write was ever sent.
+
+# request 09 89 (query status/battery)
+09 89 00 00 00 00 00 00 5a 00 00 00
+
+# request 09 84 00 (query sensor, sub 0x00 -> lift-off / motion sync)
+09 84 00 04 00 0f 0f 01 00 00 00 00
+
+# request 09 84 02 (query sensor, sub 0x02 -> ripple control)
+09 84 02 00 00 0f 0f 01 00 00 00 00
+
+# request 09 84 03 (query sensor, sub 0x03 -> angle snap)
+09 84 03 00 00 0f 0f 01 00 00 00 00
+
+# request 09 85 01 (query timing, sub 0x01 -> debounce)
+09 85 01 04 00 0f 0f 01 00 00 00 00
+
+# request 09 85 03 (query timing, sub 0x03 -> sleep)
+09 85 03 3c 00 0f 0f 01 00 00 00 00
+
+# request 09 88 (query receiver LED)
+09 88 00 00 00 00 00 00 00 00 00 00
