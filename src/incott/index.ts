@@ -264,10 +264,104 @@ export const INCOTT_CMD_QUERY_BUTTON = 0x86;
 /** Button count: left, right, middle, forward, back, DPI. */
 export const INCOTT_BUTTON_COUNT = 6;
 /**
- * The vendor tool's own query, `09 86 09` — not a button index (buttons only
- * go up to 5). Its payload is still undecoded.
+ * The vendor tool's own query, `09 86 09`. NOT a button index — buttons only
+ * go up to 5. It reads the onboard profile index, the counterpart of the
+ * `09 06 09 <index>` write (`setProfileIndex` in the vendor bundle). Neither
+ * is implemented here: switching profiles in the vendor tool still replays
+ * every setting individually, so what the device stores against the index is
+ * unknown.
  */
 export const INCOTT_SUB_UNKNOWN_86_VENDOR_QUERY = 0x09;
+
+/**
+ * Physical buttons, in left-to-right display order.
+ */
+export const INCOTT_BUTTON_NAMES = ["Left", "Right", "Middle", "Forward", "Back", "DPI"] as const;
+export type IncottButtonName = (typeof INCOTT_BUTTON_NAMES)[number];
+
+/**
+ * Display order -> WIRE index. **These are not the same**, and assuming they
+ * were would silently swap two buttons.
+ *
+ * The vendor's per-model key table carries an explicit `matrix` field and
+ * addresses the device with it (`setMsK(dvar.key[i].matrix, code)`), not with
+ * the array position. For this family Forward sits at array index 3 with
+ * `matrix = 4`, and Back at array index 4 with `matrix = 3` — the two are
+ * transposed. Every other button's matrix equals its position.
+ */
+export const INCOTT_BUTTON_WIRE_INDEX: Readonly<Record<IncottButtonName, number>> = {
+  Left: 0,
+  Right: 1,
+  Middle: 2,
+  Forward: 4,
+  Back: 3,
+  DPI: 5,
+};
+
+/**
+ * Button actions, label -> 32-bit action word, in display order.
+ *
+ * Transcribed from the vendor bundle's `kf_hw()` encoder. One row is
+ * confirmed against this contributor's hardware: the factory DPI button reads
+ * back `07 00 03`, which is `0x00030007` little-endian — the value `kf_hw`
+ * returns for that function.
+ *
+ * NOT covered here, deliberately:
+ *   - keyboard bindings, which are parametric rather than a fixed list
+ *     (`(keycode & 255) << 16 | (modifiers & 255) << 8`, or
+ *     `(keycode & 255) << 8 | 128` with no modifier). The shared
+ *     `buttonOptions` contract is a flat list of labels, which cannot express
+ *     "any key plus any modifier combination"; wiring that up needs a UI
+ *     contract that does not exist yet.
+ *   - macros (`slot << 16 | 9`), which need the `0x07` upload command.
+ *   - `fmeFAVOR`, which the vendor defines as a constant but has no case for
+ *     in its own encoder, so it has no code to send.
+ */
+export const INCOTT_BUTTON_ACTIONS: ReadonlyArray<readonly [string, number]> = [
+  ["Left click", 0x00f00001],
+  ["Right click", 0x00f10001],
+  ["Middle click", 0x00f20001],
+  ["Forward", 0x00f40001],
+  ["Back", 0x00f30001],
+  ["DPI cycle", 0x00030007],
+  ["DPI +", 0x00010007],
+  ["DPI -", 0x00020007],
+  ["Rapid fire", 0x0218f00a],
+  ["Profile switch", 0x0000f10a],
+  ["Media player", 0x01830003],
+  ["Play/Pause", 0x00cd0003],
+  ["Stop", 0x00b70003],
+  ["Previous track", 0x00b60003],
+  ["Next track", 0x00b50003],
+  ["Volume up", 0x00e90003],
+  ["Volume down", 0x00ea0003],
+  ["Mute", 0x00e20003],
+  ["Email", 0x018a0003],
+  ["Calculator", 0x01920003],
+  ["File explorer", 0x01940003],
+  ["Browser home", 0x02230003],
+  ["Browser refresh", 0x02270003],
+  ["Browser forward", 0x02250003],
+  ["Browser back", 0x02240003],
+  ["Browser search", 0x02210003],
+  ["Disabled", 0x00000000],
+];
+
+/** Label for a 32-bit action word, or null when it is not one this driver knows. */
+export function incottButtonActionLabel(code: number): string | null {
+  for (const [label, value] of INCOTT_BUTTON_ACTIONS) {
+    if (value === code) return label;
+  }
+  return null;
+}
+
+/** 32-bit action word for a label, or null when the label is not in the table. */
+export function incottButtonActionCode(label: string): number | null {
+  for (const [name, value] of INCOTT_BUTTON_ACTIONS) {
+    if (name === label) return value;
+  }
+  return null;
+}
 
 /** Sub-command for the DPI *active stage index* query (`0x83`). */
 export const INCOTT_SUB_DPI_STAGE = 0x06;
@@ -559,19 +653,31 @@ export function incottEncodeSetToggle(kind: IncottToggleKind, on: boolean): Uint
 }
 
 /**
- * Encodes a raw three-byte button binding write, `09 06 <button 0..5>
- * <b0> <b1> <b2>`. Codec only, by design (see `INCOTT_CMD_SET_BUTTON`): the
- * meaning of the three bytes (key code, macro reference, remap target — the
- * fields are unnamed here on purpose) is NOT established, so this neither
- * interprets nor validates them beyond fitting in a byte. Round-trip
- * confirmed on hardware 2026-09-08: writing `01 00 f0` to button 0 read back
- * byte for byte via `incottDecodeButtonBinding`.
+ * Encodes a button binding write, `09 06 <button 0..5> <32-bit action, LE>`.
+ *
+ * The action is a 32-bit little-endian word — see `INCOTT_BUTTON_ACTIONS`
+ * for the labelled codes. Confirmed against hardware: this unit's factory
+ * binding for the DPI button reads back `07 00 03`, and the vendor's own
+ * encoder returns `0x00030007` for that function, which is the same word.
+ *
+ * `button` is the WIRE index, which is not the physical left-to-right order
+ * — see `INCOTT_BUTTON_WIRE_INDEX`.
  */
-export function incottEncodeSetButtonBinding(button: number, raw: readonly [number, number, number]): Uint8Array {
+export function incottEncodeSetButtonBinding(button: number, code: number): Uint8Array {
   if (!Number.isInteger(button) || button < 0 || button >= INCOTT_BUTTON_COUNT) {
     throw new RangeError(`Button index out of range: ${button}`);
   }
-  return payload(INCOTT_CMD_SET_BUTTON, button, raw[0], raw[1], raw[2]);
+  if (!Number.isInteger(code) || code < 0 || code > 0xffffffff) {
+    throw new RangeError(`Button action code out of range: ${code}`);
+  }
+  return payload(
+    INCOTT_CMD_SET_BUTTON,
+    button,
+    code & 0xff,
+    (code >>> 8) & 0xff,
+    (code >>> 16) & 0xff,
+    (code >>> 24) & 0xff,
+  );
 }
 
 /**
@@ -931,28 +1037,36 @@ export function incottDecodeInputStatus(byte0: number, byte1: number): IncottInp
 }
 
 /**
- * Raw three-byte binding read back from a button. Field names are
- * deliberately generic (`b0`/`b1`/`b2`), not `type`/`code`: what each byte
- * means (key code, macro reference, remap target) is NOT established. This
- * is a codec for the wire bytes only — see `INCOTT_CMD_QUERY_BUTTON`.
+ * A button's current binding: the raw 32-bit action word, plus the label
+ * when it is one this driver knows.
+ *
+ * `label` is null for a binding the action table does not cover — a keyboard
+ * key, a macro, or an action from a model this contributor cannot test. The
+ * `code` is always reported so an unrecognised binding round-trips
+ * unchanged rather than being flattened to a default.
  */
 export interface IncottButtonBinding {
   button: number;
-  b0: number;
-  b1: number;
-  b2: number;
+  code: number;
+  label: string | null;
 }
 
 /**
- * `09 86 <button 0..5>` -> response bytes 3-5 = the raw binding. Round-trip
- * confirmed on hardware 2026-09-08 (see `INCOTT_CMD_QUERY_BUTTON`). Codec
- * only: nothing here interprets `b0`/`b1`/`b2` as a key, macro, or action —
- * that mapping is unverified and out of scope for this driver.
+ * `09 86 <button 0..5>` -> response bytes 3-6 = the binding, 32-bit
+ * little-endian.
+ *
+ * PREVIOUSLY A BUG: this read only bytes 3-5 and reported them as three
+ * unnamed bytes, silently truncating the top byte. Every action in
+ * `INCOTT_BUTTON_ACTIONS` whose code exceeds 24 bits — "Rapid fire"
+ * (`0x0218F00A`) among them — decoded to a different value than was
+ * written. The vendor reads the same four bytes
+ * (`rData[5]<<24|rData[4]<<16|rData[3]<<8|rData[2]`).
  */
 export function incottDecodeButtonBinding(frame: Uint8Array, button: number): IncottButtonBinding | null {
   if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_BUTTON, button)) return null;
-  if (frame.length < 6) return null;
-  return { button, b0: frame[3]!, b1: frame[4]!, b2: frame[5]! };
+  if (frame.length < 7) return null;
+  const code = ((frame[6]! << 24) | (frame[5]! << 16) | (frame[4]! << 8) | frame[3]!) >>> 0;
+  return { button, code, label: incottButtonActionLabel(code) };
 }
 
 /**

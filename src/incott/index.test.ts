@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   incottDecodeBattery,
+  incottButtonActionCode,
+  incottButtonActionLabel,
   incottDecodeButtonBinding,
   incottDecodeDebounce,
   incottDecodeDpiStage,
@@ -36,6 +38,9 @@ import {
   incottPerformanceModeFromWire,
   incottPerformanceModeToWire,
   incottValidateDpi,
+  INCOTT_BUTTON_ACTIONS,
+  INCOTT_BUTTON_NAMES,
+  INCOTT_BUTTON_WIRE_INDEX,
   INCOTT_PERFORMANCE_MODE_FROM_WIRE,
   INCOTT_PERFORMANCE_MODE_NAMES,
   INCOTT_PERFORMANCE_MODE_TO_WIRE,
@@ -463,34 +468,87 @@ test("input-report decode rejects out-of-byte-range inputs", () => {
   assert.equal(incottDecodeInputStatus(0x00, 256), null);
 });
 
-test("button binding encodes the raw three-byte payload under command 0x06", () => {
+test("button binding encodes the 32-bit action little-endian under command 0x06", () => {
   // Captured 2026-09-08: the vendor tool wrote `09 06 00 01 00 f0` to button
-  // 0. This is a codec for the raw bytes only — see incottEncodeSetButtonBinding.
-  assert.deepEqual(bytes(incottEncodeSetButtonBinding(0, [0x01, 0x00, 0xf0])).slice(0, 5), [0x06, 0x00, 0x01, 0x00, 0xf0]);
+  // 0, which is 0x00F00001 (left click) little-endian.
+  assert.deepEqual(
+    bytes(incottEncodeSetButtonBinding(0, 0x00f00001)).slice(0, 6),
+    [0x06, 0x00, 0x01, 0x00, 0xf0, 0x00],
+  );
+  // A code needing all four bytes: rapid fire. The old three-byte codec
+  // dropped the 0x02 here.
+  assert.deepEqual(
+    bytes(incottEncodeSetButtonBinding(5, 0x0218f00a)).slice(0, 6),
+    [0x06, 0x05, 0x0a, 0xf0, 0x18, 0x02],
+  );
 });
 
 test("button binding rejects a button index outside 0-5", () => {
-  assert.throws(() => incottEncodeSetButtonBinding(6, [0, 0, 0]), RangeError);
-  assert.throws(() => incottEncodeSetButtonBinding(-1, [0, 0, 0]), RangeError);
+  assert.throws(() => incottEncodeSetButtonBinding(6, 0), RangeError);
+  assert.throws(() => incottEncodeSetButtonBinding(-1, 0), RangeError);
 });
 
-test("button binding decodes all six buttons, pinned to the real capture", () => {
-  // Captured on real hardware 2026-09-08, reading each of the six buttons
-  // (left, right, middle, forward, back, DPI, in some physical order):
-  //   09 86 00 -> bytes 3-5 = 01 00 f0
-  //   09 86 01 -> bytes 3-5 = 01 00 f1
-  //   09 86 02 -> bytes 3-5 = 01 00 f2
-  //   09 86 03 -> bytes 3-5 = 01 00 f3
-  //   09 86 04 -> bytes 3-5 = 01 00 f4
-  //   09 86 05 -> bytes 3-5 = 07 00 03
-  // Button 0's read-back matches byte-for-byte what the vendor tool wrote
-  // (`09 06 00 01 00 f0`) — the round-trip proof this codec is correct.
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x00, 0x01, 0x00, 0xf0), 0), { button: 0, b0: 0x01, b1: 0x00, b2: 0xf0 });
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x01, 0x01, 0x00, 0xf1), 1), { button: 1, b0: 0x01, b1: 0x00, b2: 0xf1 });
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x02, 0x01, 0x00, 0xf2), 2), { button: 2, b0: 0x01, b1: 0x00, b2: 0xf2 });
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x03, 0x01, 0x00, 0xf3), 3), { button: 3, b0: 0x01, b1: 0x00, b2: 0xf3 });
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x04, 0x01, 0x00, 0xf4), 4), { button: 4, b0: 0x01, b1: 0x00, b2: 0xf4 });
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x05, 0x07, 0x00, 0x03), 5), { button: 5, b0: 0x07, b1: 0x00, b2: 0x03 });
+test("every factory binding read from hardware decodes to the vendor's own action code", () => {
+  // Captured on real hardware 2026-09-08, reading each of the six buttons.
+  // Every one matches the code the vendor bundle's `kf_hw()` encoder returns
+  // for that function — an independent confirmation of the whole mouse
+  // action table, not just one row.
+  //
+  // Note buttons 3 and 4: wire index 3 answers 0xF3 (fmsBACK) and wire index
+  // 4 answers 0xF4 (fmsFORWARD). That is the `matrix` transposition in
+  // INCOTT_BUTTON_WIRE_INDEX, confirmed on hardware.
+  const expected: ReadonlyArray<readonly [number, number, number, string]> = [
+    [0, 0xf0, 0x00f00001, "Left click"],
+    [1, 0xf1, 0x00f10001, "Right click"],
+    [2, 0xf2, 0x00f20001, "Middle click"],
+    [3, 0xf3, 0x00f30001, "Back"],
+    [4, 0xf4, 0x00f40001, "Forward"],
+  ];
+  for (const [index, high, code, label] of expected) {
+    assert.deepEqual(
+      incottDecodeButtonBinding(frame(0x86, index, 0x01, 0x00, high), index),
+      { button: index, code, label },
+    );
+  }
+  // The DPI button: `07 00 03` -> 0x00030007, kf_hw's favDPI.
+  assert.deepEqual(
+    incottDecodeButtonBinding(frame(0x86, 0x05, 0x07, 0x00, 0x03), 5),
+    { button: 5, code: 0x00030007, label: "DPI cycle" },
+  );
+});
+
+test("button binding decodes the top byte instead of truncating it", () => {
+  // Regression: the decoder used to read only frame bytes 3-5, so rapid fire
+  // (0x0218F00A) came back as 0x0018F00A and matched no action at all.
+  assert.deepEqual(
+    incottDecodeButtonBinding(frame(0x86, 0x03, 0x0a, 0xf0, 0x18, 0x02), 3),
+    { button: 3, code: 0x0218f00a, label: "Rapid fire" },
+  );
+});
+
+test("button binding reports an unknown action's raw code rather than a label", () => {
+  // A keyboard binding: 'A' (HID 0x04) with no modifier is 0x0480 by the
+  // vendor's parametric rule, which no entry in the action table covers.
+  const binding = incottDecodeButtonBinding(frame(0x86, 0x00, 0x80, 0x04, 0x00, 0x00), 0);
+  assert.equal(binding?.code, 0x00000480);
+  assert.equal(binding?.label, null);
+});
+
+test("button action labels and codes round-trip through the table", () => {
+  for (const [label, code] of INCOTT_BUTTON_ACTIONS) {
+    assert.equal(incottButtonActionCode(label), code, label);
+    assert.equal(incottButtonActionLabel(code), label, label);
+  }
+  assert.equal(incottButtonActionCode("Not a real action"), null);
+  assert.equal(incottButtonActionLabel(0x12345678), null);
+});
+
+test("Forward and Back are transposed between display order and the wire", () => {
+  // The vendor addresses buttons by a `matrix` field, not array position.
+  // Getting this wrong swaps two buttons silently.
+  assert.equal(INCOTT_BUTTON_WIRE_INDEX.Forward, 4);
+  assert.equal(INCOTT_BUTTON_WIRE_INDEX.Back, 3);
+  assert.deepEqual(INCOTT_BUTTON_NAMES.map((n) => INCOTT_BUTTON_WIRE_INDEX[n]), [0, 1, 2, 4, 3, 5]);
 });
 
 test("button binding rejects a frame answering a different button (sub-command echo)", () => {

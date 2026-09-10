@@ -21,6 +21,9 @@ import {
   incottEncodeSetReceiverLed,
   incottEncodeSetSleep,
   incottEncodeSetToggle,
+  incottButtonActionCode,
+  incottDecodeButtonBinding,
+  incottEncodeSetButtonBinding,
   incottFrameMatches,
   incottIsWiredProduct,
   incottLiftOffLabel,
@@ -29,6 +32,10 @@ import {
   incottPerformanceModeFromWire,
   incottPerformanceModeToWire,
   incottValidateDpi,
+  INCOTT_BUTTON_ACTIONS,
+  INCOTT_BUTTON_NAMES,
+  INCOTT_BUTTON_WIRE_INDEX,
+  INCOTT_CMD_QUERY_BUTTON,
   INCOTT_CMD_QUERY_DPI_STAGE,
   INCOTT_CMD_QUERY_DPI_STAGE_VALUE,
   INCOTT_CMD_QUERY_IDENTITY,
@@ -261,16 +268,17 @@ export async function incottSelectCollection<T extends FeatureTransport>(
  * this list to matter to. `incottDecodeBattery`'s own frame-matching in
  * `src/incott/index.ts` is unaffected by this list either way.
  *
- * `0x86` (button reads) shows the identical sub-echo pattern but is not
- * queried anywhere in this driver — see `INCOTT_CMD_QUERY_BUTTON` in
- * `src/incott/index.ts` for where to add it if a button read is ever wired
- * up here.
+ * `0x86` echoes the button index in the same position, and MUST stay in this
+ * list now that buttons are read: six reads go out back to back, and the
+ * device latches a single shared response buffer, so matching on the command
+ * byte alone would let button 2's reply satisfy button 3's request.
  */
 const SUB_ECHOING_QUERIES: readonly number[] = [
   INCOTT_CMD_QUERY_DPI_STAGE,
   INCOTT_CMD_QUERY_DPI_STAGE_VALUE,
   INCOTT_CMD_QUERY_SENSOR,
   INCOTT_CMD_QUERY_TIMING,
+  INCOTT_CMD_QUERY_BUTTON,
 ];
 
 function toggleWord(value: boolean | null): string {
@@ -696,12 +704,19 @@ export class IncottHidClient {
     // failure on every attempt.
     const supportedPollingRates = wired ? [...INCOTT_POLLING_STEPS_HZ_WIRED] : [...INCOTT_POLLING_STEPS_HZ];
 
+    // All six bindings, or nothing. A partial read would render some buttons
+    // with a real assignment and the rest with a fabricated default, which is
+    // worse than hiding the remapper: the shared UI writes back whatever it
+    // shows, so a wrong reading becomes a wrong write the moment anything
+    // else on the card is changed.
+    const buttonMappings = dead ? null : await this.readButtonMappings();
+
     const ui: MouseUiHints = {
       family: "incott",
       // The advanced section is the only place debounce, sleep, motion sync,
-      // angle snapping and ripple control render; Incott has no lighting, no
-      // onboard profiles, and no button remapping, so those cards stay hidden
-      // on their own (nothing populates the fields that gate them).
+      // angle snapping and ripple control render; Incott has no lighting and
+      // no onboard profiles, so those cards stay hidden on their own
+      // (nothing populates the fields that gate them).
       showAdvancedSection: true,
       // No command reports link quality.
       hideSignalCard: true,
@@ -784,6 +799,12 @@ export class IncottHidClient {
       batteryState: batteryCharging === null ? "Unknown" : batteryCharging ? "Charging" : "Discharging",
       liftOffDistance: liftOffTenths === null ? null : incottLiftOffLabel(liftOffTenths),
       supportedLiftOffDistances: ["Low", "Medium", "High"],
+      // Both fields together, or neither: the shared remapper only renders
+      // when it has the current assignments AND the list of actions it may
+      // write back.
+      ...(buttonMappings !== null
+        ? { buttonMappings, buttonOptions: INCOTT_BUTTON_ACTIONS.map(([label]) => label) }
+        : {}),
       motionSync,
       rippleControl,
       angleSnapping,
@@ -938,6 +959,51 @@ export class IncottHidClient {
    * omit the wiring outright when wired, matching the other wireless-only
    * behavior in this driver (see `INCOTT_POLLING_STEPS_HZ_WIRED`).
    */
+  /**
+   * Reads all six button bindings, keyed by the physical button name.
+   *
+   * Returns null unless every button answered: see the call site in
+   * `readStatus` for why a partial read is not published. A binding the
+   * action table does not know (a keyboard key, a macro) reports its raw code
+   * as `Unknown (0x...)` rather than being shown as one of the offered
+   * actions — the shared remapper writes back what it displays, so labelling
+   * an unknown binding as a known action would rewrite it on the next edit.
+   */
+  private async readButtonMappings(): Promise<Record<string, string> | null> {
+    const mappings: Record<string, string> = {};
+    for (const name of INCOTT_BUTTON_NAMES) {
+      const index = INCOTT_BUTTON_WIRE_INDEX[name];
+      const binding = incottDecodeButtonBinding(await this.query(INCOTT_CMD_QUERY_BUTTON, index), index);
+      if (binding === null) return null;
+      mappings[name] = binding.label ?? `Unknown (0x${binding.code.toString(16).padStart(8, "0")})`;
+    }
+    return mappings;
+  }
+
+  /**
+   * Reassigns one button, then reads it back and refuses to report success
+   * unless the device actually took the value.
+   *
+   * `button` is a physical name; the wire index it maps to is NOT the same
+   * number (Forward and Back are transposed — see
+   * `INCOTT_BUTTON_WIRE_INDEX`). This is a standalone command, so it cannot
+   * disturb DPI, polling or the other five buttons.
+   */
+  async setButtonMapping(button: string, actionLabel: string): Promise<void> {
+    const name = INCOTT_BUTTON_NAMES.find((candidate) => candidate === button);
+    if (name === undefined) throw new Error(`This mouse has no "${button}" button.`);
+    const code = incottButtonActionCode(actionLabel);
+    if (code === null) throw new Error(`Unknown button action "${actionLabel}".`);
+
+    const index = INCOTT_BUTTON_WIRE_INDEX[name];
+    await this.write(incottEncodeSetButtonBinding(index, code));
+    const applied = incottDecodeButtonBinding(await this.query(INCOTT_CMD_QUERY_BUTTON, index), index);
+    if (applied === null) throw new Error("The mouse did not confirm the button change.");
+    if (applied.code !== code) {
+      throw new Error(`The mouse kept ${applied.label ?? "another binding"} on ${name} instead of ${actionLabel}.`);
+    }
+  }
+
   async setReceiverLed(mode: number): Promise<number> {
     await this.write(incottEncodeSetReceiverLed(mode));
     const got = incottDecodeReceiverLed(await this.query(INCOTT_CMD_QUERY_RECEIVER_LED, INCOTT_SUB_NONE));

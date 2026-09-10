@@ -183,6 +183,10 @@ function defaultState() {
     receiverLed: 0,
     batteryByte: 0x38 as number | null, // 56%, captured 2026-09-07
     identity: [0x01, 0x0e, 0x02, 0xf0, 0xf1, 0x00, 0xff] as number[] | null,
+    // The factory bindings read from hardware 2026-09-08, by WIRE index.
+    // Note index 3 is Back and index 4 is Forward — the transposition in
+    // INCOTT_BUTTON_WIRE_INDEX.
+    buttons: [0x00f00001, 0x00f10001, 0x00f20001, 0x00f30001, 0x00f40001, 0x00030007] as number[],
   };
 }
 
@@ -259,6 +263,12 @@ function fakeDevice(options: FakeOptions = {}) {
         if (sub === 0x01) return frame(0x85, 0x01, state.debounceMs);
         if (sub === 0x03) return frame(0x85, 0x03, state.sleepSeconds & 0xff, (state.sleepSeconds >> 8) & 0xff);
         return null;
+      case 0x86: {
+        // Echoes the button index, then the 32-bit binding little-endian.
+        const code = state.buttons[sub];
+        if (code === undefined) return null;
+        return frame(0x86, sub, code & 0xff, (code >>> 8) & 0xff, (code >>> 16) & 0xff, (code >>> 24) & 0xff);
+      }
       case 0x88:
         return frame(0x88, state.receiverLed);
       case 0x89:
@@ -301,6 +311,11 @@ function fakeDevice(options: FakeOptions = {}) {
     else if (cmd === 0x05 && sub === 0x01) state.debounceMs = value;
     else if (cmd === 0x05 && sub === 0x03) state.sleepSeconds = value | ((payload[3] ?? 0) << 8);
     else if (cmd === 0x08) state.receiverLed = sub; // no sub-command: mode sits at byte 1
+    // cmd 0x06: `sub` is the button WIRE index, then the 32-bit action.
+    else if (cmd === 0x06 && sub >= 0 && sub < state.buttons.length) {
+      state.buttons[sub] =
+        ((value | ((payload[3] ?? 0) << 8) | ((payload[4] ?? 0) << 16) | ((payload[5] ?? 0) << 24)) >>> 0);
+    }
   };
 
   const device = {
@@ -599,6 +614,75 @@ test("supportedPollingRates offers the full ladder over the wireless connection"
   const status = await new IncottHidClient(device, fast).readStatus();
   assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000, 2000, 4000, 8000]);
   assert.equal(status.ui?.pollingNote, "Up to 8,000 Hz wireless; 1,000 Hz over the cable.");
+});
+
+test("readStatus publishes the six factory bindings by physical button name", async () => {
+  const { device } = fakeDevice();
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.deepEqual(status.buttonMappings, {
+    Left: "Left click",
+    Right: "Right click",
+    Middle: "Middle click",
+    // Proves the wire transposition is undone: wire index 4 holds 0x00F40001
+    // (forward) and is published as Forward, not as the button at array
+    // position 4.
+    Forward: "Forward",
+    Back: "Back",
+    DPI: "DPI cycle",
+  });
+  assert.equal(status.buttonOptions?.[0], "Left click");
+  assert.ok(status.buttonOptions?.includes("Disabled"));
+});
+
+test("readStatus hides the remapper entirely when a button read fails", async () => {
+  // Partial assignments would be published as real ones, and the shared
+  // remapper writes back what it shows.
+  const { device } = fakeDevice({ silent: [0x86] });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.buttonMappings, undefined);
+  assert.equal(status.buttonOptions, undefined);
+});
+
+test("readStatus reports an unrecognised binding as a raw code, not as a known action", async () => {
+  // A keyboard binding ('A', no modifier) is not in the action table.
+  const { device } = fakeDevice({ state: { buttons: [0x00000480, 0x00f10001, 0x00f20001, 0x00f30001, 0x00f40001, 0x00030007] } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.buttonMappings?.Left, "Unknown (0x00000480)");
+});
+
+test("setButtonMapping writes the action and verifies the read-back", async () => {
+  const { device } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setButtonMapping("Middle", "Mute");
+  const status = await client.readStatus();
+  assert.equal(status.buttonMappings?.Middle, "Mute");
+  // Nothing else moved.
+  assert.equal(status.buttonMappings?.Left, "Left click");
+  assert.equal(status.buttonMappings?.DPI, "DPI cycle");
+});
+
+test("setButtonMapping addresses Forward and Back by their wire index, not their position", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setButtonMapping("Forward", "Disabled");
+  // Wire index 4 is Forward. If the driver had used the display position (3)
+  // it would have silently disabled Back instead.
+  assert.equal(state.buttons[4], 0);
+  assert.equal(state.buttons[3], 0x00f30001, "Back is untouched");
+});
+
+test("setButtonMapping rejects an unknown button or action without writing", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(() => client.setButtonMapping("Thumb", "Mute"), /no "Thumb" button/);
+  await assert.rejects(() => client.setButtonMapping("Middle", "Teleport"), /Unknown button action/);
+  assert.deepEqual(state.buttons, [0x00f00001, 0x00f10001, 0x00f20001, 0x00f30001, 0x00f40001, 0x00030007]);
+});
+
+test("setButtonMapping throws when the mouse does not take the binding", async () => {
+  const { device } = fakeDevice({ ignoreWrites: true });
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(() => client.setButtonMapping("Middle", "Mute"), /instead of Mute/);
 });
 
 test("readStatus reports the same model name wired as wireless", async () => {
