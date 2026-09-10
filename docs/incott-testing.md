@@ -787,3 +787,44 @@ Only the 0.7 mm point was read back directly. Hardware `0` and `1` are 1 mm and
 2 mm in that order; the mapping is a bijection over {0,1,2} and the one claim that
 was testable proved correct, but neither of those two values has been read
 individually.
+
+## Model identification is not solved (searched 2026-09-10)
+
+The HID product string only names the model over the cable
+(`incott Esports G23V2Pro mouse`); on the 2.4 GHz dongle it reports the generic
+`incott 8K wireless mouse`. Incott's own configurator nevertheless displays
+`G23V2Pro` while wireless, so the model is derivable somehow. This is what was
+ruled out looking for it.
+
+**The sensor id is not in any feature report.** The vendor's device definition
+picks the DPI ceiling from a sensor id (`0x3395` PAW3395 caps at 32000,
+`0x3950` PAW3950 at 45000), and this unit's own profile export records
+`dpisensor:14672` = `0x3950`. Every query command `0x80`-`0x8F` was swept
+against sub-commands `0x00`-`0x1F` and **no response contains `0x3950` in
+either byte order**. The tool does not read it as a raw 16-bit value.
+
+**It must therefore come from the startup reads.** The captured init sequence
+performs only six: `0x8F`, `0x8E`/`0x01`, `0x89`, `0x83`, `0x85`/`0x03` and
+`0x86`/`0x09`. The only identity-shaped response is:
+
+    09 8f 01 0e 02 f0 f1 00
+
+Byte 3 (`0x01`) is a plausible model code, but that is **one sample from one
+device** and it is equally consistent with a firmware major version. It is not
+implemented on that basis — an earlier battery hypothesis in this driver was
+adopted from a single coincidental match and later disproven by a charge cycle.
+One sample is not evidence.
+
+**The vendor's JavaScript is deliberately obfuscated**, which is why static
+analysis stops here: property names appear as unicode escape sequences (for
+example `sensor` for `sensor`), control flow
+is padded with junk XOR arithmetic, and identifiers are scrambled. Nothing
+matching `sendFeatureReport` or `navigator.hid` appears literally in any shipped
+file. The derivation runs through an internal object (`getStDPI(ace.sensor)`);
+recovering it means deobfuscating the bundle, not grepping it.
+
+**What would settle it cheaply:** determine whether different Incott models
+enumerate under different USB product ids. If a G23 and a G23V2 differ, model
+detection needs no protocol work at all and is trivially verifiable. If they
+share `093A:522C`, the identity response has to be decoded, which needs a
+capture from a second model — this contributor has only a G23V2Pro.
