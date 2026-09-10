@@ -68,6 +68,13 @@ import {
   WALLHACK_MOUSE_USAGE_PAGE,
   WALLHACK_VENDOR_ID,
 } from "@openmouse/protocol/wallhack";
+import {
+  HYPERX_PULSEFIRE_HASTE_KINGSTON_PIDS,
+  HYPERX_PULSEFIRE_HASTE_HP_PIDS,
+  HYPERX_USAGE_PAGE,
+  HYPERX_VENDOR_ID_HP,
+  HYPERX_VENDOR_ID_KINGSTON,
+} from "@openmouse/protocol/hyperx";
 
 export const VENDOR_ID = {
   pulsar: 0x3710,
@@ -110,8 +117,10 @@ export const VENDOR_ID = {
   microsoft: 0x045E,
   // Shares 0x093a with Glorious's Pixart-based Model O 2 / I 2 family (see
   // `glorious` above); GloriousHidClient.isSupported() only claims its own
-  // catalogued product ids, so the two never overlap.
+  // catalogue product ids, so the two never overlap.
   incott: INCOTT_VENDOR_ID,
+  hyperxKingston: HYPERX_VENDOR_ID_KINGSTON,
+  hyperxHp: HYPERX_VENDOR_ID_HP,
 } as const;
 
 /**
@@ -484,6 +493,24 @@ export const INCOTT_HID_FILTERS: HIDDeviceFilter[] = INCOTT_PRODUCT_IDS.map((pro
   usagePage: INCOTT_USAGE_PAGE,
 }));
 
+/**
+ * HyperX Pulsefire Haste family. The config channel is the vendor collection
+ * on usage page 0xFF00 (usage 0x01). The original wired model enumerates
+ * under Kingston VID 0x0951; HP-era models use 0x03F0.
+ */
+export const HYPERX_KINGSTON_HID_FILTERS: HIDDeviceFilter[] = [...HYPERX_PULSEFIRE_HASTE_KINGSTON_PIDS].map(
+  (productId) => ({ vendorId: VENDOR_ID.hyperxKingston, productId, usagePage: HYPERX_USAGE_PAGE }),
+);
+
+export const HYPERX_HP_HID_FILTERS: HIDDeviceFilter[] = [...HYPERX_PULSEFIRE_HASTE_HP_PIDS].map(
+  (productId) => ({ vendorId: VENDOR_ID.hyperxHp, productId, usagePage: HYPERX_USAGE_PAGE }),
+);
+
+export const HYPERX_HID_FILTERS: HIDDeviceFilter[] = [
+  ...HYPERX_KINGSTON_HID_FILTERS,
+  ...HYPERX_HP_HID_FILTERS,
+];
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
@@ -563,4 +590,5 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.ksnakeDongle, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
   ...MICROSOFT_HID_FILTERS,
   ...INCOTT_HID_FILTERS,
+  ...HYPERX_HID_FILTERS,
 ];

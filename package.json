@@ -152,6 +152,10 @@
     "./incott": {
       "types": "./dist/incott/index.d.ts",
       "import": "./dist/incott/index.js"
+    },
+    "./hyperx": {
+      "types": "./dist/hyperx/index.d.ts",
+      "import": "./dist/hyperx/index.js"
     }
   },
   "scripts": {
