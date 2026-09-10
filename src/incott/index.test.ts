@@ -33,7 +33,12 @@ import {
   incottLiftOffLabel,
   incottLiftOffTenths,
   incottNormalizeProductName,
+  incottPerformanceModeFromWire,
+  incottPerformanceModeToWire,
   incottValidateDpi,
+  INCOTT_PERFORMANCE_MODE_FROM_WIRE,
+  INCOTT_PERFORMANCE_MODE_NAMES,
+  INCOTT_PERFORMANCE_MODE_TO_WIRE,
   INCOTT_POLLING_STEPS_HZ,
   INCOTT_POLLING_STEPS_HZ_WIRED,
   INCOTT_PRODUCT_ID,
@@ -559,9 +564,11 @@ test("incottLiftOffLabel and incottLiftOffTenths round-trip the three stops", ()
 });
 
 test("performance mode writes the raw 0-2 value captured from the vendor tool", () => {
-  // Captured 2026-09-07 as the owner switched the vendor tool's Performance
-  // mode control: TX 09 04 05 02 and TX 09 04 05 01. Which label (HP / Corded
-  // / LP) produced which value is UNVERIFIED — only the raw writes exist.
+  // Captured 2026-09-10 with EACH CLICK LABELLED before its write was
+  // recorded (unlike the 2026-09-07 capture, which only recorded the raw
+  // writes): clicked "HP" -> TX 09 04 05 02, clicked "Corded" ->
+  // TX 09 04 05 01, clicked "LP" -> TX 09 04 05 00. See
+  // captures/incott-8k-wireless/vendor-tool-session-2026-09-10.hex.
   assert.deepEqual(bytes(incottEncodeSetPerformanceMode(2)).slice(0, 3), [0x04, 0x05, 0x02]);
   assert.deepEqual(bytes(incottEncodeSetPerformanceMode(1)).slice(0, 3), [0x04, 0x05, 0x01]);
   assert.deepEqual(bytes(incottEncodeSetPerformanceMode(0)).slice(0, 3), [0x04, 0x05, 0x00]);
@@ -572,10 +579,39 @@ test("performance mode rejects a value outside 0-2", () => {
   assert.throws(() => incottEncodeSetPerformanceMode(-1), RangeError);
 });
 
-test("performance mode decodes byte 3 of the 0x84/0x05 response (unverified: never captured on hardware)", () => {
+test("performance mode decodes byte 3 of the 0x84/0x05 response (read-back CONFIRMED 2026-09-10)", () => {
   assert.equal(incottDecodePerformanceMode(frame(0x84, 0x05, 0x01)), 1);
   assert.equal(incottDecodePerformanceMode(frame(0x84, 0x05, 0x02)), 2);
   assert.equal(incottDecodePerformanceMode(frame(0x84, 0x05, 0x03)), null);
   // Wrong sub-command: must not be read as a performance-mode reply.
   assert.equal(incottDecodePerformanceMode(frame(0x84, 0x03, 0x01)), null);
+});
+
+test("performance-mode name<->wire mapping matches the labelled 2026-09-10 capture", () => {
+  assert.equal(incottPerformanceModeToWire("HP"), 2);
+  assert.equal(incottPerformanceModeToWire("Corded"), 1);
+  assert.equal(incottPerformanceModeToWire("LP"), 0);
+  assert.equal(incottPerformanceModeFromWire(2), "HP");
+  assert.equal(incottPerformanceModeFromWire(1), "Corded");
+  assert.equal(incottPerformanceModeFromWire(0), "LP");
+});
+
+test("performance-mode lookups reject an unknown name or an out-of-range wire value", () => {
+  assert.equal(incottPerformanceModeToWire("Ultra"), null);
+  assert.equal(incottPerformanceModeToWire(""), null);
+  assert.equal(incottPerformanceModeFromWire(3), null);
+  assert.equal(incottPerformanceModeFromWire(-1), null);
+});
+
+test("REGRESSION: the performance-mode mapping is NOT the vendor UI's left-to-right order", () => {
+  // The trap this capture exists to prevent: the vendor tool displays the
+  // control left-to-right as HP | Corded | LP, which would naively suggest
+  // HP=0. The labelled 2026-09-10 capture proved the opposite: HP=2, LP=0.
+  // `INCOTT_PERFORMANCE_MODE_NAMES` still advertises the UI's own display
+  // order for the app's dropdown, but the wire mapping must stay reversed.
+  assert.deepEqual(INCOTT_PERFORMANCE_MODE_NAMES, ["HP", "Corded", "LP"]);
+  assert.equal(incottPerformanceModeToWire("HP"), 2, "HP must NOT map to 0, the UI's left-to-right index");
+  assert.notEqual(incottPerformanceModeToWire("HP"), INCOTT_PERFORMANCE_MODE_NAMES.indexOf("HP"));
+  assert.deepEqual(INCOTT_PERFORMANCE_MODE_TO_WIRE, { HP: 2, Corded: 1, LP: 0 });
+  assert.deepEqual(INCOTT_PERFORMANCE_MODE_FROM_WIRE, { 2: "HP", 1: "Corded", 0: "LP" });
 });

@@ -488,35 +488,136 @@ checks it directly via `incottFrameMatches`) but is not in that set because
 the driver itself never issues a `0x86` query — see `INCOTT_CMD_QUERY_BUTTON`
 in `src/incott/index.ts`.
 
-## Performance mode: codec implemented, mapping unverified, not exposed in the UI
+## Performance mode: mapping VERIFIED 2026-09-10, now wired into the shared UI contract
 
 The vendor tool has a three-way "Performance mode" control (labelled HP /
-Corded / LP, described as trading performance for battery life). The
-vendor-tool capture recorded two of the three writes:
+Corded / LP left-to-right, described as trading performance for battery
+life and energy efficiency, the middle option suitable for everyday use).
+The 2026-09-07 vendor-tool capture recorded two of the three raw writes but
+never recorded which on-screen label produced which value — that gap is now
+closed.
+
+**2026-09-10**: a second vendor-tool session instrumented the same
+configurator again, this time with every click labelled BEFORE the
+resulting write was recorded:
 
 ```
-TX 09 04 05 02
-TX 09 04 05 01
+clicked "HP"      -> TX 09 04 05 02
+clicked "Corded"  -> TX 09 04 05 01
+clicked "LP"      -> TX 09 04 05 00
 ```
 
-Command `0x04`, sub-command `0x05`, one byte value. `0` is presumed to exist
-(a three-way control implies three values) but was never directly observed.
-**Which label produced which value was never recorded** — only the raw
-writes exist. `incottEncodeSetPerformanceMode` /
-`incottDecodePerformanceMode` / `IncottHidClient.setPerformanceMode` /
-`getPerformanceMode` implement the raw 0-2 value; the read-back
-(`0x84`/`0x05`) was never captured on hardware and is a best-effort attempt
-by symmetry with the other `0x04`/`0x84` sub-command pairs, not a confirmed
-one.
+So: **HP = 2, Corded = 1, LP = 0** — the **REVERSE** of the vendor UI's own
+left-to-right display order. This is exactly why the mapping was captured
+with each click labelled rather than assumed from the on-screen order; see
+`captures/incott-8k-wireless/vendor-tool-session-2026-09-10.hex`. The
+reversal lives in one named table, `INCOTT_PERFORMANCE_MODE_TO_WIRE` /
+`INCOTT_PERFORMANCE_MODE_FROM_WIRE` (`src/incott/index.ts`), with
+`incottPerformanceModeToWire`/`incottPerformanceModeFromWire` as the
+validated lookup functions.
 
-This is deliberately **not wired into `MouseStatus`/`MouseUiHints`**. The
-shared contract's closest fit — `powerModes`/`powerMode`/`setPowerMode`,
-which MCHOSE uses for an identical three-way mode — requires naming each
-value for display. Doing that here would mean guessing an order for
-HP/Corded/LP and presenting it to the user as fact, which the capture does
-not support. The codec and client method exist so a future contributor with
-a hardware-confirmed mapping can wire it up without redoing the protocol
-work.
+The same session also captured the read-back:
+
+```
+TX 09 84 05
+RX 09 84 05 00 00 00 00 00 00   (byte 3 = 0, matching the just-written LP)
+```
+
+confirming `0x84`/sub `0x05` follows the same symmetric-read pattern as
+lift-off, ripple, angle snap and motion sync (see "Lift-off and motion sync"
+above) — `0x84` was already registered in `SUB_ECHOING_QUERIES`
+(`src/drivers/incott/hid.ts`) for those other sub-commands, so no
+transaction-discipline change was needed to cover this one too.
+
+**Now wired into `MouseStatus`/`MouseUiHints`**, using the shared contract's
+existing `powerModes`/`powerMode`/`setPowerMode` fields (the same fields
+MCHOSE uses for an identical three-way mode): `IncottHidClient.getPowerModes()`
+advertises `["HP", "Corded", "LP"]` in the vendor UI's own left-to-right
+order; `readStatus()` populates `powerMode` from a live `0x84`/`0x05` read,
+leaving it `undefined` (never fabricated) when that read fails or when the
+collection is dead; and `setPowerMode(name)` validates the name against the
+table above, writes, and requires a matching, non-null read-back before
+reporting success — an unverifiable write reports failure, matching every
+other setter in this driver. The lower-level `incottEncodeSetPerformanceMode`/
+`incottDecodePerformanceMode` codec and the raw-value `setPerformanceMode`/
+`getPerformanceMode` client methods are kept unchanged underneath it.
+
+## Receiver LED labels are now VERIFIED (2026-09-10)
+
+`INCOTT_RECEIVER_LED_MODES` (`src/incott/index.ts`) — "Connect & polling
+rate" / "Battery status" / "Battery warning" for raw values `0`/`1`/`2` — came
+from the MIT-licensed IncottHIDApp as unverified prior art. The 2026-09-10
+vendor-tool session selected each of the vendor UI's three receiver-LED
+options in turn, labelling the click before recording the write, then read
+`0x88` back:
+
+```
+selected "Connect and polling rate" -> TX 09 08 00 -> RX 09 88 00 …
+selected "Battery status"           -> TX 09 08 01 -> RX 09 88 01 …
+selected "Battery warning"          -> TX 09 08 02 -> RX 09 88 02 …
+```
+
+All three labels are confirmed correct, in the same 0/1/2 order the driver
+already shipped. See
+`captures/incott-8k-wireless/vendor-tool-session-2026-09-10.hex`.
+
+## DPI writes carry an axis byte (2026-09-10)
+
+The DPI write payload is longer than this driver previously modelled it:
+`02 <stage> <lo> <hi> 00 00 00 <axis>`, where `axis` is a byte at payload
+index 7 (the last byte of the 8-byte payload) that this driver did not
+previously know existed:
+
+```
+axis 0 -> both axes (the vendor UI's default "both" control)
+axis 1 -> X axis only
+axis 2 -> Y axis only
+```
+
+`incottEncodeSetDpi` (`src/incott/index.ts`) has always emitted trailing
+zeros for every payload position it does not explicitly fill, so it has
+always written axis `0` (both) — correct, but for a reason that was unknown
+until this capture, not by design. A comment at `incottEncodeSetDpi` records
+this.
+
+**Independent X/Y DPI is deliberately NOT implemented from this finding.**
+The same session probed the READ side (`0x82`) with the axis byte set to `0`,
+`1` and `2` in turn and got back the identical value every time — there is no
+per-axis read on this firmware, or at least not at this sub-command. Without
+a read that can distinguish a Y-only write from a both-axes write, this
+driver cannot verify one, and it does not ship writes it cannot verify (see
+the class comment on `IncottHidClient`). This is recorded as an open question
+in "Unresolved unknowns" below: the fix would be finding the read the vendor
+tool itself uses to display separate X and Y DPI values, if it has one. See
+`captures/incott-8k-wireless/vendor-tool-session-2026-09-10.hex`.
+
+## Onboard profiles are NOT a device feature (2026-09-10)
+
+Switching the vendor UI from "Onboard 1" to "Onboard 2" was instrumented end
+to end. **It emitted no profile-select command at all.** Instead it replayed
+the entire configuration as a burst of ordinary setting writes — all six
+button bindings, all six DPI stage values, the active stage, polling rate,
+performance mode, lift-off, the three sensor toggles, receiver LED, debounce
+and sleep, roughly 23 writes in total, indistinguishable from a user manually
+re-entering every setting by hand.
+
+**There is no on-device command to search for here.** "Onboard profiles" are
+a construct of the vendor's own configurator software, which apparently
+stores a full settings snapshot per named slot and replays it wholesale on
+selection; the mouse itself has no concept of a stored, selectable profile.
+Recording this so nobody spends time hunting for a `0x0N`/profile-select
+opcode that does not exist.
+
+One write at the very end of each replay is not accounted for by any known
+setting: `09 06 09 <00|01>`. Button indices only run 0-5 (`INCOTT_BUTTON_COUNT`),
+so `09` here is not a button index — this is a distinct write under command
+`0x06`. **Leading hypothesis, UNCONFIRMED**: the vendor UI has an "Invert the
+left and right button" toggle, and the two onboard slots in this session
+happened to have that toggle in different states. This was not tested in
+isolation (toggling that control on its own with nothing else changed), so it
+remains a hypothesis, not a confirmed mapping — do not implement it from this
+capture alone. See
+`captures/incott-8k-wireless/vendor-tool-session-2026-09-10.hex`.
 
 ## READS: verified on hardware
 
@@ -531,8 +632,9 @@ device — see `captures/incott-8k-wireless/targeted-reads.hex`,
   (0-5) — not a DPI value.
 - `0x84` (sensor) answers for sub-commands `0x00` (packed lift-off + motion
   sync), `0x01` (lift-off, symmetric), `0x02` (ripple control), `0x03`
-  (angle snap), `0x04` (motion sync, symmetric), and (unverified read-back,
-  see above) `0x05` (performance mode).
+  (angle snap), `0x04` (motion sync, symmetric), and `0x05` (performance
+  mode, symmetric — read-back CONFIRMED 2026-09-10, see "Performance mode"
+  above).
 - `0x85` (timing) answers for sub-commands `0x01` (debounce) and `0x03`
   (sleep).
 - `0x86` (with a sub-command 0-5) answers with that button's raw binding;
@@ -562,9 +664,15 @@ sync (`0x04`/`0x04`), polling rate (`0x01`), and button bindings (`0x06`, new
 capability).
 
 **Verified by a write + read-back** (no restore recorded,
-`vendor-tool-session.hex`, 2026-09-07): DPI (an earlier, narrower proof),
-receiver LED (`0x08`), and performance mode (`0x04`/`0x05`, values only, no
-label mapping).
+`vendor-tool-session.hex`, 2026-09-07): DPI (an earlier, narrower proof) and
+receiver LED (`0x08`, values only — label mapping confirmed 2026-09-10, see
+below).
+
+**Verified by a LABELLED write + read-back** (no restore recorded,
+`vendor-tool-session-2026-09-10.hex`, 2026-09-10): performance mode
+(`0x04`/`0x05` write, `0x84`/`0x05` read-back, full HP/Corded/LP label
+mapping — see "Performance mode" above) and receiver LED's own label mapping
+(`0x08` write, `0x88` read-back, all three labels — see "Receiver LED" below).
 
 **Still unverified against hardware writes**: `incottEncodeSetToggle` for
 ripple and angle snap specifically (motion sync is now verified; the write
@@ -615,10 +723,6 @@ capture session has resolved. **Do not resolve these by guessing.**
   given write. **Left unchanged pending a hardware check**: set 0.7 mm in the
   vendor tool, then read `0x84`/`0x01` (or the packed form) and see which
   value comes back.
-- **Performance-mode value-to-label mapping.** See "Performance mode" above —
-  writes for values `1` and `2` were captured, but not which of HP / Corded /
-  LP produced either. Needs a hardware check: set each of the three vendor-UI
-  options in turn and read back which raw value each produces.
 - **Button payload semantics.** The three bytes `incottDecodeButtonBinding`
   returns (`b0`/`b1`/`b2`) are deliberately unnamed: whether they encode a
   key code, a macro reference, or a remap target is not established. Needs a
@@ -637,10 +741,17 @@ capture session has resolved. **Do not resolve these by guessing.**
   captured and shown as-is in the details panel (see
   `incottDecodeIdentity`), but no field within them (firmware version,
   hardware revision, etc.) has been decoded.
-- **Whether `0x84`/`0x05` (the presumed performance-mode read-back) actually
-  answers at all.** It has never been captured on hardware; `IncottHidClient`
-  treats `null` from this query as "unknown," not as a failure, specifically
-  because of this uncertainty.
+- **DPI per-axis read.** The 2026-09-10 capture found a write-side axis byte
+  (payload index 7: 0 = both, 1 = X only, 2 = Y only — see "DPI write axis
+  byte" below) but no corresponding per-axis READ: probing `0x82` with the
+  axis byte set to 0, 1 and 2 returned the identical value every time. Without
+  a read to verify a Y-only write against, this driver does not implement
+  independent X/Y DPI. Needs a hardware check: find the read the vendor tool
+  itself uses to display separate X and Y DPI values (if it does).
+- **The `09 06 09 <00|01>` write seen at the end of an onboard-profile
+  replay.** See "Onboard profiles are not a device feature" below. Leading
+  hypothesis: the vendor UI's "Invert the left and right button" toggle —
+  UNCONFIRMED, not tested in isolation.
 
 ## Attribution
 

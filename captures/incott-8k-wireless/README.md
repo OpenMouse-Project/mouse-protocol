@@ -26,6 +26,7 @@ Three capture sessions now exist, at increasing trust:
 | `device-enumeration.txt` | The device's 8 HID collections (wireless, 0x522C) and which interface carries the vendor protocol. |
 | `wired-device-enumeration.txt` | **2026-09-08, wired (0x622C).** Interface 2 exposes TWO `0xFF05` collections, indistinguishable by vendor/product id or usage page — only one answers feature reports, the other fails `HidD_SetFeature` outright. Also captures the wired product string, "incott Esports G23V2Pro mouse" — the real model name, absent from the wireless dongle's generic string. This is the capture behind the wired-mode fix in `incottProbeCollection`/`incottSelectCollection` (`src/drivers/incott/hid.ts`). |
 | `repeatability.hex` | The same query returned three different payloads across three separate runs — the finding that shaped the driver's entire transaction discipline. |
+| `vendor-tool-session-2026-09-10.hex` | **2026-09-10, second vendor-tool session.** Every click labelled before its write was recorded. Settles the performance-mode HP/Corded/LP value-to-label mapping (reversed vs. the vendor UI's own display order) and its `0x84`/`0x05` read-back, verifies the receiver LED labels, finds a DPI-write axis byte at payload index 7 (no matching per-axis read exists), and documents that onboard profiles are a vendor-software replay, not a device feature. |
 
 ## The single most important protocol fact
 

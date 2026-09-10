@@ -1,0 +1,138 @@
+# Vendor-tool session: performance mode, receiver LED, DPI axis byte, and
+# onboard "profiles."
+#
+# Captured 2026-09-10 by instrumenting Incott's OWN WebHID configurator at
+# incott.net/mouse/ again — hooking HIDDevice.prototype.sendFeatureReport and
+# HIDDevice.prototype.receiveFeatureReport in the browser, against a real
+# G23V2Pro. Unlike the 2026-09-07 vendor-tool session
+# (vendor-tool-session.hex), which recorded only the raw performance-mode
+# writes with no label attached, EVERY click in this session was labelled by
+# hand as it was made, specifically to settle the performance-mode
+# value-to-label mapping that capture left open.
+#
+# TX lines are feature-report payloads as sent to sendFeatureReport(0x09, …),
+# i.e. they OMIT the report id byte, matching what this driver's
+# incottEncode* functions build. RX lines are full feature reports as
+# returned by receiveFeatureReport(0x09), i.e. they INCLUDE the report id at
+# byte 0.
+
+## Performance mode — command 0x04, sub 0x05. Each of the vendor UI's three
+## "Performance mode" buttons (displayed left-to-right as HP | Corded | LP)
+## was clicked in turn, with the click labelled BEFORE the resulting write was
+## recorded:
+
+# clicked "HP"
+TX 09 04 05 02
+# clicked "Corded"
+TX 09 04 05 01
+# clicked "LP"
+TX 09 04 05 00
+
+# So: HP=2, Corded=1, LP=0 — the REVERSE of the vendor UI's own left-to-right
+# display order. This is exactly why this session exists: the mapping is
+# OBSERVED here, not inferred from the on-screen order. See
+# INCOTT_SUB_PERFORMANCE / INCOTT_PERFORMANCE_MODE_TO_WIRE in
+# src/incott/index.ts.
+
+## Performance mode read-back — command 0x84, sub 0x05. Probed immediately
+## after selecting "LP" above (raw value 0):
+
+TX 09 84 05
+RX 09 84 05 00 00 00 00 00 00
+# Byte 3 = 0x00, matching the just-written LP=0. This is the read-back
+# incottDecodePerformanceMode / IncottHidClient.setPowerMode rely on — it
+# follows the same symmetric 0x04-write/0x84-read pattern already confirmed
+# for lift-off, ripple, angle snap and motion sync, and 0x84 was already in
+# SUB_ECHOING_QUERIES for those, so no transaction-discipline change was
+# needed to cover it.
+
+## Receiver LED labels — command 0x08 write / 0x88 read. Each of the vendor
+## UI's three receiver-LED options was selected in turn, labelled before the
+## write:
+
+# selected "Connect and polling rate"
+TX 09 08 00
+TX 09 88 00
+RX 09 88 00 00 00 00 00 00 00
+# selected "Battery status"
+TX 09 08 01
+TX 09 88 00
+RX 09 88 01 00 00 00 00 00 00
+# selected "Battery warning"
+TX 09 08 02
+TX 09 88 00
+RX 09 88 02 00 00 00 00 00 00
+
+# Confirms the labels this driver already shipped (INCOTT_RECEIVER_LED_MODES
+# in src/incott/index.ts) — previously carried over from IncottHIDApp as
+# unverified prior art, now independently hardware-confirmed:
+#   0 -> "Connect & polling rate"
+#   1 -> "Battery status"
+#   2 -> "Battery warning"
+
+## DPI write axis byte — command 0x02. Setting DPI stage 1 to 800 (wire 15)
+## through the vendor UI's plain DPI control, then probing payload index 7
+## (the vendor tool's own "X" / "Y" per-axis DPI sub-controls, which this
+## driver does not expose) with each of its three positions selected in turn:
+
+# "Both axes" selected (the vendor UI's default)
+TX 09 02 01 0f 00 00 00 00 00
+# "X only" selected
+TX 09 02 01 0f 00 00 00 00 01
+# "Y only" selected
+TX 09 02 01 0f 00 00 00 00 02
+
+# So payload index 7 (0-indexed from the command byte, i.e. the LAST byte of
+# the 8-byte payload) is an axis selector: 0 = both, 1 = X only, 2 = Y only.
+# This driver's own incottEncodeSetDpi has always emitted trailing zeros at
+# every payload position it does not explicitly fill, so it has always sent
+# axis 0 (both) — correct, but by construction rather than by design until
+# this capture explained why.
+#
+# Independent X/Y DPI is NOT implemented from this capture. Probing the read
+# side with the same axis byte set to 0, 1 and 2:
+
+TX 09 82 01 00 00 00 00 00 00 00
+RX 09 82 01 0f 00 00 00 00 00 00
+TX 09 82 01 00 00 00 00 00 01
+RX 09 82 01 0f 00 00 00 00 00 00
+TX 09 82 01 00 00 00 00 00 02
+RX 09 82 01 0f 00 00 00 00 00 00
+
+# All three reads returned the identical value (wire 0x0f = 800 DPI)
+# regardless of the axis byte sent — i.e. there is no per-axis READ on this
+# firmware, or at least not at this sub-command. Without a way to read back a
+# Y-axis write independently, this driver cannot VERIFY one, and it does not
+# ship writes it cannot verify (see the class comment on IncottHidClient).
+# OPEN QUESTION: find the read the vendor tool itself uses to display
+# separate X and Y DPI values in its own UI (if it does) — that would be the
+# missing per-axis read.
+
+## Onboard profiles — NOT a device feature. Switching the vendor UI from
+## "Onboard 1" to "Onboard 2" was instrumented end to end. It emitted NO
+## profile-select command at all. Instead it replayed the ENTIRE
+## configuration as a burst of ordinary setting writes — all six button
+## bindings, all six DPI stage values, the active stage, polling rate,
+## performance mode, lift-off, the three sensor toggles, receiver LED,
+## debounce and sleep — roughly 23 writes in total, indistinguishable from a
+## user manually re-entering every setting by hand. The exact sequence is not
+## reproduced byte-for-byte here (it is just the same commands documented
+## elsewhere in this driver, replayed back to back); what matters is that NO
+## new command appeared to mean "select profile 2."
+##
+## One write at the very end of the replay is NOT accounted for by any known
+## setting:
+
+TX 09 06 09 00
+# ... (immediately after switching to the OTHER onboard slot in a later trial) ...
+TX 09 06 09 01
+
+# Button indices only run 0-5 (see INCOTT_BUTTON_COUNT), so "09" here is not
+# a button index — this is a distinct, unexplained write under command 0x06.
+# LEADING HYPOTHESIS, UNCONFIRMED: the vendor UI has an "Invert the left and
+# right button" toggle, and this pair of writes (0x00 / 0x01) lines up with
+# switching between the two onboard slots in this session, which happened to
+# have that toggle in different states. This was NOT deliberately tested by
+# toggling that control on its own with everything else held constant, so it
+# remains a hypothesis, not a confirmed mapping — do not implement it from
+# this capture alone.

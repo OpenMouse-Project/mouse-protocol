@@ -73,6 +73,22 @@
  * `src/drivers/incott/hid.ts` for how the driver layer avoids decoding a
  * frame left over from a previous query.
  *
+ * A SIXTH round, 2026-09-10, instrumented Incott's own web configurator again,
+ * this time with every click LABELLED, settling the performance-mode
+ * value-to-label mapping left open by the 2026-09-07 capture: HP=2, Corded=1,
+ * LP=0 — the REVERSE of the vendor UI's own left-to-right display order. See
+ * `INCOTT_SUB_PERFORMANCE` for the labelled capture,
+ * `INCOTT_PERFORMANCE_MODE_TO_WIRE`/`incottPerformanceModeToWire` for the
+ * table it lives in, and `src/drivers/incott/hid.ts`'s `setPowerMode`/
+ * `getPowerModes` for where it is now wired into OpenMouse's shared
+ * `powerMode`/`powerModes` contract. The same session also verified the
+ * receiver LED labels (previously prior art, now confirmed — see
+ * `INCOTT_RECEIVER_LED_MODES`), found a DPI-write axis byte at payload index
+ * 7 (see `incottEncodeSetDpi`), and established that onboard profiles are a
+ * vendor-software construct with no on-device select command. See
+ * `docs/incott-testing.md` and
+ * `captures/incott-8k-wireless/vendor-tool-session-2026-09-10.hex`.
+ *
  * This module must not import WebHID types or talk to a device; see
  * `src/drivers/incott/hid.ts` for the WebHID client.
  */
@@ -273,12 +289,22 @@ export const INCOTT_SUB_RIPPLE = 0x02;
 export const INCOTT_SUB_ANGLE_SNAP = 0x03;
 export const INCOTT_SUB_MOTION_SYNC = 0x04;
 /**
- * Captured writes as the owner switched the vendor tool's "Performance mode"
- * control (labelled HP / Corded / LP, described as trading performance for
- * battery life): `TX 09 04 05 02` and `TX 09 04 05 01`. Only two of the three
- * values were observed being written, and — critically — WHICH label was
- * selected for either write was never recorded, so the value-to-label
- * mapping is UNVERIFIED. See `incottEncodeSetPerformanceMode`.
+ * Sub-command for the "Performance mode" sensor setting (labelled HP / Corded
+ * / LP in the vendor tool, described as trading performance for battery
+ * life). The value-to-label mapping is now CONFIRMED: captured 2026-09-10 by
+ * instrumenting Incott's own WebHID configurator with each click labelled
+ * (unlike the 2026-09-07 capture, which only recorded the raw writes):
+ *
+ *   clicked "HP"      -> TX 09 04 05 02
+ *   clicked "Corded"  -> TX 09 04 05 01
+ *   clicked "LP"      -> TX 09 04 05 00
+ *
+ * i.e. HP=2, Corded=1, LP=0. **This is the REVERSE of the vendor UI's
+ * left-to-right display order (HP | Corded | LP)** — exactly why this was
+ * captured with each click labelled rather than assumed from the on-screen
+ * order. See `INCOTT_PERFORMANCE_MODE_TO_WIRE`/`INCOTT_PERFORMANCE_MODE_FROM_WIRE`
+ * for the single named table this reversal lives in, and
+ * `incottEncodeSetPerformanceMode`.
  */
 export const INCOTT_SUB_PERFORMANCE = 0x05;
 export const INCOTT_SUB_DEBOUNCE = 0x01;
@@ -378,9 +404,45 @@ export const INCOTT_DEBOUNCE_MAX_MS = 30;
 export const INCOTT_SLEEP_MIN_S = 1;
 export const INCOTT_SLEEP_MAX_S = 900;
 
-/** 0, 1 and 2 are the only values ever written; 0 is presumed to exist (a three-way control implies three values) but was never directly observed. */
+/** All three raw wire values (LP/Corded/HP) are now hardware-confirmed — see `INCOTT_SUB_PERFORMANCE`. */
 export const INCOTT_PERFORMANCE_MODE_MIN = 0;
 export const INCOTT_PERFORMANCE_MODE_MAX = 2;
+
+/**
+ * The single named table the HP/Corded/LP value-to-label reversal lives in —
+ * see `INCOTT_SUB_PERFORMANCE` for the capture that confirmed it. Keys are the
+ * vendor tool's own display labels; `INCOTT_PERFORMANCE_MODE_NAMES` lists them
+ * in the vendor UI's own left-to-right order (HP, Corded, LP) for advertising
+ * to the app, while this table (and its inverse,
+ * `INCOTT_PERFORMANCE_MODE_FROM_WIRE`) hold the REVERSED wire values.
+ * `incottPerformanceModeToWire`/`incottPerformanceModeFromWire` are the
+ * intended entry points; the raw tables are exported for tests.
+ */
+export const INCOTT_PERFORMANCE_MODE_NAMES: readonly string[] = ["HP", "Corded", "LP"];
+
+/** name -> raw wire value. See `INCOTT_PERFORMANCE_MODE_NAMES`'s doc comment for the reversal warning. */
+export const INCOTT_PERFORMANCE_MODE_TO_WIRE: Readonly<Record<string, number>> = {
+  HP: 2,
+  Corded: 1,
+  LP: 0,
+};
+
+/** raw wire value -> name. The inverse of `INCOTT_PERFORMANCE_MODE_TO_WIRE`. */
+export const INCOTT_PERFORMANCE_MODE_FROM_WIRE: Readonly<Record<number, string>> = {
+  2: "HP",
+  1: "Corded",
+  0: "LP",
+};
+
+/** Validated name -> wire lookup for `incottEncodeSetPerformanceMode`/`IncottHidClient.setPowerMode`. Returns `null` for an unknown name rather than throwing, so callers can reject before writing anything. */
+export function incottPerformanceModeToWire(name: string): number | null {
+  return INCOTT_PERFORMANCE_MODE_TO_WIRE[name] ?? null;
+}
+
+/** Wire -> validated name lookup, the inverse of `incottPerformanceModeToWire`. Returns `null` for a value outside 0-2. */
+export function incottPerformanceModeFromWire(wire: number): string | null {
+  return INCOTT_PERFORMANCE_MODE_FROM_WIRE[wire] ?? null;
+}
 
 /**
  * A curated subset of the verified 1-900s sleep-timer range to offer in the
@@ -444,6 +506,17 @@ export function incottValidateDpi(dpi: number): void {
  * could only ever reach stage 1). The value itself is a plain little-endian
  * uint16 "wire" value — see the comment on `INCOTT_DPI_MIN` for the
  * conversion and the captured proof.
+ *
+ * PAYLOAD INDEX 7 IS AN AXIS BYTE, discovered 2026-09-10: the full write is
+ * `02 <stage> <lo> <hi> 00 00 00 <axis>`, where `axis` 0 = both axes, 1 = X
+ * only, 2 = Y only. This encoder always emits trailing zeros (see `payload`),
+ * so it has only ever written axis 0 (both) — correct, but now for a known
+ * reason rather than by accident. Independent X/Y is deliberately NOT
+ * implemented: probing `0x82` with the axis byte set to 0, 1 and 2 returned
+ * the identical value every time, i.e. there is no per-axis READ yet, and
+ * this driver never ships a write it cannot verify. See
+ * `docs/incott-testing.md` for the open question (find the read the vendor
+ * tool uses to display separate X and Y DPI values) that would unblock this.
  */
 export function incottEncodeSetDpi(stage: number, dpi: number): Uint8Array {
   if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
@@ -502,9 +575,12 @@ export function incottEncodeSetButtonBinding(button: number, raw: readonly [numb
 }
 
 /**
- * See the comment on `INCOTT_SUB_PERFORMANCE`: the value-to-label mapping
- * (HP / Corded / LP) is UNVERIFIED. This function only encodes the raw
- * 0-2 value the vendor tool was observed writing.
+ * Encodes the raw 0-2 performance-mode value. The value-to-label mapping
+ * (HP=2 / Corded=1 / LP=0) is now CONFIRMED — see `INCOTT_SUB_PERFORMANCE`
+ * for the labelled capture and its REVERSED-vs-UI warning. Most callers
+ * should go through `incottPerformanceModeToWire`/`IncottHidClient.setPowerMode`
+ * with a name instead of a raw value; this function is the low-level codec
+ * both build on.
  */
 export function incottEncodeSetPerformanceMode(mode: number): Uint8Array {
   if (!Number.isInteger(mode) || mode < INCOTT_PERFORMANCE_MODE_MIN || mode > INCOTT_PERFORMANCE_MODE_MAX) {
@@ -657,13 +733,15 @@ export function incottDecodeToggle(frame: Uint8Array, sub?: number): boolean | n
 }
 
 /**
- * A read-back for performance mode was never captured on hardware — only the
- * writes documented on `INCOTT_SUB_PERFORMANCE` were observed. This mirrors
- * the read/write symmetry every other `0x04`/`0x84` sensor sub-command uses
- * (lift-off, ripple, angle snap and motion sync all pair a `0x04` write with
- * an `0x84` read at the same sub-command and a value at byte 3), so it is a
- * reasonable attempt, not a confirmed one. Callers must treat `null` as
- * "unknown," not as a failed write.
+ * `09 84 05` -> response byte 3 carries the current raw 0-2 performance-mode
+ * value. This follows the symmetric-read pattern every other `0x04`/`0x84`
+ * sensor sub-command uses (lift-off, ripple, angle snap and motion sync all
+ * pair a `0x04` write with an `0x84` read at the same sub-command), and
+ * `0x84` is already in the sub-echoing set (`SUB_ECHOING_QUERIES` in
+ * `src/drivers/incott/hid.ts`), so the existing transaction discipline covers
+ * it. Callers must still treat `null` as "unreadable," not as a confirmed
+ * value — see `IncottHidClient.setPowerMode`, which requires a non-null,
+ * matching read-back before reporting success.
  */
 export function incottDecodePerformanceMode(frame: Uint8Array): number | null {
   if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_PERFORMANCE)) return null;
