@@ -148,6 +148,10 @@
     "./ksnake": {
       "types": "./dist/ksnake/index.d.ts",
       "import": "./dist/ksnake/index.js"
+    },
+    "./hyperx": {
+      "types": "./dist/hyperx/index.d.ts",
+      "import": "./dist/hyperx/index.js"
     }
   },
   "scripts": {
