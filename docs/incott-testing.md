@@ -1073,3 +1073,63 @@ been driven to make one.
 This also settles the count reading itself by a second route: a device that
 rotates through exactly three stages after being told `09 03 03 <idx>` is
 reading that byte as a cycle length, not echoing a sub-command.
+
+## Macros: format recovered, transport NOT (2026-09-11)
+
+The 320-byte macro buffer is fully transcribed from the vendor bundle's
+`juji_to_hw()` and encoded by `incottEncodeMacroBuffer`:
+
+```
+[0]        buffer id (0-9)
+[1]        loop mode  0 until key release, 1 until any key, 2 cycle
+[2..3]     cycle count, LE16
+[4+4n]     event flags: bit 0 always set, bit 7 set for a RELEASE
+[5+4n]     HID keyboard usage code
+[6..7+4n]  delay after the event, LE16 ms
+[288..293] ASCII "Macro" then '1' + buffer id
+[304..307] (steps + 1) * 132, LE32
+[308..311] 16, 0, 232, 232 — constant in every buffer the vendor builds
+[312..315] uid, LE32
+[316..317] steps * 2, LE16
+[318]      step count
+```
+
+Steps occupy bytes 4..287 at four bytes each, so 71 fit. The upload sends the
+buffer as ten 32-byte chunks, each announced by an ordinary 8-byte command
+(`09 07 0a <chunk> 20 <buffer id>`, `incottEncodeMacroChunkHeader`).
+
+**Nothing sends it, and this is why.** The call that carries each 32-byte
+chunk is `document.elsDevice` in the vendor bundle, and that function is
+**never defined in any file the page loads** — the eight scripts under
+`incott.net/mouse/js/` plus `js/lib/savepro.js` were all downloaded and
+searched. It cannot be recovered by reading further, either: no
+`sendFeatureReport` or `receiveFeatureReport` appears literally anywhere in
+the bundle, because the method names are resolved through variables at
+runtime (the same indirection that made `navigator.hid[mymethod1]` out of
+`requestDevice`).
+
+It is also not the ordinary path. Every command in this protocol is an 8-byte
+feature report on id `0x09`, which a 32-byte chunk does not fit. A read-only
+sweep of the other vendor collections on 2026-09-11 found the `0xFF00`
+collection answering no feature read at all, and the dead `0xFF05` collection
+answering none either (which independently re-confirms the two-collection
+finding above).
+
+**What would settle it:** instrument the vendor tool while it saves a macro,
+the way `vendor-tool-session.hex` was captured. That shows the transport
+directly instead of inferring it.
+
+Also worth noting, since it is a trap for anyone implementing this from the
+vendor's code: its own uploader slices `mda.slice(i * 32, i * 64)`, which
+yields an EMPTY chunk for `i = 0` and over-long ones afterwards. That is a bug
+in the vendor's uploader; `incottMacroChunks` does not reproduce it.
+
+### Why there is no UI for this either
+
+Independently of the transport, `MouseStatus` in `src/drivers/mouse-types.ts`
+has no macro field, so there is nowhere to publish macros even once they can
+be written. Upstream has deliberately deferred this elsewhere — the ATK card
+states that "assignment writes, shortcuts, and macros remain locked pending
+reversible validation", and Logitech's macro encoders are driver-internal
+rather than part of the shared contract. A macro contract shape is a question
+for the maintainers, not something to guess at.

@@ -20,10 +20,12 @@ import {
   incottDecodeSleep,
   incottDecodeToggle,
   incottEncodeQuery,
-  incottEncodeSetDpiCycle,
+  incottEncodeMacroBuffer,
+  incottEncodeMacroChunkHeader,
   incottEncodeSetButtonBinding,
   incottEncodeSetDebounce,
   incottEncodeSetDpi,
+  incottEncodeSetDpiCycle,
   incottEncodeSetLiftOff,
   incottEncodeSetPerformanceMode,
   incottEncodeSetPollingRate,
@@ -33,6 +35,7 @@ import {
   incottFrameMatches,
   incottIsWiredProduct,
   incottKeyboardActionCode,
+  incottMacroChunks,
   incottLiftOffLabel,
   incottLiftOffTenths,
   incottNormalizeProductName,
@@ -51,6 +54,7 @@ import {
   INCOTT_PRODUCT_ID_WIRED,
   INCOTT_SENSOR_PAW3395,
   INCOTT_SENSOR_PAW3950,
+  type IncottMacroLoop,
 } from "./index.ts";
 
 const bytes = (frame: Uint8Array): number[] => Array.from(frame);
@@ -800,4 +804,74 @@ test("REGRESSION: the performance-mode mapping is NOT the vendor UI's left-to-ri
   assert.notEqual(incottPerformanceModeToWire("HP"), INCOTT_PERFORMANCE_MODE_NAMES.indexOf("HP"));
   assert.deepEqual(INCOTT_PERFORMANCE_MODE_TO_WIRE, { HP: 2, Corded: 1, LP: 0 });
   assert.deepEqual(INCOTT_PERFORMANCE_MODE_FROM_WIRE, { 2: "HP", 1: "Corded", 0: "LP" });
+});
+
+test("macro buffer encodes the header, steps and trailer from the vendor's juji_to_hw", () => {
+  const buffer = incottEncodeMacroBuffer({
+    bufferId: 2,
+    loop: "cycle",
+    cycles: 300,
+    uid: 0x12345678,
+    steps: [
+      { key: 0x04, press: true, delayMs: 50 },   // 'A' down
+      { key: 0x04, press: false, delayMs: 1000 }, // 'A' up
+    ],
+  });
+  assert.equal(buffer.length, 320);
+  assert.equal(buffer[0], 2, "buffer id");
+  assert.equal(buffer[1], 2, "loop mode: cycle");
+  assert.deepEqual([buffer[2], buffer[3]], [0x2c, 0x01], "cycles 300 LE16");
+
+  // A press sets bit 0 only; a release also sets bit 7.
+  assert.deepEqual([...buffer.slice(4, 8)], [0x01, 0x04, 50, 0]);
+  assert.deepEqual([...buffer.slice(8, 12)], [0x81, 0x04, 0xe8, 0x03]);
+
+  // "Macro3" — the name is 1-based where the buffer id is 0-based.
+  assert.equal(String.fromCharCode(...buffer.slice(288, 294)), "Macro3");
+
+  const size = (2 + 1) * 132;
+  assert.deepEqual([...buffer.slice(304, 308)], [size & 0xff, (size >> 8) & 0xff, 0, 0]);
+  assert.deepEqual([...buffer.slice(308, 312)], [16, 0, 232, 232]);
+  assert.deepEqual([...buffer.slice(312, 316)], [0x78, 0x56, 0x34, 0x12], "uid LE32");
+  assert.deepEqual([...buffer.slice(316, 319)], [4, 0, 2], "steps*2 LE16, then the step count");
+});
+
+test("macro loop modes map to their wire values in order", () => {
+  const at = (loop: IncottMacroLoop): number =>
+    incottEncodeMacroBuffer({ bufferId: 0, loop, cycles: 0, uid: 0, steps: [] })[1]!;
+  assert.equal(at("untilKeyRelease"), 0);
+  assert.equal(at("untilAnyKey"), 1);
+  assert.equal(at("cycle"), 2);
+});
+
+test("macro encoders reject an out-of-range buffer, chunk or step count", () => {
+  const base = { bufferId: 0, loop: "cycle" as const, cycles: 0, uid: 0, steps: [] };
+  assert.throws(() => incottEncodeMacroBuffer({ ...base, bufferId: 10 }), RangeError);
+  assert.throws(
+    () => incottEncodeMacroBuffer({
+      ...base,
+      steps: Array.from({ length: 72 }, () => ({ key: 4, press: true, delayMs: 0 })),
+    }),
+    RangeError,
+  );
+  assert.throws(() => incottEncodeMacroChunkHeader(10, 0), RangeError);
+  assert.throws(() => incottEncodeMacroChunkHeader(0, 10), RangeError);
+});
+
+test("macro chunk headers announce ten 32-byte chunks under command 0x07", () => {
+  assert.deepEqual(bytes(incottEncodeMacroChunkHeader(0, 3)).slice(0, 5), [0x07, 0x0a, 0x00, 0x20, 0x03]);
+  assert.deepEqual(bytes(incottEncodeMacroChunkHeader(9, 0)).slice(0, 5), [0x07, 0x0a, 0x09, 0x20, 0x00]);
+});
+
+test("macro chunking covers the whole buffer without the vendor's slice bug", () => {
+  // The vendor slices `mda.slice(i * 32, i * 64)`, which is EMPTY for i = 0.
+  const buffer = incottEncodeMacroBuffer({
+    bufferId: 0, loop: "cycle", cycles: 1, uid: 0,
+    steps: [{ key: 0x04, press: true, delayMs: 1 }],
+  });
+  const chunks = incottMacroChunks(buffer);
+  assert.equal(chunks.length, 10);
+  assert.ok(chunks.every((chunk) => chunk.length === 32));
+  assert.deepEqual([...chunks.flatMap((chunk) => [...chunk])], [...buffer], "chunks rejoin to the original");
+  assert.throws(() => incottMacroChunks(new Uint8Array(319)), RangeError);
 });

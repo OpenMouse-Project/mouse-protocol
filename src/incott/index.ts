@@ -145,6 +145,13 @@ export const INCOTT_CMD_SET_TIMING = 0x05;
  * nothing here interprets them.
  */
 export const INCOTT_CMD_SET_BUTTON = 0x06;
+/**
+ * Announces one 32-byte chunk of a macro buffer:
+ * `09 07 <chunks> <chunk index> <bytes per chunk> <buffer id>`.
+ *
+ * CODEC ONLY, AND NOT SENDABLE YET — see `incottEncodeMacroChunkHeader`.
+ */
+export const INCOTT_CMD_MACRO_CHUNK = 0x07;
 export const INCOTT_CMD_SET_RECEIVER_LED = 0x08;
 
 /**
@@ -414,6 +421,149 @@ export const INCOTT_BUTTON_ACTIONS: ReadonlyArray<readonly [string, number]> = [
     ([label, modifiers, usage]) => [label, incottKeyboardActionCode(usage, modifiers)] as const,
   ),
 ];
+
+/** Macro loop modes, in wire order. */
+export const INCOTT_MACRO_LOOP_MODES = ["untilKeyRelease", "untilAnyKey", "cycle"] as const;
+export type IncottMacroLoop = (typeof INCOTT_MACRO_LOOP_MODES)[number];
+
+/** One key event in a macro: a press or a release, then a delay. */
+export interface IncottMacroStep {
+  /** HID keyboard usage code. */
+  key: number;
+  /** True for a key-down event, false for key-up. */
+  press: boolean;
+  /** Delay after this event, milliseconds, 16-bit. */
+  delayMs: number;
+}
+
+export interface IncottMacro {
+  /** Which of the ten on-device macro buffers this occupies, 0-9. */
+  bufferId: number;
+  loop: IncottMacroLoop;
+  /** Repeat count, used by the `cycle` loop mode. */
+  cycles: number;
+  steps: readonly IncottMacroStep[];
+  /** The vendor's own identifier for the macro; echoed back in the buffer. */
+  uid: number;
+}
+
+/** A macro buffer is always this long, in ten 32-byte chunks. */
+export const INCOTT_MACRO_BUFFER_BYTES = 320;
+export const INCOTT_MACRO_CHUNK_BYTES = 32;
+export const INCOTT_MACRO_CHUNK_COUNT = INCOTT_MACRO_BUFFER_BYTES / INCOTT_MACRO_CHUNK_BYTES;
+export const INCOTT_MACRO_BUFFER_COUNT = 10;
+/** Steps occupy bytes 4..287 at four bytes each, so 71 fit. */
+export const INCOTT_MACRO_MAX_STEPS = 71;
+
+/**
+ * Builds the 320-byte macro buffer, transcribed from the vendor bundle's
+ * `juji_to_hw()`.
+ *
+ *     [0]        buffer id
+ *     [1]        loop mode (0 until key release, 1 until any key, 2 cycle)
+ *     [2..3]     cycle count, LE16
+ *     [4+4n]     event flags: bit 0 always set, bit 7 set for a RELEASE
+ *     [5+4n]     HID keyboard usage code
+ *     [6..7+4n]  delay after the event, LE16 milliseconds
+ *     [288..293] the ASCII name "Macro" followed by '1' + buffer id
+ *     [304..307] (steps + 1) * 132, LE32
+ *     [308..311] 16, 0, 232, 232 — constant in every buffer the vendor builds
+ *     [312..315] uid, LE32
+ *     [316..317] steps * 2, LE16
+ *     [318]      step count
+ *
+ * NOT SENDABLE YET, and this is the reason no client method exists: the
+ * buffer goes out as ten 32-byte chunks, each announced by
+ * `incottEncodeMacroChunkHeader` and then followed by the chunk itself — and
+ * the call that carries the chunk (`document.elsDevice` in the vendor bundle)
+ * is never defined in any file the page loads. Its transport cannot be
+ * recovered by reading the bundle: no `sendFeatureReport` or
+ * `receiveFeatureReport` appears literally anywhere in it, because the method
+ * names are resolved through variables at runtime.
+ *
+ * It cannot be the ordinary path either. Every command in this protocol is an
+ * 8-byte feature report on id `0x09`, which a 32-byte chunk does not fit, and
+ * a read-only sweep of the other vendor collections (2026-09-11) found
+ * `0xFF00` answering nothing at all.
+ *
+ * So this encoder exists to preserve a format that took real work to recover,
+ * with tests pinning it. Wiring it up needs the transport identified first —
+ * most likely by instrumenting the vendor tool while it saves a macro, the
+ * same way `vendor-tool-session.hex` was captured.
+ */
+export function incottEncodeMacroBuffer(macro: IncottMacro): Uint8Array {
+  if (!Number.isInteger(macro.bufferId) || macro.bufferId < 0 || macro.bufferId >= INCOTT_MACRO_BUFFER_COUNT) {
+    throw new RangeError(`Macro buffer id out of range: ${macro.bufferId}`);
+  }
+  if (macro.steps.length > INCOTT_MACRO_MAX_STEPS) {
+    throw new RangeError(`Macro has ${macro.steps.length} steps; the buffer holds ${INCOTT_MACRO_MAX_STEPS}`);
+  }
+  const out = new Uint8Array(INCOTT_MACRO_BUFFER_BYTES);
+  out[0] = macro.bufferId & 0xff;
+  out[1] = INCOTT_MACRO_LOOP_MODES.indexOf(macro.loop);
+  out[2] = macro.cycles & 0xff;
+  out[3] = (macro.cycles >> 8) & 0xff;
+
+  macro.steps.forEach((step, index) => {
+    const at = 4 + index * 4;
+    // Bit 0 is set on every event; bit 7 marks a release. A press is 0x01.
+    out[at] = (step.press ? 0x00 : 0x80) | 0x01;
+    out[at + 1] = step.key & 0xff;
+    out[at + 2] = step.delayMs & 0xff;
+    out[at + 3] = (step.delayMs >> 8) & 0xff;
+  });
+
+  // "Macro" + the 1-based buffer number, as the vendor names its slots.
+  out.set([0x4d, 0x61, 0x63, 0x72, 0x6f], 288);
+  out[293] = 0x31 + macro.bufferId;
+
+  const size = (macro.steps.length + 1) * 132;
+  out[304] = size & 0xff;
+  out[305] = (size >> 8) & 0xff;
+  out[306] = (size >> 16) & 0xff;
+  out[307] = (size >> 24) & 0xff;
+  out[308] = 16;
+  out[310] = 232;
+  out[311] = 232;
+  out[312] = macro.uid & 0xff;
+  out[313] = (macro.uid >>> 8) & 0xff;
+  out[314] = (macro.uid >>> 16) & 0xff;
+  out[315] = (macro.uid >>> 24) & 0xff;
+  const len = macro.steps.length * 2;
+  out[316] = len & 0xff;
+  out[317] = (len >> 8) & 0xff;
+  out[318] = macro.steps.length;
+  return out;
+}
+
+/**
+ * The 8-byte header announcing one chunk of a macro buffer:
+ * `09 07 0a <chunk index> 20 <buffer id>`.
+ *
+ * See `incottEncodeMacroBuffer` for why nothing sends this yet. Note the
+ * vendor slices its own payload as `mda.slice(i * 32, i * 64)`, which yields
+ * an EMPTY chunk for `i = 0` and over-long ones after — visibly a bug in its
+ * own uploader, and not reproduced here.
+ */
+export function incottEncodeMacroChunkHeader(chunkIndex: number, bufferId: number): Uint8Array {
+  if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= INCOTT_MACRO_CHUNK_COUNT) {
+    throw new RangeError(`Macro chunk index out of range: ${chunkIndex}`);
+  }
+  if (!Number.isInteger(bufferId) || bufferId < 0 || bufferId >= INCOTT_MACRO_BUFFER_COUNT) {
+    throw new RangeError(`Macro buffer id out of range: ${bufferId}`);
+  }
+  return payload(INCOTT_CMD_MACRO_CHUNK, INCOTT_MACRO_CHUNK_COUNT, chunkIndex, INCOTT_MACRO_CHUNK_BYTES, bufferId);
+}
+
+/** Splits a macro buffer into the ten chunks the upload sends. */
+export function incottMacroChunks(buffer: Uint8Array): Uint8Array[] {
+  if (buffer.length !== INCOTT_MACRO_BUFFER_BYTES) {
+    throw new RangeError(`Macro buffer must be ${INCOTT_MACRO_BUFFER_BYTES} bytes, got ${buffer.length}`);
+  }
+  return Array.from({ length: INCOTT_MACRO_CHUNK_COUNT }, (_, index) =>
+    buffer.slice(index * INCOTT_MACRO_CHUNK_BYTES, (index + 1) * INCOTT_MACRO_CHUNK_BYTES),
+  );
+}
 
 /** Label for a 32-bit action word, or null when it is not one this driver knows. */
 export function incottButtonActionLabel(code: number): string | null {
