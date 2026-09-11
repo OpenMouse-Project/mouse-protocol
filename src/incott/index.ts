@@ -637,6 +637,23 @@ export const INCOTT_SUB_MOTION_SYNC = 0x04;
  */
 export const INCOTT_SUB_PERFORMANCE = 0x05;
 export const INCOTT_SUB_DEBOUNCE = 0x01;
+/**
+ * Fire Key (rapid-fire) parameters, `09 05 02 <times> <interval ms>`.
+ *
+ * The last unidentified command in this protocol, settled 2026-09-11. The
+ * vendor calls it `setFKeyPm(lp, ir)` and only ever calls it for a button
+ * bound to `favFIRE`, deriving both values from that button's `itemdata` and
+ * clamping them to 3 and 255 respectively. Its own UI names the two fields:
+ * "Fire Key" / "Keep left-clicking according to the interval and times".
+ *
+ * Read back at `0x85`/`0x02`. On this hardware: `09 85 02 03 0a` — three
+ * clicks, 10 ms apart.
+ */
+export const INCOTT_SUB_FIRE_KEY = 0x02;
+/** Clicks per press. The vendor clamps to this; 0 is accepted but untested. */
+export const INCOTT_FIRE_KEY_MAX_TIMES = 3;
+/** Milliseconds between clicks in a burst, one byte. */
+export const INCOTT_FIRE_KEY_MAX_INTERVAL_MS = 255;
 export const INCOTT_SUB_SLEEP = 0x03;
 export const INCOTT_SUB_NONE = 0x00;
 
@@ -1191,6 +1208,41 @@ export function incottDecodeSleep(frame: Uint8Array): number | null {
   if (frame.length < 5) return null;
   const value = frame[3] | (frame[4] << 8);
   return value >= INCOTT_SLEEP_MIN_S && value <= INCOTT_SLEEP_MAX_S ? value : null;
+}
+
+/** How a Fire Key button behaves: how many clicks it sends, and how fast. */
+export interface IncottFireKey {
+  /** Clicks sent per press, 0-3. */
+  times: number;
+  /** Milliseconds between those clicks, 0-255. */
+  intervalMs: number;
+}
+
+/**
+ * `09 05 02 <times> <interval ms>` — see `INCOTT_SUB_FIRE_KEY`.
+ *
+ * These are the settings for whichever button is bound to "Rapid fire"; they
+ * are global to the device rather than per-button, since the command carries
+ * no button index.
+ */
+export function incottEncodeSetFireKey(times: number, intervalMs: number): Uint8Array {
+  if (!Number.isInteger(times) || times < 0 || times > INCOTT_FIRE_KEY_MAX_TIMES) {
+    throw new RangeError(`Fire key times out of range: ${times}`);
+  }
+  if (!Number.isInteger(intervalMs) || intervalMs < 0 || intervalMs > INCOTT_FIRE_KEY_MAX_INTERVAL_MS) {
+    throw new RangeError(`Fire key interval out of range: ${intervalMs} ms`);
+  }
+  return payload(INCOTT_CMD_SET_TIMING, INCOTT_SUB_FIRE_KEY, times, intervalMs);
+}
+
+/** `09 85 02` -> times at byte 3, interval at byte 4. */
+export function incottDecodeFireKey(frame: Uint8Array): IncottFireKey | null {
+  if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_TIMING, INCOTT_SUB_FIRE_KEY)) return null;
+  if (frame.length < 5) return null;
+  const times = frame[3]!;
+  const intervalMs = frame[4]!;
+  if (times > INCOTT_FIRE_KEY_MAX_TIMES) return null;
+  return { times, intervalMs };
 }
 
 export function incottDecodeReceiverLed(frame: Uint8Array): number | null {

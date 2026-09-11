@@ -182,6 +182,9 @@ function defaultState() {
     debounceMs: 4,
     sleepSeconds: 60,
     receiverLed: 0,
+    // Read from hardware 2026-09-11: 09 85 02 03 0a.
+    fireKeyTimes: 3,
+    fireKeyIntervalMs: 10,
     batteryByte: 0x38 as number | null, // 56%, captured 2026-09-07
     identity: [0x01, 0x0e, 0x02, 0xf0, 0xf1, 0x00, 0xff] as number[] | null,
     // The factory bindings read from hardware 2026-09-08, by WIRE index.
@@ -266,6 +269,7 @@ function fakeDevice(options: FakeOptions = {}) {
         return null;
       case 0x85:
         if (sub === 0x01) return frame(0x85, 0x01, state.debounceMs);
+        if (sub === 0x02) return frame(0x85, 0x02, state.fireKeyTimes, state.fireKeyIntervalMs);
         if (sub === 0x03) return frame(0x85, 0x03, state.sleepSeconds & 0xff, (state.sleepSeconds >> 8) & 0xff);
         return null;
       case 0x86: {
@@ -317,6 +321,7 @@ function fakeDevice(options: FakeOptions = {}) {
     else if (cmd === 0x04 && sub === 0x04) state.motionSync = value;
     else if (cmd === 0x04 && sub === 0x05) state.performanceMode = value;
     else if (cmd === 0x05 && sub === 0x01) state.debounceMs = value;
+    else if (cmd === 0x05 && sub === 0x02) { state.fireKeyTimes = value; state.fireKeyIntervalMs = payload[3] ?? 0; }
     else if (cmd === 0x05 && sub === 0x03) state.sleepSeconds = value | ((payload[3] ?? 0) << 8);
     else if (cmd === 0x08) state.receiverLed = sub; // no sub-command: mode sits at byte 1
     // cmd 0x06: `sub` is the button WIRE index, then the 32-bit action.
@@ -1302,4 +1307,30 @@ test("REGRESSION: battery is not read from the 0x8e/0x01 feature-report reply, e
   assert.notEqual(status.batteryPercent, 56);
   assert.equal(status.batteryPercent, null);
   assert.equal(status.batteryState, "Unknown");
+});
+
+test("getFireKey reads the rapid-fire parameters", async () => {
+  const { device } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  assert.deepEqual(await client.getFireKey(), { times: 3, intervalMs: 10 });
+});
+
+test("setFireKey writes both parameters and verifies the read-back", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  assert.deepEqual(await client.setFireKey(2, 50), { times: 2, intervalMs: 50 });
+  assert.deepEqual([state.fireKeyTimes, state.fireKeyIntervalMs], [2, 50]);
+});
+
+test("setFireKey throws when the mouse does not take the value", async () => {
+  const { device } = fakeDevice({ ignoreWrites: true });
+  await assert.rejects(() => new IncottHidClient(device, fast).setFireKey(1, 20), /instead of 1 at 20 ms/);
+});
+
+test("setFireKey rejects out-of-range values without writing", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(() => client.setFireKey(4, 10), RangeError);
+  await assert.rejects(() => client.setFireKey(3, 300), RangeError);
+  assert.deepEqual([state.fireKeyTimes, state.fireKeyIntervalMs], [3, 10]);
 });

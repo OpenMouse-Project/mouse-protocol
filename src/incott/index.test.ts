@@ -9,6 +9,7 @@ import {
   incottDecodeDebounce,
   incottDecodeDpiStage,
   incottDecodeDpiCycle,
+  incottDecodeFireKey,
   incottDecodeIdentity,
   incottDecodeInputStatus,
   incottDecodeLiftOff,
@@ -26,6 +27,7 @@ import {
   incottEncodeSetDebounce,
   incottEncodeSetDpi,
   incottEncodeSetDpiCycle,
+  incottEncodeSetFireKey,
   incottEncodeSetLiftOff,
   incottEncodeSetPerformanceMode,
   incottEncodeSetPollingRate,
@@ -874,4 +876,33 @@ test("macro chunking covers the whole buffer without the vendor's slice bug", ()
   assert.ok(chunks.every((chunk) => chunk.length === 32));
   assert.deepEqual([...chunks.flatMap((chunk) => [...chunk])], [...buffer], "chunks rejoin to the original");
   assert.throws(() => incottMacroChunks(new Uint8Array(319)), RangeError);
+});
+
+test("fire key encodes times and interval under 0x05/0x02", () => {
+  // The last unidentified command in the protocol. The vendor's setFKeyPm
+  // clamps its two arguments to 3 and 255, and its UI labels them "times"
+  // and "interval" ("Keep left-clicking according to the interval and
+  // times").
+  assert.deepEqual(bytes(incottEncodeSetFireKey(3, 10)).slice(0, 4), [0x05, 0x02, 0x03, 0x0a]);
+  assert.deepEqual(bytes(incottEncodeSetFireKey(1, 255)).slice(0, 4), [0x05, 0x02, 0x01, 0xff]);
+});
+
+test("fire key rejects a times or interval the device cannot hold", () => {
+  assert.throws(() => incottEncodeSetFireKey(4, 10), RangeError);
+  assert.throws(() => incottEncodeSetFireKey(-1, 10), RangeError);
+  assert.throws(() => incottEncodeSetFireKey(3, 256), RangeError);
+  assert.throws(() => incottEncodeSetFireKey(3, -1), RangeError);
+});
+
+test("fire key decodes the live hardware reading", () => {
+  // Read from the device 2026-09-11: 09 85 02 03 0a.
+  assert.deepEqual(incottDecodeFireKey(frame(0x85, 0x02, 0x03, 0x0a)), { times: 3, intervalMs: 10 });
+  assert.deepEqual(incottDecodeFireKey(frame(0x85, 0x02, 0x01, 0x32)), { times: 1, intervalMs: 50 });
+});
+
+test("fire key rejects a frame from another sub-command or one too short", () => {
+  assert.equal(incottDecodeFireKey(frame(0x85, 0x01, 0x04)), null, "debounce, not fire key");
+  assert.equal(incottDecodeFireKey(frame(0x85, 0x03, 0x3c, 0x00)), null, "sleep, not fire key");
+  assert.equal(incottDecodeFireKey(new Uint8Array([0x09, 0x85, 0x02, 0x03])), null, "no interval byte");
+  assert.equal(incottDecodeFireKey(frame(0x85, 0x02, 0x09, 0x0a)), null, "times above the maximum");
 });

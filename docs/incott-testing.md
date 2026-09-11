@@ -1133,3 +1133,63 @@ states that "assignment writes, shortcuts, and macros remain locked pending
 reversible validation", and Logitech's macro encoders are driver-internal
 rather than part of the shared contract. A macro contract shape is a question
 for the maintainers, not something to guess at.
+
+## 0x05/0x02 identified: Fire Key parameters (2026-09-11)
+
+The last unidentified command in this protocol. It is not a power or timing
+setting despite living in the `0x05` family alongside debounce and sleep — it
+configures **rapid fire**.
+
+The vendor calls it `setFKeyPm(lp, ir)` and calls it from exactly one place:
+applying a button whose binding is `favFIRE`.
+
+```js
+if (fMouse == pf.key[i].major && favFIRE == pf.key[i].minor) {
+  let lp = pf.key[i].itemdata & 0xffff;        if (lp > 3) lp = 3;
+  let ir = pf.key[i].itemdata >> 16 & 0xffff;  if (ir > 255) ir = 255;
+  await this.setFKeyPm(lp, ir);
+}
+```
+
+Its own `text_en` bundle names both fields:
+
+```
+"fire"  : "Fire Key"
+"fire1" : "Keep left-clicking according to the interval and times"
+"fire2" : "interval"
+```
+
+So `lp` is **times** (clicks per press, clamped to 3) and `ir` is the
+**interval** in milliseconds (clamped to 255).
+
+```
+write: 09 05 02 <times> <interval ms>
+read:  09 85 02  -> times at byte 3, interval at byte 4
+```
+
+**Hardware-confirmed 2026-09-11.** The device read `09 85 02 03 0a` — three
+clicks, 10 ms apart — and a round-trip wrote `1/50`, `2/20` and `3/255`,
+reading each back exactly before restoring `3/10`.
+
+The parameters are **global, not per-button**: the command carries no button
+index, so they apply to whichever button is bound to "Rapid fire"
+(`0x0218F00A` in `INCOTT_BUTTON_ACTIONS`).
+
+Not advertised through `MouseStatus` — the shared contract has no rapid-fire
+field, so `getFireKey`/`setFireKey` sit where `setReceiverLed` does: real,
+tested, and waiting for a control to hang them off.
+
+### Newly seen while sweeping: 0x85 sub 0x07
+
+The same read-only sweep turned up an undocumented responder:
+
+```
+sub 0x00: 09 85 00 00 00      sub 0x02: 09 85 02 03 0a   (fire key)
+sub 0x01: 09 85 01 04 00      sub 0x03: 09 85 03 3c 00   (sleep)
+sub 0x07: 09 85 07 01 0e 00                              (UNKNOWN)
+```
+
+Nothing else in `0x00`-`0x0f` answers. `01 0e` is suggestive — those are the
+same two values the identity reply carries at bytes 2 and 3 (guard `0x01`,
+model code `0x0E`) — but the vendor bundle never queries `0x85`/`0x07` at
+all, so there is no caller to name it. Recorded, not guessed at.

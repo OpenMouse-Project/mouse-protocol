@@ -5,6 +5,7 @@ import {
   incottDecodeDebounce,
   incottDecodeDpiStage,
   incottDecodeDpiCycle,
+  incottDecodeFireKey,
   incottDecodeIdentity,
   incottDecodeInputStatus,
   incottDecodeLiftOffDirect,
@@ -18,6 +19,7 @@ import {
   incottEncodeSetDebounce,
   incottEncodeSetDpi,
   incottEncodeSetDpiCycle,
+  incottEncodeSetFireKey,
   incottEncodeSetLiftOff,
   incottEncodeSetPerformanceMode,
   incottEncodeSetPollingRate,
@@ -59,6 +61,7 @@ import {
   INCOTT_RESPONSE_LENGTH,
   INCOTT_SUB_ANGLE_SNAP,
   INCOTT_SUB_DEBOUNCE,
+  INCOTT_SUB_FIRE_KEY,
   INCOTT_SUB_LOD,
   INCOTT_SUB_MOTION_SYNC,
   INCOTT_SUB_NONE,
@@ -68,6 +71,7 @@ import {
   INCOTT_USAGE_PAGE,
   INCOTT_VENDOR_ID,
   type IncottDpiCycle,
+  type IncottFireKey,
   type IncottInputStatus,
 } from "../../incott/index.ts";
 
@@ -1058,6 +1062,35 @@ export class IncottHidClient {
     if (applied.code !== code) {
       throw new Error(`The mouse kept ${applied.label ?? "another binding"} on ${name} instead of ${actionLabel}.`);
     }
+  }
+
+  /**
+   * Reads the Fire Key (rapid-fire) parameters — how many clicks a button
+   * bound to "Rapid fire" sends, and how far apart. Global to the device: the
+   * command carries no button index.
+   */
+  async getFireKey(): Promise<IncottFireKey | null> {
+    return incottDecodeFireKey(await this.query(INCOTT_CMD_QUERY_TIMING, INCOTT_SUB_FIRE_KEY));
+  }
+
+  /**
+   * Writes the Fire Key parameters and verifies the read-back.
+   *
+   * Not advertised through `MouseStatus`: the shared contract has no
+   * rapid-fire field, so there is no generic control to publish this behind —
+   * the same position `setReceiverLed` is in. Kept for protocol parity and
+   * for whoever wires a control up.
+   */
+  async setFireKey(times: number, intervalMs: number): Promise<IncottFireKey> {
+    await this.write(incottEncodeSetFireKey(times, intervalMs));
+    const got = await this.getFireKey();
+    if (got === null) throw new Error("The mouse did not confirm the fire key change.");
+    if (got.times !== times || got.intervalMs !== intervalMs) {
+      throw new Error(
+        `The mouse kept ${got.times} clicks at ${got.intervalMs} ms instead of ${times} at ${intervalMs} ms.`,
+      );
+    }
+    return got;
   }
 
   async setReceiverLed(mode: number): Promise<number> {
