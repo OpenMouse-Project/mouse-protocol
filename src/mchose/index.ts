@@ -540,6 +540,8 @@ export function mchosePollingRates(
 
 export * from "./buttons.ts";
 export * from "./dock.ts";
+// The A7 V3 generation's protocol, which shares only a vendor id with the above.
+export * from "./v3.ts";
 
 /**
  * Profile names, read one at a time with `0x12 0x68 <index>`. The reply is the
