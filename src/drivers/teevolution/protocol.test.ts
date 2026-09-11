@@ -3,21 +3,28 @@ import test from "node:test";
 
 import {
   TEEVOLUTION_FLASH,
+  TEEVOLUTION_KEY_CLASS,
+  TEEVOLUTION_PROFILE_COUNT,
   TEEVOLUTION_REPORT_ID,
   teevolutionProfileForCid,
   teevolutionBuildOnlinePayload,
   teevolutionBuildReadPayload,
+  teevolutionBuildSetCurrentProfile,
   teevolutionBuildSimplePayload,
   teevolutionBuildWriteScalarPayload,
+  teevolutionDecodeButtonMappings,
+  teevolutionDecodeCurrentProfile,
   teevolutionDecodeDpiLightBrightness,
   teevolutionDecodeDpiLightMode,
   teevolutionDecodeDpi,
   teevolutionDecodeFirmwareVersion,
+  teevolutionDecodeKeyFunction,
   teevolutionDecodeLiftOff,
   teevolutionDecodePollingRate,
   teevolutionDpiOptions,
   teevolutionEncodeDpiLightBrightness,
   teevolutionEncodeDpi,
+  teevolutionEncodeKeyFunction,
   teevolutionEncodeLiftOff,
   teevolutionEncodePollingRate,
   teevolutionEncodeSensorMode,
@@ -25,6 +32,10 @@ import {
   teevolutionParseBattery,
   teevolutionParseReadResponse,
   teevolutionSensorModeUi,
+  teevolutionFindButtonAction,
+  teevolutionKeyFunctionAddress,
+  teevolutionKeyFunctionLabel,
+  teevolutionKeyTableHasLeftClick,
   teevolutionLcdChecksum,
   teevolutionBuildLcdTimePacket,
   TEEVOLUTION_LCD_REPORT_ID,
@@ -147,6 +158,7 @@ test("Terra Pro capabilities are selected by reported CID", () => {
   assert.equal(TEEVOLUTION_FLASH.maxDpiStage, 2);
   assert.equal(TEEVOLUTION_FLASH.currentDpi, 4);
   assert.equal(TEEVOLUTION_FLASH.dpiValues, 12);
+  assert.equal(TEEVOLUTION_FLASH.keyFunction, 96);
   assert.deepEqual(profile.pollingRates, [125, 250, 500, 1000, 2000, 4000, 8000]);
   assert.deepEqual(profile.liftOffDistances, ["Low", "Medium", "High"]);
   assert.deepEqual(profile.sensorModes, ["Eco", "High"]);
@@ -212,4 +224,59 @@ test("RapidSync LCD time packets match Teevolink framing and CRC", () => {
   assert.deepEqual([...packet.subarray(1, 11)], [0x00, 0x10, 0x07, 0xea, 0x08, 0x0f, 0x15, 0x1b, 0x00, 6]);
   assert.equal(packet[39], teevolutionLcdChecksum(packet));
   assert.equal(now.getDay(), 6);
+});
+
+test("key-function records match Teevolink's 4-byte flash layout", () => {
+  const left = teevolutionEncodeKeyFunction(TEEVOLUTION_KEY_CLASS.mouse, 0x0100);
+  assert.deepEqual([...left], [0x01, 0x01, 0x00, 0x53]);
+  assert.deepEqual(teevolutionDecodeKeyFunction(left), {
+    cls: 1,
+    param: 0x0100,
+    checksumValid: true,
+  });
+  assert.equal(teevolutionKeyFunctionLabel(left), "Left Click");
+  assert.equal(teevolutionKeyFunctionAddress(0), 96);
+  assert.equal(teevolutionKeyFunctionAddress(4), 0x70);
+  assert.equal(teevolutionFindButtonAction("Backward")?.param, 0x0800);
+  assert.equal(teevolutionFindButtonAction("Launch rocket"), null);
+
+  const table = new Uint8Array(24);
+  const defaults: Array<readonly [number, number]> = [
+    [1, 0x0100], [1, 0x0200], [1, 0x0400], [1, 0x0800], [1, 0x1000], [2, 0x0100],
+  ];
+  defaults.forEach(([cls, param], index) => {
+    table.set(teevolutionEncodeKeyFunction(cls, param), index * 4);
+  });
+  const flash = new Uint8Array(120);
+  flash.set(table, 96);
+  assert.deepEqual(teevolutionDecodeButtonMappings(flash), {
+    Left: "Left Click",
+    Right: "Right Click",
+    Middle: "Middle Click",
+    Back: "Backward",
+    Forward: "Forward",
+    DPI: "DPI Loop",
+  });
+  assert.equal(teevolutionKeyTableHasLeftClick(table), true);
+  table.set(teevolutionEncodeKeyFunction(1, 0x0200), 0);
+  assert.equal(teevolutionKeyTableHasLeftClick(table), false);
+  assert.equal(teevolutionKeyFunctionLabel([6, 0x01, 0x05, 0]), "Custom");
+});
+
+test("SetCurrentConfig matches TeevoLink's 0-based four-bank picker", () => {
+  const profile0 = teevolutionBuildSetCurrentProfile(0);
+  const profile3 = teevolutionBuildSetCurrentProfile(3);
+  assert.deepEqual([...profile0.slice(0, 6)], [0x0f, 0, 0, 0, 1, 0]);
+  assert.deepEqual([...profile3.slice(0, 6)], [0x0f, 0, 0, 0, 1, 3]);
+  assert.equal(teevolutionPacketChecksumIsValid(profile0), true);
+  assert.equal(teevolutionPacketChecksumIsValid(profile3), true);
+  assert.equal(TEEVOLUTION_PROFILE_COUNT, 4);
+  assert.throws(() => teevolutionBuildSetCurrentProfile(4), /0 and 3/);
+
+  const reply = new Uint8Array([0x0e, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  reply[15] = (0x55 - TEEVOLUTION_REPORT_ID - reply.slice(0, 15).reduce((sum, byte) => sum + byte, 0)) & 0xff;
+  assert.equal(teevolutionDecodeCurrentProfile(reply), 2);
+  reply[1] = 1;
+  reply[15] = (0x55 - TEEVOLUTION_REPORT_ID - reply.slice(0, 15).reduce((sum, byte) => sum + byte, 0)) & 0xff;
+  assert.equal(teevolutionDecodeCurrentProfile(reply), null);
 });

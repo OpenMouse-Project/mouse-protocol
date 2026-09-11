@@ -8,10 +8,11 @@ import { DEVICE_DRIVERS } from "./registry.ts";
 import { SUPPORTED_HID_FILTERS, VENDOR_ID } from "./vendors.ts";
 import { LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
 import { ORBITAL_DEVICES } from "@openmouse/protocol/orbital";
+import { MCHOSE_V3_PRODUCT_IDS } from "@openmouse/protocol/mchose";
 
 const DEVICES_DIR = dirname(fileURLToPath(import.meta.url));
 
-const REPORT_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 0x0f, 0x10, 0x11, 0x20, 0xa1, 0xb3, 0xb4];
+const REPORT_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 0x09, 0x0f, 0x10, 0x11, 0x20, 0xa1, 0xb3, 0xb4];
 const USAGE_PAGES = [0x01, 0x0c, 0xff, 0xff00, 0xff01, 0xff02, 0xff05, 0xff0a, 0xff1c, 0xff43, 0xff55, 0xff60, 0xffa0, 0xffc1, 0xffc2, 0xffff];
 // Usage 4 is the Corsair config collection; 0x61 is VIA raw HID.
 const USAGES = [0, 1, 2, 4, 0x10, 0x61];
@@ -68,6 +69,9 @@ function candidateProductIds(): number[] {
     0xffff,
     ...LAMZU_PRODUCTS.keys(),
     ...ORBITAL_DEVICES.keys(),
+    // The MCHOSE V3 driver matches on an id allowlist and shares its usage
+    // page with the V2, so the probe needs a real one to reach it at all.
+    ...MCHOSE_V3_PRODUCT_IDS,
   ]);
   for (const filter of SUPPORTED_HID_FILTERS) {
     if (filter.productId !== undefined) ids.add(filter.productId);

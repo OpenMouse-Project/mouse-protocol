@@ -1,0 +1,20 @@
+Incott 8K wireless mouse — HID enumeration (Windows, node-hid), 2026-09-07
+093A:522C, manufacturer string "Pixart Imaging, Inc."
+
+The device exposes 8 HID collections across its interfaces. The vendor
+protocol this driver speaks lives on interface 3; the rest are ordinary
+mouse/keyboard/consumer/system collections unrelated to configuration.
+
+  interface  collection  usagePage  usage   role
+  ---------  ----------  ---------  ------  ----------------------------------
+  3          (top)       0xFF05     0x01    vendor protocol (this driver)
+  2          col03       0xFF00     0x01    unidentified vendor collection
+  2          col04       0xFF01     0x01    unidentified vendor collection
+  1          (top)       0x0001     0x02    boot mouse
+  0 or 2     col05       0x0001     0x06    keyboard
+  2          col01       0x000C     0x01    consumer control
+  2          col02       0x0001     0x0080  system control
+
+Only interface 3 (usage page 0xFF05) answered feature-report queries in this
+capture session; the 0xFF00 and 0xFF01 vendor collections on interface 2 were
+not probed and their purpose is unknown.

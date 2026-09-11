@@ -1,0 +1,53 @@
+# Full query opcode sweep 0x80-0x8F, one request per byte, no sub-command.
+# First 12 bytes of the 64-byte feature-report response; "no response" means
+# the device never answered within the capture's read budget.
+# Captured 2026-09-07 from an "incott 8K wireless mouse" (093A:522C) over the
+# 0xFF05 vendor collection with node-hid. Read-only: no write was ever sent.
+
+# request 09 80
+# no response
+
+# request 09 81 (query polling rate)
+09 81 00 04 00 0f 0f 01 00 00 00 00
+
+# request 09 82 (unidentified)
+09 82 00 07 00 00 00 00 00 00 00 00
+
+# request 09 83 (query DPI, no sub-command supplied)
+09 83 06 01 00 00 00 00 00 00 00 00
+
+# request 09 84 (query sensor, no sub-command supplied)
+09 84 00 01 00 00 00 00 00 00 00 00
+
+# request 09 85 (query timing, no sub-command supplied)
+09 85 00 01 00 00 00 00 00 00 00 00
+
+# request 09 86 (unidentified)
+09 86 00 01 00 f0 00 00 00 00 00 00
+
+# request 09 87
+# no response
+
+# request 09 88 (query receiver LED)
+09 88 00 00 00 00 00 00 00 00 00 00
+
+# request 09 89 (query status/battery)
+09 89 00 00 00 00 00 00 5a 00 00 00
+
+# request 09 8a
+# no response
+
+# request 09 8b
+# no response
+
+# request 09 8c
+# no response
+
+# request 09 8d
+# no response
+
+# request 09 8e
+# no response
+
+# request 09 8f (query identity)
+09 8f 01 0e 02 f0 f1 00 ff 00 00 00

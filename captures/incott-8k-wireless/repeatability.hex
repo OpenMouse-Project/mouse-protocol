@@ -1,0 +1,24 @@
+# THE SINGLE MOST IMPORTANT PROTOCOL FACT IN THIS DIRECTORY.
+#
+# The same request, sent unchanged, returned three DIFFERENT payloads across
+# three separate capture runs against the same physical device (093A:522C),
+# 2026-09-07. Nothing else about the setup changed between runs.
+#
+# request 09 84 00 (query sensor, sub 0x00), run A:
+09 84 00 04 00 0f 0f 01
+
+# same request, run B:
+09 84 00 0e 00 f1 00 00
+
+# same request, taken during the 0x80-0x8F sweep (no sub-command supplied):
+09 84 00 01 00 00 00 00
+
+# This is why the driver in src/drivers/incott/hid.ts and the transaction
+# queue in src/drivers/incott/hid.ts (IncottTransactionQueue) never trust a
+# single read: every request flushes whatever is already latched in the
+# device's single shared response buffer before sending, then only accepts a
+# reply whose report ID, command byte, and (for 0x83/0x84/0x85 only)
+# sub-command byte all echo the request. A read that skips this discipline
+# will silently decode a stale frame left over from an earlier, unrelated
+# query as if it were the answer to the current one. See incottFrameMatches()
+# in src/incott/index.ts.

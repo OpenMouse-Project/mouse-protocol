@@ -1,0 +1,46 @@
+Incott G23V2Pro — WIRED HID enumeration (Windows, node-hid), 2026-09-08
+093A:622C, product string "incott Esports G23V2Pro mouse"
+
+Same physical mouse as the rest of this fixture directory (VID 0x093A),
+captured plugged into USB instead of over the 2.4 GHz dongle. Two things
+differ from the wireless enumeration in `device-enumeration.txt`:
+
+  1. The product id is 0x622C, not 0x522C.
+  2. The product string carries the real model name — "incott Esports
+     G23V2Pro mouse" — where the wireless dongle reports only the generic
+     "incott 8K wireless mouse" with no model in it at all. See
+     `incottNormalizeProductName` in `src/incott/index.ts`.
+
+THE HEADLINE FINDING: interface 2 exposes TWO top-level collections on usage
+page 0xFF05, both usage 0x01 — indistinguishable by vendor id, product id, or
+usage page alone:
+
+  interface  collection  usagePage  usage   feature-report probe (09 8f 00)
+  ---------  ----------  ---------  ------  --------------------------------
+  2          col-a       0xFF05     0x01    HidD_SetFeature: (0x00000001)
+                                             Incorrect function — DEAD
+  2          col-b       0xFF05     0x01    RX 09 8f 01 0e 02 f0 f1 00 ff
+                                             — LIVE, this is the vendor
+                                             protocol
+
+Every read and every write this driver issues failed 100% of the time before
+this was diagnosed, because collection selection previously trusted usage
+page alone and took the FIRST 0xFF05 match — which on this hardware happens
+to be the dead one. There is no other observable difference between the two
+collections' descriptors that would let usage-page matching alone tell them
+apart; only sending something and checking for a real reply does.
+
+THE FIX (see `incottProbeCollection`/`incottSelectCollection` and
+`IncottHidClient.open()` in `src/drivers/incott/hid.ts`): probe a candidate
+with the identity query (`09 8f 00`) and require a well-formed reply (byte 0
+= report id 0x09, byte 1 = 0x8f) before trusting it, trying 0xFF05 candidates
+first, then any page >= 0xFF00 as a fallback. In the browser, WebHID hands
+this driver exactly one HIDDevice per collection — already chosen by the
+picker/filters before the driver ever sees it — so there is no second
+candidate to fall back to at that layer; `open()` instead probes the single
+collection it was given and `readStatus()` degrades gracefully
+(`ui.settingsReady: false`) rather than throwing when it is the dead one.
+
+Remaining rows are unchanged from the wireless enumeration (boot mouse,
+keyboard, consumer control, system control collections) and were not
+re-captured here since nothing about them changed.
