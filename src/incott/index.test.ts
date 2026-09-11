@@ -551,10 +551,10 @@ test("button binding decodes the top byte instead of truncating it", () => {
 });
 
 test("button binding reports an unknown action's raw code rather than a label", () => {
-  // A macro binding (slot 1): `slot << 16 | 9`, which the action table
-  // deliberately does not cover — macros need the 0x07 upload command.
-  const binding = incottDecodeButtonBinding(frame(0x86, 0x00, 0x09, 0x00, 0x01, 0x00), 0);
-  assert.equal(binding?.code, 0x00010009);
+  // Not a mouse, media, keyboard or macro encoding — nothing this driver can
+  // name, so it must round-trip as a raw value rather than be mislabelled.
+  const binding = incottDecodeButtonBinding(frame(0x86, 0x00, 0x78, 0x56, 0x34, 0x12), 0);
+  assert.equal(binding?.code, 0x12345678);
   assert.equal(binding?.label, null);
 });
 
@@ -808,36 +808,6 @@ test("REGRESSION: the performance-mode mapping is NOT the vendor UI's left-to-ri
   assert.deepEqual(INCOTT_PERFORMANCE_MODE_FROM_WIRE, { 2: "HP", 1: "Corded", 0: "LP" });
 });
 
-test("macro buffer encodes the header, steps and trailer from the vendor's juji_to_hw", () => {
-  const buffer = incottEncodeMacroBuffer({
-    bufferId: 2,
-    loop: "cycle",
-    cycles: 300,
-    uid: 0x12345678,
-    steps: [
-      { key: 0x04, press: true, delayMs: 50 },   // 'A' down
-      { key: 0x04, press: false, delayMs: 1000 }, // 'A' up
-    ],
-  });
-  assert.equal(buffer.length, 320);
-  assert.equal(buffer[0], 2, "buffer id");
-  assert.equal(buffer[1], 2, "loop mode: cycle");
-  assert.deepEqual([buffer[2], buffer[3]], [0x2c, 0x01], "cycles 300 LE16");
-
-  // A press sets bit 0 only; a release also sets bit 7.
-  assert.deepEqual([...buffer.slice(4, 8)], [0x01, 0x04, 50, 0]);
-  assert.deepEqual([...buffer.slice(8, 12)], [0x81, 0x04, 0xe8, 0x03]);
-
-  // "Macro3" — the name is 1-based where the buffer id is 0-based.
-  assert.equal(String.fromCharCode(...buffer.slice(288, 294)), "Macro3");
-
-  const size = (2 + 1) * 132;
-  assert.deepEqual([...buffer.slice(304, 308)], [size & 0xff, (size >> 8) & 0xff, 0, 0]);
-  assert.deepEqual([...buffer.slice(308, 312)], [16, 0, 232, 232]);
-  assert.deepEqual([...buffer.slice(312, 316)], [0x78, 0x56, 0x34, 0x12], "uid LE32");
-  assert.deepEqual([...buffer.slice(316, 319)], [4, 0, 2], "steps*2 LE16, then the step count");
-});
-
 test("macro loop modes map to their wire values in order", () => {
   const at = (loop: IncottMacroLoop): number =>
     incottEncodeMacroBuffer({ bufferId: 0, loop, cycles: 0, uid: 0, steps: [] })[1]!;
@@ -905,4 +875,64 @@ test("fire key rejects a frame from another sub-command or one too short", () =>
   assert.equal(incottDecodeFireKey(frame(0x85, 0x03, 0x3c, 0x00)), null, "sleep, not fire key");
   assert.equal(incottDecodeFireKey(new Uint8Array([0x09, 0x85, 0x02, 0x03])), null, "no interval byte");
   assert.equal(incottDecodeFireKey(frame(0x85, 0x02, 0x09, 0x0a)), null, "times above the maximum");
+});
+
+test("the macro buffer reproduces a real capture byte for byte", () => {
+  // Captured from Incott's own configurator 2026-09-11 saving "first macro"
+  // to buffer 3: L/K/F/Y pressed and released with the delays shown in the
+  // vendor UI, looping until any key is pressed, one cycle.
+  const buffer = incottEncodeMacroBuffer({
+    bufferId: 3,
+    loop: "untilAnyKey",
+    cycles: 1,
+    uid: 0x8fba0e90,
+    steps: [
+      { key: 0x0f, press: true, delayMs: 124 },   // L down
+      { key: 0x0f, press: false, delayMs: 1510 }, // L up
+      { key: 0x0e, press: true, delayMs: 157 },   // K down
+      { key: 0x0e, press: false, delayMs: 1104 }, // K up
+      { key: 0x09, press: true, delayMs: 135 },   // F down
+      { key: 0x09, press: false, delayMs: 1713 }, // F up
+      { key: 0x1c, press: true, delayMs: 140 },   // Y down
+      { key: 0x1c, press: false, delayMs: 0 },    // Y up
+    ],
+  });
+  const hex = (from: number, to: number): string =>
+    [...buffer.slice(from, to)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+
+  // Chunk 0 exactly as the vendor sent it.
+  assert.equal(
+    hex(0, 32),
+    "03 01 01 00 01 0f 7c 00 81 0f e6 05 01 0e 9d 00 81 0e 50 04 01 09 87 00 81 09 b1 06 01 1c 8c 00",
+  );
+  // Chunk 1: the final release, then the step area runs out into zeros.
+  assert.equal(hex(32, 36), "81 1c 00 00");
+  assert.ok(buffer.slice(36, 288).every((byte) => byte === 0), "nothing between the steps and the trailer");
+  // Chunk 9, the trailer. 0xa4 = 164 = (8 + 1) * 4 + 128 — the constant an
+  // earlier transcription had as 132.
+  assert.equal(
+    hex(288, 320),
+    "4d 61 63 72 6f 34 00 00 00 00 00 00 00 00 00 00 a4 00 00 00 10 00 e8 e8 90 0e ba 8f 10 00 08 00",
+  );
+});
+
+test("macro chunk headers match the captured upload", () => {
+  // TX feature  07 0a 00 20 03  ... through  07 0a 09 20 03
+  for (let index = 0; index < 10; index += 1) {
+    assert.deepEqual(
+      bytes(incottEncodeMacroChunkHeader(index, 3)).slice(0, 5),
+      [0x07, 0x0a, index, 0x20, 0x03],
+    );
+  }
+});
+
+test("a macro button binding reads back as its slot", () => {
+  // The capture ended with `06 04 09 00 03 00` — button wire index 4 bound to
+  // macro slot 3, encoded as slot << 16 | 9.
+  assert.equal(incottButtonActionLabel(0x00030009), "Macro 4");
+  assert.equal(incottButtonActionLabel(0x00000009), "Macro 1");
+  const binding = incottDecodeButtonBinding(frame(0x86, 0x04, 0x09, 0x00, 0x03, 0x00), 4);
+  assert.equal(binding?.label, "Macro 4");
+  // Not offered as a writable option: there is no UI to author one.
+  assert.equal(incottButtonActionCode("Macro 4"), null);
 });

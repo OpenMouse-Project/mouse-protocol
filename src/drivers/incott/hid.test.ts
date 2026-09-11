@@ -232,6 +232,8 @@ function vendorCollection(usagePage: number = INCOTT_USAGE_PAGE): HIDCollectionI
 function fakeDevice(options: FakeOptions = {}) {
   const state: FakeState = { ...defaultState(), ...options.state };
   const sent: Uint8Array[] = [];
+  // OUTPUT reports, which only the macro upload uses.
+  const outputs: Array<{ reportId: number; bytes: Uint8Array }> = [];
   let buffer = new Uint8Array(64);
   let opened = false;
   // Only "inputreport" is ever registered by this driver; a single slot is
@@ -356,6 +358,13 @@ function fakeDevice(options: FakeOptions = {}) {
     close: async () => {
       opened = false;
     },
+    // Only the macro upload sends these; everything else is a feature report.
+    sendReport: async (reportId: number, data: BufferSource) => {
+      const view = ArrayBuffer.isView(data)
+        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+        : new Uint8Array(data as ArrayBuffer);
+      outputs.push({ reportId, bytes: new Uint8Array(view) });
+    },
     sendFeatureReport: async (_reportId: number, data: BufferSource) => {
       const view = ArrayBuffer.isView(data)
         ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
@@ -387,6 +396,7 @@ function fakeDevice(options: FakeOptions = {}) {
   return {
     device: device as unknown as HIDDevice,
     sent,
+    outputs,
     state,
     /**
      * Simulates the mouse's unsolicited input report arriving — only fires
@@ -745,11 +755,11 @@ test("readStatus hides the remapper entirely when a button read fails", async ()
 });
 
 test("readStatus reports an unrecognised binding as a raw code, not as a known action", async () => {
-  // A macro binding (`slot << 16 | 9`) — macros need the 0x07 upload command
-  // and are deliberately absent from the action table.
-  const { device } = fakeDevice({ state: { buttons: [0x00010009, 0x00f10001, 0x00f20001, 0x00f30001, 0x00f40001, 0x00030007] } });
+  // Nothing this driver can name — not a mouse, media, keyboard or macro
+  // encoding — so it must be reported rather than mislabelled.
+  const { device } = fakeDevice({ state: { buttons: [0x12345678, 0x00f10001, 0x00f20001, 0x00f30001, 0x00f40001, 0x00030007] } });
   const status = await new IncottHidClient(device, fast).readStatus();
-  assert.equal(status.buttonMappings?.Left, "Unknown (0x00010009)");
+  assert.equal(status.buttonMappings?.Left, "Unknown (0x12345678)");
 });
 
 test("readStatus labels a keyboard binding read back from the mouse", async () => {
@@ -1443,4 +1453,42 @@ test("setAxisDpi sends a single linked write when the axes match", async () => {
   const dpiWrites = sent.filter((payload) => payload[0] === 0x02);
   assert.equal(dpiWrites.length, 1, "one write, not one per axis");
   assert.equal(dpiWrites[0]![7], 0, "the 'both' axis flag");
+});
+
+test("uploadMacro interleaves ten headers with ten 32-byte output reports", async () => {
+  // Exactly the shape captured from the vendor tool: an 8-byte feature
+  // report announcing each chunk, then the chunk itself as an OUTPUT report
+  // on the same id.
+  const { device, sent, outputs } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.uploadMacro({
+    bufferId: 3,
+    loop: "untilAnyKey",
+    cycles: 1,
+    uid: 0x8fba0e90,
+    steps: [{ key: 0x0f, press: true, delayMs: 124 }, { key: 0x0f, press: false, delayMs: 1510 }],
+  });
+
+  const headers = sent.filter((payload) => payload[0] === 0x07);
+  assert.equal(headers.length, 10);
+  assert.equal(outputs.length, 10);
+  assert.ok(outputs.every((report) => report.bytes.length === 32), "every chunk is 32 bytes");
+  assert.ok(outputs.every((report) => report.reportId === 0x09), "same report id as the feature path");
+  headers.forEach((header, index) => {
+    assert.deepEqual([...header.slice(0, 5)], [0x07, 0x0a, index, 0x20, 0x03]);
+  });
+  // The chunks rejoin into the buffer the encoder produced.
+  const rejoined = outputs.flatMap((report) => [...report.bytes]);
+  assert.equal(rejoined.length, 320);
+  assert.deepEqual(rejoined.slice(0, 8), [0x03, 0x01, 0x01, 0x00, 0x01, 0x0f, 0x7c, 0x00]);
+});
+
+test("uploadMacro fails clearly on a transport with no output-report support", async () => {
+  const { device } = fakeDevice();
+  delete (device as unknown as { sendReport?: unknown }).sendReport;
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(
+    () => client.uploadMacro({ bufferId: 0, loop: "cycle", cycles: 1, uid: 0, steps: [] }),
+    /cannot send output reports/,
+  );
 });

@@ -1123,31 +1123,48 @@ Steps occupy bytes 4..287 at four bytes each, so 71 fit. The upload sends the
 buffer as ten 32-byte chunks, each announced by an ordinary 8-byte command
 (`09 07 0a <chunk> 20 <buffer id>`, `incottEncodeMacroChunkHeader`).
 
-**Nothing sends it, and this is why.** The call that carries each 32-byte
-chunk is `document.elsDevice` in the vendor bundle, and that function is
-**never defined in any file the page loads** — the eight scripts under
-`incott.net/mouse/js/` plus `js/lib/savepro.js` were all downloaded and
-searched. It cannot be recovered by reading further, either: no
-`sendFeatureReport` or `receiveFeatureReport` appears literally anywhere in
-the bundle, because the method names are resolved through variables at
-runtime (the same indirection that made `navigator.hid[mymethod1]` out of
-`requestDevice`).
+**The transport is a 32-byte OUTPUT report on report id `0x09`** — captured
+2026-09-11 and implemented as `IncottHidClient.uploadMacro`. Nothing else in
+this protocol uses an output report, which is exactly why reading the bundle
+could not find it: `document.elsDevice` is defined in none of the shipped
+files, and the HID method names resolve through variables at runtime, so the
+string `sendFeatureReport` never appears literally anywhere in it.
 
-It is also not the ordinary path. Every command in this protocol is an 8-byte
-feature report on id `0x09`, which a 32-byte chunk does not fit. A read-only
-sweep of the other vendor collections on 2026-09-11 found the `0xFF00`
-collection answering no feature read at all, and the dead `0xFF05` collection
-answering none either (which independently re-confirms the two-collection
-finding above).
+Hooking `sendReport` in the browser showed it immediately. The connect log
+also reported something node-hid enumeration cannot see:
 
-**What would settle it:** instrument the vendor tool while it saves a macro,
-the way `vendor-tool-session.hex` was captured. That shows the transport
-directly instead of inferring it.
+```
+page 0xff05  feature: 0x9  output: 0x9
+```
 
-Also worth noting, since it is a trap for anyone implementing this from the
-vendor's code: its own uploader slices `mda.slice(i * 32, i * 64)`, which
-yields an EMPTY chunk for `i = 0` and over-long ones afterwards. That is a bug
-in the vendor's uploader; `incottMacroChunks` does not reproduce it.
+One collection, both report kinds on the same id. See
+`tools/hid-probes/vendor-macro-capture.js` in IncottHub for the
+instrumentation, and `captures/incott-8k-wireless/macro-upload-2026-09-11.hex`
+for the capture and its decode.
+
+There is no macro READ command, so `uploadMacro` is the one writer in this
+driver with nothing to verify against. Binding a button to `Macro <n>` and
+pressing it is the only confirmation available.
+
+### The correction this forced
+
+The size field at `[304..307]` had been transcribed as `(steps + 1) * 132`.
+It is `(steps + 1) * 4 + 128` — 164 for the captured 8-step macro, where the
+old formula would have written 1188. **The deobfuscation pass used to recover
+the vendor's source folded the constant `4 + 128` into `132` before anyone
+read it**, so this was a bug on this side rather than anything the vendor
+does. Every macro this driver built would have carried a wrong size, and
+re-reading the transcription could never have caught it — only a real buffer
+did. The encoder is now pinned byte-for-byte to that capture.
+
+### Also confirmed: macro button bindings
+
+The capture ended with `06 04 09 00 03 00`, binding wire button 4 to
+`0x00030009` — the `fJuji` encoding `slot << 16 | 9`.
+`incottButtonActionLabel` now names these (`Macro 4`) instead of reporting
+raw hex. `incottButtonActionCode` deliberately does NOT reverse them: nothing
+can assign a macro until there is a UI to author one, so an existing macro
+binding reads back correctly and is left alone.
 
 ### Why there is no UI for this either
 

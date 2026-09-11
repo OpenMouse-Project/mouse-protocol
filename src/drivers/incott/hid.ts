@@ -15,6 +15,8 @@ import {
   incottDecodeReceiverLed,
   incottDecodeSleep,
   incottDecodeToggle,
+  incottEncodeMacroBuffer,
+  incottEncodeMacroChunkHeader,
   incottEncodeQuery,
   incottEncodeQueryDpiAxis,
   incottEncodeSetButtonBinding,
@@ -30,6 +32,7 @@ import {
   incottEncodeSetToggle,
   incottFrameMatches,
   incottIsWiredProduct,
+  incottMacroChunks,
   incottLiftOffLabel,
   incottLiftOffTenths,
   incottNormalizeProductName,
@@ -77,6 +80,7 @@ import {
   type IncottDpiCycle,
   type IncottFireKey,
   type IncottInputStatus,
+  type IncottMacro,
 } from "../../incott/index.ts";
 
 type LiftOffLevel = "Low" | "Medium" | "High";
@@ -89,6 +93,13 @@ type LiftOffLevel = "Low" | "Medium" | "High";
 export interface FeatureTransport {
   sendFeatureReport(reportId: number, data: BufferSource): Promise<void>;
   receiveFeatureReport(reportId: number): Promise<DataView>;
+  /**
+   * OUTPUT report, used only by the macro upload — every other command in
+   * this protocol is an 8-byte FEATURE report. Optional because most
+   * transports (and the test fakes that predate macros) have no reason to
+   * implement it; `uploadMacro` reports a clear error when it is absent.
+   */
+  sendReport?(reportId: number, data: BufferSource): Promise<void>;
 }
 
 export interface IncottTransactionOptions {
@@ -158,6 +169,24 @@ export class IncottTransactionQueue {
       } catch {
         // A failed write surfaces as a failed read-back in the client.
       }
+    });
+    this.tail = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * Sends a 32-byte OUTPUT report, the macro upload's data path. Queued with
+   * everything else so it cannot interleave with the 8-byte header that
+   * announces it, and followed by a settle delay because the vendor waits
+   * 80 ms between the two halves of each chunk.
+   */
+  sendOutput(reportId: number, payload: Uint8Array): Promise<void> {
+    const run = this.tail.then(async () => {
+      if (!this.transport.sendReport) {
+        throw new Error("This transport cannot send output reports, which the macro upload needs.");
+      }
+      await this.transport.sendReport(reportId, toArrayBuffer(payload));
+      await this.sleep(this.settleMs);
     });
     this.tail = run.catch(() => undefined);
     return run;
@@ -918,6 +947,27 @@ export class IncottHidClient {
     }
     await this.setDpiStageAxis(stage, dpiX, "x");
     await this.setDpiStageAxis(stage, dpiY, "y");
+  }
+
+  /**
+   * Uploads one macro into an on-device buffer.
+   *
+   * Ten 32-byte chunks, each announced by an 8-byte feature report and then
+   * carried by a 32-byte OUTPUT report on the same id — the only place this
+   * protocol uses an output report at all. Captured from the vendor tool
+   * 2026-09-11; see `captures/incott-8k-wireless/macro-upload-2026-09-11.hex`.
+   *
+   * The device does not acknowledge any of it, so unlike every other setter
+   * here there is nothing to verify against: there is no macro read command.
+   * Bind a button to `Macro <n>` and press it — that is the only confirmation
+   * available.
+   */
+  async uploadMacro(macro: IncottMacro): Promise<void> {
+    const chunks = incottMacroChunks(incottEncodeMacroBuffer(macro));
+    for (const [index, chunk] of chunks.entries()) {
+      await this.write(incottEncodeMacroChunkHeader(index, macro.bufferId));
+      await this.queue.sendOutput(INCOTT_REPORT_ID, chunk);
+    }
   }
 
   /** Reads the DPI cycle (stage count + active stage) in one query. */

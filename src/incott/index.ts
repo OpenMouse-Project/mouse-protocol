@@ -466,7 +466,7 @@ export const INCOTT_MACRO_MAX_STEPS = 71;
  *     [5+4n]     HID keyboard usage code
  *     [6..7+4n]  delay after the event, LE16 milliseconds
  *     [288..293] the ASCII name "Macro" followed by '1' + buffer id
- *     [304..307] (steps + 1) * 132, LE32
+ *     [304..307] (steps + 1) * 4 + 128, LE32
  *     [308..311] 16, 0, 232, 232 — constant in every buffer the vendor builds
  *     [312..315] uid, LE32
  *     [316..317] steps * 2, LE16
@@ -517,7 +517,11 @@ export function incottEncodeMacroBuffer(macro: IncottMacro): Uint8Array {
   out.set([0x4d, 0x61, 0x63, 0x72, 0x6f], 288);
   out[293] = 0x31 + macro.bufferId;
 
-  const size = (macro.steps.length + 1) * 132;
+  // (steps + 1) * 4 + 128. An earlier transcription of this read
+  // `(steps + 1) * 132`, because the deobfuscation pass used to recover the
+  // vendor's source folded the constant `4 + 128` into `132` before anyone
+  // read it. Pinned to a real captured buffer now (2026-09-11).
+  const size = (macro.steps.length + 1) * 4 + 128;
   out[304] = size & 0xff;
   out[305] = (size >> 8) & 0xff;
   out[306] = (size >> 16) & 0xff;
@@ -565,13 +569,30 @@ export function incottMacroChunks(buffer: Uint8Array): Uint8Array[] {
   );
 }
 
-/** Label for a 32-bit action word, or null when it is not one this driver knows. */
+/**
+ * Label for a 32-bit action word, or null when it is not one this driver
+ * knows.
+ *
+ * Macro bindings are named rather than listed: the vendor encodes them as
+ * `slot << 16 | 9` (confirmed 2026-09-11, where binding a button to macro
+ * slot 3 wrote `0x00030009`), so a label can be derived for any slot without
+ * putting ten entries in the picker. `incottButtonActionCode` deliberately
+ * does NOT reverse these — nothing can assign a macro until there is a UI to
+ * author one — so a macro binding reads back correctly and is left alone.
+ */
 export function incottButtonActionLabel(code: number): string | null {
   for (const [label, value] of INCOTT_BUTTON_ACTIONS) {
     if (value === code) return label;
   }
+  if ((code & 0xffff) === INCOTT_BUTTON_MACRO_MARKER) {
+    const slot = code >>> 16;
+    if (slot < INCOTT_MACRO_BUFFER_COUNT) return `Macro ${slot + 1}`;
+  }
   return null;
 }
+
+/** Low half of a macro button binding: `slot << 16 | 9`. */
+export const INCOTT_BUTTON_MACRO_MARKER = 0x0009;
 
 /** 32-bit action word for a label, or null when the label is not in the table. */
 export function incottButtonActionCode(label: string): number | null {

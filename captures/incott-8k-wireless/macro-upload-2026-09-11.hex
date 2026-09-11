@@ -1,0 +1,65 @@
+# Macro upload: the transport, captured 2026-09-11
+#
+# Taken by instrumenting Incott's own configurator at incott.net/mouse/ with
+# tools/hid-probes/vendor-macro-capture.js (IncottHub), which hooks
+# sendReport as well as the two feature-report methods the 2026-09-07 session
+# used. Saving "first macro" to buffer 3 and binding it to a button.
+#
+# THE ANSWER: each chunk is a 32-byte OUTPUT report on report id 0x09.
+# Nothing else in this protocol uses an output report, which is exactly why
+# reading the bundle could not find it - `document.elsDevice` is defined in
+# none of the shipped files, and the HID method names resolve through
+# variables at runtime, so the string `sendFeatureReport` never appears
+# literally anywhere.
+#
+# The connect log also reported what node-hid enumeration cannot see:
+#     page 0xff05  feature: 0x9  output: 0x9
+# One collection, both report kinds on the same id.
+
+TX feature id=0x09  07 0a 00 20 03 00 00 00
+TX OUTPUT  id=0x09  03 01 01 00 01 0f 7c 00 81 0f e6 05 01 0e 9d 00 81 0e 50 04 01 09 87 00 81 09 b1 06 01 1c 8c 00
+TX feature id=0x09  07 0a 01 20 03 00 00 00
+TX OUTPUT  id=0x09  81 1c 00 00 00 00 ... (zeros to 32)
+TX feature id=0x09  07 0a 02 20 03 00 00 00      chunks 2-8 are all zeros:
+TX OUTPUT  id=0x09  00 00 ... (zeros)            the step area past the macro
+   ... same shape through chunk 8 ...
+TX feature id=0x09  07 0a 09 20 03 00 00 00
+TX OUTPUT  id=0x09  4d 61 63 72 6f 34 00 00 00 00 00 00 00 00 00 00 a4 00 00 00 10 00 e8 e8 90 0e ba 8f 10 00 08 00
+
+# Then the button binding, which confirms the fJuji encoding `slot << 16 | 9`:
+TX feature id=0x09  06 04 09 00 03 00 00 00      wire button 4 -> 0x00030009 = macro slot 3
+
+# ---------------------------------------------------------------------------
+# THE BUFFER, decoded against the vendor UI that produced it
+#
+# The UI showed: "first macro", "Cycle until any key is pressed", Cycle 1
+# times, and content:
+#     L 124ms > L 1510ms > K 157ms > K 1104ms > F 135ms > F 1713ms > Y 140ms > Y
+#
+#   [0]        03        buffer id 3
+#   [1]        01        loop 1 = until any key is pressed
+#   [2..3]     01 00     cycle count 1
+#   [4..35]              eight 4-byte events, press 0x01 / release 0x81:
+#                          01 0f 7c 00   L down,  124 ms     (L = HID 0x0F)
+#                          81 0f e6 05   L up,   1510 ms
+#                          01 0e 9d 00   K down,  157 ms     (K = HID 0x0E)
+#                          81 0e 50 04   K up,   1104 ms
+#                          01 09 87 00   F down,  135 ms     (F = HID 0x09)
+#                          81 09 b1 06   F up,   1713 ms
+#                          01 1c 8c 00   Y down,  140 ms     (Y = HID 0x1C)
+#                          81 1c 00 00   Y up,      0 ms
+#   [36..287]  00        unused step area
+#   [288..293] "Macro4"  ASCII name, '1' + buffer id
+#   [304..307] a4 00 00 00   size = 164 = (8 + 1) * 4 + 128
+#   [308..311] 10 00 e8 e8   constant in every buffer the vendor builds
+#   [312..315] 90 0e ba 8f   uid, LE32
+#   [316..317] 10 00         steps * 2
+#   [318]      08            step count
+#
+# CORRECTION THIS CAPTURE FORCED: the size field had been transcribed as
+# `(steps + 1) * 132`, which would have written 1188 here instead of 164. The
+# deobfuscation pass used to recover the vendor's source folded the constant
+# `4 + 128` into `132` before anyone read it - a transcription bug on this
+# side, not anything the vendor's code does. Every macro this driver built
+# would have carried a wrong size, and re-reading the transcription could
+# never have caught it. Only a real buffer did.
