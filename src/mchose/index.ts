@@ -540,6 +540,7 @@ export function mchosePollingRates(
 
 export * from "./buttons.ts";
 export * from "./dock.ts";
+export * from "./a5-gen1.ts";
 // The A7 V3 generation's protocol, which shares only a vendor id with the above.
 export * from "./v3.ts";
 
