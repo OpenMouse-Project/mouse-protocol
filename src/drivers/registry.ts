@@ -8,6 +8,7 @@ import { eggWeCreate, eggWeIsSupported, eggWeSupportScore, isEggWeClient, type E
 import { FinalmouseHidClient } from "./finalmouse/hid.ts";
 import { KeychronM6HidClient } from "./keychron/m6-hid.ts";
 import { KeychronNapeHidClient } from "./keychron/nape-hid.ts";
+import { LamzuAtlantisHidClient } from "./lamzu-atlantis/hid.ts";
 import { LamzuHidClient } from "./lamzu/hid.ts";
 import { LogitechHidppClient } from "./logitech/hidpp.ts";
 import { ModdoHidClient } from "./moddo/hid.ts";
@@ -54,7 +55,7 @@ import { HyperXHidClient } from "./hyperx/hid.ts";
 import { MchoseV3HidClient } from "./mchose/v3-hid.ts";
 
 export type PulsarClient = PulsarHidClient | PulsarProHidClient | PulsarXs1HidClient;
-export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | AtkBitmouseHidClient | VgnF2HidClient | KeychronM6HidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | CorsairHidClient | AttackSharkHidClient | FantechHidClient | GearHubHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | SteelSeriesRival3HidClient | SteelSeriesAerox3HidClient | SteelSeriesRival3WirelessHidClient | SteelSeriesAerox5HidClient | SteelSeriesAerox5WirelessHidClient | SteelSeriesRival650HidClient | SteelSeriesAerox9WirelessHidClient | SteelSeriesRival310HidClient | SteelSeriesPrimePlusHidClient | SteelSeriesPrimeMiniWirelessHidClient | SteelSeriesSenseiTenHidClient | GloriousHidClient | GloriousClassicHidClient | MchoseHidClient | MchoseDockHidClient | MchoseA5ProMaxHidClient | KsnakeHidClient | MicrosoftHidClient | DareuHidClient | IncottHidClient | HyperXHidClient | MchoseV3HidClient;
+export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | LamzuAtlantisHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | AtkBitmouseHidClient | VgnF2HidClient | KeychronM6HidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | CorsairHidClient | AttackSharkHidClient | FantechHidClient | GearHubHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | SteelSeriesRival3HidClient | SteelSeriesAerox3HidClient | SteelSeriesRival3WirelessHidClient | SteelSeriesAerox5HidClient | SteelSeriesAerox5WirelessHidClient | SteelSeriesRival650HidClient | SteelSeriesAerox9WirelessHidClient | SteelSeriesRival310HidClient | SteelSeriesPrimePlusHidClient | SteelSeriesPrimeMiniWirelessHidClient | SteelSeriesSenseiTenHidClient | GloriousHidClient | GloriousClassicHidClient | MchoseHidClient | MchoseDockHidClient | MchoseA5ProMaxHidClient | KsnakeHidClient | MicrosoftHidClient | DareuHidClient | IncottHidClient | HyperXHidClient | MchoseV3HidClient;
 
 export interface DeviceDriver {
   brand: string;
@@ -78,6 +79,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Logitech", supports: (device) => LogitechHidppClient.isSupported(device), create: (device) => new LogitechHidppClient(device), score: (device) => LogitechHidppClient.supportScore(device) },
   { brand: "WLMouse", supports: (device) => WLMouseHidClient.isSupported(device), create: (device) => new WLMouseHidClient(device), score: () => 5 },
   { brand: "Lamzu", supports: (device) => LamzuHidClient.isSupported(device), create: (device) => new LamzuHidClient(device), score: () => 5 },
+  { brand: "Lamzu", supports: (device) => LamzuAtlantisHidClient.isSupported(device), create: (device) => new LamzuAtlantisHidClient(device), score: () => 5 },
   { brand: "moddoMOUSE", supports: (device) => ModdoHidClient.isSupported(device), create: (device) => new ModdoHidClient(device), score: () => 5 },
   { brand: "Ninjutso", supports: (device) => NinjutsoHidClient.isSupported(device), create: (device) => new NinjutsoHidClient(device), score: () => 7 },
   { brand: "Orbital", supports: (device) => OrbitalHidClient.isSupported(device), create: (device) => new OrbitalHidClient(device), score: () => 6 },

@@ -552,6 +552,8 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // The Pulsar 4K Wireless Receiver enumerates under the shared Teevolution/VGN
   // vendor id with a Pulsar-specific product id, so the broad VID-only filter
   // keeps it visible in the picker; the driver disambiguates by product id.
+  // Lamzu's Atlantis generation lands here too — 0x3554 is CompX's ODM id, and
+  // this filter already surfaces it, so it needs no entry of its own.
   { vendorId: VENDOR_ID.vgn },
   { vendorId: VENDOR_ID.endgameGear },
   { vendorId: VENDOR_ID.wlmouse },
