@@ -1021,8 +1021,13 @@ count to clamp the active stage into the new range). `setDpiStageCount`
 resizes the cycle, leaves every stored stage value untouched, and clamps the
 active stage rather than leaving it pointing past the end.
 
-**Untested on hardware:** no capture exists of a cycle shorter than six,
-because the vendor tool was never driven to make one. The decode is proven,
-but the resize path is exercised only against the fake device. Setting the
-count to 3 in the vendor tool and re-reading `09 83` would confirm it in
-seconds.
+**CONFIRMED on hardware 2026-09-11.** The device owner set the cycle to three
+stages through this driver and cycled the mouse through all three, which is
+the first direct evidence of a cycle shorter than six on this hardware —
+until then the resize path was exercised only against the fake device, and no
+capture of a non-six count existed at all, because the vendor tool had never
+been driven to make one.
+
+This also settles the count reading itself by a second route: a device that
+rotates through exactly three stages after being told `09 03 03 <idx>` is
+reading that byte as a cycle length, not echoing a sub-command.
