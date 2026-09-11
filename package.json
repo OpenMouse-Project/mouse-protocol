@@ -125,6 +125,10 @@
       "types": "./dist/corsair/index.d.ts",
       "import": "./dist/corsair/index.js"
     },
+    "./dareu": {
+      "types": "./dist/dareu/index.d.ts",
+      "import": "./dist/dareu/index.js"
+    },
     "./drivers": {
       "types": "./dist/drivers/index.d.ts",
       "import": "./dist/drivers/index.js"

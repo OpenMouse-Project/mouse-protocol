@@ -39,6 +39,12 @@ function collection(
 
 function collectionShapes(): HIDCollectionInfo[][] {
   const shapes: HIDCollectionInfo[][] = [[]];
+  // Dareu's receiver exposes a service collection beside its report-8 command
+  // channel; retain both so strict multi-collection drivers are exercisable.
+  shapes.push([
+    collection(0xff05, 0),
+    collection(0xff02, 2, { input: [8], output: [8] }),
+  ]);
   shapes.push(USAGE_PAGES.map((page) =>
     collection(page, 1, { feature: REPORT_IDS, input: REPORT_IDS, output: REPORT_IDS })));
   for (const page of USAGE_PAGES) {
