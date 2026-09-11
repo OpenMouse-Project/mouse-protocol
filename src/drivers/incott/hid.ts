@@ -818,7 +818,7 @@ export class IncottHidClient {
       // go here, but `ui.settingsReady: false` above means the app never
       // renders it.
       dpi: dpi ?? 0,
-      ...(dpiY !== null ? { dpiY } : {}),
+      ...(dpiY !== null ? { dpiY, supportsSeparateDpiAxes: true } : {}),
       // All six stages' stored values, only when every one of them answered
       // — see the loop above. Omitted (not fabricated) on a partial read.
       ...(dpiStages !== null ? { dpiStages } : {}),

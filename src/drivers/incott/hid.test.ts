@@ -1352,6 +1352,8 @@ test("readStatus publishes dpiY for the active stage", async () => {
   const status = await new IncottHidClient(device, fast).readStatus();
   assert.equal(status.dpi, 800, "X");
   assert.equal(status.dpiY, 1600, "Y");
+  // The capability flag the shared UI gates the X/Y display on.
+  assert.equal(status.supportsSeparateDpiAxes, true);
 });
 
 test("readStatus omits dpiY rather than mirroring X when the axis read fails", async () => {
@@ -1360,6 +1362,7 @@ test("readStatus omits dpiY rather than mirroring X when the axis read fails", a
   const { device } = fakeDevice({ silent: [0x82] });
   const status = await new IncottHidClient(device, fast).readStatus();
   assert.equal(status.dpiY, undefined);
+  assert.equal(status.supportsSeparateDpiAxes, undefined, "no axes claimed without a reading");
 });
 
 test("setDpiStageAxis writes one axis and leaves the other alone", async () => {
