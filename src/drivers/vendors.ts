@@ -11,6 +11,9 @@ import {
   MCHOSE_DOCK_PRODUCT_ID,
   MCHOSE_DOCK_USAGE,
   MCHOSE_DOCK_USAGE_PAGE,
+  MCHOSE_A5_GEN1_PRODUCTS,
+  MCHOSE_A5_GEN1_USAGE_PAGE,
+  MCHOSE_A5_GEN1_VENDOR_ID,
 } from "@openmouse/protocol/mchose";
 import {
   HIDPP_BLUETOOTH_USAGE_PAGE,
@@ -118,6 +121,7 @@ export const VENDOR_ID = {
   gloriousClassicIWired: 0x320f, // Model O V2 / Model I 2 wired
   gloriousO3: 0x3794, // Model O3 Wireless / receiver (newer CORE-v2 generation)
   mchose: 0x3837,
+  mchoseA5Gen1: MCHOSE_A5_GEN1_VENDOR_ID,
   ksnakeUsb: 0xa8a4, // K-snake X11 wired
   ksnakeDongle: 0xa8a5, // K-snake X11 2.4 GHz dongle
   microsoft: 0x045E,
@@ -129,6 +133,14 @@ export const VENDOR_ID = {
   hyperxKingston: HYPERX_VENDOR_ID_KINGSTON,
   hyperxHp: HYPERX_VENDOR_ID_HP,
 } as const;
+
+export const MCHOSE_A5_HID_FILTERS: HIDDeviceFilter[] = [
+  ...[...MCHOSE_A5_GEN1_PRODUCTS.keys()].map((productId) => ({
+    vendorId: MCHOSE_A5_GEN1_VENDOR_ID,
+    productId,
+    usagePage: MCHOSE_A5_GEN1_USAGE_PAGE,
+  })),
+];
 
 /** Exact PID and report-8 command collection measured on the TM265 receiver. */
 export const DAREU_HID_FILTERS: HIDDeviceFilter[] = [...DAREU_PRODUCT_IDS].map((productId) => ({
@@ -553,6 +565,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   // MCHOSE ships keyboards and audio devices under 0x3837 too, so this stays
   // narrowed to the mouse configuration collection rather than the whole VID.
+  ...MCHOSE_A5_HID_FILTERS,
   // Both mouse generations answer on this collection — the A7 V2 with inverted
   // feature reports, the A7 V3 with its own output-report protocol — so one
   // filter offers the whole mouse line and the drivers split it by product id.
