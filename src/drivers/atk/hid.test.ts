@@ -308,7 +308,7 @@ test("R1 inspection rejects unsuccessful and corrupt command replies", async () 
   const otherR1 = device(0xf58f, "VXE R1");
   Object.assign(otherR1, { vendorId: 0x3554 });
   (otherR1 as unknown as FakeAtkDevice).replies = [reply(0x10, 0, [2, 12])];
-  await assert.rejects(new AtkHidClient(otherR1).setR1ActiveProfile(2), /verified wired transport/);
+  await assert.rejects(new AtkHidClient(otherR1).setR1ActiveProfile(2), /not available on this connection/);
   assert.equal((otherR1 as unknown as FakeAtkDevice).sent.some(({ data }) => data[0] === 0x0f), false);
 
   const corruptColor = device(0xf58f, "VXE R1SE+");
