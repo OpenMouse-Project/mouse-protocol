@@ -368,15 +368,49 @@ function fakeDevice(options: FakeOptions = {}) {
 
 const fast: IncottTransactionOptions = { settleMs: 0, attempts: 3, sleep: async () => {} };
 
-test("isSupported matches the Incott vendor/product ids and a >=0xFF00 usage page", () => {
+/** A vendor collection that declares some OTHER feature report id. */
+function siblingCollection(usagePage: number, reportId: number): HIDCollectionInfo {
+  return {
+    usagePage,
+    usage: 0x01,
+    type: 1,
+    children: [],
+    featureReports: [{ reportId, items: [] }],
+    inputReports: [],
+    outputReports: [],
+  } as unknown as HIDCollectionInfo;
+}
+
+test("isSupported requires the 0xFF05 collection that declares feature report 0x09", () => {
   assert.equal(IncottHidClient.isSupported(fakeDevice().device), true);
   assert.equal(IncottHidClient.isSupported(fakeDevice({ productId: INCOTT_PRODUCT_ID_WIRED }).device), true);
   assert.equal(IncottHidClient.isSupported(fakeDevice({ productId: 0x1234 }).device), false);
   assert.equal(IncottHidClient.isSupported({ ...fakeDevice().device, vendorId: 0x1532 } as HIDDevice), false);
   assert.equal(IncottHidClient.isSupported(fakeDevice({ collections: [vendorCollection(0x0001)] }).device), false);
   assert.equal(IncottHidClient.isSupported(fakeDevice({ collections: [] }).device), false);
-  // The fallback boundary: any page >= 0xFF00, not only 0xFF05.
-  assert.equal(IncottHidClient.isSupported(fakeDevice({ collections: [vendorCollection(0xff00)] }).device), true);
+  // A vendor page alone is not enough — it must also declare report 0x09.
+  assert.equal(IncottHidClient.isSupported(fakeDevice({ collections: [vendorCollection(0xff00)] }).device), false);
+  assert.equal(
+    IncottHidClient.isSupported(fakeDevice({ collections: [siblingCollection(INCOTT_USAGE_PAGE, 0x03)] }).device),
+    false,
+  );
+});
+
+test("isSupported claims the mouse exactly once across its real collection set", () => {
+  // Enumerated from a connected G23V2Pro on 2026-09-10. The mouse presents as
+  // several HIDDevices; only the 0xFF05 collection declaring feature report
+  // 0x09 speaks the protocol. Its vendor-page siblings declare 0x03 and 0x04
+  // and never answer, so claiming them made the app list the mouse once per
+  // collection with every card but one inert.
+  const protocolDevice = fakeDevice({ collections: [vendorCollection(INCOTT_USAGE_PAGE)] }).device;
+  const siblingDevice = fakeDevice({
+    collections: [siblingCollection(0xff00, 0x03), siblingCollection(0xff01, 0x04)],
+  }).device;
+  const plainMouse = fakeDevice({ collections: [vendorCollection(0x0001)] }).device;
+
+  const claimed = [protocolDevice, siblingDevice, plainMouse].filter((d) => IncottHidClient.isSupported(d));
+  assert.equal(claimed.length, 1, "exactly one collection may be claimed");
+  assert.equal(claimed[0], protocolDevice);
 });
 
 test("filters request both product ids on the vendor usage page", () => {
@@ -418,6 +452,11 @@ test("readStatus decodes every field from the device's current state", async () 
   assert.equal(status.angleSnapping, false);
   assert.equal(status.debounceMs, 4);
   assert.equal(status.sleepTimeout, 60);
+  // Default state's performanceMode wire value is 1 -> "Corded" (see
+  // incottPerformanceModeFromWire / INCOTT_SUB_PERFORMANCE for the confirmed,
+  // UI-order-reversed mapping).
+  assert.equal(status.powerMode, "Corded");
+  assert.deepEqual(status.powerModes, ["HP", "Corded", "LP"]);
   // Battery is read from the mouse's unsolicited input report, not from any
   // feature-report query readStatus() issues (0x8e/byte 6 and 0x89/byte 8 are
   // BOTH disproven constants — see incottDecodeBattery/INCOTT_CMD_QUERY_STATUS
@@ -530,6 +569,16 @@ test("battery state is Unknown before any input report has arrived, regardless o
   assert.equal(status.batteryPercent, null);
   assert.equal(status.batteryState, "Unknown");
   assert.equal(status.connectionType, "Wired", "connection type is independent of the battery read");
+});
+
+test("readStatus leaves powerMode/powerModes undefined when 0x84/0x05 cannot be read", async () => {
+  // Never fabricated: an unreadable performance mode must not default to any
+  // label, and powerModes (the option list) is withheld alongside it so the
+  // shell does not offer a selector it cannot back with a current value.
+  const { device } = fakeDevice({ silent: [0x84] });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.powerMode, undefined);
+  assert.equal(status.powerModes, undefined);
 });
 
 test("supportedPollingRates and the polling footnote are narrower over the wired connection", async () => {
@@ -802,6 +851,64 @@ test("setPerformanceMode throws when a confirmed read-back disagrees", async () 
 
 test("setPerformanceMode rejects a value outside 0-2", async () => {
   await assert.rejects(new IncottHidClient(fakeDevice().device, fast).setPerformanceMode(3), RangeError);
+});
+
+// ---------------------------------------------------------------------------
+// getPowerModes / setPowerMode — OpenMouse's shared power/performance-mode
+// contract (openmouse/src/device/controller.ts's requireClientMethod
+// ("setPowerMode", …)). Hardware-confirmed 2026-09-10: HP=2, Corded=1, LP=0,
+// the REVERSE of the vendor UI's own left-to-right display order — see
+// INCOTT_SUB_PERFORMANCE in src/incott/index.ts and
+// captures/incott-8k-wireless/vendor-tool-session-2026-09-10.hex.
+// ---------------------------------------------------------------------------
+
+test("getPowerModes advertises the vendor UI's own left-to-right order", () => {
+  const client = new IncottHidClient(fakeDevice().device, fast);
+  assert.deepEqual(client.getPowerModes(), ["HP", "Corded", "LP"]);
+});
+
+test("setPowerMode writes the reversed wire value for each name and verifies the read-back", async () => {
+  // Each setPowerMode call sends TWO feature reports: the write, then the
+  // 0x84/0x05 read-back query (which sends its own request payload too) — so
+  // the write is the SECOND-TO-LAST entry in `sent`, not the last.
+  const { device, sent, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  const lastWrite = () => sent[sent.length - 2]!;
+
+  await client.setPowerMode("HP");
+  assert.equal(state.performanceMode, 2, "HP must write wire value 2, not 0");
+  assert.deepEqual([...lastWrite().slice(0, 3)], [0x04, 0x05, 0x02]);
+
+  await client.setPowerMode("Corded");
+  assert.equal(state.performanceMode, 1);
+  assert.deepEqual([...lastWrite().slice(0, 3)], [0x04, 0x05, 0x01]);
+
+  await client.setPowerMode("LP");
+  assert.equal(state.performanceMode, 0, "LP must write wire value 0, not 2");
+  assert.deepEqual([...lastWrite().slice(0, 3)], [0x04, 0x05, 0x00]);
+});
+
+test("setPowerMode rejects an unknown mode name before writing anything", async () => {
+  const { device, sent } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(client.setPowerMode("Ultra"), /no "Ultra" performance mode/);
+  assert.equal(sent.length, 0, "an unknown name must never reach the device");
+});
+
+test("setPowerMode reports failure when the read-back disagrees", async () => {
+  // ignoreWrites: the device drops every SET, so the write never actually
+  // takes — the read-back keeps reporting the untouched default (Corded).
+  const { device } = fakeDevice({ ignoreWrites: true });
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(client.setPowerMode("HP"), /kept performance mode Corded instead of HP/);
+});
+
+test("setPowerMode reports failure, not success, when the read-back never answers", async () => {
+  // Unlike the lower-level setPerformanceMode (which tolerates a silent
+  // read-back), setPowerMode must treat an unverifiable write as a failure.
+  const { device } = fakeDevice({ silent: [0x84] });
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(client.setPowerMode("HP"), /Could not read back the performance mode/);
 });
 
 // ---------------------------------------------------------------------------

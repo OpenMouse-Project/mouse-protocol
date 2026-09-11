@@ -26,6 +26,8 @@ import {
   incottLiftOffLabel,
   incottLiftOffTenths,
   incottNormalizeProductName,
+  incottPerformanceModeFromWire,
+  incottPerformanceModeToWire,
   incottValidateDpi,
   INCOTT_CMD_QUERY_DPI_STAGE,
   INCOTT_CMD_QUERY_DPI_STAGE_VALUE,
@@ -41,6 +43,7 @@ import {
   INCOTT_DPI_STAGE_COUNT,
   INCOTT_DPI_STEP,
   INCOTT_INPUT_REPORT_ID,
+  INCOTT_PERFORMANCE_MODE_NAMES,
   INCOTT_POLLING_STEPS_HZ,
   INCOTT_POLLING_STEPS_HZ_WIRED,
   INCOTT_PRODUCT_IDS,
@@ -58,7 +61,6 @@ import {
   INCOTT_SUB_SLEEP,
   INCOTT_USAGE_PAGE,
   INCOTT_VENDOR_ID,
-  INCOTT_VENDOR_USAGE_PAGE_MIN,
   type IncottInputStatus,
 } from "../../incott/index.ts";
 
@@ -212,8 +214,7 @@ export async function incottProbeCollection(
  * next one when a candidate throws, never replies, or replies with garbage.
  * Returns `null` when no candidate answers.
  *
- * Candidates must be pre-ordered by the CALLER: `0xFF05` first, then any
- * page `>= INCOTT_VENDOR_USAGE_PAGE_MIN` (`0xFF00`) as a fallback — this
+ * Candidates must be pre-ordered by the CALLER, most likely first — this
  * function only probes in the order it is given, it does not itself inspect
  * usage pages. This is the general form of the wired dead-collection fix
  * (see `incottProbeCollection`): a transport layer that genuinely has more
@@ -366,6 +367,15 @@ function toggleWord(value: boolean | null): string {
  * uses, and being wired does imply charging in practice, but the input report
  * is the authoritative source for the charging state, not an inference from
  * the product id.
+ *
+ * A SIXTH addition, 2026-09-10: performance mode (HP/Corded/LP) is now wired
+ * into OpenMouse's shared `powerModes`/`powerMode`/`setPowerMode` contract.
+ * The value-to-label mapping was hardware-confirmed by labelling every click
+ * in the vendor tool before recording its write — see `getPowerModes`,
+ * `setPowerMode`, and `INCOTT_SUB_PERFORMANCE` in `src/incott/index.ts` for
+ * the capture and the REVERSED-vs-UI warning (HP=2, Corded=1, LP=0). `readStatus()`
+ * populates `powerMode` from a live `0x84`/`0x05` read, leaving it `undefined`
+ * (never fabricated) when the collection is dead or the read fails.
  */
 export class IncottHidClient {
   readonly device: HIDDevice;
@@ -435,8 +445,17 @@ export class IncottHidClient {
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== INCOTT_VENDOR_ID) return false;
     if (!INCOTT_PRODUCT_IDS.includes(device.productId)) return false;
+    // Require BOTH the vendor page and a declared feature report `0x09`. The
+    // mouse exposes several vendor collections and only this one speaks the
+    // protocol: enumerated on hardware 2026-09-10, page 0xFF05 declares
+    // feature report 0x09, while 0xFF00 declares 0x03 and 0xFF01 declares
+    // 0x04. Matching on the usage page alone (or on any page >= 0xFF00)
+    // claims those siblings too, so the app lists the mouse once per
+    // collection and every card but one is inert.
     return device.collections.some(
-      (collection) => (collection.usagePage ?? 0) >= INCOTT_VENDOR_USAGE_PAGE_MIN,
+      (collection) =>
+        collection.usagePage === INCOTT_USAGE_PAGE &&
+        collection.featureReports.some((report) => report.reportId === INCOTT_REPORT_ID),
     );
   }
 
@@ -613,6 +632,16 @@ export class IncottHidClient {
     const angleSnapping = dead
       ? null
       : incottDecodeToggle(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_ANGLE_SNAP), INCOTT_SUB_ANGLE_SNAP);
+    // Performance mode (HP/Corded/LP), hardware-confirmed 2026-09-10 — see
+    // `INCOTT_SUB_PERFORMANCE` and `setPowerMode`. A live read of the raw wire
+    // value, converted to its display name through `incottPerformanceModeFromWire`
+    // (the single table the value-to-label reversal lives in). `undefined`,
+    // never fabricated, when the collection is dead or the read fails/returns
+    // an out-of-range value.
+    const powerModeWire = dead
+      ? null
+      : incottDecodePerformanceMode(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_PERFORMANCE));
+    const powerMode = powerModeWire === null ? undefined : incottPerformanceModeFromWire(powerModeWire) ?? undefined;
     const debounceMs = dead
       ? null
       : incottDecodeDebounce(await this.query(INCOTT_CMD_QUERY_TIMING, INCOTT_SUB_DEBOUNCE));
@@ -747,6 +776,11 @@ export class IncottHidClient {
       angleSnapping,
       debounceMs,
       sleepTimeout,
+      // Named power/performance modes (HP/Corded/LP) — see `powerModeWire`
+      // above. `powerModes` is only advertised alongside a real `powerMode`
+      // reading, matching MCHOSE's identical three-way mode: never claim a
+      // set of options exists on a collection that just failed to answer.
+      ...(powerMode !== undefined ? { powerMode, powerModes: [...INCOTT_PERFORMANCE_MODE_NAMES] } : {}),
       firmware: [identity ? `Identity ${identity.raw}` : "Identity unavailable"],
     };
   }
@@ -899,23 +933,17 @@ export class IncottHidClient {
   }
 
   /**
-   * The vendor tool's "Performance mode" control (HP / Corded / LP), captured
-   * writing `0x04`/`0x05` values `1` and `2` on 2026-09-07 — see
-   * `incottEncodeSetPerformanceMode`. Deliberately NOT wired into
-   * `MouseStatus`/`MouseUiHints`: the shared contract's closest fit
-   * (`powerModes`/`powerMode`/`setPowerMode`, which MCHOSE uses for an
-   * identical three-way mode) requires naming each value, and only the raw
-   * writes were ever captured — never which on-screen label produced which
-   * value. Surfacing named options here would mean guessing an order and
-   * presenting it as fact, which the capture does not support. Kept as a
-   * codec + client method so a future contributor with a hardware-confirmed
-   * mapping can wire it up without redoing the protocol work.
+   * Low-level codec method: writes the RAW 0-2 performance-mode value. Kept
+   * for protocol parity and as the primitive `setPowerMode` below builds on.
+   * Most callers should use `setPowerMode(name)` instead, which validates a
+   * name against the hardware-confirmed HP/Corded/LP mapping (see
+   * `INCOTT_SUB_PERFORMANCE` in `src/incott/index.ts`) and requires a
+   * matching read-back before reporting success.
    *
-   * A read-back was never captured on hardware; `incottDecodePerformanceMode`
-   * is a best-effort attempt by symmetry with the other `0x04`/`0x84`
-   * sub-commands (see its comment). If the device does not answer, `got` is
-   * `null` and this does not throw — there is nothing confirmed to compare
-   * against.
+   * This method is intentionally more lenient than `setPowerMode`: a `null`
+   * read-back (the device not answering) does not throw here, since a raw
+   * numeric call has no name to validate up front and existing callers/tests
+   * rely on this tolerance. See `setPowerMode` for the stricter contract.
    */
   async setPerformanceMode(mode: number): Promise<number> {
     await this.write(incottEncodeSetPerformanceMode(mode));
@@ -928,9 +956,52 @@ export class IncottHidClient {
     return mode;
   }
 
-  /** See `setPerformanceMode`. Returns `null` when `0x84`/`0x05` does not answer (never confirmed on hardware). */
+  /** See `setPerformanceMode`. Returns `null` when `0x84`/`0x05` does not answer. */
   async getPerformanceMode(): Promise<number | null> {
     return incottDecodePerformanceMode(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_PERFORMANCE));
+  }
+
+  /**
+   * The named power/performance modes this mouse offers, in the vendor UI's
+   * own left-to-right display order (HP, Corded, LP) — see
+   * `INCOTT_PERFORMANCE_MODE_NAMES`. This order is deliberately NOT the wire
+   * value order: see `setPowerMode` and `INCOTT_SUB_PERFORMANCE` in
+   * `src/incott/index.ts` for the reversal this table exists to get right.
+   */
+  getPowerModes(): string[] {
+    return [...INCOTT_PERFORMANCE_MODE_NAMES];
+  }
+
+  /**
+   * OpenMouse's shared power/performance-mode contract
+   * (`requireClientMethod("setPowerMode", …)` in
+   * `openmouse/src/device/controller.ts`) — takes the mode NAME, not the raw
+   * wire value. Maps name -> wire through `incottPerformanceModeToWire`
+   * (`INCOTT_PERFORMANCE_MODE_TO_WIRE` in `src/incott/index.ts`), the single
+   * table the HP=2/Corded=1/LP=0 reversal lives in — hardware-confirmed
+   * 2026-09-10 by labelling each click in the vendor tool before recording
+   * its write; see `INCOTT_SUB_PERFORMANCE`'s doc comment.
+   *
+   * Rejects an unknown name BEFORE writing anything (same pattern as
+   * `incottValidateDpi`/`setDpi` above), then writes and requires a matching,
+   * non-null read-back — unlike the lower-level `setPerformanceMode`, a
+   * `null` read-back here is treated as a failure, not tolerated: every
+   * setter in this driver verifies its write, and an unverifiable write must
+   * report failure rather than claim success.
+   */
+  async setPowerMode(name: string): Promise<void> {
+    const wire = incottPerformanceModeToWire(name);
+    if (wire === null) {
+      throw new Error(`This mouse has no "${name}" performance mode.`);
+    }
+    await this.write(incottEncodeSetPerformanceMode(wire));
+    const got = incottDecodePerformanceMode(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_PERFORMANCE));
+    if (got === null) {
+      throw new Error(`Could not read back the performance mode to confirm ${name}.`);
+    }
+    if (got !== wire) {
+      throw new Error(`The mouse kept performance mode ${incottPerformanceModeFromWire(got) ?? got} instead of ${name}.`);
+    }
   }
 
   /** Queries return an all-zero frame on failure, which every decoder rejects. */
