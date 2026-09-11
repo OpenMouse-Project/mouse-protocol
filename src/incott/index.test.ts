@@ -32,6 +32,7 @@ import {
   incottEncodeSetToggle,
   incottFrameMatches,
   incottIsWiredProduct,
+  incottKeyboardActionCode,
   incottLiftOffLabel,
   incottLiftOffTenths,
   incottNormalizeProductName,
@@ -544,11 +545,36 @@ test("button binding decodes the top byte instead of truncating it", () => {
 });
 
 test("button binding reports an unknown action's raw code rather than a label", () => {
-  // A keyboard binding: 'A' (HID 0x04) with no modifier is 0x0480 by the
-  // vendor's parametric rule, which no entry in the action table covers.
-  const binding = incottDecodeButtonBinding(frame(0x86, 0x00, 0x80, 0x04, 0x00, 0x00), 0);
-  assert.equal(binding?.code, 0x00000480);
+  // A macro binding (slot 1): `slot << 16 | 9`, which the action table
+  // deliberately does not cover — macros need the 0x07 upload command.
+  const binding = incottDecodeButtonBinding(frame(0x86, 0x00, 0x09, 0x00, 0x01, 0x00), 0);
+  assert.equal(binding?.code, 0x00010009);
   assert.equal(binding?.label, null);
+});
+
+test("keyboard actions use a different shape with and without modifiers", () => {
+  // From the vendor's kf_hw() keyboard branch. An unmodified key sets the
+  // 0x80 marker in the low byte and sits one byte lower than a chord does —
+  // they are not the same form with a zero modifier.
+  assert.equal(incottKeyboardActionCode(0x04), 0x00000480, "'A' alone");
+  assert.equal(incottKeyboardActionCode(0x04, 0x01), 0x00040100, "Ctrl + A");
+  assert.equal(incottKeyboardActionCode(0x29, 0x01 | 0x02), 0x00290300, "Ctrl + Shift + Escape");
+});
+
+test("the action table offers keyboard keys and chords, and every label is unique", () => {
+  // The picker keys on the label, so a duplicate would make one action
+  // unreachable and silently write the other.
+  const labels = INCOTT_BUTTON_ACTIONS.map(([label]) => label);
+  assert.equal(new Set(labels).size, labels.length);
+
+  assert.equal(incottButtonActionCode("A"), 0x00000480);
+  assert.equal(incottButtonActionCode("F1"), 0x00003a80);
+  assert.equal(incottButtonActionCode("Ctrl + C"), 0x00060100);
+  assert.equal(incottButtonActionCode("Alt + Tab"), 0x002b0400);
+  // Still round-trips back to a label, so a key binding read from the mouse
+  // is not reported as unknown.
+  assert.equal(incottButtonActionLabel(0x00000480), "A");
+  assert.equal(incottButtonActionLabel(0x00060100), "Ctrl + C");
 });
 
 test("button action labels and codes round-trip through the table", () => {

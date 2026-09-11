@@ -306,18 +306,11 @@ export const INCOTT_BUTTON_WIRE_INDEX: Readonly<Record<IncottButtonName, number>
  * back `07 00 03`, which is `0x00030007` little-endian — the value `kf_hw`
  * returns for that function.
  *
- * NOT covered here, deliberately:
- *   - keyboard bindings, which are parametric rather than a fixed list
- *     (`(keycode & 255) << 16 | (modifiers & 255) << 8`, or
- *     `(keycode & 255) << 8 | 128` with no modifier). The shared
- *     `buttonOptions` contract is a flat list of labels, which cannot express
- *     "any key plus any modifier combination"; wiring that up needs a UI
- *     contract that does not exist yet.
- *   - macros (`slot << 16 | 9`), which need the `0x07` upload command.
- *   - `fmeFAVOR`, which the vendor defines as a constant but has no case for
- *     in its own encoder, so it has no code to send.
+ * NOT covered here: macros (`slot << 16 | 9`), which need the `0x07` upload
+ * command, and `fmeFAVOR`, which the vendor defines as a constant but has no
+ * case for in its own encoder, so there is no code to send.
  */
-export const INCOTT_BUTTON_ACTIONS: ReadonlyArray<readonly [string, number]> = [
+const MOUSE_AND_MEDIA_ACTIONS: ReadonlyArray<readonly [string, number]> = [
   ["Left click", 0x00f00001],
   ["Right click", 0x00f10001],
   ["Middle click", 0x00f20001],
@@ -345,6 +338,81 @@ export const INCOTT_BUTTON_ACTIONS: ReadonlyArray<readonly [string, number]> = [
   ["Browser back", 0x02240003],
   ["Browser search", 0x02210003],
   ["Disabled", 0x00000000],
+];
+
+/** HID keyboard modifier bits, as the vendor's encoder packs them at byte 1. */
+const MODIFIER_CTRL = 0x01;
+const MODIFIER_SHIFT = 0x02;
+const MODIFIER_ALT = 0x04;
+const MODIFIER_GUI = 0x08;
+
+/**
+ * Standard HID keyboard usage codes. Labels are display names, not key-cap
+ * legends, so they stay readable in a flat picker.
+ */
+const KEY_USAGES: ReadonlyArray<readonly [string, number]> = [
+  ...Array.from({ length: 26 }, (_, i) => [String.fromCharCode(65 + i), 0x04 + i] as const),
+  ...Array.from({ length: 9 }, (_, i) => [String(i + 1), 0x1e + i] as const),
+  ["0", 0x27],
+  ...Array.from({ length: 12 }, (_, i) => [`F${i + 1}`, 0x3a + i] as const),
+  ["Enter", 0x28], ["Escape", 0x29], ["Backspace", 0x2a], ["Tab", 0x2b], ["Space", 0x2c],
+  ["Insert", 0x49], ["Delete", 0x4c], ["Home", 0x4a], ["End", 0x4d],
+  ["Page Up", 0x4b], ["Page Down", 0x4e],
+  ["Up", 0x52], ["Down", 0x51], ["Left", 0x50], ["Right", 0x4f],
+  ["Caps Lock", 0x39], ["Num Lock", 0x53], ["Scroll Lock", 0x47],
+  ["Print Screen", 0x46], ["Pause", 0x48], ["Context Menu", 0x65],
+  ["Left Ctrl", 0xe0], ["Left Shift", 0xe1], ["Left Alt", 0xe2], ["Left Windows", 0xe3],
+  ["Right Ctrl", 0xe4], ["Right Shift", 0xe5], ["Right Alt", 0xe6], ["Right Windows", 0xe7],
+];
+
+/** Common chords, since the flat picker cannot express "any key + any modifier". */
+const KEY_SHORTCUTS: ReadonlyArray<readonly [string, number, number]> = [
+  ["Ctrl + A", MODIFIER_CTRL, 0x04], ["Ctrl + C", MODIFIER_CTRL, 0x06],
+  ["Ctrl + V", MODIFIER_CTRL, 0x19], ["Ctrl + X", MODIFIER_CTRL, 0x1b],
+  ["Ctrl + Z", MODIFIER_CTRL, 0x1d], ["Ctrl + Y", MODIFIER_CTRL, 0x1c],
+  ["Ctrl + S", MODIFIER_CTRL, 0x16], ["Ctrl + O", MODIFIER_CTRL, 0x12],
+  ["Ctrl + N", MODIFIER_CTRL, 0x11], ["Ctrl + T", MODIFIER_CTRL, 0x17],
+  ["Ctrl + W", MODIFIER_CTRL, 0x1a], ["Ctrl + F", MODIFIER_CTRL, 0x09],
+  ["Ctrl + Shift + Escape", MODIFIER_CTRL | MODIFIER_SHIFT, 0x29],
+  ["Alt + Tab", MODIFIER_ALT, 0x2b], ["Alt + F4", MODIFIER_ALT, 0x3d],
+  ["Alt + Left", MODIFIER_ALT, 0x50], ["Alt + Right", MODIFIER_ALT, 0x4f],
+  ["Win + D", MODIFIER_GUI, 0x07], ["Win + E", MODIFIER_GUI, 0x08],
+  ["Win + L", MODIFIER_GUI, 0x0f], ["Win + R", MODIFIER_GUI, 0x15],
+  ["Win + S", MODIFIER_GUI, 0x16], ["Win + Tab", MODIFIER_GUI, 0x2b],
+];
+
+/**
+ * A keyboard action word, from the vendor's `kf_hw()` keyboard branch:
+ *
+ *     no modifier:   (keycode & 255) << 8  | 128
+ *     with modifier: (keycode & 255) << 16 | (modifiers & 255) << 8
+ *
+ * The two forms are genuinely different shapes, not one with a zero
+ * modifier — an unmodified key sets the `0x80` marker in the low byte and
+ * puts the keycode one byte lower than a chord does.
+ */
+export function incottKeyboardActionCode(keycode: number, modifiers = 0): number {
+  return modifiers === 0
+    ? (((keycode & 0xff) << 8) | 0x80) >>> 0
+    : (((keycode & 0xff) << 16) | ((modifiers & 0xff) << 8)) >>> 0;
+}
+
+/**
+ * Everything a button can be set to, in display order: the mouse, DPI and
+ * media actions above, then individual keys, then common chords.
+ *
+ * Keyboard bindings are enumerated rather than left out. The encoding is
+ * parametric (any of 256 keycodes against any of 256 modifier masks) and the
+ * shared `buttonOptions` contract is a flat list of labels, so the full space
+ * cannot be offered — but a curated list covers what people actually bind,
+ * and it is the same approach the MCHOSE driver in this repo already takes.
+ */
+export const INCOTT_BUTTON_ACTIONS: ReadonlyArray<readonly [string, number]> = [
+  ...MOUSE_AND_MEDIA_ACTIONS,
+  ...KEY_USAGES.map(([label, usage]) => [label, incottKeyboardActionCode(usage)] as const),
+  ...KEY_SHORTCUTS.map(
+    ([label, modifiers, usage]) => [label, incottKeyboardActionCode(usage, modifiers)] as const,
+  ),
 ];
 
 /** Label for a 32-bit action word, or null when it is not one this driver knows. */

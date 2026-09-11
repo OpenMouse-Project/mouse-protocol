@@ -448,11 +448,23 @@ a partial read would show fabricated defaults, and the shared UI writes back
 what it displays. A binding outside the table reports as `Unknown (0x...)`
 for the same reason.
 
-**Deliberately NOT offered:** keyboard bindings, which are parametric rather
-than a fixed list (`(keycode & 255) << 16 | (modifiers & 255) << 8`, or
-`(keycode & 255) << 8 | 128` with no modifier) and cannot be expressed in the
-flat `buttonOptions` contract; and macros (`slot << 16 | 9`), which need the
-`0x07` upload command.
+**Keyboard bindings ARE offered** (added 2026-09-11). The encoding is
+parametric — any of 256 keycodes against any of 256 modifier masks — and the
+two forms differ in shape, not just in a modifier value:
+
+    no modifier:   (keycode & 255) << 8  | 128
+    with modifier: (keycode & 255) << 16 | (modifiers & 255) << 8
+
+An unmodified key sets the `0x80` marker in the low byte and sits one byte
+lower than a chord does. The flat `buttonOptions` contract cannot express the
+whole space, so the table enumerates a curated set — letters, digits, F-keys,
+navigation and editing keys, the eight modifiers, and ~24 common chords — the
+same approach `src/mchose/buttons.ts` already takes in this repo. 127 actions
+in total. This was initially recorded as impossible to offer; that was wrong,
+and the MCHOSE driver was the counter-example sitting in the same tree.
+
+**Still NOT offered:** macros (`slot << 16 | 9`), which need the `0x07`
+upload command.
 
 ### Battery (2026-09-07, DISPROVEN 2026-09-08 — see the top of this document)
 

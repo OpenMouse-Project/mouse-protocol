@@ -729,10 +729,17 @@ test("readStatus hides the remapper entirely when a button read fails", async ()
 });
 
 test("readStatus reports an unrecognised binding as a raw code, not as a known action", async () => {
-  // A keyboard binding ('A', no modifier) is not in the action table.
-  const { device } = fakeDevice({ state: { buttons: [0x00000480, 0x00f10001, 0x00f20001, 0x00f30001, 0x00f40001, 0x00030007] } });
+  // A macro binding (`slot << 16 | 9`) — macros need the 0x07 upload command
+  // and are deliberately absent from the action table.
+  const { device } = fakeDevice({ state: { buttons: [0x00010009, 0x00f10001, 0x00f20001, 0x00f30001, 0x00f40001, 0x00030007] } });
   const status = await new IncottHidClient(device, fast).readStatus();
-  assert.equal(status.buttonMappings?.Left, "Unknown (0x00000480)");
+  assert.equal(status.buttonMappings?.Left, "Unknown (0x00010009)");
+});
+
+test("readStatus labels a keyboard binding read back from the mouse", async () => {
+  const { device } = fakeDevice({ state: { buttons: [0x00f00001, 0x00f10001, 0x00060100, 0x00f30001, 0x00f40001, 0x00030007] } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.buttonMappings?.Middle, "Ctrl + C");
 });
 
 test("setButtonMapping writes the action and verifies the read-back", async () => {
