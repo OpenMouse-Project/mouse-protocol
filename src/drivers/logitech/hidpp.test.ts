@@ -78,6 +78,14 @@ test("the active transport comes from HID++ identity instead of a product except
   assert.equal(isWiredHidppConnection(0xc07e, {}, true), true, "old direct devices use the probed-index fallback");
 });
 
+test("the PRO X 2 Superstrike's own Lightspeed receiver (0x40bd) is a known receiver", () => {
+  // Confirmed from a user diagnostic: transportIds {Wireless: "40BD", USB: "C0A8"}.
+  // Without this it was misclassified as a direct connection (receiverAttached
+  // false), which picks the wrong device-index candidate set in resolveDeviceIndex.
+  assert.equal(LogitechHidppClient.isKnownReceiver({ vendorId: 0x046d, productId: 0x40bd } as HIDDevice), true);
+  assert.equal(LogitechHidppClient.isKnownReceiver({ vendorId: 0x046d, productId: SUPERSTRIKE_USB } as HIDDevice), true);
+});
+
 test("receiver probing covers every pairing slot before the direct index", () => {
   // G HUB merging a keyboard onto the receiver can move the mouse off slot
   // 0x01, so discovery probes all six slots before the direct index.
