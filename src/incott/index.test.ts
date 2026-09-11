@@ -628,18 +628,25 @@ test("identity decodes the model, sensor and receiver from the G23V2 capture", (
   assert.equal(identity?.is8KReceiver, true);
 });
 
-test("identity reads the fitted sensor from byte 6, so the name is the same wired and wireless", () => {
-  // Bytes 5 and 6 disagree (f0/f1) on this device. The vendor picks between
-  // them by connection and so renames the same physical mouse when a cable
-  // goes in; byte 6 is the full-capability slot and is used unconditionally
-  // here. See `incottDecodeIdentity` for why, and for how to falsify it.
-  const identity = incottDecodeIdentity(IDENTITY_G23V2);
-  assert.equal(identity?.sensorId, INCOTT_SENSOR_PAW3950);
-  assert.equal(identity?.isPro, true);
-  assert.equal(identity?.displayName, "G23V2 Pro");
+test("identity finds the PAW3950 whichever slot the receiver puts it in", () => {
+  // The sensor slot MOVES with the receiver. Both of these are the same
+  // physical mouse on the cable, captured with and without the dongle
+  // plugged in — see `incottDecodeIdentity`.
+  const withDongle = incottDecodeIdentity(IDENTITY_G23V2);
+  assert.equal(withDongle?.sensorId, INCOTT_SENSOR_PAW3950);
+  assert.equal(withDongle?.displayName, "G23V2 Pro");
+  assert.equal(withDongle?.is8KReceiver, true);
+
+  // Cable only, captured 2026-09-11: 0xF1 has moved to byte 5 and byte 6 is
+  // empty. Reading byte 6 alone reported a PAW3395 here and dropped the
+  // "Pro" — the bug this replaced.
+  const cableOnly = incottDecodeIdentity(frame(0x8f, 0x01, 0x0e, 0x00, 0xf1, 0x00, 0x00, 0x00));
+  assert.equal(cableOnly?.sensorId, INCOTT_SENSOR_PAW3950);
+  assert.equal(cableOnly?.displayName, "G23V2 Pro");
+  assert.equal(cableOnly?.is8KReceiver, false, "no dongle, so no 8K receiver");
 });
 
-test("identity reports the PAW3395 and drops the Pro suffix when byte 6 is 0xf0", () => {
+test("identity reports the PAW3395 only when no slot carries 0xf1", () => {
   const identity = incottDecodeIdentity(frame(0x8f, 0x01, 0x0e, 0x02, 0xf0, 0xf0, 0x00, 0xff));
   assert.equal(identity?.sensorId, INCOTT_SENSOR_PAW3395);
   assert.equal(identity?.isPro, false);

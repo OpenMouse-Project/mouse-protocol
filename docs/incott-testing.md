@@ -812,8 +812,9 @@ Resolved since this list was written (kept for the record):
 - ~~**Button payload semantics.**~~ A 32-bit little-endian action word; the
   six factory bindings confirm the mouse rows against hardware. See
   "Buttons: DECODED and shipped".
-- ~~**Which sensor is fitted.**~~ Byte 6 of the identity reply: `0xF0` =
-  PAW3395, `0xF1` = PAW3950.
+- ~~**Which sensor is fitted.**~~ PAW3950, settled twice over: the identity
+  reply carries `0xF1` in a sensor slot, and the mouse stored 45000 DPI over
+  the cable, which a PAW3395 cannot do.
 - ~~**What `0x86` sub `0x09` means.**~~ The onboard profile index.
 - ~~**The `09 06 09 <00|01>` write.**~~ The profile-index write, not a
   left/right invert toggle — see the correction under "Onboard profiles".
@@ -921,28 +922,57 @@ The sensor decides the "Pro" suffix: the vendor appends `Pro` when the sensor
 is `0x3950`, which is how `G23V2Pro` appears for a device whose HID product
 string only ever says `incott 8K wireless mouse`.
 
-### The one inference, and how to falsify it
+### The sensor slot moves with the receiver — corrected 2026-09-11
 
-Bytes 5 and 6 **disagree on this device** (`f0 f1`), and the vendor picks
-between them by connection (`let i = this.iswireless ? 5 : 4`). Read as
-hardware identity that is a contradiction — a mouse does not change sensors
-when a cable goes in — so the vendor's own tool necessarily labels this one
-physical mouse `G23V2Pro` on the dongle and `G23V2` on the cable.
+This section previously argued that bytes 5 and 6 were per-link *capability*
+profiles, that the vendor's connection-dependent index was a cosmetic bug
+because it renamed one physical mouse when a cable went in, and that reading
+byte 6 unconditionally was the better answer. **That was wrong**, and a
+cable-only capture disproved it:
 
-Read as a per-link **capability** profile it is consistent: the value feeds
-`getStDPI(sensor)`, which selects a DPI ceiling (PAW3395 -> 32000,
-PAW3950 -> 45000), and the cable is already the reduced-capability path on
-this device, capping polling at 1000 Hz.
+```
+cable + dongle (2026-09-08):  09 8f 01 0e 02 f0 f1 00 ff
+cable only     (2026-09-11):  09 8f 01 0e 00 f1 00 00 00
+                                         ^^ ^^ ^^
+                                         |  |  +-- byte 6
+                                         |  +----- byte 5
+                                         +-------- byte 4, receiver type
+```
 
-`incottDecodeIdentity` therefore reads the fitted sensor from **byte 6**
-unconditionally, so the decoded name is stable across connections. This is
-the only inference in that decoder rather than a transcription.
+The frame is not fixed. With the dongle present, byte 4 reports the receiver
+and the `0xF1` sits at byte 6; with the dongle gone, byte 4 is `0x00` and the
+same `0xF1` moves to byte 5. The vendor indexing by connection is therefore
+**correct behaviour**, not a bug — and reading byte 6 unconditionally reported
+a PAW3395 on a cable-only connection, dropping the "Pro" from the model name.
 
-**To falsify it:** connect the mouse by cable and read what the vendor tool
-displays. If it shows `G23V2Pro` while wired, byte 5 is not a wired
-capability profile and this reading is wrong. A per-link DPI ceiling is
-deliberately NOT implemented — nothing has confirmed the cable caps DPI at
-32000.
+The earlier reasoning had only one wired capture to go on, and that capture
+had been taken with the dongle still in the port, so it looked identical to
+the wireless one. "The frame is the same either way" was an artifact of the
+test setup, not a property of the device.
+
+**What the decoder does now:** reports the PAW3950 when EITHER slot carries
+`0xF1`. The fitted sensor is settled independently of this frame — see the
+DPI ceiling below — so the answer is whichever slot the current configuration
+happens to put it in. The vendor's index disagrees in exactly one case, cable
+AND dongle attached, where it reads byte 5's `0xF0`; that is the one
+configuration where a per-link byte cannot be describing this mouse.
+
+### There is no wired DPI ceiling (2026-09-11)
+
+`tools/hid-probes/dpi-ceiling.mjs` walked a ladder straddling the vendor's
+32000 limit on a cable-only connection. Every value was stored and read back
+exactly:
+
+```
+30000 ACCEPTED   32000 ACCEPTED   32050 ACCEPTED
+35000 ACCEPTED   40000 ACCEPTED   45000 ACCEPTED
+```
+
+So `INCOTT_DPI_MAX` stays flat at 45000 across both links — unlike the
+polling rate, which genuinely is capped at 1000 Hz over the cable. The
+vendor's PAW3395 table stopping at 32000 is a UI list, not a firmware limit,
+and this also settles which sensor is fitted: a PAW3395 could not have stored
+45000.
 
 ### What this replaces
 

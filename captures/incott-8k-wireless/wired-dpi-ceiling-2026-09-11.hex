@@ -1,0 +1,51 @@
+# Wired DPI ceiling + a cable-ONLY identity frame, 2026-09-11
+# tools/hid-probes/dpi-ceiling.mjs (IncottHub), node-hid, 093A:622C.
+#
+# The mouse was on the USB cable with the 2.4 GHz dongle UNPLUGGED. That is
+# what makes this capture new: the 2026-09-08 "wired" enumeration was taken
+# with the dongle still in the port, so it was really cable+dongle.
+
+connection : WIRED (0x622C)
+identity   : 09 8f 01 0e 00 f1 00 00 00
+DPI cycle  : 6 stages, stage 1 active
+
+# 1. THE DPI CEILING: no wired cap. Every value was stored and read back
+#    exactly, including 45000 — above the 32000 the vendor's PAW3395 DPI
+#    table stops at. The driver's flat INCOTT_DPI_MAX of 45000 is correct on
+#    both links; no per-connection ceiling is needed (unlike polling rate).
+
+   wrote 30000 -> reads 30000   ACCEPTED
+   wrote 32000 -> reads 32000   ACCEPTED
+   wrote 32050 -> reads 32050   ACCEPTED
+   wrote 35000 -> reads 35000   ACCEPTED
+   wrote 40000 -> reads 40000   ACCEPTED
+   wrote 45000 -> reads 45000   ACCEPTED
+
+restored stage 1 -> 800 DPI OK
+
+# 2. THE IDENTITY FRAME IS NOT FIXED. Compare the two wired captures:
+#
+#   cable + dongle (2026-09-08):  09 8f 01 0e 02 f0 f1 00 ff
+#   cable only     (2026-09-11):  09 8f 01 0e 00 f1 00 00 00
+#                                            ^^ ^^ ^^
+#                                            |  |  +-- byte 6
+#                                            |  +----- byte 5
+#                                            +-------- byte 4, receiver type
+#
+#    byte 4 is 0x02 when the 8 KHz receiver is present and 0x00 when it is
+#    not, which is consistent and was already decoded. What was NOT known is
+#    that the sensor slot MOVES with it: with the dongle present the sensor
+#    (0xF1 = PAW3950) sits at byte 6 and byte 5 holds 0xF0; with the dongle
+#    gone the same 0xF1 sits at byte 5 and byte 6 is empty.
+#
+#    This vindicates the vendor's connection-dependent index
+#    (`iswireless ? 5 : 4` over its report-id-less buffer = frame bytes 6:5),
+#    which this driver had dismissed as a cosmetic bug and replaced with a
+#    fixed byte 6. Cable-only, fixed byte 6 reads 0x00 and reports PAW3395 —
+#    dropping the "Pro" from the model name.
+#
+#    The DPI result above independently settles which sensor is fitted: a
+#    PAW3395 tops out at 32000 in the vendor's own table, and this mouse
+#    stored 45000 over the cable. It is a PAW3950 on every link, so ANY slot
+#    reading 0xF1 is the answer regardless of which one the connection puts
+#    it in.

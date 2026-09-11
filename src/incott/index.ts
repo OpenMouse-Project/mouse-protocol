@@ -868,7 +868,7 @@ export interface IncottDeviceIdentity {
   modelCode: number | null;
   /** Model plus a " Pro" suffix when the PAW3950 is fitted, e.g. "G23V2 Pro". */
   displayName: string | null;
-  /** The FITTED sensor, from byte 6: `INCOTT_SENSOR_PAW3395` or `INCOTT_SENSOR_PAW3950`. */
+  /** The FITTED sensor: `INCOTT_SENSOR_PAW3395` or `INCOTT_SENSOR_PAW3950`. */
   sensorId: number | null;
   /** True when the PAW3950 is fitted — what the vendor's "Pro" suffix means. */
   isPro: boolean;
@@ -1196,31 +1196,34 @@ export function incottDecodeButtonBinding(frame: Uint8Array, button: number): In
  *     byte 2  guard, always 0x01   -- the vendor abandons the device otherwise
  *     byte 3  model code           -- 0x0e = G23V2, see INCOTT_MODEL_BY_CODE
  *     byte 4  receiver type        -- 0x02 = 8 KHz receiver
- *     byte 5  sensor profile, WIRED link    -- 0xF0 -> PAW3395, 0xF1 -> PAW3950
- *     byte 6  sensor profile, WIRELESS link
+ *     byte 5  sensor slot A          -- 0xF0 -> PAW3395, 0xF1 -> PAW3950
+ *     byte 6  sensor slot B          -- same encoding, 0x00 when unpopulated
  *
- * WHY BYTE 6 AND NOT BYTE 5: the vendor picks its sensor byte by connection
- * (`let i = this.iswireless ? 5 : 4` over its own report-id-less buffer), and
- * on this G23V2 the two bytes DISAGREE — `f0 f1`. Taken as hardware identity
- * that is a contradiction: a mouse does not swap sensors when a cable goes
- * in. Taken as a per-link CAPABILITY profile it is consistent, because the
- * vendor feeds this value straight into `getStDPI(sensor)` to pick a DPI
- * ceiling (PAW3395 -> 32000, PAW3950 -> 45000) — and the cable is already
- * known to be the reduced-capability path on this device, capping polling at
- * 1000 Hz (see `INCOTT_POLLING_STEPS_HZ_WIRED`).
+ * THE SENSOR SLOT MOVES WITH THE RECEIVER, so neither byte alone is "the"
+ * sensor. Two wired captures of the same mouse:
  *
- * So the FITTED sensor is read from byte 6, the full-capability slot, and the
- * decoded name is therefore stable across wired and wireless. The vendor's
- * own tool is not: because it re-reads the byte by connection, it labels this
- * one physical mouse "G23V2Pro" on the dongle and "G23V2" on the cable. That
- * cosmetic flip is deliberately NOT mirrored — a model name that changes when
- * you plug in a cable is a worse answer than the hardware's own.
+ *     cable + dongle (2026-09-08):  09 8f 01 0e 02 f0 f1 00 ff
+ *     cable only     (2026-09-11):  09 8f 01 0e 00 f1 00 00 00
  *
- * This is the one inference in this decoder rather than a transcription, and
- * it is falsifiable: if the vendor tool ever shows "G23V2Pro" while WIRED,
- * byte 5 is not a wired-capability profile and this reading is wrong. Byte 5
- * is otherwise unused here — a per-link DPI ceiling is not implemented,
- * because nothing has yet confirmed the cable actually caps DPI at 32000.
+ * With the dongle present, byte 4 reports the receiver and the `0xF1` sits at
+ * byte 6; with the dongle gone, byte 4 is `0x00` and the same `0xF1` sits at
+ * byte 5. This is why the vendor indexes by connection
+ * (`let i = this.iswireless ? 5 : 4` over its report-id-less buffer, i.e.
+ * frame bytes 6:5) — that is correct behaviour, not the cosmetic bug an
+ * earlier version of this comment claimed.
+ *
+ * WHY ANY SLOT, NOT THE CONNECTION-INDEXED ONE: the fitted sensor is settled
+ * independently of this frame. A PAW3395 stops at 32000 DPI in the vendor's
+ * own table, and this mouse stored and read back 45000 over the CABLE
+ * (`captures/incott-8k-wireless/wired-dpi-ceiling-2026-09-11.hex`). It is a
+ * PAW3950 on every link, so the answer is whichever slot carries `0xF1`. The
+ * vendor's index disagrees in exactly one configuration — cable AND dongle
+ * attached, where it reads byte 5's `0xF0` and drops the "Pro" — and that is
+ * the one case where a capability byte cannot be describing this mouse.
+ *
+ * The same capture also shows there is NO wired DPI ceiling to model: 45000
+ * is accepted over the cable, so `INCOTT_DPI_MAX` stays flat across links,
+ * unlike the polling rate (`INCOTT_POLLING_STEPS_HZ_WIRED`).
  *
  * Returns `null` ONLY when the report id or command echo is wrong — `open()`
  * uses that as its collection-liveness probe. A frame that is well-formed
@@ -1246,7 +1249,7 @@ export function incottDecodeIdentity(frame: Uint8Array): IncottDeviceIdentity | 
   if (frame[2] !== INCOTT_IDENTITY_GUARD) return unknown;
   const modelCode = frame[3]!;
   const model = INCOTT_MODEL_BY_CODE.get(modelCode) ?? null;
-  const sensorId = frame[6] === INCOTT_IDENTITY_SENSOR_PAW3950
+  const sensorId = frame[5] === INCOTT_IDENTITY_SENSOR_PAW3950 || frame[6] === INCOTT_IDENTITY_SENSOR_PAW3950
     ? INCOTT_SENSOR_PAW3950
     : INCOTT_SENSOR_PAW3395;
   const isPro = sensorId === INCOTT_SENSOR_PAW3950;
