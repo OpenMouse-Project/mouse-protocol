@@ -42,6 +42,8 @@ export interface MouseUiHints {
   showAdvancedSection?: boolean;
   /** Always show battery column (even wired with null %). */
   forceShowBattery?: boolean;
+  /** Group the device's battery, DPI-indicator, and sleep controls on Overview. */
+  powerOverview?: boolean;
   /**
    * Extra sentence appended to the connected status line, for drivers whose
    * connection is deliberately limited (e.g. why settings are unavailable).
@@ -70,6 +72,8 @@ export interface MouseUiHints {
     modes: readonly (0 | 1 | 2)[];
     brightness: readonly number[];
     speed: readonly number[];
+    /** Optional DPI-indicator-only sleep values in seconds. */
+    sleepTimeouts?: readonly number[];
   };
 }
 
@@ -144,7 +148,7 @@ export interface AtkReceiverInfo {
 }
 
 export interface MouseStatus {
-  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Lingbao" | "GearHub" | "Corsair" | "Microsoft" | "Incott" | "HyperX";
+  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Lingbao" | "GearHub" | "Corsair" | "Microsoft" | "Dareu" | "Incott" | "HyperX";
   name: string;
   /** Driver-supplied UI policy (optional; keeps control.ts brand-agnostic). */
   ui?: MouseUiHints;
@@ -195,6 +199,8 @@ export interface MouseStatus {
   profileNames?: string[];
   /** Every action `setButtonMapping` will accept, in display order. */
   buttonOptions?: string[];
+  /** Button names the device reported in an unknown or macro encoding. */
+  fixedButtons?: string[];
   deviceMode?: "Onboard" | "Host" | "Unknown";
   unitId?: string | null;
   modelId?: string | null;
@@ -275,6 +281,8 @@ export interface MouseStatus {
   dpiLedMode?: number | null;
   dpiLedBrightness?: number | null;
   dpiLedSpeed?: number | null;
+  /** DPI-indicator-only sleep timeout in seconds, distinct from mouse sleep. */
+  dpiLedSleepTimeout?: number | null;
   liftOffDistance: "Low" | "Medium" | "High" | null;
   /**
    * A single lift-off height the device tunes continuously, for mice whose
