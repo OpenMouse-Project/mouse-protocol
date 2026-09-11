@@ -740,6 +740,16 @@ export class IncottHidClient {
     // failure on every attempt.
     const supportedPollingRates = wired ? [...INCOTT_POLLING_STEPS_HZ_WIRED] : [...INCOTT_POLLING_STEPS_HZ];
 
+    // The receiver LED belongs to the 2.4 GHz dongle and means nothing over
+    // the cable, so it is not read at all when wired — the card then hides
+    // itself rather than offering a control that cannot do anything. See
+    // `setReceiverLed`.
+    const receiverLedMode = dead || wired
+      ? null
+      : incottDecodeReceiverLed(await this.query(INCOTT_CMD_QUERY_RECEIVER_LED, INCOTT_SUB_NONE));
+    // Rapid-fire parameters, global to the device — see `INCOTT_SUB_FIRE_KEY`.
+    const fireKey = dead ? null : await this.getFireKey();
+
     // All six bindings, or nothing. A partial read would render some buttons
     // with a real assignment and the rest with a fabricated default, which is
     // worse than hiding the remapper: the shared UI writes back whatever it
@@ -819,6 +829,13 @@ export class IncottHidClient {
       // renders it.
       dpi: dpi ?? 0,
       ...(dpiY !== null ? { dpiY, supportsSeparateDpiAxes: true } : {}),
+      // Omitted, not nulled, when unreadable or inapplicable: the app's
+      // Incott card renders only the fields that are present, so a wired
+      // connection simply has no receiver-LED control rather than a dead one.
+      ...(receiverLedMode !== null ? { incottReceiverLedMode: receiverLedMode } : {}),
+      ...(fireKey !== null
+        ? { incottFireKeyTimes: fireKey.times, incottFireKeyIntervalMs: fireKey.intervalMs }
+        : {}),
       // All six stages' stored values, only when every one of them answered
       // — see the loop above. Omitted (not fabricated) on a partial read.
       ...(dpiStages !== null ? { dpiStages } : {}),

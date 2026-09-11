@@ -1392,3 +1392,28 @@ test("REGRESSION: reading X then Y on one stage does not return X twice", async 
   assert.equal(await client.readDpiStageAxis(2, "x"), 1600);
   assert.equal(await client.readDpiStageAxis(2, "y"), 3200);
 });
+
+test("readStatus publishes the receiver LED mode and rapid-fire settings", async () => {
+  const { device } = fakeDevice({ state: { receiverLed: 2, fireKeyTimes: 2, fireKeyIntervalMs: 40 } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.incottReceiverLedMode, 2);
+  assert.equal(status.incottFireKeyTimes, 2);
+  assert.equal(status.incottFireKeyIntervalMs, 40);
+});
+
+test("readStatus omits the receiver LED over the cable, where it has no meaning", async () => {
+  // There is no dongle in wired mode, so the control is absent rather than
+  // present-but-inert. Rapid fire is unaffected: it lives in the mouse.
+  const { device } = fakeDevice({ productId: INCOTT_PRODUCT_ID_WIRED });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.incottReceiverLedMode, undefined);
+  assert.equal(status.incottFireKeyTimes, 3);
+});
+
+test("readStatus omits both rather than guessing when the queries fail", async () => {
+  const { device } = fakeDevice({ silent: [0x85, 0x88] });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.incottReceiverLedMode, undefined);
+  assert.equal(status.incottFireKeyTimes, undefined);
+  assert.equal(status.incottFireKeyIntervalMs, undefined);
+});
