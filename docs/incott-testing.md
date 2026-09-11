@@ -1026,16 +1026,16 @@ Two independent confirmations:
 
 ### Leads recovered from the same source, not yet implemented
 
-Buttons came from this source and are now **implemented and hardware-
-confirmed** — see "Buttons: DECODED and shipped" above. The rest are still
-transcriptions, unverified against hardware:
+Everything that came from this source has since been implemented and, where
+a device could show it, confirmed on hardware:
 
-- **Independent X/Y DPI** — one write per axis, distinguished by a flag at
-  byte 7: `[2, ix, dpiLo, dpiHi, 0, 0, 0, flag]` with flag `0` when X == Y,
-  then `1` for X and `2` for Y. There is no per-axis read, which is why a Y
-  write could never be verified.
-- **Profile select** — `[6, 9, index, 0, 0, 0, 0, 0]`, read back via
-  `0x86` sub `0x09`. See the correction in "Onboard profiles" above.
+- **Buttons** — see "Buttons: DECODED and shipped" above.
+- **Independent X/Y DPI** — `[2, ix, dpiLo, dpiHi, 0, 0, 0, flag]`, flag `0`
+  when X == Y then `1` for X and `2` for Y. The per-axis READ does exist; see
+  "Independent X/Y DPI" below for why an earlier probe concluded otherwise.
+- **Profile select** — `[6, 9, index]`, read back via `0x86` sub `0x09`. Real,
+  but it gates nothing: see "Onboard profiles" above.
+- **Macros** — `0x07` headers plus 32-byte OUTPUT reports; see "Macros" below.
 
 ## DPI stage count: a byte misread as a sub-command (2026-09-10)
 
@@ -1112,7 +1112,7 @@ The 320-byte macro buffer is fully transcribed from the vendor bundle's
 [5+4n]     HID keyboard usage code
 [6..7+4n]  delay after the event, LE16 ms
 [288..293] ASCII "Macro" then '1' + buffer id
-[304..307] (steps + 1) * 132, LE32
+[304..307] (steps + 1) * 4 + 128, LE32
 [308..311] 16, 0, 232, 232 — constant in every buffer the vendor builds
 [312..315] uid, LE32
 [316..317] steps * 2, LE16

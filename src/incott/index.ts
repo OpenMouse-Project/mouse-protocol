@@ -149,7 +149,8 @@ export const INCOTT_CMD_SET_BUTTON = 0x06;
  * Announces one 32-byte chunk of a macro buffer:
  * `09 07 <chunks> <chunk index> <bytes per chunk> <buffer id>`.
  *
- * CODEC ONLY, AND NOT SENDABLE YET — see `incottEncodeMacroChunkHeader`.
+ * Each header is followed by the chunk itself as a 32-byte OUTPUT report on
+ * the same id — see `IncottHidClient.uploadMacro`.
  */
 export const INCOTT_CMD_MACRO_CHUNK = 0x07;
 export const INCOTT_CMD_SET_RECEIVER_LED = 0x08;
@@ -261,24 +262,28 @@ export const INCOTT_INPUT_REPORT_ID = INCOTT_REPORT_ID;
  *   1 -> 01 00 f1    4 -> 01 00 f4
  *   2 -> 01 00 f2    5 -> 07 00 03
  * (left, right, middle, forward, back, DPI — physically, in some order).
- * This was previously `INCOTT_CMD_UNKNOWN_86`, decoded only for the vendor
- * tool's own `09 86 09` query (still unexplained, kept as
- * `INCOTT_SUB_UNKNOWN_86_VENDOR_QUERY`). See `incottDecodeButtonBinding` —
- * only the raw three bytes are exposed; what `type`/`code` mean inside them
- * is NOT established and is not guessed at here.
+ * This was previously `INCOTT_CMD_UNKNOWN_86`. Sub-command `0x09` on the
+ * same command reads the onboard profile index instead — see
+ * `INCOTT_SUB_PROFILE_INDEX`. The binding itself is a 32-bit little-endian
+ * action word; see `incottDecodeButtonBinding`.
  */
 export const INCOTT_CMD_QUERY_BUTTON = 0x86;
 /** Button count: left, right, middle, forward, back, DPI. */
 export const INCOTT_BUTTON_COUNT = 6;
 /**
- * The vendor tool's own query, `09 86 09`. NOT a button index — buttons only
- * go up to 5. It reads the onboard profile index, the counterpart of the
- * `09 06 09 <index>` write (`setProfileIndex` in the vendor bundle). Neither
- * is implemented here: switching profiles in the vendor tool still replays
- * every setting individually, so what the device stores against the index is
- * unknown.
+ * Reads the onboard profile INDEX, `09 86 09` — not a button index, since
+ * buttons only go up to 5. Counterpart of the `09 06 09 <index>` write.
+ *
+ * Neither is implemented, and that is a finding rather than an omission: the
+ * index is real and sticks (0-3), but it gates nothing. Writing a setting
+ * while on one slot changes what every other slot reports, so there is a
+ * single settings store and the vendor replays every setting on a switch
+ * because the mouse holds none of them. Publishing OpenMouse's
+ * `profileCount`/`setProfile` contract — which describes ONBOARD profiles —
+ * would hand the user a selector that appears to work and does not. See
+ * `captures/incott-8k-wireless/profile-index-2026-09-11.hex`.
  */
-export const INCOTT_SUB_UNKNOWN_86_VENDOR_QUERY = 0x09;
+export const INCOTT_SUB_PROFILE_INDEX = 0x09;
 
 /**
  * Physical buttons, in left-to-right display order.
@@ -472,24 +477,18 @@ export const INCOTT_MACRO_MAX_STEPS = 71;
  *     [316..317] steps * 2, LE16
  *     [318]      step count
  *
- * NOT SENDABLE YET, and this is the reason no client method exists: the
- * buffer goes out as ten 32-byte chunks, each announced by
- * `incottEncodeMacroChunkHeader` and then followed by the chunk itself — and
- * the call that carries the chunk (`document.elsDevice` in the vendor bundle)
- * is never defined in any file the page loads. Its transport cannot be
- * recovered by reading the bundle: no `sendFeatureReport` or
- * `receiveFeatureReport` appears literally anywhere in it, because the method
- * names are resolved through variables at runtime.
+ * The buffer goes out as ten 32-byte chunks, each announced by
+ * `incottEncodeMacroChunkHeader` and then carried by a 32-byte OUTPUT report
+ * on the same report id — the only place this protocol uses an output report
+ * at all. That transport is not recoverable from the vendor bundle (the call
+ * carrying each chunk is defined in none of the files its page loads, and the
+ * HID method names resolve through variables at runtime), so it was captured
+ * from the running tool instead: see
+ * `captures/incott-8k-wireless/macro-upload-2026-09-11.hex`, and
+ * `IncottHidClient.uploadMacro` for the sender.
  *
- * It cannot be the ordinary path either. Every command in this protocol is an
- * 8-byte feature report on id `0x09`, which a 32-byte chunk does not fit, and
- * a read-only sweep of the other vendor collections (2026-09-11) found
- * `0xFF00` answering nothing at all.
- *
- * So this encoder exists to preserve a format that took real work to recover,
- * with tests pinning it. Wiring it up needs the transport identified first —
- * most likely by instrumenting the vendor tool while it saves a macro, the
- * same way `vendor-tool-session.hex` was captured.
+ * Pinned byte-for-byte to that capture. There is no macro READ command, so
+ * nothing here can be verified against the device after the fact.
  */
 export function incottEncodeMacroBuffer(macro: IncottMacro): Uint8Array {
   if (!Number.isInteger(macro.bufferId) || macro.bufferId < 0 || macro.bufferId >= INCOTT_MACRO_BUFFER_COUNT) {
@@ -913,13 +912,10 @@ export function incottValidateDpi(dpi: number): void {
  * PAYLOAD INDEX 7 IS AN AXIS BYTE, discovered 2026-09-10: the full write is
  * `02 <stage> <lo> <hi> 00 00 00 <axis>`, where `axis` 0 = both axes, 1 = X
  * only, 2 = Y only. This encoder always emits trailing zeros (see `payload`),
- * so it has only ever written axis 0 (both) — correct, but now for a known
- * reason rather than by accident. Independent X/Y is deliberately NOT
- * implemented: probing `0x82` with the axis byte set to 0, 1 and 2 returned
- * the identical value every time, i.e. there is no per-axis READ yet, and
- * this driver never ships a write it cannot verify. See
- * `docs/incott-testing.md` for the open question (find the read the vendor
- * tool uses to display separate X and Y DPI values) that would unblock this.
+ * and the `axis` argument selects it. Independent X/Y IS implemented and
+ * hardware-verified — the matching per-axis read is `incottEncodeQueryDpiAxis`,
+ * which an earlier probe concluded did not exist because X and Y happened to
+ * be equal at the time.
  */
 /**
  * Which axis a DPI write targets, and which one a read asks for.
