@@ -680,10 +680,41 @@ replay, and the **"invert left and right button" hypothesis recorded for it
 was wrong** — it is the profile index. The vendor also reads it back at
 connect time, so the mouse genuinely stores a selectable index.
 
-What survives from the original finding: switching slots still replays ~23
-ordinary setting writes, so the index alone does not appear to make the mouse
-swap a stored configuration. Whether the device stores anything at all
-against that index is untested.
+### Settled 2026-09-11: the index is real, the storage is not
+
+"Whether the device stores anything against that index" is now tested. It
+does not.
+
+Reading every slot first looked like it might: all four reported identical
+settings. That is the AMBIGUOUS case rather than an answer — equally
+consistent with "no per-profile storage" and "per-profile storage where the
+slots happen to match", which is the same trap that made the per-axis DPI
+read look non-existent. Making them differ settles it:
+
+```
+on profile 0: stage 0 = 400 DPI
+switch to profile 1, write stage 0 = 1000  -> reads 1000
+switch to profile 0                        -> reads 1000   <-- not 400
+```
+
+**There is one settings store.** A write on any slot changes what every other
+slot reports, so the index gates no device behaviour.
+
+That explains the 2026-09-10 capture without contradiction: the vendor tool
+replays ~23 setting writes on a profile switch BECAUSE the mouse stores
+nothing per slot. The index is a host-readable signal — pressing the
+"Profile switch" button (`favProfile`, `0x0000F10A`) bumps it, and software
+that happens to be running notices and pushes the matching configuration
+from its own storage. With nothing running, switching profiles changes
+nothing perceptible.
+
+**So this driver does not publish `profileCount`/`activeProfile`/
+`setProfile`.** That contract is for onboard profiles — a device that holds
+configurations itself — and claiming it here would give the user a selector
+that appears to work and does nothing. OpenMouse's Profiles tab correctly
+reports profiles as unavailable for this mouse.
+
+See `captures/incott-8k-wireless/profile-index-2026-09-11.hex`.
 
 Neither command is implemented here — both are transcriptions, unverified on
 hardware. See
