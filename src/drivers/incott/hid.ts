@@ -4,6 +4,7 @@ import {
   incottDecodeButtonBinding,
   incottDecodeDebounce,
   incottDecodeDpiStage,
+  incottDecodeDpiStageAxis,
   incottDecodeDpiCycle,
   incottDecodeFireKey,
   incottDecodeIdentity,
@@ -15,6 +16,7 @@ import {
   incottDecodeSleep,
   incottDecodeToggle,
   incottEncodeQuery,
+  incottEncodeQueryDpiAxis,
   incottEncodeSetButtonBinding,
   incottEncodeSetDebounce,
   incottEncodeSetDpi,
@@ -46,6 +48,7 @@ import {
   INCOTT_CMD_QUERY_SENSOR,
   INCOTT_CMD_QUERY_TIMING,
   INCOTT_DEBOUNCE_MAX_MS,
+  INCOTT_DPI_AXIS,
   INCOTT_DPI_DEFAULT_STAGE_PRESETS,
   INCOTT_DPI_MAX,
   INCOTT_DPI_MIN,
@@ -70,6 +73,7 @@ import {
   INCOTT_SUB_SLEEP,
   INCOTT_USAGE_PAGE,
   INCOTT_VENDOR_ID,
+  type IncottDpiAxis,
   type IncottDpiCycle,
   type IncottFireKey,
   type IncottInputStatus,
@@ -130,8 +134,13 @@ export class IncottTransactionQueue {
    * no matching frame arrives. Never rejects: a device that stops answering
    * yields null so the caller can render an em dash instead of a stale value.
    */
-  request(payload: Uint8Array, cmd: number, sub: number | null): Promise<Uint8Array | null> {
-    const run = this.tail.then(() => this.exchange(payload, cmd, sub));
+  request(
+    payload: Uint8Array,
+    cmd: number,
+    sub: number | null,
+    axis: number | null = null,
+  ): Promise<Uint8Array | null> {
+    const run = this.tail.then(() => this.exchange(payload, cmd, sub, axis));
     // Keep the chain alive even if one exchange throws.
     this.tail = run.catch(() => undefined);
     return run;
@@ -158,6 +167,7 @@ export class IncottTransactionQueue {
     payload: Uint8Array,
     cmd: number,
     sub: number | null,
+    axis: number | null = null,
   ): Promise<Uint8Array | null> {
     try {
       // Discard anything latched by a previous exchange before sending.
@@ -166,7 +176,7 @@ export class IncottTransactionQueue {
       for (let attempt = 0; attempt < this.attempts; attempt += 1) {
         if (this.settleMs > 0) await this.sleep(this.settleMs);
         const frame = await this.read();
-        if (frame && incottFrameMatches(frame, cmd, sub)) return frame;
+        if (frame && incottFrameMatches(frame, cmd, sub, axis)) return frame;
       }
       return null;
     } catch {
@@ -632,6 +642,14 @@ export class IncottHidClient {
       ? dpiStageReads.slice(0, dpiCycle?.count ?? dpiStageReads.length)
       : null;
     const dpi = activeDpiStage === null ? null : dpiStageReads[activeDpiStage] ?? null;
+    // The active stage's Y axis, which the plain stage read above does not
+    // distinguish — that returns X. Published so the shared "X n · Y n DPI"
+    // summary is truthful on a mouse whose axes differ; omitted rather than
+    // mirrored from X when the read fails, so the app falls back to one
+    // number instead of claiming the axes match.
+    const dpiY = dead || activeDpiStage === null
+      ? null
+      : await this.readDpiStageAxis(activeDpiStage, "y");
     const pollingRateHz = dead
       ? null
       : incottDecodePollingRate(await this.query(INCOTT_CMD_QUERY_POLLING, INCOTT_SUB_NONE));
@@ -800,6 +818,7 @@ export class IncottHidClient {
       // go here, but `ui.settingsReady: false` above means the app never
       // renders it.
       dpi: dpi ?? 0,
+      ...(dpiY !== null ? { dpiY } : {}),
       // All six stages' stored values, only when every one of them answered
       // — see the loop above. Omitted (not fabricated) on a partial read.
       ...(dpiStages !== null ? { dpiStages } : {}),
@@ -1176,6 +1195,52 @@ export class IncottHidClient {
   private async query(cmd: number, sub: number): Promise<Uint8Array> {
     const matchSub = SUB_ECHOING_QUERIES.includes(cmd) ? sub : null;
     return (await this.queue.request(incottEncodeQuery(cmd, sub), cmd, matchSub)) ?? new Uint8Array(INCOTT_RESPONSE_LENGTH);
+  }
+
+  /**
+   * Reads ONE AXIS of one DPI stage. Separate from `query` because the axis
+   * has to be matched in the reply as well as sent: X and Y on the same stage
+   * are two requests with an identical command and sub-command, so the second
+   * would otherwise accept the first's latched frame.
+   */
+  private async queryDpiAxis(stage: number, axis: IncottDpiAxis): Promise<Uint8Array> {
+    const frame = await this.queue.request(
+      incottEncodeQueryDpiAxis(stage, axis),
+      INCOTT_CMD_QUERY_DPI_STAGE_VALUE,
+      stage,
+      INCOTT_DPI_AXIS[axis],
+    );
+    return frame ?? new Uint8Array(INCOTT_RESPONSE_LENGTH);
+  }
+
+  /** Reads one axis of one stage, or null when the device does not answer. */
+  async readDpiStageAxis(stage: number, axis: IncottDpiAxis): Promise<number | null> {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
+      throw new RangeError(`DPI stage out of range: ${stage}`);
+    }
+    return incottDecodeDpiStageAxis(await this.queryDpiAxis(stage, axis), stage, axis);
+  }
+
+  /**
+   * Writes one axis of one stage and verifies it by reading that axis back.
+   *
+   * Independent X and Y are real on this device — hardware-verified
+   * 2026-09-11, see `INCOTT_DPI_AXIS`. Writing `"both"` is what the ordinary
+   * `setDpiStageValue` does.
+   */
+  async setDpiStageAxis(stage: number, dpi: number, axis: IncottDpiAxis): Promise<number> {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
+      throw new RangeError(`DPI stage out of range: ${stage}`);
+    }
+    incottValidateDpi(dpi);
+    await this.write(incottEncodeSetDpi(stage, dpi, axis));
+    // "both" has no axis of its own to read back; X is the axis it lands on.
+    const readAxis: IncottDpiAxis = axis === "both" ? "x" : axis;
+    const got = await this.readDpiStageAxis(stage, readAxis);
+    if (got !== dpi) {
+      throw new Error(`The mouse kept ${got ?? "an unreadable"} ${readAxis.toUpperCase()} DPI instead of ${dpi}.`);
+    }
+    return dpi;
   }
 
   private async write(payload: Uint8Array): Promise<void> {

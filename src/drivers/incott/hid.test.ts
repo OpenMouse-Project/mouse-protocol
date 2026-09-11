@@ -171,6 +171,9 @@ function defaultState() {
     // the exact values verified on hardware 2026-09-08. Stage 1 (800 DPI) is
     // active by default.
     dpiStagesWire: [7, 15, 31, 47, 63, 127],
+    // Y starts equal to X, as the factory table has it. That equality is
+    // exactly what hid the per-axis read from an earlier probe.
+    dpiStagesWireY: [7, 15, 31, 47, 63, 127],
     activeDpiStage: 1, // 0x83 response byte 3.
     dpiStageCount: 6, // 0x83 response byte 2 — the cycle length, not an echo.
     pollingWire: 0, // 1000 Hz
@@ -243,10 +246,14 @@ function fakeDevice(options: FakeOptions = {}) {
       case 0x81:
         return frame(0x81, state.pollingWire);
       case 0x82: {
-        // Per-stage DPI value read, little-endian at bytes 3-4. See
-        // incottDecodeDpiStage.
-        const wire = state.dpiStagesWire[sub];
-        return wire === undefined ? null : frame(0x82, sub, wire & 0xff, (wire >> 8) & 0xff);
+        // Per-stage DPI value read, little-endian at bytes 3-4. Request byte
+        // 2 selects the axis (0 both/X, 1 X, 2 Y) and the reply echoes it at
+        // byte 8 — see incottEncodeQueryDpiAxis.
+        const axis = payload[2] ?? 0;
+        const table = axis === 2 ? state.dpiStagesWireY : state.dpiStagesWire;
+        const wire = table[sub];
+        if (wire === undefined) return null;
+        return frame(0x82, sub, wire & 0xff, (wire >> 8) & 0xff, 0, 0, 0, axis);
       }
       case 0x83:
         // The DPI cycle: byte 2 the stage COUNT, byte 3 the active index.
@@ -303,7 +310,11 @@ function fakeDevice(options: FakeOptions = {}) {
     // cmd 0x02: `sub` here is a DPI STAGE INDEX (0-5), not a fixed
     // sub-command — the bug this driver used to have. See incottEncodeSetDpi.
     if (cmd === 0x02 && sub >= 0 && sub < state.dpiStagesWire.length) {
-      state.dpiStagesWire[sub] = value | ((payload[3] ?? 0) << 8);
+      // Payload byte 7 is the axis: 0 writes both, 1 X only, 2 Y only.
+      const wire = value | ((payload[3] ?? 0) << 8);
+      const axis = payload[7] ?? 0;
+      if (axis !== 2) state.dpiStagesWire[sub] = wire;
+      if (axis !== 1) state.dpiStagesWireY[sub] = wire;
     }
     // cmd 0x03: writes the CYCLE — byte 1 the stage count, byte 2 the active
     // index. Must never touch dpiStagesWire: this is the operation
@@ -1333,4 +1344,48 @@ test("setFireKey rejects out-of-range values without writing", async () => {
   await assert.rejects(() => client.setFireKey(4, 10), RangeError);
   await assert.rejects(() => client.setFireKey(3, 300), RangeError);
   assert.deepEqual([state.fireKeyTimes, state.fireKeyIntervalMs], [3, 10]);
+});
+
+test("readStatus publishes dpiY for the active stage", async () => {
+  // Stage 1 is active; give its axes different values.
+  const { device } = fakeDevice({ state: { dpiStagesWireY: [7, 31, 31, 47, 63, 127] } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.dpi, 800, "X");
+  assert.equal(status.dpiY, 1600, "Y");
+});
+
+test("readStatus omits dpiY rather than mirroring X when the axis read fails", async () => {
+  // Claiming the axes match would be a fabricated reading; the app falls
+  // back to showing a single number instead.
+  const { device } = fakeDevice({ silent: [0x82] });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.dpiY, undefined);
+});
+
+test("setDpiStageAxis writes one axis and leaves the other alone", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setDpiStageAxis(2, 3200, "y");
+  assert.equal(await client.readDpiStageAxis(2, "y"), 3200);
+  assert.equal(await client.readDpiStageAxis(2, "x"), 1600, "X untouched");
+  assert.equal(state.dpiStagesWire[2], 31, "the X table did not move");
+});
+
+test("setDpiStageAxis with 'both' moves the two axes together", async () => {
+  const { device } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setDpiStageAxis(4, 400, "both");
+  assert.equal(await client.readDpiStageAxis(4, "x"), 400);
+  assert.equal(await client.readDpiStageAxis(4, "y"), 400);
+});
+
+test("REGRESSION: reading X then Y on one stage does not return X twice", async () => {
+  // The two requests carry an identical command and sub-command, so without
+  // matching the axis echo at byte 8 the second read is satisfied by the
+  // first's latched frame — the reading that made this driver conclude no
+  // per-axis read existed.
+  const { device } = fakeDevice({ state: { dpiStagesWireY: [7, 15, 63, 47, 63, 127] } });
+  const client = new IncottHidClient(device, fast);
+  assert.equal(await client.readDpiStageAxis(2, "x"), 1600);
+  assert.equal(await client.readDpiStageAxis(2, "y"), 3200);
 });

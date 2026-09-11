@@ -864,13 +864,53 @@ export function incottValidateDpi(dpi: number): void {
  * `docs/incott-testing.md` for the open question (find the read the vendor
  * tool uses to display separate X and Y DPI values) that would unblock this.
  */
-export function incottEncodeSetDpi(stage: number, dpi: number): Uint8Array {
+/**
+ * Which axis a DPI write targets, and which one a read asks for.
+ *
+ * On the WRITE the value rides at payload byte 7; on the READ it is request
+ * byte 2 and the reply echoes it back at byte 8. Hardware-verified
+ * 2026-09-11: writing X=800/Y=1600, X=2400/Y=400 and X=1000/Y=1000 to one
+ * stage read back exactly, each axis independently.
+ *
+ * `both` is what a plain `incottEncodeSetDpi` sends, and what reading with no
+ * axis byte returns.
+ */
+export const INCOTT_DPI_AXIS = { both: 0, x: 1, y: 2 } as const;
+export type IncottDpiAxis = keyof typeof INCOTT_DPI_AXIS;
+
+export function incottEncodeSetDpi(stage: number, dpi: number, axis: IncottDpiAxis = "both"): Uint8Array {
   if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
     throw new RangeError(`DPI stage out of range: ${stage}`);
   }
   incottValidateDpi(dpi);
   const wire = dpi / INCOTT_DPI_STEP - 1;
-  return payload(INCOTT_CMD_SET_DPI, stage, wire & 0xff, (wire >> 8) & 0xff);
+  return payload(
+    INCOTT_CMD_SET_DPI,
+    stage,
+    wire & 0xff,
+    (wire >> 8) & 0xff,
+    0,
+    0,
+    0,
+    INCOTT_DPI_AXIS[axis],
+  );
+}
+
+/**
+ * `09 82 <stage> <axis>` — reads one axis of one stage.
+ *
+ * WHY THIS EXISTS, given a plain `09 82 <stage>` already reads a value: this
+ * driver previously recorded that no per-axis read existed, on the strength
+ * of a probe where all three axis values came back identical. They were
+ * identical because X and Y were BOTH at the factory 1600 at the time — the
+ * probe could not tell "no per-axis read" from "per-axis read whose axes
+ * happen to match". Confirmed 2026-09-11 by setting them apart first.
+ */
+export function incottEncodeQueryDpiAxis(stage: number, axis: IncottDpiAxis): Uint8Array {
+  if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
+    throw new RangeError(`DPI stage out of range: ${stage}`);
+  }
+  return payload(INCOTT_CMD_QUERY_DPI_STAGE_VALUE, stage, INCOTT_DPI_AXIS[axis]);
 }
 
 /**
@@ -1049,11 +1089,23 @@ export interface IncottDeviceIdentity {
  * The device latches a single shared response buffer, so a frame left over
  * from an earlier query will otherwise be decoded as a real value.
  */
-export function incottFrameMatches(frame: Uint8Array, cmd: number, sub: number | null): boolean {
+export function incottFrameMatches(
+  frame: Uint8Array,
+  cmd: number,
+  sub: number | null,
+  axis: number | null = null,
+): boolean {
   if (frame.length < 3) return false;
   if (frame[0] !== INCOTT_REPORT_ID) return false;
   if (frame[1] !== cmd) return false;
   if (sub !== null && frame[2] !== sub) return false;
+  // The per-axis DPI read echoes the requested axis at byte 8. Reading X and
+  // then Y on the SAME stage sends two requests whose command and sub-command
+  // are identical, so without this the second read can be satisfied by the
+  // first one's latched reply and both axes report the same number — which
+  // is exactly the reading that made this driver conclude no per-axis read
+  // existed. See `incottEncodeQueryDpiAxis`.
+  if (axis !== null && frame[8] !== axis) return false;
   return true;
 }
 
@@ -1105,6 +1157,24 @@ export function incottDecodeDpiCycle(frame: Uint8Array): IncottDpiCycle | null {
  */
 export function incottDecodeDpiStage(frame: Uint8Array, stage: number): number | null {
   if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_DPI_STAGE_VALUE, stage)) return null;
+  if (frame.length < 5) return null;
+  const wire = frame[3]! | (frame[4]! << 8);
+  const dpi = (wire + 1) * INCOTT_DPI_STEP;
+  return dpi >= INCOTT_DPI_MIN && dpi <= INCOTT_DPI_MAX ? dpi : null;
+}
+
+/**
+ * One axis of one stage, from a reply to `incottEncodeQueryDpiAxis`. The
+ * requested axis MUST be matched at byte 8 — see `incottFrameMatches`.
+ */
+export function incottDecodeDpiStageAxis(
+  frame: Uint8Array,
+  stage: number,
+  axis: IncottDpiAxis,
+): number | null {
+  if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_DPI_STAGE_VALUE, stage, INCOTT_DPI_AXIS[axis])) {
+    return null;
+  }
   if (frame.length < 5) return null;
   const wire = frame[3]! | (frame[4]! << 8);
   const dpi = (wire + 1) * INCOTT_DPI_STEP;

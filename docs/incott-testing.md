@@ -798,17 +798,11 @@ capture session has resolved. **Do not resolve these by guessing.**
   receiver, sensor — see the model-identification section at the end of this
   document). Bytes 7-8 (`00 ff` on this device) are still unknown; a firmware
   version is the obvious candidate but nothing confirms it.
-- **DPI per-axis read — probably does not exist.** The 2026-09-10 capture
-  found a write-side axis byte (payload index 7: 0 = both, 1 = X, 2 = Y) but
-  no per-axis READ: probing `0x82` with the axis byte set to 0, 1 and 2
-  returned the identical value every time. The vendor's own code matches
-  this — `setResolution` sends two writes distinguished by that flag and has
-  no per-axis read at all, so its UI must track X and Y host-side. Without a
-  read to verify a Y-only write against, this driver still does not implement
-  independent X/Y DPI.
-
 Resolved since this list was written (kept for the record):
 
+- ~~**DPI per-axis read.**~~ It exists: `09 82 <stage> <axis>`, echoed at
+  reply byte 8. The earlier probe saw one value for all three axes because X
+  and Y were both at the factory 1600 — see "Independent X/Y DPI" below.
 - ~~**Button payload semantics.**~~ A 32-bit little-endian action word; the
   six factory bindings confirm the mouse rows against hardware. See
   "Buttons: DECODED and shipped".
@@ -1193,3 +1187,68 @@ Nothing else in `0x00`-`0x0f` answers. `01 0e` is suggestive — those are the
 same two values the identity reply carries at bytes 2 and 3 (guard `0x01`,
 model code `0x0E`) — but the vendor bundle never queries `0x85`/`0x07` at
 all, so there is no caller to name it. Recorded, not guessed at.
+
+## Independent X/Y DPI: the per-axis read DOES exist (2026-09-11)
+
+This document previously recorded, under "Unresolved unknowns", that probing
+`0x82` with the axis byte set to 0, 1 and 2 "returned the identical value
+every time", and concluded there was no per-axis read — so a Y-only write
+could never be verified and independent axes were left unimplemented.
+
+**That conclusion was wrong, and the probe that produced it could not have
+shown anything else**: X and Y were both sitting at the factory 1600 at the
+time. Three identical readings are exactly what a working per-axis read
+returns when the two axes match. The test could not distinguish "no per-axis
+read" from "per-axis read whose axes happen to agree" — the same shape of
+mistake as the battery byte that matched once by coincidence.
+
+Setting the axes apart first settles it immediately:
+
+```
+09 82 02 01  ->  09 82 02 07 00 00 00 00 01     X = 400
+09 82 02 02  ->  09 82 02 3f 00 00 00 00 02     Y = 3200
+```
+
+### The wire format
+
+```
+write:  09 02 <stage> <lo> <hi> 00 00 <axis>     axis 0 both, 1 X, 2 Y
+read:   09 82 <stage> <axis>                     axis at REQUEST byte 3
+reply:  09 82 <stage> <lo> <hi> 00 00 00 <axis>  axis echoed at byte 8
+```
+
+**Hardware-confirmed 2026-09-11** on stage 3, writing and reading back three
+independent pairs before restoring:
+
+```
+wrote X= 800 Y=1600  ->  reads X= 800 Y=1600   OK
+wrote X=2400 Y= 400  ->  reads X=2400 Y= 400   OK
+wrote X=1000 Y=1000  ->  reads X=1000 Y=1000   OK
+```
+
+### The axis echo is load-bearing
+
+Reading X and then Y on the same stage sends two requests whose command AND
+sub-command are identical. The device latches one shared response buffer, so
+without matching the echo at byte 8 the second read is satisfied by the
+first's frame and both axes report the same number — reproducing the exact
+false reading that closed this question the first time.
+`incottFrameMatches` takes an optional axis for this, and
+`IncottTransactionQueue.request` passes it through.
+
+### What ships
+
+`setDpiStageAxis(stage, dpi, axis)` and `readDpiStageAxis(stage, axis)` on the
+client, and `readStatus` publishes `dpiY` for the active stage. That last one
+works with no app-side change: `MouseStatus.dpiY` already exists and the DPI
+card's summary line and the Diagnostics panel already render "X n · Y n DPI"
+from it. `dpiY` is OMITTED, not mirrored from X, when the axis read fails —
+the app then shows a single number rather than claiming the axes match.
+
+**The write UI is not generic yet.** `AxisControls` in `DpiCard.tsx` is
+`id="logitech-axis-controls"` and calls `applyLogitechAxisDpi`, which
+early-returns unless the client is a Logitech one. Generalising it is a small
+change of the same shape as `applyDeviceButtonMapping` — dispatch through
+`requireClientMethod` instead of a brand check — but it is an upstream call,
+so it is a question for the maintainers rather than something to change
+unilaterally.
