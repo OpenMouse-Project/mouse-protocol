@@ -1,0 +1,255 @@
+# Write round-trip session: DPI stage table, polling rate, lift-off, motion
+# sync, and buttons — all verified on real hardware.
+#
+# Captured 2026-09-08 using node-hid DIRECTLY against an "incott 8K wireless
+# mouse" (093A:522C) — not through the vendor's own configurator, unlike
+# vendor-tool-session.hex. Every value this session wrote was READ BACK and
+# then RESTORED to what the device held before the write, so the device was
+# left in the same state it started in. This is the highest-trust session in
+# this directory for the facts it covers, because it is the only one that
+# performed real writes and confirmed them with a read-back before undoing
+# them.
+#
+# TX lines omit the report id byte (0x09), matching what this driver's
+# incottEncode* functions build for sendFeatureReport(0x09, …). RX lines
+# include the report id at byte 0, matching receiveFeatureReport(0x09).
+
+## ---------------------------------------------------------------------
+## DPI stage table — command 0x02 (write) / 0x82 (read), byte 1 is a STAGE
+## INDEX (0-5), not a fixed sub-command. This is the bug fix: the driver used
+## to hardcode byte 1 as a constant 0x01, so it could only ever write stage 1.
+## ---------------------------------------------------------------------
+
+# Reading all six stages independently — six points on the wire = dpi/50 - 1
+# line, proving DPI is linear, not an index into a preset table:
+TX 09 82 00
+RX 09 82 00 07 00 00 00 00
+# wire 0x07 -> (7+1)*50 = 400 DPI
+
+TX 09 82 01
+RX 09 82 01 0f 00 00 00 00
+# wire 0x0f -> (15+1)*50 = 800 DPI
+
+TX 09 82 02
+RX 09 82 02 1f 00 00 00 00
+# wire 0x1f -> (31+1)*50 = 1600 DPI
+
+TX 09 82 03
+RX 09 82 03 2f 00 00 00 00
+# wire 0x2f -> (47+1)*50 = 2400 DPI
+
+TX 09 82 04
+RX 09 82 04 3f 00 00 00 00
+# wire 0x3f -> (63+1)*50 = 3200 DPI
+
+TX 09 82 05
+RX 09 82 05 7f 00 00 00 00
+# wire 0x7f -> (127+1)*50 = 6400 DPI
+
+# 0x82 echoes its sub-command (confirmed by every RX line above carrying the
+# requested stage back at byte 2) — it is added to SUB_ECHOING_QUERIES in
+# src/drivers/incott/hid.ts alongside 0x83/0x84/0x85/0x86/0x8e.
+
+# Write/read-back/restore round-trip on stage 2 (was 1600 DPI, wire 0x1f):
+TX 09 02 02 f3 01
+# wire 499 = 25000/50 - 1
+TX 09 82 02
+RX 09 82 02 f3 01 00 00 00
+# Read back exactly 25000 DPI — confirms the write landed as written.
+
+TX 09 02 02 1f 00
+# Restoring wire 31 = 1600 DPI, the original value.
+TX 09 82 02
+RX 09 82 02 1f 00 00 00 00
+# Read back exactly 1600 DPI — the device was left as it started.
+
+## ---------------------------------------------------------------------
+## Active DPI stage index — command 0x83, sub 0x06. Unchanged by this
+## session; recorded here because MouseStatus.dpi now depends on it (read the
+## active stage index, then that stage's value via 0x82).
+## ---------------------------------------------------------------------
+
+TX 09 83 06
+RX 09 83 06 01 00 00 00 00
+# Stage 1 of 6 active on this unit at capture time.
+
+## ---------------------------------------------------------------------
+## Polling rate — command 0x01 (write) / 0x81 (read). Byte 2 of the 0x81
+## reply is DATA, not an echoed sub-command; confirmed by writing two
+## different wire values in sequence and watching byte 2 follow.
+## ---------------------------------------------------------------------
+
+TX 09 01 01
+# wire 1 = 500 Hz
+TX 09 81 00
+RX 09 81 01 00 00 00 00 00
+# Byte 2 = 0x01, following the write.
+
+TX 09 01 00
+# wire 0 = 1000 Hz
+TX 09 81 00
+RX 09 81 00 00 00 00 00 00
+# Byte 2 = 0x00, following the write. 0 -> 1 -> 0 confirms this is genuinely
+# the polling-rate byte, kept OUT of SUB_ECHOING_QUERIES (it is data here,
+# not an echo — matching it as a sub-command would reject every rate but
+# 1000 Hz).
+
+## ---------------------------------------------------------------------
+## Lift-off — command 0x04 sub 0x01 (write) / 0x84 sub 0x01 (read, the
+## symmetric single-purpose form) and 0x84 sub 0x00 byte 7 high nibble (the
+## packed form this driver used before). Both forms were read after each
+## write and agreed at every step.
+## ---------------------------------------------------------------------
+
+TX 09 04 01 00
+TX 09 84 01
+RX 09 84 01 00 00 00 00 00
+# Symmetric read: byte 3 = 0x00.
+TX 09 84 00
+RX 09 84 00 00 00 00 00 01
+# Packed read: byte 7 high nibble = 0x0 -> matches.
+
+TX 09 04 01 01
+TX 09 84 01
+RX 09 84 01 01 00 00 00 00
+# Symmetric read: byte 3 = 0x01.
+TX 09 84 00
+RX 09 84 00 00 00 00 00 11
+# Packed read: byte 7 high nibble = 0x1 -> matches.
+
+TX 09 04 01 02
+TX 09 84 01
+RX 09 84 01 02 00 00 00 00
+# Symmetric read: byte 3 = 0x02.
+TX 09 84 00
+RX 09 84 00 00 00 00 00 21
+# Packed read: byte 7 high nibble = 0x2 -> matches.
+
+# Restored to hw 0x00 (the value observed before this sequence started) after
+# the check above.
+TX 09 04 01 00
+
+## ---------------------------------------------------------------------
+## Motion sync — command 0x04 sub 0x04 (write) / 0x84 sub 0x04 (read, the
+## symmetric single-purpose form) and 0x84 sub 0x00 byte 7 low nibble (the
+## packed form). Both forms were read after each write and agreed.
+## ---------------------------------------------------------------------
+
+TX 09 04 04 00
+TX 09 84 04
+RX 09 84 04 00 00 00 00 00
+# Symmetric read: byte 3 = 0x00 (off).
+TX 09 84 00
+RX 09 84 00 00 00 00 00 00
+# Packed read: byte 7 low nibble = 0x0 -> matches.
+
+TX 09 04 04 01
+TX 09 84 04
+RX 09 84 04 01 00 00 00 00
+# Symmetric read: byte 3 = 0x01 (on).
+TX 09 84 00
+RX 09 84 00 00 00 00 00 01
+# Packed read: byte 7 low nibble = 0x1 -> matches.
+
+TX 09 04 04 00
+TX 09 84 04
+RX 09 84 04 00 00 00 00 00
+# Symmetric read: byte 3 = 0x00 (off) — restored to the value observed before
+# this sequence started.
+TX 09 84 00
+RX 09 84 00 00 00 00 00 00
+# Packed read: byte 7 low nibble = 0x0 -> matches.
+
+## ---------------------------------------------------------------------
+## Buttons — command 0x06 (write) / 0x86 (read). New capability this session;
+## the meaning of the three payload bytes (key code / macro / remap) is NOT
+## established and is not decoded beyond the raw bytes — see
+## incottDecodeButtonBinding in src/incott/index.ts.
+## ---------------------------------------------------------------------
+
+TX 09 06 00 01 00 f0
+TX 09 86 00
+RX 09 86 00 01 00 f0 00 00
+# Byte-for-byte match with the write above — round-trip confirmed.
+
+# Reading all six buttons without writing them (left, right, middle, forward,
+# back, DPI — physically, in some order not established by this capture):
+TX 09 86 00
+RX 09 86 00 01 00 f0 00 00
+TX 09 86 01
+RX 09 86 01 01 00 f1 00 00
+TX 09 86 02
+RX 09 86 02 01 00 f2 00 00
+TX 09 86 03
+RX 09 86 03 01 00 f3 00 00
+TX 09 86 04
+RX 09 86 04 01 00 f4 00 00
+TX 09 86 05
+RX 09 86 05 07 00 03 00 00
+# Button 5 (DPI) carries a visibly different payload shape (07 00 03) from
+# the other five (01 00 fN) — consistent with it being a different kind of
+# action (a DPI-cycle function) rather than a key, but this is an inference,
+# not something this capture decodes.
+
+## ---------------------------------------------------------------------
+## Active DPI stage SELECT — command 0x03, sub 0x06 (write) / 0x83, sub 0x06
+## (read). Added 2026-09-08 in response to an owner report: the driver's
+## setDpi() was reading the active stage and writing the requested DPI INTO
+## it, silently overwriting the stage's stored value (one owner's stage 2 was
+## found changed from 1600 to 800 this way). This section proves selecting a
+## stage and editing a stage's value are genuinely different operations: the
+## unit under test started on stage 1 (see the 0x83/0x06 read earlier in this
+## file); every write below is a SELECT (0x03), and the stage table (read via
+## 0x82 for all six stages) was re-read after the sequence and found
+## byte-for-byte unchanged from the six-stage read at the top of this file.
+##
+## IncottHIDApp labels this same 0x03/0x06 write "set DPI" and treats its six
+## "DPI presets" as if picking one changes the DPI value — it does not; it
+## only changes which already-stored stage answers as active. That mislabel
+## is the root of the confusion this fix addresses; do not re-introduce it.
+## ---------------------------------------------------------------------
+
+TX 09 03 06 00
+TX 09 83 06
+RX 09 83 06 00 00 00 00 00
+# Selected stage 0; read back confirms stage 0 is now active.
+
+TX 09 03 06 03
+TX 09 83 06
+RX 09 83 06 03 00 00 00 00
+# Selected stage 3; read back confirms stage 3 is now active.
+
+TX 09 03 06 05
+TX 09 83 06
+RX 09 83 06 05 00 00 00 00
+# Selected stage 5; read back confirms stage 5 is now active.
+
+TX 09 03 06 01
+TX 09 83 06
+RX 09 83 06 01 00 00 00 00
+# Restored the original active stage (1), the value observed before this
+# sequence started (see the 0x83/0x06 read earlier in this file).
+
+# Re-reading all six stages after the four selects above — table completely
+# unchanged from the six-stage read at the top of this file, proving a select
+# never edits a stored value:
+TX 09 82 00
+RX 09 82 00 07 00 00 00 00
+TX 09 82 01
+RX 09 82 01 0f 00 00 00 00
+TX 09 82 02
+RX 09 82 02 1f 00 00 00 00
+TX 09 82 03
+RX 09 82 03 2f 00 00 00 00
+TX 09 82 04
+RX 09 82 04 3f 00 00 00 00
+TX 09 82 05
+RX 09 82 05 7f 00 00 00 00
+# Identical to the six-stage read at the top of this file (400/800/1600/2400/
+# 3200/6400 DPI) — the four active-stage selects above left the table
+# completely untouched.
+
+## Attribution: the opcode set exercised here was established by earlier
+## capture sessions in this directory (see README.md) and by the MIT-licensed
+## IncottHIDApp. This file's data — every byte sequence above — is original,
+## taken directly from hardware with node-hid.

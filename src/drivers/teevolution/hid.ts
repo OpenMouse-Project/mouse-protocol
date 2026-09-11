@@ -1,8 +1,11 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
 import {
+  TEEVOLUTION_BUTTON_OPTIONS,
   TEEVOLUTION_COMMAND,
   TEEVOLUTION_FLASH,
+  TEEVOLUTION_PROFILE_COUNT,
+  TEEVOLUTION_KEY_TABLE_LENGTH,
   TEEVOLUTION_LCD_REPORT_ID,
   TEEVOLUTION_LCD_USAGE,
   TEEVOLUTION_LCD_USAGE_PAGE,
@@ -12,8 +15,11 @@ import {
   teevolutionBuildLcdTimePacket,
   teevolutionBuildOnlinePayload,
   teevolutionBuildReadPayload,
+  teevolutionBuildSetCurrentProfile,
   teevolutionBuildSimplePayload,
   teevolutionBuildWritePayload,
+  teevolutionDecodeButtonMappings,
+  teevolutionDecodeCurrentProfile,
   teevolutionDecodeDpiLightBrightness,
   teevolutionDecodeDpiLightMode,
   teevolutionDecodeDpi,
@@ -24,9 +30,15 @@ import {
   teevolutionDpiOptions,
   teevolutionEncodeDpiLightBrightness,
   teevolutionEncodeDpi,
+  teevolutionEncodeKeyFunction,
   teevolutionEncodeLiftOff,
   teevolutionEncodePollingRate,
   teevolutionEncodeSensorMode,
+  teevolutionFindButton,
+  teevolutionFindButtonAction,
+  teevolutionKeyFunctionAddress,
+  teevolutionKeyFunctionLabel,
+  teevolutionKeyTableHasLeftClick,
   teevolutionPacketChecksum,
   teevolutionParseBattery,
   teevolutionParseReadResponse,
@@ -34,6 +46,12 @@ import {
   teevolutionSensorModeUi,
   type TeevolutionDeviceProfile,
 } from "@openmouse/protocol/teevolution";
+
+const PROFILE_SETTLE_MS = 100;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 export interface TeevolutionDeviceInfo {
   cid: number;
@@ -164,6 +182,7 @@ export class TeevolutionHidClient {
     const dongleVersion = await this.query(TEEVOLUTION_COMMAND.getDongleVersion).catch(() => null);
     const profile = await this.query(TEEVOLUTION_COMMAND.getCurrentConfig).catch(() => null);
     const rssi = await this.query(TEEVOLUTION_COMMAND.getRssi).catch(() => null);
+    const currentBank = profile ? teevolutionDecodeCurrentProfile(profile) : null;
     const stageCount = this.decodeDpiStageCount(flash[TEEVOLUTION_FLASH.maxDpiStage], info.profile);
     const activeDpiStage = Math.min(flash[TEEVOLUTION_FLASH.currentDpi] ?? 0, stageCount - 1);
     const dpiStages = Array.from({ length: stageCount }, (_, stage) => {
@@ -200,7 +219,8 @@ export class TeevolutionHidClient {
       activeDpiStage,
       pollingRateHz,
       supportedPollingRates: info.profile.pollingRates.filter((rate) => rate <= info.maximumPollingRateHz),
-      activeProfile: profile && profile[1] === 0 ? (profile[5] ?? 0) + 1 : null,
+      activeProfile: currentBank !== null ? currentBank + 1 : null,
+      profileCount: currentBank !== null ? TEEVOLUTION_PROFILE_COUNT : undefined,
       connectionType: info.connection,
       connectionDetail: `CID ${info.cid} · MID ${info.mid} · Type ${info.type}`,
       signalStrength: rssi && rssi[1] === 0 ? Math.min(rssi[5] ?? 0, 4) : null,
@@ -224,6 +244,8 @@ export class TeevolutionHidClient {
       sensorModeEditable: sensorModeUi.editable,
       liftOffDistance: teevolutionDecodeLiftOff(flash[TEEVOLUTION_FLASH.liftOffDistance] ?? -1),
       supportedLiftOffDistances: [...info.profile.liftOffDistances],
+      buttonMappings: teevolutionDecodeButtonMappings(flash),
+      buttonOptions: TEEVOLUTION_BUTTON_OPTIONS,
       firmware: [
         this.decodeVersionOptional("Mouse", deviceVersion) ?? "Mouse firmware unavailable",
         this.decodeVersionOptional("Dongle", dongleVersion) ?? "Dongle firmware unavailable",
@@ -238,6 +260,62 @@ export class TeevolutionHidClient {
 
   getModelProfile(): TeevolutionDeviceProfile {
     return this.profile();
+  }
+
+  getButtonOptions(): string[] {
+    return [...TEEVOLUTION_BUTTON_OPTIONS];
+  }
+
+  async setButtonMapping(button: string, action: string): Promise<void> {
+    const slot = teevolutionFindButton(button);
+    if (!slot) throw new Error(`This mouse has no "${button}" button.`);
+    const assigned = teevolutionFindButtonAction(action);
+    if (!assigned) throw new Error(`Unknown button action "${action}".`);
+    const payload = teevolutionEncodeKeyFunction(assigned.cls, assigned.param);
+    await this.open();
+    await this.withDeviceControl(async () => {
+      const table = await this.readFlash(TEEVOLUTION_FLASH.keyFunction, TEEVOLUTION_KEY_TABLE_LENGTH);
+      const next = new Uint8Array(table);
+      next.set(payload, slot.index * payload.length);
+      if (!teevolutionKeyTableHasLeftClick(next)) {
+        throw new Error("Keep at least one button as Left Click.");
+      }
+      const address = teevolutionKeyFunctionAddress(slot.index);
+      await this.writeFlash(address, payload);
+      const confirmed = await this.readFlash(address, payload.length);
+      if (teevolutionKeyFunctionLabel(confirmed) !== assigned.label) {
+        throw new Error("The mouse did not accept that button assignment.");
+      }
+    });
+  }
+
+  /**
+   * Switch the active onboard bank. `profile` is 1-based to match the shell;
+   * TeevoLink / firmware use 0–3. DPI, buttons, and the rest of flash belong
+   * to that bank, so the panel re-reads status after this returns.
+   */
+  async setProfile(profile: number): Promise<void> {
+    if (!Number.isInteger(profile) || profile < 1 || profile > TEEVOLUTION_PROFILE_COUNT) {
+      throw new Error(`Profile must be 1-${TEEVOLUTION_PROFILE_COUNT}.`);
+    }
+    await this.open();
+    await this.withDeviceControl(async () => {
+      this.assertAccepted(
+        await this.exchange(teevolutionBuildSetCurrentProfile(profile - 1)),
+        "profile switch",
+      );
+      await delay(PROFILE_SETTLE_MS);
+      const confirmed = teevolutionDecodeCurrentProfile(
+        await this.query(TEEVOLUTION_COMMAND.getCurrentConfig),
+      );
+      if (confirmed !== profile - 1) {
+        throw new Error(
+          confirmed === null
+            ? "The mouse did not confirm the profile change."
+            : `The mouse kept profile ${confirmed + 1} instead of ${profile}.`,
+        );
+      }
+    });
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {

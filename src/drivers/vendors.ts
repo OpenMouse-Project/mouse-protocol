@@ -1,5 +1,6 @@
 import { ATK_COMPX_PRODUCT_IDS } from "./atk/products.ts";
 import { MICROSOFT_PRODUCTS } from "../microsoft/index.ts";
+import { INCOTT_PRODUCT_IDS, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../incott/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { GEARHUB_PRODUCTS, GEARHUB_VENDOR_ID } from "@openmouse/protocol/gearhub";
 import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
@@ -73,6 +74,13 @@ import {
   DAREU_PRODUCT_IDS,
   DAREU_VENDOR_ID,
 } from "@openmouse/protocol/dareu";
+import {
+  HYPERX_PULSEFIRE_HASTE_KINGSTON_PIDS,
+  HYPERX_PULSEFIRE_HASTE_HP_PIDS,
+  HYPERX_USAGE_PAGE,
+  HYPERX_VENDOR_ID_HP,
+  HYPERX_VENDOR_ID_KINGSTON,
+} from "@openmouse/protocol/hyperx";
 
 export const VENDOR_ID = {
   pulsar: 0x3710,
@@ -114,6 +122,12 @@ export const VENDOR_ID = {
   ksnakeDongle: 0xa8a5, // K-snake X11 2.4 GHz dongle
   microsoft: 0x045E,
   dareu: DAREU_VENDOR_ID,
+  // Shares 0x093a with Glorious's Pixart-based Model O 2 / I 2 family (see
+  // `glorious` above); GloriousHidClient.isSupported() only claims its own
+  // catalogue product ids, so the two never overlap.
+  incott: INCOTT_VENDOR_ID,
+  hyperxKingston: HYPERX_VENDOR_ID_KINGSTON,
+  hyperxHp: HYPERX_VENDOR_ID_HP,
 } as const;
 
 /** Exact PID and report-8 command collection measured on the TM265 receiver. */
@@ -481,6 +495,37 @@ export const MICROSOFT_HID_FILTERS: HIDDeviceFilter[] = [...MICROSOFT_PRODUCTS].
   (productId) => ({ vendorId: VENDOR_ID.microsoft, productId, usagePage: 0x0C, usage: 0x01 }),
 );
 
+/**
+ * The Incott 8K wireless mouse (and its charging-state product id) answer the
+ * vendor protocol on usage page 0xFF05. Narrowed per product id and usage
+ * page, like the other 0x093a filter above, so the picker offers the
+ * protocol-carrying collection specifically rather than relying only on the
+ * broad Glorious VID-only filter that already happens to admit this VID.
+ */
+export const INCOTT_HID_FILTERS: HIDDeviceFilter[] = INCOTT_PRODUCT_IDS.map((productId) => ({
+  vendorId: INCOTT_VENDOR_ID,
+  productId,
+  usagePage: INCOTT_USAGE_PAGE,
+}));
+
+/**
+ * HyperX Pulsefire Haste family. The config channel is the vendor collection
+ * on usage page 0xFF00 (usage 0x01). The original wired model enumerates
+ * under Kingston VID 0x0951; HP-era models use 0x03F0.
+ */
+export const HYPERX_KINGSTON_HID_FILTERS: HIDDeviceFilter[] = [...HYPERX_PULSEFIRE_HASTE_KINGSTON_PIDS].map(
+  (productId) => ({ vendorId: VENDOR_ID.hyperxKingston, productId, usagePage: HYPERX_USAGE_PAGE }),
+);
+
+export const HYPERX_HP_HID_FILTERS: HIDDeviceFilter[] = [...HYPERX_PULSEFIRE_HASTE_HP_PIDS].map(
+  (productId) => ({ vendorId: VENDOR_ID.hyperxHp, productId, usagePage: HYPERX_USAGE_PAGE }),
+);
+
+export const HYPERX_HID_FILTERS: HIDDeviceFilter[] = [
+  ...HYPERX_KINGSTON_HID_FILTERS,
+  ...HYPERX_HP_HID_FILTERS,
+];
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...DAREU_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
@@ -506,6 +551,9 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   // MCHOSE ships keyboards and audio devices under 0x3837 too, so this stays
   // narrowed to the mouse configuration collection rather than the whole VID.
+  // Both mouse generations answer on this collection — the A7 V2 with inverted
+  // feature reports, the A7 V3 with its own output-report protocol — so one
+  // filter offers the whole mouse line and the drivers split it by product id.
   { vendorId: VENDOR_ID.mchose, usagePage: MCHOSE_CONFIG_USAGE_PAGE, usage: MCHOSE_CONFIG_USAGE },
   // The MagDock is a separate device on its own usage page; it carries the RGB.
   { vendorId: VENDOR_ID.mchose, productId: MCHOSE_DOCK_PRODUCT_ID, usagePage: MCHOSE_DOCK_USAGE_PAGE, usage: MCHOSE_DOCK_USAGE },
@@ -560,4 +608,6 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.ksnakeUsb, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
   { vendorId: VENDOR_ID.ksnakeDongle, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
   ...MICROSOFT_HID_FILTERS,
+  ...INCOTT_HID_FILTERS,
+  ...HYPERX_HID_FILTERS,
 ];

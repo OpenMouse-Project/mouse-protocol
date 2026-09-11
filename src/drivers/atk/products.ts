@@ -10,6 +10,9 @@ export interface AtkProduct {
 
 /** Mouse identity returned by GetMouseCIDMID (command 0x10). */
 export const ATK_PRODUCTS: Record<string, AtkProduct> = {
+  "1,8": { brand: "ATK", model: "F1 Ultimate 2.0", sensor: "PAW3950Ultra", verified: false },
+  "1,31": { brand: "ATK", model: "A9 Mini +", sensor: "PAW3955Master", verified: false },
+  "1,52": { brand: "ATK", model: "A9 Mini +", sensor: "PAW3955Master", verified: true },
   "2,11": { brand: "VXE", model: "R1", sensor: "PAW3395", family: "r1", verified: false },
   "2,12": { brand: "VXE", model: "R1", sensor: "PAW3395", family: "r1", verified: true },
   "2,32": { brand: "VXE", model: "R1 SE+", sensor: "PAW3395SE", family: "r1", verified: true },

@@ -1,0 +1,108 @@
+# Vendor-tool session: DPI and battery ground truth.
+#
+# Captured 2026-09-07 by instrumenting Incott's OWN WebHID configurator at
+# incott.net/mouse/ — hooking HIDDevice.prototype.sendFeatureReport and
+# HIDDevice.prototype.receiveFeatureReport in the browser and recording the
+# real traffic the vendor tool exchanged with a real G23V2Pro. This is a
+# DIFFERENT, higher-trust capture session than targeted-reads.hex and
+# query-sweep-0x80-0x8f.hex (which were read-only probes taken directly with
+# node-hid, not through the vendor's own software) and it OUTRANKS every
+# assumption this driver inherited from the MIT-licensed IncottHIDApp.
+#
+# TX lines are feature-report payloads as sent to sendFeatureReport(0x09, …),
+# i.e. they OMIT the report id byte, matching what this driver's
+# incottEncode* functions build. RX lines are full feature reports as
+# returned by receiveFeatureReport(0x09), i.e. they INCLUDE the report id at
+# byte 0 — the same TX/RX asymmetry the rest of this driver already handles.
+#
+# This session disproved two things this driver used to assume:
+#   1. DPI was believed to be a 6-entry preset index written under command
+#      0x03. It is actually a linear little-endian uint16 written under
+#      command 0x02, sub-command 0x01 (see the two DPI lines below).
+#   2. Battery percentage was believed to be byte 8 of the 0x89 response
+#      (it read the constant 0x5a/90 on every capture ever taken, in every
+#      device state — see targeted-reads.hex and query-sweep-0x80-0x8f.hex).
+#      It is actually byte 6 of the 0x8e/sub-0x01 response (see the battery
+#      line below); 0x8e never answered in the earlier sweep because that
+#      sweep only ever tried sub-command 0x00.
+
+## DPI — command 0x02, sub 0x01, little-endian uint16 at payload bytes 2-3.
+## wire = dpi/50 - 1, dpi = (wire + 1) * 50.
+
+# TX: set DPI to 800 (wire 15 = 0x000f)
+TX 09 02 01 0f 00
+# The vendor UI showed "800" immediately after this write.
+
+# TX: set DPI to 25000 (wire 499 = 0x01f3)
+TX 09 02 01 f3 01
+# The vendor UI showed "25000" immediately after this write. 25000 is inside
+# even the lower of the two known sensor ceilings (PAW3395: 32000), so this
+# alone does not tell us which sensor variant is fitted; see INCOTT_DPI_MAX
+# in src/incott/index.ts for how the driver handles that.
+
+## DPI stage query — command 0x83, sub 0x06. Returns the ACTIVE STAGE INDEX
+## (0-5) into the vendor's six default stage presets, NOT the DPI value
+## written above. This is the same request/reply shape earlier captures
+## already recorded (targeted-reads.hex has nothing for this sub-command, but
+## query-sweep-0x80-0x8f.hex's bare "09 83" sweep got back "09 83 06 01",
+## which this driver used to (mis)decode as index 1 -> 800 DPI, matching the
+## vendor UI only because the device happened to be on stage 1 of 6 at that
+## moment).
+
+TX 09 83 00
+RX 09 83 06 01 00 00 00 00
+
+## Battery — command 0x8e, sub 0x01. Percentage is the EXACT value at byte 6.
+## The earlier opcode sweep only ever tried 0x8e with sub-command 0x00 and
+## got no answer, and concluded "0x8e never answered" — sub-commands are not
+## optional on this opcode. The same lesson applies to 0x86, which the vendor
+## tool queries as "09 86 09" (payload meaning still undecoded).
+
+TX 09 8e 01
+RX 09 8e 01 5a 04 84 38 01 00
+# Byte 6 = 0x38 = 56 (decimal). The vendor UI displayed "60%" for this exact
+# reading — confirmed directly by the person who captured this session to be
+# the vendor UI rounding to the nearest 10%, not a different underlying
+# value. This driver reports the exact 56, not the rounded 60.
+
+## Performance mode — command 0x04, sub 0x05, one byte value. The vendor UI's
+## "Performance mode" control (HP / Corded / LP, described as trading
+## performance for battery life) was switched between two of its three
+## positions during this session:
+
+TX 09 04 05 02
+TX 09 04 05 01
+# Only the writes were captured, NOT which on-screen label (HP / Corded / LP)
+# produced which value. Do not assume an order — see
+# incottEncodeSetPerformanceMode in src/incott/index.ts and
+# docs/incott-testing.md's open questions.
+
+## Lift-off — command 0x04, sub 0x01. Confirms the write shape this driver
+## already used (incottEncodeSetLiftOff); it does NOT settle which on-screen
+## label (0.7 / 1 / 2 mm) produced which hardware value:
+
+TX 09 04 01 02
+TX 09 04 01 00
+# See the UNRESOLVED CONFLICT comment on INCOTT_LOD_WIRE_TO_TENTHS in
+# src/incott/index.ts and the matching open question in
+# docs/incott-testing.md.
+
+## Receiver LED — command 0x08, one byte value. Confirms the write shape this
+## driver already used (incottEncodeSetReceiverLed):
+
+TX 09 08 00
+TX 09 08 01
+TX 09 08 02
+
+## Sleep timer read — command 0x85, sub 0x03. Confirms the decode this driver
+## already used (incottDecodeSleep):
+
+TX 09 85 03
+RX 09 85 03 3c 00 00 00 00 00
+# 0x3c 0x00 little-endian = 60 seconds.
+
+## Identity — command 0x8f. Confirms the decode this driver already used
+## (incottDecodeIdentity):
+
+TX 09 8f 00
+RX 09 8f 01 0e 02 f0 f1 00 ff

@@ -147,11 +147,15 @@ explicit preparation step. Cancellation command `0x13` remains unavailable.
 The Nordic receiver was identified over USB as `0x3554:0xf58e`, product `VXE
 Mouse 1K Dongle`, firmware/bcdDevice 1.10. Its configuration channel is
 interface 1 with usage page `0xff02`, usage `2`, and report `0x08`. Read-only
-hardware probes produced checksum-valid replies for online status (`0x03`),
-pairing status (`0x06`), and dongle version (`0x1d`). The online reply declared
-one payload byte for status while retaining the three-byte RF identifier in its
-fixed frame positions, so the driver requires the declared status byte and
-decodes the identifier from the complete validated frame.
+hardware probes produced checksum-valid replies for online status (`0x03`) and
+pairing status (`0x06`). Dongle-version command `0x1d` returned status `1`,
+declared zero payload bytes (`08 1d 01 00 00 00 00 00 00 00 00 00 00 00 00 00
+2f`, including report ID), and therefore cannot be used to expose the USB
+descriptor's 1.10 revision as protocol telemetry. Command `0x12` continued to
+report mouse firmware 3.15. The online reply declared one payload byte for
+status while retaining the three-byte RF identifier in its fixed frame
+positions, so the driver requires the declared status byte and decodes the
+identifier from the complete validated frame.
 
 Pairing was validated with the mouse cable unplugged and the mouse switched to
 2.4 GHz mode. After command `0x05`, holding left click, wheel click, and right

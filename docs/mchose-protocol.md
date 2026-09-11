@@ -227,12 +227,12 @@ MCHOSE's own firmware-version table cross-checks this: the Ultra reports
 
 ## Dead ends, so the next person can skip them
 
-- **The `0x4d`-magic framing in the same bundle is a different product line.**
-  It is a real MCHOSE protocol (`[4d][ver][flags][len][cmdLo][cmdHi][biz][seq]…`
-  plus an XOR checksum, commands `0x00xx` read / `0x01xx` write) but the A7 V2
-  has no report `0x4d`, and every variant of it was rejected by the hardware.
-  A second framing in that bundle starting `0xaa` belongs to the keyboard and
-  audio paths.
+- **The `0x4d`-magic framing in the same bundle is a different *generation*.**
+  The A7 V2 has no report `0x4d` and rejected every variant of it, which is
+  correct — but it was first written up here as belonging to some other product
+  line, and that was wrong. It is MCHOSE's newer mouse protocol, and the A7 V3
+  family speaks it; see [the V3 section](#the-a7-v3-generation) below. A third
+  framing in that bundle starting `0xaa` is the MagDock's, in `src/mchose/dock.ts`.
 - **CompX framing does not apply.** The older MCHOSE A5/AX5 line (VID `0x2023`,
   reverse-engineered by [`Klegus/mchose-macos`](https://github.com/Klegus/mchose-macos)
   from MCHOSE's `DriverCore.exe`) speaks CompX over usage page `0xffff` with
@@ -444,3 +444,154 @@ watching **only** the wired byte move.
 With the mouse on its cable the receiver stays enumerated but has nothing behind
 it, so its config read simply fails — a driver must degrade rather than treat
 that as an error.
+
+## The A7 V3 generation
+
+Everything above is the **A7 V2** protocol. MCHOSE's newer mice — the A7 V3
+family and its siblings — use a second, unrelated protocol on the *same vendor
+id and the same usage page*. M HUB ships both UIs side by side, with a model
+list (`W8` in the bundle) picking which one a device gets.
+
+**Nothing in this section has been confirmed on hardware.** It is a reading of
+the vendor bundle, which is why `src/drivers/mchose/v3-hid.ts` only reads.
+
+| | A7 V2 | A7 V3 |
+| --- | --- | --- |
+| transport | feature reports `0x11` / `0x12` | **output report `0x4d`**; replies arrive as input reports |
+| encoding | every body byte XOR `0xff` | plain bytes, XOR checksum |
+| command id | one byte | **two bytes, little-endian** |
+| settings | one 64-byte blob (`0x67`) | several focused commands |
+| collection | `0xff01` / `0x0001` | `0xff01` / `0x0001` — *the same one* |
+
+That last row is the trap. Before the V3 landed, the V2 driver matched on the
+usage page alone and would happily have opened an A7 V3 and talked inverted
+feature reports at it. The two matchers are now kept apart by product id: the V3
+driver takes an allowlist, the V2 driver subtracts it.
+
+### Framing
+
+The first byte is both the `'M'` magic and the HID report id, so
+`sendReport(0x4d, body)` sends the remaining 63:
+
+```
+frame[0] = 0x4d   report id
+body[0]  = 0x01   protocol version
+body[1]  = flags  1 when a trailing checksum is present
+body[2]  = data length
+body[3]  = command low byte
+body[4]  = command high byte
+body[5]  = business code
+body[6]  = sequence
+body[7…] = data, then the checksum at body[7 + length]
+```
+
+The checksum is an XOR of `body[1]` through `body[6 + length]`. Replies use the
+same layout and are paired to their request by command id — M HUB does not check
+their checksum, though the codec here does when the reply claims to carry one.
+
+### Commands
+
+Reads are `0x00xx` and `0x09xx`; a write is its read plus `0x0100`.
+
+| Id | Payload | Meaning |
+| --- | --- | --- |
+| `0x0900` | — | vid, pid, profile count, macro sizes, link state, charge state, battery, mode |
+| `0x0002` | — | profile, DPI/rate indices, sleep, sensor flags, angle, debounce |
+| `0x0003` | `[profile, axis]` | stage count, active stage, six uint16 stages |
+| `0x0001` | `[profile, 0, 6]` | button table |
+| `0x0009` | `[profile]` | lift-off index |
+| `0x0901` | — | firmware version |
+| `0x090c` | `[index, offset u16, 22]` | macro storage, 22 bytes per read |
+| `0x0101` `0x0102` `0x0103` `0x0104` `0x0105` `0x0109` | | the matching writes, plus a single-stage DPI write and a factory reset |
+
+`0x0900` reports **the mouse's own product id** even behind a receiver, which is
+the only way to tell the models apart: `0x1014` and `0x1018` are shared by the
+whole 8 kHz generation and `0x1016` by the two 1 kHz ones.
+
+### The settings block (`0x0002` / `0x0102`)
+
+| Offset | Field |
+| --- | --- |
+| 0 | profile index |
+| 1 | wired: high nibble polling slot, low nibble DPI stage |
+| 2 | wireless: same shape |
+| 3 | sleep, in minutes |
+| 4 | sleep mode (bit 0) |
+| 5 | sensor flags |
+| 6 | angle tuning, two's-complement signed |
+| 7 | left debounce, ms |
+| 8 | right debounce, ms |
+
+Two differences from the V2 worth naming. Debounce is **per button** here, left
+and right separately. And the polling nibble is *not* an index into the model's
+rate list: the firmware's table has a slot M HUB never offers, so the vendor
+maps `slot > 1 ? slot - 1 : slot` on the way in and `option > 0 ? option + 1 :
+option` on the way out. Those are deliberately not inverses — slot 1 reads back
+as option 1 but is never written — which is consistent with a hidden 250 Hz step
+sitting between 125 and 500.
+
+Unlike the V2's `0x57`, this write replaces the whole block; there is no
+read-modify-write on the device side, so a caller must read, edit and send back.
+
+### The sensor byte — **not laid out like the V2's**
+
+| Bit | Mask | A7 V3 | A7 V2 (for contrast) |
+| --- | --- | --- | --- |
+| 0-1 | `0x03` | **performance mode** | lift-off step |
+| 2 | `0x04` | ripple control | ripple control |
+| 3 | `0x08` | linear correction | linear correction |
+| 4 | `0x10` | motion sync | motion sync |
+| 5-6 | `0x60` | **lift-off step** | mode / unexplained |
+| 7 | `0x80` | **glass-surface mode** | always set on the test hardware |
+
+Lift-off and the performance mode have swapped ends of the byte. Read a V3 byte
+with the V2's masks and a lift-off level comes out as a power mode; there is a
+test pinning exactly that.
+
+Two bits only reach four lift-off steps, and five models ship a five-step ladder
+(0.7 / 0.9 / 1.2 / 1.4 / 1.7 mm). Those keep lift-off behind `0x0009` instead —
+`liftOffCommand` in the product table marks them, and a test asserts the flag
+matches the ladder length rather than being maintained by hand.
+
+### Models
+
+From the bundle's own table. Every one of these shares the wire format; the A7
+V3 family is what the driver was written for and the rest are included so a
+shared receiver resolves to the right ceiling instead of the wrong one.
+
+| Model | PID | DPI max | Lift-off |
+| --- | --- | --- | --- |
+| A5 V3 Pro | `0x4035` | 26 000 | 1 / 2 mm |
+| A5 V3 Ultra+ | `0x4026` | 42 000 | 0.7 / 1 / 2 mm |
+| A5 V3 Ultra+ (3955) | `0x4034` | 50 000 | five steps |
+| K7 V2 Pro+ | `0x4027` | 42 000 | 0.7 / 1 / 2 mm |
+| K7 V2 Ultra+ | `0x4028` | 50 000 | five steps |
+| A7 V3 | `0x4030` | 26 000 | 1 / 2 mm |
+| A7 V3 Pro | `0x4031` | 42 000 | 0.7 / 1 / 2 mm |
+| A7 V3 Pro+ | `0x4032` | 42 000 | 0.7 / 1 / 2 mm |
+| **A7 V3 Ultra+** | `0x4033` | 50 000 | five steps |
+| K5 Pro | `0x4037` | 26 000 | 1 / 2 mm |
+| K5 Ultra | `0x4038` | 50 000 | five steps |
+| R7 Ultra | `0x4036` | 50 000 | five steps |
+| V7 | `0x402a` | 26 000 | 1 / 2 mm, 1 kHz |
+| G3 V3 | `0x4029` | 12 000 | 1 / 2 mm, 1 kHz |
+
+The bundle's per-model `dpiMagicNum` and `dpiSlider` tables are UI slider
+geometry, not wire encoding — DPI goes out as a plain little-endian uint16.
+
+### What is left for someone with the hardware
+
+The reads are the whole driver today. To turn it into a full one:
+
+1. Confirm the frame is accepted at all — `0x0900` is the cheapest probe, and
+   its reply carries a known vendor id to check against.
+2. Confirm the reply arrives on the input report rather than as a feature read.
+3. Time the writes. The V2 needed 400 ms to 2 s per command and three attempts
+   for its slowest; nothing here has been timed.
+4. Then the encoders in `src/mchose/v3.ts` can be wired to setters. Start with a
+   value that is trivially reversible, verify by reading it back, and restore
+   the entry state — the same order the V2 work used.
+
+Do not skip step 3. The V2's stale-reply buffer meant a read taken too early
+returned a *different command's* payload, and one of those nearly went back out
+as a config write.
