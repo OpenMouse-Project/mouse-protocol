@@ -85,6 +85,7 @@ export const TEEVOLUTION_COMMAND = {
   writeFlashData: 0x07,
   readFlashData: 0x08,
   getCurrentConfig: 0x0e,
+  setCurrentConfig: 0x0f,
   readVersionId: 0x12,
   getDongleVersion: 0x1d,
   getRssi: 0x2b,
@@ -104,6 +105,8 @@ export const TEEVOLUTION_FLASH = {
   dpiLightBrightness: 78,
   dpiLightSpeed: 80,
   dpiLightState: 82,
+  /** Base of 4-byte key-function records (one per physical button). */
+  keyFunction: 96,
   debounceTime: 169,
   motionSync: 171,
   sleepTime: 173,
@@ -113,6 +116,121 @@ export const TEEVOLUTION_FLASH = {
   performanceTime: 183,
   sensorMode: 185,
 } as const;
+
+/** Teevolink MouseKeyFunction class byte stored at flash 0x60 + 4×index. */
+export const TEEVOLUTION_KEY_CLASS = {
+  disable: 0,
+  mouse: 1,
+  dpi: 2,
+  tilt: 3,
+} as const;
+
+export const TEEVOLUTION_BUTTONS = [
+  { name: "Left", index: 0 },
+  { name: "Right", index: 1 },
+  { name: "Middle", index: 2 },
+  { name: "Back", index: 3 },
+  { name: "Forward", index: 4 },
+  { name: "DPI", index: 5 },
+] as const;
+
+export type TeevolutionButtonName = (typeof TEEVOLUTION_BUTTONS)[number]["name"];
+
+export interface TeevolutionButtonAction {
+  label: string;
+  cls: number;
+  param: number;
+}
+
+/** Simple assignments the generic remap dropdown can write. */
+export const TEEVOLUTION_BUTTON_ACTIONS: readonly TeevolutionButtonAction[] = [
+  { label: "Left Click", cls: TEEVOLUTION_KEY_CLASS.mouse, param: 0x0100 },
+  { label: "Right Click", cls: TEEVOLUTION_KEY_CLASS.mouse, param: 0x0200 },
+  { label: "Middle Click", cls: TEEVOLUTION_KEY_CLASS.mouse, param: 0x0400 },
+  { label: "Backward", cls: TEEVOLUTION_KEY_CLASS.mouse, param: 0x0800 },
+  { label: "Forward", cls: TEEVOLUTION_KEY_CLASS.mouse, param: 0x1000 },
+  { label: "DPI Loop", cls: TEEVOLUTION_KEY_CLASS.dpi, param: 0x0100 },
+  { label: "DPI+", cls: TEEVOLUTION_KEY_CLASS.dpi, param: 0x0200 },
+  { label: "DPI-", cls: TEEVOLUTION_KEY_CLASS.dpi, param: 0x0300 },
+  { label: "Scroll Left", cls: TEEVOLUTION_KEY_CLASS.tilt, param: 0x0100 },
+  { label: "Scroll Right", cls: TEEVOLUTION_KEY_CLASS.tilt, param: 0x0200 },
+  { label: "Disable", cls: TEEVOLUTION_KEY_CLASS.disable, param: 0x0000 },
+];
+
+export const TEEVOLUTION_BUTTON_OPTIONS = TEEVOLUTION_BUTTON_ACTIONS.map((action) => action.label);
+
+export const TEEVOLUTION_KEY_RECORD_LENGTH = 4;
+export const TEEVOLUTION_KEY_TABLE_LENGTH = TEEVOLUTION_BUTTONS.length * TEEVOLUTION_KEY_RECORD_LENGTH;
+/** TeevoLink ProfileOptions: four firmware-managed flash banks. */
+export const TEEVOLUTION_PROFILE_COUNT = 4;
+
+export function teevolutionKeyFunctionAddress(index: number): number {
+  if (!Number.isInteger(index) || index < 0 || index >= TEEVOLUTION_BUTTONS.length) {
+    throw new Error("Teevolution button index is out of range.");
+  }
+  return TEEVOLUTION_FLASH.keyFunction + index * TEEVOLUTION_KEY_RECORD_LENGTH;
+}
+
+export function teevolutionEncodeKeyFunction(cls: number, param: number): Uint8Array {
+  if (!Number.isInteger(cls) || cls < 0 || cls > 0xff) {
+    throw new Error("Teevolution key class must be one byte.");
+  }
+  if (!Number.isInteger(param) || param < 0 || param > 0xffff) {
+    throw new Error("Teevolution key parameter must be a 16-bit value.");
+  }
+  const bytes = [cls, (param >> 8) & 0xff, param & 0xff];
+  return new Uint8Array([...bytes, teevolutionDataChecksum(bytes)]);
+}
+
+export function teevolutionDecodeKeyFunction(data: Uint8Array | readonly number[]): {
+  cls: number;
+  param: number;
+  checksumValid: boolean;
+} {
+  const cls = data[0] ?? 0;
+  const param = ((data[1] ?? 0) << 8) | (data[2] ?? 0);
+  const checksumValid = data.length >= 4
+    && (data[3] ?? 0) === teevolutionDataChecksum([cls, (param >> 8) & 0xff, param & 0xff]);
+  return { cls, param, checksumValid };
+}
+
+export function teevolutionFindButtonAction(label: string): TeevolutionButtonAction | null {
+  return TEEVOLUTION_BUTTON_ACTIONS.find((action) => action.label === label) ?? null;
+}
+
+export function teevolutionFindButton(name: string): (typeof TEEVOLUTION_BUTTONS)[number] | null {
+  return TEEVOLUTION_BUTTONS.find((button) => button.name === name) ?? null;
+}
+
+export function teevolutionKeyFunctionLabel(data: Uint8Array | readonly number[]): string {
+  const { cls, param } = teevolutionDecodeKeyFunction(data);
+  return TEEVOLUTION_BUTTON_ACTIONS.find((action) => action.cls === cls && action.param === param)?.label
+    ?? "Custom";
+}
+
+export function teevolutionIsLeftClick(cls: number, param: number): boolean {
+  return cls === TEEVOLUTION_KEY_CLASS.mouse && param === 0x0100;
+}
+
+export function teevolutionKeyTableHasLeftClick(table: Uint8Array | readonly number[]): boolean {
+  for (let index = 0; index < TEEVOLUTION_BUTTONS.length; index += 1) {
+    const offset = index * TEEVOLUTION_KEY_RECORD_LENGTH;
+    const { cls, param } = teevolutionDecodeKeyFunction(table.slice(offset, offset + TEEVOLUTION_KEY_RECORD_LENGTH));
+    if (teevolutionIsLeftClick(cls, param)) return true;
+  }
+  return false;
+}
+
+export function teevolutionDecodeButtonMappings(flash: Uint8Array | readonly number[]): Record<string, string> {
+  const mappings: Record<string, string> = {};
+  for (const { name, index } of TEEVOLUTION_BUTTONS) {
+    const offset = teevolutionKeyFunctionAddress(index);
+    mappings[name] = flash.length >= offset + TEEVOLUTION_KEY_RECORD_LENGTH
+      ? teevolutionKeyFunctionLabel(flash.slice(offset, offset + TEEVOLUTION_KEY_RECORD_LENGTH))
+      : "Custom";
+  }
+  return mappings;
+}
 
 export const TEEVOLUTION_TYPE_MAX_POLL: Record<number, number> = {
   0: 1000,
@@ -202,6 +320,28 @@ export function teevolutionBuildOnlinePayload(enabled: boolean): Uint8Array {
   const payload = teevolutionBuildSimplePayload(TEEVOLUTION_COMMAND.deviceOnline);
   payload[5] = enabled ? 1 : 0;
   return finalize(payload);
+}
+
+/** Build SetCurrentConfig with TeevoLink's length byte and zero-based bank. */
+export function teevolutionBuildSetCurrentProfile(profile: number): Uint8Array {
+  if (!Number.isInteger(profile) || profile < 0 || profile >= TEEVOLUTION_PROFILE_COUNT) {
+    throw new Error(`Teevolution profile must be between 0 and ${TEEVOLUTION_PROFILE_COUNT - 1}.`);
+  }
+  const payload = teevolutionBuildSimplePayload(TEEVOLUTION_COMMAND.setCurrentConfig);
+  payload[4] = 1;
+  payload[5] = profile;
+  return finalize(payload);
+}
+
+/**
+ * Decode GetCurrentConfig. TeevoLink treats status 1 as “no profile switch”
+ * (`supportChangeProfile = false`); only a 0–3 bank in byte 5 is usable.
+ */
+export function teevolutionDecodeCurrentProfile(response: Uint8Array | readonly number[]): number | null {
+  if (!teevolutionPacketChecksumIsValid(response)) return null;
+  if (response[0] !== TEEVOLUTION_COMMAND.getCurrentConfig || response[1] !== 0) return null;
+  const profile = response[5] ?? 0;
+  return profile < TEEVOLUTION_PROFILE_COUNT ? profile : null;
 }
 
 export function teevolutionParseReadResponse(
