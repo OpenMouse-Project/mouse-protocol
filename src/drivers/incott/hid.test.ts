@@ -171,7 +171,8 @@ function defaultState() {
     // the exact values verified on hardware 2026-09-08. Stage 1 (800 DPI) is
     // active by default.
     dpiStagesWire: [7, 15, 31, 47, 63, 127],
-    activeDpiStage: 1, // 0x83/0x06's answer.
+    activeDpiStage: 1, // 0x83 response byte 3.
+    dpiStageCount: 6, // 0x83 response byte 2 — the cycle length, not an echo.
     pollingWire: 0, // 1000 Hz
     lodWire: 0, // 10 tenths mm -> Medium
     motionSync: 1,
@@ -245,8 +246,12 @@ function fakeDevice(options: FakeOptions = {}) {
         return wire === undefined ? null : frame(0x82, sub, wire & 0xff, (wire >> 8) & 0xff);
       }
       case 0x83:
-        // Active DPI *stage index* (0-5). See incottDecodeDpiStageIndex.
-        return sub === 0x06 ? frame(0x83, 0x06, state.activeDpiStage) : null;
+        // The DPI cycle: byte 2 the stage COUNT, byte 3 the active index.
+        // Answers whatever sub-command was sent, because byte 2 is data, not
+        // an echo — real hardware answers `09 83 00` with `09 83 06 01`, and
+        // this fake used to answer only sub 0x06, which is what let the
+        // driver's wrong echo assumption pass its tests.
+        return frame(0x83, state.dpiStageCount, state.activeDpiStage);
       case 0x84:
         // sub 0x00 is the legacy packed byte-7 form (still decodable via
         // incottDecodeLiftOff/incottDecodeMotionSync, cross-checked against
@@ -296,10 +301,13 @@ function fakeDevice(options: FakeOptions = {}) {
     if (cmd === 0x02 && sub >= 0 && sub < state.dpiStagesWire.length) {
       state.dpiStagesWire[sub] = value | ((payload[3] ?? 0) << 8);
     }
-    // cmd 0x03/sub 0x06: SELECTS the active stage — must never touch
-    // dpiStagesWire. This is the operation IncottHIDApp mislabels "set DPI"
-    // and the one the driver's setDpi() used to be conflated with.
-    else if (cmd === 0x03 && sub === 0x06 && value >= 0 && value < state.dpiStagesWire.length) {
+    // cmd 0x03: writes the CYCLE — byte 1 the stage count, byte 2 the active
+    // index. Must never touch dpiStagesWire: this is the operation
+    // IncottHIDApp mislabels "set DPI" and the one the driver's setDpi() used
+    // to be conflated with. The count is stored, so a driver that sends a
+    // hardcoded 6 here visibly resizes a shorter cycle.
+    else if (cmd === 0x03 && sub >= 1 && sub <= state.dpiStagesWire.length && value >= 0 && value < sub) {
+      state.dpiStageCount = sub;
       state.activeDpiStage = value;
     }
     else if (cmd === 0x01) state.pollingWire = sub; // no sub-command: wire value sits at byte 1
@@ -498,7 +506,7 @@ test("readStatus decodes every field from the device's current state", async () 
   assert.equal(status.activeDpiStage, 1);
   assert.deepEqual(status.ui?.dpiStageEditor, {
     maxStages: 6,
-    countEditable: false,
+    countEditable: true,
     minDpi: 50,
     maxDpi: 45000,
     stepDpi: 50,
@@ -614,6 +622,83 @@ test("supportedPollingRates offers the full ladder over the wireless connection"
   const status = await new IncottHidClient(device, fast).readStatus();
   assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000, 2000, 4000, 8000]);
   assert.equal(status.ui?.pollingNote, "Up to 8,000 Hz wireless; 1,000 Hz over the cable.");
+});
+
+test("readStatus trims the published stage table to the cycle the mouse actually uses", async () => {
+  // The device keeps six stored values regardless; only the first `count` are
+  // in the rotation, and offering the rest would let the user select a stage
+  // the mouse never visits.
+  const { device } = fakeDevice({ state: { dpiStageCount: 4, activeDpiStage: 2 } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.deepEqual(status.dpiStages, [400, 800, 1600, 2400]);
+  assert.equal(status.activeDpiStage, 2);
+  assert.equal(status.dpi, 1600);
+});
+
+test("REGRESSION: a cycle shorter than six still reads, instead of failing the sub-echo match", async () => {
+  // 0x83's byte 2 is the stage count, which the driver used to require to
+  // equal the 0x06 it sent. On a four-stage mouse every DPI read returned
+  // null and the whole settings grid was hidden.
+  const { device } = fakeDevice({ state: { dpiStageCount: 3, activeDpiStage: 0 } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.ui?.settingsReady, true);
+  assert.equal(status.activeDpiStage, 0);
+  assert.deepEqual(status.dpiStages, [400, 800, 1600]);
+});
+
+test("REGRESSION: selecting a stage preserves the cycle length instead of resetting it to six", async () => {
+  // The count shares the write with the index. Sending a hardcoded 0x06 here
+  // silently grew a four-stage cycle back to six every time the user picked a
+  // different DPI stage.
+  const { device, state } = fakeDevice({ state: { dpiStageCount: 4, activeDpiStage: 0 } });
+  await new IncottHidClient(device, fast).setActiveDpiStage(3);
+  assert.equal(state.activeDpiStage, 3);
+  assert.equal(state.dpiStageCount, 4, "the cycle length must survive a stage select");
+});
+
+test("setActiveDpiStage refuses a stage outside the mouse's current cycle", async () => {
+  const { device, state } = fakeDevice({ state: { dpiStageCount: 3, activeDpiStage: 0 } });
+  await assert.rejects(
+    () => new IncottHidClient(device, fast).setActiveDpiStage(4),
+    /outside this mouse's 3-stage cycle/,
+  );
+  assert.equal(state.activeDpiStage, 0, "nothing was written");
+});
+
+test("setDpiStageCount resizes the cycle and leaves every stored DPI value alone", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  const before = [...state.dpiStagesWire];
+  await client.setDpiStageCount(3);
+  assert.equal(state.dpiStageCount, 3);
+  assert.deepEqual(state.dpiStagesWire, before, "stage values are untouched by a resize");
+  const status = await client.readStatus();
+  assert.deepEqual(status.dpiStages, [400, 800, 1600]);
+});
+
+test("setDpiStageCount clamps an active stage that would fall outside the new cycle", async () => {
+  // The active index rides along in the same write, so it cannot be left
+  // pointing past the end of the shortened cycle.
+  const { device, state } = fakeDevice({ state: { activeDpiStage: 5 } });
+  await new IncottHidClient(device, fast).setDpiStageCount(2);
+  assert.equal(state.dpiStageCount, 2);
+  assert.equal(state.activeDpiStage, 1);
+});
+
+test("setDpiStageCount rejects a count outside 1-6 without writing", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(() => client.setDpiStageCount(0), RangeError);
+  await assert.rejects(() => client.setDpiStageCount(7), RangeError);
+  assert.equal(state.dpiStageCount, 6);
+});
+
+test("the stage-count picker is hidden when the cycle cannot be read", async () => {
+  // setDpiStageCount needs a real current count to preserve the active stage;
+  // offering the control against an unreadable one would write a guess.
+  const { device } = fakeDevice({ silent: [0x83] });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.ui?.dpiStageEditor?.countEditable, false);
 });
 
 test("readStatus publishes the six factory bindings by physical button name", async () => {

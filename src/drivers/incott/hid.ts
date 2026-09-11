@@ -1,8 +1,10 @@
 import type { MouseStatus, MouseUiHints } from "../mouse-types.ts";
 import {
+  incottButtonActionCode,
+  incottDecodeButtonBinding,
   incottDecodeDebounce,
   incottDecodeDpiStage,
-  incottDecodeDpiStageIndex,
+  incottDecodeDpiCycle,
   incottDecodeIdentity,
   incottDecodeInputStatus,
   incottDecodeLiftOffDirect,
@@ -12,18 +14,16 @@ import {
   incottDecodeSleep,
   incottDecodeToggle,
   incottEncodeQuery,
-  incottEncodeSetActiveDpiStage,
+  incottEncodeSetButtonBinding,
   incottEncodeSetDebounce,
   incottEncodeSetDpi,
+  incottEncodeSetDpiCycle,
   incottEncodeSetLiftOff,
   incottEncodeSetPerformanceMode,
   incottEncodeSetPollingRate,
   incottEncodeSetReceiverLed,
   incottEncodeSetSleep,
   incottEncodeSetToggle,
-  incottButtonActionCode,
-  incottDecodeButtonBinding,
-  incottEncodeSetButtonBinding,
   incottFrameMatches,
   incottIsWiredProduct,
   incottLiftOffLabel,
@@ -59,7 +59,6 @@ import {
   INCOTT_RESPONSE_LENGTH,
   INCOTT_SUB_ANGLE_SNAP,
   INCOTT_SUB_DEBOUNCE,
-  INCOTT_SUB_DPI_STAGE,
   INCOTT_SUB_LOD,
   INCOTT_SUB_MOTION_SYNC,
   INCOTT_SUB_NONE,
@@ -68,6 +67,7 @@ import {
   INCOTT_SUB_SLEEP,
   INCOTT_USAGE_PAGE,
   INCOTT_VENDOR_ID,
+  type IncottDpiCycle,
   type IncottInputStatus,
 } from "../../incott/index.ts";
 
@@ -272,9 +272,15 @@ export async function incottSelectCollection<T extends FeatureTransport>(
  * list now that buttons are read: six reads go out back to back, and the
  * device latches a single shared response buffer, so matching on the command
  * byte alone would let button 2's reply satisfy button 3's request.
+ *
+ * `0x83` WAS in this list and has been removed. Its byte 2 is the DPI stage
+ * COUNT, not an echo — `09 83 00` answers `09 83 06 01` — so treating it as
+ * one only worked because this contributor's mouse has a six-stage cycle and
+ * the driver happened to send `06`. On a mouse configured for four stages
+ * every DPI read would have been rejected. See
+ * `INCOTT_DPI_STAGE_COUNT_DEFAULT`.
  */
 const SUB_ECHOING_QUERIES: readonly number[] = [
-  INCOTT_CMD_QUERY_DPI_STAGE,
   INCOTT_CMD_QUERY_DPI_STAGE_VALUE,
   INCOTT_CMD_QUERY_SENSOR,
   INCOTT_CMD_QUERY_TIMING,
@@ -593,9 +599,14 @@ export class IncottHidClient {
     // value. Per the driver's graceful-degradation contract, a device that
     // stops answering yields `dpi: null` / an omitted `dpiStages` here rather
     // than throwing or fabricating a value.
-    const activeDpiStage = dead
+    // One query answers both how many stages the cycle uses and which is
+    // live — see `incottDecodeDpiCycle`. The count is NOT assumed to be six:
+    // it is written back verbatim by every stage select, and publishing six
+    // rows for a four-stage cycle would offer stages the mouse never visits.
+    const dpiCycle = dead
       ? null
-      : incottDecodeDpiStageIndex(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_DPI_STAGE));
+      : incottDecodeDpiCycle(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_NONE));
+    const activeDpiStage = dpiCycle?.active ?? null;
     // Six sequential queries, deliberately NOT parallelized: the device has a
     // single shared response buffer (see `IncottTransactionQueue`'s class
     // comment), and concurrent requests would corrupt each other's replies.
@@ -609,9 +620,12 @@ export class IncottHidClient {
     }
     // `dpiStages` is populated only when every one of the six stages
     // answered — a partial table is never fabricated with a placeholder for
-    // the stage(s) that did not.
+    // the stage(s) that did not. It is then trimmed to the stages the cycle
+    // actually uses: the device keeps all six stored values, but the ones
+    // past `count` are not in the rotation and must not be offered as if
+    // they were.
     const dpiStages = dpiStageReads.every((value): value is number => value !== null)
-      ? dpiStageReads
+      ? dpiStageReads.slice(0, dpiCycle?.count ?? dpiStageReads.length)
       : null;
     const dpi = activeDpiStage === null ? null : dpiStageReads[activeDpiStage] ?? null;
     const pollingRateHz = dead
@@ -765,7 +779,11 @@ export class IncottHidClient {
       // PAW3395 unit is expected to have a write above 32000 refused by the
       // existing read-back verification in `setDpi`/`setDpiStageValue`
       // rather than this module guessing which sensor is present.
-      dpiStageEditor: { maxStages: INCOTT_DPI_STAGE_COUNT, countEditable: false, minDpi: INCOTT_DPI_MIN, maxDpi: INCOTT_DPI_MAX, stepDpi: INCOTT_DPI_STEP },
+      // `countEditable` only while the cycle actually read: the count picker
+      // writes through `setDpiStageCount`, which needs a real current count
+      // to preserve the active stage, and offering it against an unreadable
+      // one would write a guess.
+      dpiStageEditor: { maxStages: INCOTT_DPI_STAGE_COUNT, countEditable: dpiCycle !== null, minDpi: INCOTT_DPI_MIN, maxDpi: INCOTT_DPI_MAX, stepDpi: INCOTT_DPI_STEP },
     };
 
     return {
@@ -831,7 +849,7 @@ export class IncottHidClient {
    */
   async setDpi(dpi: number): Promise<number> {
     incottValidateDpi(dpi);
-    const stage = incottDecodeDpiStageIndex(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_DPI_STAGE));
+    const stage = (await this.readDpiCycle())?.active ?? null;
     if (stage === null) throw new Error("Could not read the active DPI stage to write.");
     await this.write(incottEncodeSetDpi(stage, dpi));
     const got = incottDecodeDpiStage(await this.query(INCOTT_CMD_QUERY_DPI_STAGE_VALUE, stage), stage);
@@ -839,22 +857,60 @@ export class IncottHidClient {
     return dpi;
   }
 
+  /** Reads the DPI cycle (stage count + active stage) in one query. */
+  private async readDpiCycle(): Promise<IncottDpiCycle | null> {
+    return incottDecodeDpiCycle(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_NONE));
+  }
+
   /**
-   * SELECTS which of the six DPI stages is active (`09 03 06 <idx>`) —
-   * distinct from `setDpi`/`setDpiStageValue`, which EDIT a stage's stored
-   * value. Confirmed on hardware 2026-09-08 that a select never touches any
-   * stage's stored value (see `INCOTT_CMD_SET_DPI_STAGE` in
-   * `src/incott/index.ts`), so unlike every value setter in this client this
-   * one reads back `0x83`/`0x06` — the active index — not a DPI value.
+   * SELECTS which DPI stage is active (`09 03 <count> <idx>`) — distinct from
+   * `setDpi`/`setDpiStageValue`, which EDIT a stage's stored value. Confirmed
+   * on hardware 2026-09-08 that a select never touches any stage's stored
+   * value (see `INCOTT_CMD_SET_DPI_STAGE` in `src/incott/index.ts`), so
+   * unlike every value setter in this client this one reads back the active
+   * index rather than a DPI value.
+   *
+   * The stage count is READ FIRST and written back unchanged. It shares the
+   * write with the index, so sending a constant here would silently resize a
+   * cycle that is not six stages long — see
+   * `INCOTT_DPI_STAGE_COUNT_DEFAULT`.
    */
   async setActiveDpiStage(stage: number): Promise<number> {
     if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
       throw new RangeError(`DPI stage out of range: ${stage}`);
     }
-    await this.write(incottEncodeSetActiveDpiStage(stage));
-    const got = incottDecodeDpiStageIndex(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_DPI_STAGE));
+    const cycle = await this.readDpiCycle();
+    if (cycle === null) throw new Error("Could not read the DPI stage cycle to write.");
+    if (stage >= cycle.count) {
+      throw new RangeError(`DPI stage ${stage} is outside this mouse's ${cycle.count}-stage cycle.`);
+    }
+    await this.write(incottEncodeSetDpiCycle(cycle.count, stage));
+    const got = (await this.readDpiCycle())?.active ?? null;
     if (got !== stage) throw new Error(`The mouse kept DPI stage ${got ?? "an unreadable"} instead of ${stage}.`);
     return stage;
+  }
+
+  /**
+   * Sets how many stages the DPI cycle rotates through (`09 03 <count>
+   * <idx>`). The stored value of every stage is left alone — stages above
+   * the new count keep their values and simply stop being visited.
+   *
+   * The active stage rides along in the same write, so it is clamped into
+   * the new cycle rather than left pointing past the end.
+   */
+  async setDpiStageCount(count: number): Promise<number> {
+    if (!Number.isInteger(count) || count < 1 || count > INCOTT_DPI_STAGE_COUNT) {
+      throw new RangeError(`DPI stage count out of range: ${count}`);
+    }
+    const cycle = await this.readDpiCycle();
+    if (cycle === null) throw new Error("Could not read the DPI stage cycle to write.");
+    const active = Math.min(cycle.active, count - 1);
+    await this.write(incottEncodeSetDpiCycle(count, active));
+    const got = await this.readDpiCycle();
+    if (got?.count !== count) {
+      throw new Error(`The mouse kept ${got?.count ?? "an unreadable"} DPI stages instead of ${count}.`);
+    }
+    return count;
   }
 
   /**

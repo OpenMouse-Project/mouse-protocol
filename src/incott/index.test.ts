@@ -8,7 +8,7 @@ import {
   incottDecodeButtonBinding,
   incottDecodeDebounce,
   incottDecodeDpiStage,
-  incottDecodeDpiStageIndex,
+  incottDecodeDpiCycle,
   incottDecodeIdentity,
   incottDecodeInputStatus,
   incottDecodeLiftOff,
@@ -20,7 +20,7 @@ import {
   incottDecodeSleep,
   incottDecodeToggle,
   incottEncodeQuery,
-  incottEncodeSetActiveDpiStage,
+  incottEncodeSetDpiCycle,
   incottEncodeSetButtonBinding,
   incottEncodeSetDebounce,
   incottEncodeSetDpi,
@@ -184,34 +184,51 @@ test("incottFrameMatches rejects a frame carrying the wrong report ID", () => {
   assert.equal(incottFrameMatches(wrong, 0x85, 0x03), false);
 });
 
-test("0x83/0x06 decodes the active DPI STAGE INDEX, not a DPI value", () => {
-  // Captured 2026-09-07 against the vendor tool: 09 83 06 01 -> stage 1 of 6.
-  // Decoding byte 3 as an index into the six default presets used to yield
-  // 800 DPI here, which matched the vendor UI only by coincidence.
-  assert.equal(incottDecodeDpiStageIndex(frame(0x83, 0x06, 0x01)), 1);
-  assert.equal(incottDecodeDpiStageIndex(frame(0x83, 0x06, 0x00)), 0);
-  assert.equal(incottDecodeDpiStageIndex(frame(0x83, 0x06, 0x05)), 5);
+test("0x83 decodes the stage COUNT and the active index, not a DPI value", () => {
+  // Captured 2026-09-07 against the vendor tool: 09 83 06 01 -> a six-stage
+  // cycle sitting on stage 1. Decoding byte 3 as an index into the six
+  // default presets used to yield 800 DPI here, which matched the vendor UI
+  // only by coincidence.
+  assert.deepEqual(incottDecodeDpiCycle(frame(0x83, 0x06, 0x01)), { count: 6, active: 1 });
+  assert.deepEqual(incottDecodeDpiCycle(frame(0x83, 0x06, 0x00)), { count: 6, active: 0 });
+  assert.deepEqual(incottDecodeDpiCycle(frame(0x83, 0x06, 0x05)), { count: 6, active: 5 });
 });
 
-test("DPI stage index returns null outside 0-5", () => {
-  assert.equal(incottDecodeDpiStageIndex(frame(0x83, 0x06, 0x06)), null);
+test("REGRESSION: 0x83 byte 2 is data, so a cycle shorter than six still decodes", () => {
+  // This is what the old decoder got wrong. It required byte 2 to equal the
+  // 0x06 the driver had sent, treating it as a sub-command echo — which only
+  // held because the count on the device under test happened to be six. A
+  // four-stage mouse would have failed every DPI read.
+  assert.deepEqual(incottDecodeDpiCycle(frame(0x83, 0x04, 0x03)), { count: 4, active: 3 });
+  assert.deepEqual(incottDecodeDpiCycle(frame(0x83, 0x01, 0x00)), { count: 1, active: 0 });
 });
 
-test("incottEncodeSetActiveDpiStage encodes 09 03 06 <idx> for every stage 0-5", () => {
-  // Command 0x03, sub-command INCOTT_SUB_DPI_STAGE (0x06), then the stage
-  // index — verified on hardware 2026-09-08 by selecting stages 0, 3, 5, then
-  // 1 and reading each back correctly via 0x83/0x06.
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(0)).slice(0, 3), [0x03, 0x06, 0x00]);
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(1)).slice(0, 3), [0x03, 0x06, 0x01]);
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(2)).slice(0, 3), [0x03, 0x06, 0x02]);
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(3)).slice(0, 3), [0x03, 0x06, 0x03]);
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(4)).slice(0, 3), [0x03, 0x06, 0x04]);
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(5)).slice(0, 3), [0x03, 0x06, 0x05]);
+test("DPI cycle rejects a count out of range or an active stage outside it", () => {
+  assert.equal(incottDecodeDpiCycle(frame(0x83, 0x07, 0x00)), null, "count above the table size");
+  assert.equal(incottDecodeDpiCycle(frame(0x83, 0x00, 0x00)), null, "zero-length cycle");
+  assert.equal(incottDecodeDpiCycle(frame(0x83, 0x04, 0x04)), null, "active stage past the cycle");
+  assert.equal(incottDecodeDpiCycle(frame(0x83, 0x06, 0x06)), null);
 });
 
-test("incottEncodeSetActiveDpiStage rejects a stage index outside 0-5", () => {
-  assert.throws(() => incottEncodeSetActiveDpiStage(6), RangeError);
-  assert.throws(() => incottEncodeSetActiveDpiStage(-1), RangeError);
+test("incottEncodeSetDpiCycle encodes 09 03 <count> <idx> for every stage 0-5", () => {
+  // Verified on hardware 2026-09-08 by selecting stages 0, 3, 5, then 1 and
+  // reading each back correctly.
+  for (let stage = 0; stage < 6; stage += 1) {
+    assert.deepEqual(bytes(incottEncodeSetDpiCycle(6, stage)).slice(0, 3), [0x03, 0x06, stage]);
+  }
+  // A shorter cycle writes its own count, not a hardcoded six.
+  assert.deepEqual(bytes(incottEncodeSetDpiCycle(3, 2)).slice(0, 3), [0x03, 0x03, 0x02]);
+});
+
+test("incottEncodeSetDpiCycle rejects a stage outside the cycle it is given", () => {
+  assert.throws(() => incottEncodeSetDpiCycle(3, 3), RangeError);
+  assert.throws(() => incottEncodeSetDpiCycle(0, 0), RangeError);
+  assert.throws(() => incottEncodeSetDpiCycle(7, 0), RangeError);
+});
+
+test("incottEncodeSetDpiCycle rejects a stage index outside 0-5", () => {
+  assert.throws(() => incottEncodeSetDpiCycle(6, 6), RangeError);
+  assert.throws(() => incottEncodeSetDpiCycle(6, -1), RangeError);
 });
 
 test("selecting the active stage (0x03) is byte-for-byte distinct from editing a stage's value (0x02) — the bug this driver used to have", () => {
@@ -221,7 +238,7 @@ test("selecting the active stage (0x03) is byte-for-byte distinct from editing a
   // commands with different opcodes and different payload shapes: the select
   // carries only a stage index (no DPI value at all), the edit carries a
   // 2-byte DPI wire value and no fixed sub-command byte.
-  const select = incottEncodeSetActiveDpiStage(4);
+  const select = incottEncodeSetDpiCycle(6, 4);
   const edit = incottEncodeSetDpi(4, 3200);
   assert.notEqual(select[0], edit[0], "different command bytes (0x03 vs 0x02)");
   assert.deepEqual(bytes(select).slice(0, 3), [0x03, 0x06, 0x04]);

@@ -519,13 +519,20 @@ the earlier sweep.** The vendor tool teaches the same lesson for `0x86`,
 which it queries as `09 86 09` — not a button index (buttons only go up to
 5) and still undecoded.
 
-`0x82`/`0x83`/`0x84`/`0x85`/`0x86`/`0x8e` all echo their sub-command at byte
-2 of the reply. `0x82`, `0x83`, `0x84`, `0x85` and `0x8e` are registered as
-such in `SUB_ECHOING_QUERIES` (`src/drivers/incott/hid.ts`), since the driver
-queries all of them; `0x86` echoes identically (`incottDecodeButtonBinding`
-checks it directly via `incottFrameMatches`) but is not in that set because
-the driver itself never issues a `0x86` query — see `INCOTT_CMD_QUERY_BUTTON`
-in `src/incott/index.ts`.
+`0x82`/`0x84`/`0x85`/`0x86`/`0x8e` echo their sub-command at byte 2 of the
+reply, and all five are registered in `SUB_ECHOING_QUERIES`
+(`src/drivers/incott/hid.ts`). `0x86` joined that set on 2026-09-10 when
+button reads were wired up: six reads go out back to back against a single
+shared response buffer, so matching on the command byte alone would let one
+button's reply satisfy another's request.
+
+**`0x83` DOES NOT echo — corrected 2026-09-10.** It was listed here and
+registered in `SUB_ECHOING_QUERIES` for two sessions on the strength of a
+reply that appeared to echo the `0x06` sent with it. Byte 2 is the DPI stage
+COUNT: the vendor sends `09 83 00` and gets `09 83 06 01`, and a bare
+`09 83` sweep answers the same `06`. A byte the request never contained
+cannot be an echo — the assumption only survived because the count on the
+device under test happens to be six. See "DPI stage count" below.
 
 ## Performance mode: mapping VERIFIED 2026-09-10, now wired into the shared UI contract
 
@@ -680,8 +687,8 @@ device — see `captures/incott-8k-wireless/targeted-reads.hex`,
 
 - `0x81` answers the polling-rate query; byte 2 is confirmed data (see above).
 - `0x82` (with a sub-command 0-5) answers with that DPI stage's value.
-- `0x83` (with sub-command `0x06`) answers with the active DPI *stage index*
-  (0-5) — not a DPI value.
+- `0x83` (no sub-command) answers with the DPI cycle: byte 2 the stage COUNT,
+  byte 3 the active *stage index* — neither is a DPI value.
 - `0x84` (sensor) answers for sub-commands `0x00` (packed lift-off + motion
   sync), `0x01` (lift-off, symmetric), `0x02` (ripple control), `0x03`
   (angle snap), `0x04` (motion sync, symmetric), and `0x05` (performance
@@ -962,3 +969,60 @@ transcriptions, unverified against hardware:
   write could never be verified.
 - **Profile select** — `[6, 9, index, 0, 0, 0, 0, 0]`, read back via
   `0x86` sub `0x09`. See the correction in "Onboard profiles" above.
+
+## DPI stage count: a byte misread as a sub-command (2026-09-10)
+
+`0x83`'s reply byte 2 is the **stage count** — how many stages the DPI cycle
+rotates through — not a sub-command echo. The proof is in captures this
+driver already had:
+
+```
+TX 09 83 00      <- vendor sends sub-command 0x00
+RX 09 83 06 01   <- byte 2 comes back 0x06 anyway
+```
+
+and the bare `09 83` sweep in `query-sweep-0x80-0x8f.hex` answers
+`09 83 06 01` too. A byte the request never contained cannot be an echo.
+Byte 3 varies across the same session (`00`/`01`/`03`/`05`) while byte 2
+stays `06`: byte 3 is the active stage, byte 2 is the cycle length.
+
+The misreading survived two sessions because this contributor's mouse has a
+six-stage cycle and the driver happened to send `06`. Everything agreed with
+everything else, on one device, by coincidence — the same shape of mistake as
+the battery byte (a constant matched once) and the DPI stage index (an index
+that decoded to the right number once).
+
+### Two real bugs this was causing
+
+**Every DPI read would have failed on a shorter cycle.** `0x83` was in
+`SUB_ECHOING_QUERIES`, so the driver required reply byte 2 to equal the `06`
+it sent. On a mouse configured for four stages the reply carries `04`, no
+frame ever matched, and `activeDpiStage`, `dpi` and `dpiStages` all came back
+null — which sets `ui.settingsReady: false` and hides the entire settings
+grid. Removed from that set; `incottDecodeDpiCycle` matches on the command
+byte only.
+
+**Selecting a stage silently resized the cycle.** The `0x03` write carries
+the count and the index together (`09 03 <count> <stage>`), and the driver
+hardcoded `0x06` in the count position. Picking a different DPI stage on a
+four-stage mouse would have written six, growing the cycle back to the full
+table. `setActiveDpiStage` now reads the current count and writes it back
+unchanged.
+
+Neither bug was observable on the only available device, and neither would
+have been found by testing it.
+
+### What this adds
+
+`readStatus` publishes `dpiStages` trimmed to the live cycle and sets
+`dpiStageEditor.countEditable` (only while the cycle actually read — the
+count picker writes through `setDpiStageCount`, which needs a real current
+count to clamp the active stage into the new range). `setDpiStageCount`
+resizes the cycle, leaves every stored stage value untouched, and clamps the
+active stage rather than leaving it pointing past the end.
+
+**Untested on hardware:** no capture exists of a cycle shorter than six,
+because the vendor tool was never driven to make one. The decode is proven,
+but the resize path is exercised only against the fake device. Setting the
+count to 3 in the vendor tool and re-reading `09 83` would confirm it in
+seconds.

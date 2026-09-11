@@ -363,8 +363,25 @@ export function incottButtonActionCode(label: string): number | null {
   return null;
 }
 
-/** Sub-command for the DPI *active stage index* query (`0x83`). */
-export const INCOTT_SUB_DPI_STAGE = 0x06;
+/**
+ * How many DPI stages the cycle uses by default — and the value this driver
+ * spent two sessions mistaking for a sub-command.
+ *
+ * `0x83`'s reply byte 2 is the stage COUNT, not an echo. Proven by the
+ * captures: the vendor sends `09 83 00` and gets `09 83 06 01` back, and a
+ * bare `09 83` sweep with no sub-command gets the same `06` — a byte the
+ * request never contained cannot be an echo. Byte 3 is the active index,
+ * which varies (`00`/`01`/`03`/`05`) while byte 2 stays `06`.
+ *
+ * This matters twice over:
+ *   - `0x83` must NOT be treated as sub-echoing when matching responses. It
+ *     belongs with `0x81`/`0x88`/`0x89`/`0x8f`, where byte 2 is data.
+ *   - the `0x03` write carries the count alongside the index
+ *     (`09 03 <count> <stage>`), so writing a hardcoded `06` while selecting
+ *     a stage would reset a four-stage cycle back to six — the same shape of
+ *     bug as the old `INCOTT_SUB_SET_DPI` constant below.
+ */
+export const INCOTT_DPI_STAGE_COUNT_DEFAULT = 6;
 /**
  * Number of DPI stages the table holds. Both the `0x02` write and the `0x82`
  * read take a stage index in this range as their second payload byte — see
@@ -622,17 +639,27 @@ export function incottEncodeSetDpi(stage: number, dpi: number): Uint8Array {
 }
 
 /**
- * Selects which of the six DPI stages is active — `09 03 06 <idx>`. Does NOT
- * write a DPI value and does NOT alter any stage's stored value; see
- * `INCOTT_CMD_SET_DPI_STAGE` for the hardware proof (select 0/3/5/1, table
- * unchanged) and for why this is a distinct operation from
- * `incottEncodeSetDpi`, which edits a stage's stored value.
+ * Writes the DPI cycle: `09 03 <count> <stage>` — how many stages the cycle
+ * uses, and which one is active. Does NOT write a DPI value and does NOT
+ * alter any stage's stored value; see `INCOTT_CMD_SET_DPI_STAGE` for the
+ * hardware proof (select 0/3/5/1, table unchanged) and for why this is a
+ * distinct operation from `incottEncodeSetDpi`, which edits a stage's stored
+ * value.
+ *
+ * `count` IS REQUIRED, and callers must pass what the device currently
+ * reports rather than a constant — the byte used to be hardcoded `0x06` in
+ * the belief that it was a sub-command, which would silently reset a
+ * four-stage cycle to six every time a stage was selected. See
+ * `INCOTT_DPI_STAGE_COUNT_DEFAULT`.
  */
-export function incottEncodeSetActiveDpiStage(stage: number): Uint8Array {
-  if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
-    throw new RangeError(`DPI stage out of range: ${stage}`);
+export function incottEncodeSetDpiCycle(count: number, stage: number): Uint8Array {
+  if (!Number.isInteger(count) || count < 1 || count > INCOTT_DPI_STAGE_COUNT) {
+    throw new RangeError(`DPI stage count out of range: ${count}`);
   }
-  return payload(INCOTT_CMD_SET_DPI_STAGE, INCOTT_SUB_DPI_STAGE, stage);
+  if (!Number.isInteger(stage) || stage < 0 || stage >= count) {
+    throw new RangeError(`DPI stage ${stage} out of range for a ${count}-stage cycle`);
+  }
+  return payload(INCOTT_CMD_SET_DPI_STAGE, count, stage);
 }
 
 export function incottEncodeSetPollingRate(hz: number): Uint8Array {
@@ -795,19 +822,41 @@ export function incottFrameMatches(frame: Uint8Array, cmd: number, sub: number |
   return true;
 }
 
+/** The DPI cycle as the device reports it: how many stages, and which is live. */
+export interface IncottDpiCycle {
+  /** Stages in the cycle, 1..`INCOTT_DPI_STAGE_COUNT`. */
+  count: number;
+  /** Active stage, 0-based and always below `count`. */
+  active: number;
+}
+
 /**
- * `0x83`/`0x06` returns which of the six DPI stages is currently active
- * (0-5) at response byte 3 — proven wrong to be a DPI-value index on
- * hardware 2026-09-07: decoding byte 3 through `INCOTT_DPI_DEFAULT_STAGE_PRESETS`
- * used to yield 800 DPI, which matched the vendor UI only by coincidence (the
- * device happened to be on stage 1 of 6). Combine with
- * `incottDecodeDpiStage` at this index to get the actual DPI value — see
- * `IncottHidClient.readStatus`.
+ * `09 83` -> `<count> <active>` at response bytes 2 and 3.
+ *
+ * Byte 3 was proven not to be a DPI-value index on hardware 2026-09-07:
+ * decoding it through `INCOTT_DPI_DEFAULT_STAGE_PRESETS` used to yield 800
+ * DPI, matching the vendor UI only by coincidence (the device happened to be
+ * on stage 1 of 6). Combine with `incottDecodeDpiStage` at `active` to get
+ * the actual DPI value — see `IncottHidClient.readStatus`.
+ *
+ * Byte 2 was then mistaken for a sub-command echo, because the count on the
+ * only device available is 6 and the driver happened to send `06`. It is
+ * data: `09 83 00` and a bare `09 83` both answer `06`. Matching it as an
+ * echo would reject every reply from a mouse whose cycle is not six stages
+ * long, so this decoder matches on the COMMAND ONLY — see
+ * `INCOTT_DPI_STAGE_COUNT_DEFAULT`.
  */
-export function incottDecodeDpiStageIndex(frame: Uint8Array): number | null {
-  if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_DPI_STAGE)) return null;
-  const index = frame[3];
-  return index !== undefined && index >= 0 && index <= 5 ? index : null;
+export function incottDecodeDpiCycle(frame: Uint8Array): IncottDpiCycle | null {
+  if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_DPI_STAGE, null)) return null;
+  const count = frame[2];
+  const active = frame[3];
+  if (count === undefined || active === undefined) return null;
+  if (count < 1 || count > INCOTT_DPI_STAGE_COUNT) return null;
+  // An active index outside the cycle is not a reading this driver can make
+  // sense of, and guessing a fallback would put the DPI panel on the wrong
+  // stage. Report nothing instead.
+  if (active >= count) return null;
+  return { count, active };
 }
 
 /**
