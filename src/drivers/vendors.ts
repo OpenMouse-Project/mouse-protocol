@@ -72,6 +72,12 @@ import {
   WALLHACK_VENDOR_ID,
 } from "@openmouse/protocol/wallhack";
 import {
+  DAREU_COMMAND_USAGE,
+  DAREU_COMMAND_USAGE_PAGE,
+  DAREU_PRODUCT_IDS,
+  DAREU_VENDOR_ID,
+} from "@openmouse/protocol/dareu";
+import {
   HYPERX_PULSEFIRE_HASTE_KINGSTON_PIDS,
   HYPERX_PULSEFIRE_HASTE_HP_PIDS,
   HYPERX_USAGE_PAGE,
@@ -119,6 +125,7 @@ export const VENDOR_ID = {
   ksnakeUsb: 0xa8a4, // K-snake X11 wired
   ksnakeDongle: 0xa8a5, // K-snake X11 2.4 GHz dongle
   microsoft: 0x045E,
+  dareu: DAREU_VENDOR_ID,
   // Shares 0x093a with Glorious's Pixart-based Model O 2 / I 2 family (see
   // `glorious` above); GloriousHidClient.isSupported() only claims its own
   // catalogue product ids, so the two never overlap.
@@ -134,6 +141,14 @@ export const MCHOSE_A5_HID_FILTERS: HIDDeviceFilter[] = [
     usagePage: MCHOSE_A5_GEN1_USAGE_PAGE,
   })),
 ];
+
+/** Exact PID and report-8 command collection measured on the TM265 receiver. */
+export const DAREU_HID_FILTERS: HIDDeviceFilter[] = [...DAREU_PRODUCT_IDS].map((productId) => ({
+  vendorId: DAREU_VENDOR_ID,
+  productId,
+  usagePage: DAREU_COMMAND_USAGE_PAGE,
+  usage: DAREU_COMMAND_USAGE,
+}));
 
 /**
  * SteelSeries ships keyboards, headsets, and USB audio under 0x1038, so there
@@ -524,6 +539,7 @@ export const HYPERX_HID_FILTERS: HIDDeviceFilter[] = [
 ];
 
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
+  ...DAREU_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
     productId,
