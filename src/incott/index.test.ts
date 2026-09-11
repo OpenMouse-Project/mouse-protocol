@@ -11,6 +11,7 @@ import {
   incottDecodeDpiCycle,
   incottDecodeFireKey,
   incottDecodeIdentity,
+  incottDpiMaxForSensor,
   incottDecodeInputStatus,
   incottDecodeLiftOff,
   incottDecodeLiftOffDirect,
@@ -935,4 +936,22 @@ test("a macro button binding reads back as its slot", () => {
   assert.equal(binding?.label, "Macro 4");
   // Not offered as a writable option: there is no UI to author one.
   assert.equal(incottButtonActionCode("Macro 4"), null);
+});
+
+test("the offered DPI ceiling follows the fitted sensor", () => {
+  // The vendor builds its DPI table from the sensor: PAW3395 stops at 32000,
+  // PAW3950 reaches 45000. Every Incott model shares one protocol and one
+  // device definition, so this is the only thing that varies between them.
+  assert.equal(incottDpiMaxForSensor(INCOTT_SENSOR_PAW3395), 32000);
+  assert.equal(incottDpiMaxForSensor(INCOTT_SENSOR_PAW3950), 45000);
+  // Unknown or unreadable falls back to the higher ceiling: narrowing on a
+  // guess would hide DPI the mouse can actually reach.
+  assert.equal(incottDpiMaxForSensor(null), 45000);
+  assert.equal(incottDpiMaxForSensor(0x1234), 45000);
+});
+
+test("the encoder still accepts the full range regardless of sensor", () => {
+  // Same split as the polling rate: readStatus narrows what is OFFERED, the
+  // codec keeps accepting anything the protocol can express.
+  assert.doesNotThrow(() => incottEncodeSetDpi(0, 45000));
 });

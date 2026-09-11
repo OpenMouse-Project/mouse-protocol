@@ -1492,3 +1492,20 @@ test("uploadMacro fails clearly on a transport with no output-report support", a
     /cannot send output reports/,
   );
 });
+
+test("readStatus offers a PAW3395 model only the DPI its sensor reaches", async () => {
+  // A Ghero or any other PAW3395 unit in this family: the vendor's table
+  // stops at 32000 there, and advertising 45000 would offer DPI the mouse
+  // may silently refuse.
+  const { device } = fakeDevice({ state: { identity: [0x01, 0x01, 0x02, 0xf0, 0xf0, 0x00, 0xff] } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.name, "Ghero", "model code 0x01");
+  assert.equal(status.ui?.dpiStageEditor?.maxDpi, 32000);
+});
+
+test("readStatus keeps the full ceiling when identity cannot be read", async () => {
+  // Narrowing on a guess would hide DPI the mouse can actually reach.
+  const { device } = fakeDevice({ state: { identity: null } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.ui?.dpiStageEditor?.maxDpi, 45000);
+});

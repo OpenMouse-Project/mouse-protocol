@@ -8,6 +8,7 @@ import {
   incottDecodeDpiCycle,
   incottDecodeFireKey,
   incottDecodeIdentity,
+  incottDpiMaxForSensor,
   incottDecodeInputStatus,
   incottDecodeLiftOffDirect,
   incottDecodePerformanceMode,
@@ -844,7 +845,12 @@ export class IncottHidClient {
       // writes through `setDpiStageCount`, which needs a real current count
       // to preserve the active stage, and offering it against an unreadable
       // one would write a guess.
-      dpiStageEditor: { maxStages: INCOTT_DPI_STAGE_COUNT, countEditable: dpiCycle !== null, minDpi: INCOTT_DPI_MIN, maxDpi: INCOTT_DPI_MAX, stepDpi: INCOTT_DPI_STEP },
+      // The ceiling follows the FITTED SENSOR, which the identity reply
+      // reports: the PAW3395 models in this family stop at 32000 in the
+      // vendor's own table where the PAW3950 reaches 45000. Falls back to the
+      // higher value when identity could not be read, since narrowing on a
+      // guess would hide DPI the mouse can actually do.
+      dpiStageEditor: { maxStages: INCOTT_DPI_STAGE_COUNT, countEditable: dpiCycle !== null, minDpi: INCOTT_DPI_MIN, maxDpi: incottDpiMaxForSensor(identity?.sensorId ?? null), stepDpi: INCOTT_DPI_STEP },
     };
 
     return {

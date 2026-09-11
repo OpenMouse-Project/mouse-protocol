@@ -712,15 +712,36 @@ export const INCOTT_SUB_NONE = 0x00;
  * of 50:
  *   sensor 0x3395 (PAW3395): 32000
  *   sensor 0x3950 (PAW3950): 45000
- * There is no known way to read which sensor variant is fitted to a given
- * unit, so `INCOTT_DPI_MAX` uses the higher of the two known ceilings. A
- * PAW3395 unit is expected to refuse anything above 32000; the existing
- * write-cache/read-back verification in `IncottHidClient.setDpi` is relied on
- * to report that honestly rather than this module guessing which sensor is
- * present.
+ * The fitted sensor IS readable — the identity reply carries it (see
+ * `incottDecodeIdentity`) — so `readStatus` narrows the ceiling it OFFERS to
+ * whichever sensor answered, via `incottDpiMaxForSensor`. This constant stays
+ * the higher of the two: it is the bound on what the protocol can express,
+ * and the encoder must keep accepting a value the app is entitled to send.
+ * That mirrors the polling rate, where `supportedPollingRates` narrows by
+ * connection while `incottEncodeSetPollingRate` still accepts the full
+ * ladder.
  */
 export const INCOTT_DPI_MIN = 50;
 export const INCOTT_DPI_MAX = 45000;
+/** The PAW3395's ceiling in the vendor's own DPI table. */
+export const INCOTT_DPI_MAX_PAW3395 = 32000;
+
+/**
+ * The DPI ceiling to OFFER for a fitted sensor, matching the table the vendor
+ * builds in `getStDPI`.
+ *
+ * Worth being precise about what this is and is not. It is the vendor's UI
+ * limit, not a proven firmware limit: this contributor's PAW3950 accepted
+ * 45000 over the cable even though the connection-indexed sensor byte read
+ * PAW3395 there (see `captures/incott-8k-wireless/wired-dpi-ceiling-2026-09-11.hex`),
+ * so a real PAW3395 unit has never been tested and may well accept more. It
+ * is used because offering exactly what the vendor offers cannot surprise
+ * anyone, and because the alternative — advertising 45000 to a Ghero — risks
+ * a silent refusal on a model nobody here can test.
+ */
+export function incottDpiMaxForSensor(sensorId: number | null): number {
+  return sensorId === INCOTT_SENSOR_PAW3395 ? INCOTT_DPI_MAX_PAW3395 : INCOTT_DPI_MAX;
+}
 export const INCOTT_DPI_STEP = 50;
 
 /**
