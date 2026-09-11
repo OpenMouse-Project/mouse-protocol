@@ -897,6 +897,29 @@ export class IncottHidClient {
     return dpi;
   }
 
+  /**
+   * Sets both DPI axes on the ACTIVE stage — the shape a generic X/Y control
+   * needs, where `setDpiStageAxis` is per-stage and per-axis.
+   *
+   * Mirrors the vendor's own `setResolution`: one write with the "both" flag
+   * when the axes match, two axis-flagged writes when they differ. Named to
+   * match the method proposed upstream for a brand-agnostic axis control; if
+   * the maintainers settle on a different name this is the one line to
+   * rename.
+   */
+  async setAxisDpi(dpiX: number, dpiY: number): Promise<void> {
+    incottValidateDpi(dpiX);
+    incottValidateDpi(dpiY);
+    const stage = (await this.readDpiCycle())?.active ?? null;
+    if (stage === null) throw new Error("Could not read the active DPI stage to write.");
+    if (dpiX === dpiY) {
+      await this.setDpiStageAxis(stage, dpiX, "both");
+      return;
+    }
+    await this.setDpiStageAxis(stage, dpiX, "x");
+    await this.setDpiStageAxis(stage, dpiY, "y");
+  }
+
   /** Reads the DPI cycle (stage count + active stage) in one query. */
   private async readDpiCycle(): Promise<IncottDpiCycle | null> {
     return incottDecodeDpiCycle(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_NONE));

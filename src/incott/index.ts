@@ -650,8 +650,23 @@ export const INCOTT_SUB_DEBOUNCE = 0x01;
  * clicks, 10 ms apart.
  */
 export const INCOTT_SUB_FIRE_KEY = 0x02;
-/** Clicks per press. The vendor clamps to this; 0 is accepted but untested. */
+/**
+ * Clicks per press, 1-3 — the ceiling the vendor clamps to.
+ *
+ * `INCOTT_FIRE_KEY_TIMES_HOLD` (0) is a real fourth setting, not an absence
+ * of one: it switches the button from a fixed burst to firing continuously
+ * while held. Confirmed against the vendor software 2026-09-11 by the device
+ * owner, which is the only way it could have been established — the value is
+ * in range for the write either way, so a round-trip proves nothing about
+ * what it MEANS.
+ */
 export const INCOTT_FIRE_KEY_MAX_TIMES = 3;
+/**
+ * Fire key "times" value that means hold-to-fire: the button keeps clicking
+ * at the configured interval for as long as it is held, and stops on
+ * release. See `INCOTT_FIRE_KEY_MAX_TIMES`.
+ */
+export const INCOTT_FIRE_KEY_TIMES_HOLD = 0;
 /** Milliseconds between clicks in a burst, one byte. */
 export const INCOTT_FIRE_KEY_MAX_INTERVAL_MS = 255;
 export const INCOTT_SUB_SLEEP = 0x03;

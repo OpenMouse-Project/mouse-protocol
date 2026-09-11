@@ -1169,6 +1169,14 @@ The parameters are **global, not per-button**: the command carries no button
 index, so they apply to whichever button is bound to "Rapid fire"
 (`0x0218F00A` in `INCOTT_BUTTON_ACTIONS`).
 
+**`times` = 0 is a fourth mode, not an absence of one** (confirmed against
+the vendor software 2026-09-11): the button fires continuously while held and
+stops on release, rather than sending a fixed burst. Worth recording how that
+was established — a write round-trip could never have shown it, because 0 is
+in range and reads back cleanly like any other value. The MEANING of a value
+is not something a round-trip tests, and only someone watching the vendor UI
+could supply it.
+
 Not advertised through `MouseStatus` — the shared contract has no rapid-fire
 field, so `getFireKey`/`setFireKey` sit where `setReceiverLed` does: real,
 tested, and waiting for a control to hang them off.

@@ -1417,3 +1417,30 @@ test("readStatus omits both rather than guessing when the queries fail", async (
   assert.equal(status.incottFireKeyTimes, undefined);
   assert.equal(status.incottFireKeyIntervalMs, undefined);
 });
+
+test("setFireKey accepts 0 times, which is hold-to-fire rather than no fire", async () => {
+  // Confirmed against the vendor software 2026-09-11: 0 makes the button
+  // fire continuously while held and stop on release.
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  assert.deepEqual(await client.setFireKey(0, 25), { times: 0, intervalMs: 25 });
+  assert.equal(state.fireKeyTimes, 0);
+});
+
+test("setAxisDpi writes both axes of the active stage", async () => {
+  const { device } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setAxisDpi(800, 3200);
+  // Stage 1 is the active one in the default fake state.
+  assert.equal(await client.readDpiStageAxis(1, "x"), 800);
+  assert.equal(await client.readDpiStageAxis(1, "y"), 3200);
+});
+
+test("setAxisDpi sends a single linked write when the axes match", async () => {
+  const { device, sent } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setAxisDpi(1600, 1600);
+  const dpiWrites = sent.filter((payload) => payload[0] === 0x02);
+  assert.equal(dpiWrites.length, 1, "one write, not one per axis");
+  assert.equal(dpiWrites[0]![7], 0, "the 'both' axis flag");
+});
