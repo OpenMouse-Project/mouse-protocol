@@ -299,6 +299,53 @@ export const RAZER_VIPER_V3_CONTROL_FILTERS: HIDDeviceFilter[] = [0x00c0, 0x00c1
   (productId) => ({ vendorId: VENDOR_ID.razer, productId, usagePage: 0x01, usage: 0x02 }),
 );
 
+/**
+ * Confirmed against real hardware: a user's `navigator.hid.getDevices()` dump
+ * on Windows for a DeathAdder V3 HyperSpeed (0x00c5) showed the un-narrowed
+ * catch-all filter below granting five *other* collections but never the one
+ * that actually answers (usage 0x01:0x02, opened, featureReports [0]) — the
+ * same device's macOS dump did include it, as a separate grant. Without a
+ * dedicated filter, this generation falls to RAZER_REGISTRY_FILTERS, which
+ * offers the whole device with no usage restriction: every top-level
+ * collection appears as an identical, unlabeled checkbox in Chrome's picker,
+ * and picking the wrong one(s) silently fails with no way to tell which was
+ * correct.
+ *
+ * Every other Viper-receiver/HyperSpeed-generation model (`viper-receiver` and
+ * `new-receiver` transports, `vendorControlInterface` false, not `nativeOnly`)
+ * shares this exact interface shape per the driver's own `isMouseControlInterface`
+ * contract, so they get the same narrow filter here rather than waiting for
+ * each one to be separately reported broken. Left OUT of this batch,
+ * deliberately:
+ * - `vendorControlInterface: true` models (the pre-HyperSpeed "standard"
+ *   generation, and the Viper V3 Pro SE) answer on a vendor-defined page
+ *   instead, which is a different filter this evidence says nothing about.
+ * - DeathAdder Essential and DeathAdder V2 keep their existing whole-device
+ *   filters: their control channel is a split interface, not this shape.
+ * - Naga V2 Pro (0x00a7/0x00a8) is already `verified: true` — it demonstrably
+ *   connects via the broad filter today, so it is left alone rather than risk
+ *   narrowing it to the wrong shape.
+ * - Cobra Pro, Naga V2 HyperSpeed, and the Pro Click/Basilisk Mobile
+ *   productivity lines were left out: no report or capture confirms this
+ *   shape for them, and their extra buttons/wheel make a different interface
+ *   layout plausible.
+ */
+export const RAZER_HYPERSPEED_CONTROL_FILTERS: HIDDeviceFilter[] = [
+  0x0078, // Viper (see RAZER_VIPER_CONTROL_FILTERS above; kept for the doc trail)
+  0x007a, // Viper Ultimate (Wired)
+  0x007c, 0x007d, // DeathAdder V2 Pro (Wired/wireless) — issue #253
+  0x009e, 0x009f, // Viper Mini Signature Edition (Wired/wireless)
+  0x00b8, // Viper V3 HyperSpeed (already verified: true)
+  0x00c2, 0x00c3, // DeathAdder V3 Pro
+  0x00b6, 0x00b7, // DeathAdder V3 Pro (second SKU pair)
+  0x00c4, 0x00c5, // DeathAdder V3 HyperSpeed (Wired/wireless)
+  0x00aa, 0x00ab, // Basilisk V3 Pro
+  0x00cc, 0x00cd, // Basilisk V3 Pro 35K
+  0x00d6, 0x00d7, // Basilisk V3 Pro 35K Phantom Green
+  0x00be, 0x00bf, // DeathAdder V4 Pro
+  0x00ef, 0x00f0, // DeathAdder V4 Pro Carbon Fiber Edition
+].map((productId) => ({ vendorId: VENDOR_ID.razer, productId, usagePage: 0x01, usage: 0x02 }));
+
 // The Viper Mini answers on the same kind of single Generic Desktop Mouse
 // control interface as the V3 Pro, so it gets the same narrow collection filter.
 export const RAZER_VIPER_MINI_CONTROL_FILTERS: HIDDeviceFilter[] = [0x008a].map(
@@ -342,6 +389,15 @@ export const RAZER_COBRA_FILTERS: HIDDeviceFilter[] = [0x00a3].map(
  */
 const RAZER_NARROWED_PRODUCT_IDS: ReadonlySet<number> = new Set([
   0x00a4, 0x00a5, 0x00a6, 0x00c0, 0x00c1, 0x006e, 0x0071, 0x0098, 0x0084,
+  // Viper and Viper Mini already had their own narrow filters defined above
+  // (RAZER_VIPER_CONTROL_FILTERS / RAZER_VIPER_MINI_CONTROL_FILTERS) but were
+  // never excluded from the catch-all below, so they carried this same
+  // ambiguous-picker bug the whole time. Excluded here alongside the rest of
+  // RAZER_HYPERSPEED_CONTROL_FILTERS' coverage.
+  0x0078, 0x008a,
+  0x007a, 0x007c, 0x007d, 0x009e, 0x009f, 0x00b8, 0x00c2, 0x00c3, 0x00b6,
+  0x00b7, 0x00c4, 0x00c5, 0x00aa, 0x00ab, 0x00cc, 0x00cd, 0x00d6, 0x00d7,
+  0x00be, 0x00bf, 0x00ef, 0x00f0,
 ]);
 
 /**
@@ -582,6 +638,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...RAZER_MOUSE_DOCK_PRO_CONTROL_FILTERS,
   ...RAZER_VIPER_V2_CONTROL_FILTERS,
   ...RAZER_VIPER_V3_CONTROL_FILTERS,
+  ...RAZER_HYPERSPEED_CONTROL_FILTERS,
   ...RAZER_VIPER_MINI_CONTROL_FILTERS,
   ...RAZER_VIPER_CONTROL_FILTERS,
   { vendorId: VENDOR_ID.vgn, productId: 0xfb56 },
