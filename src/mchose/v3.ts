@@ -752,3 +752,31 @@ export function mchoseV3EncodeButtons(
 export const MCHOSE_V3_SLEEP_OPTIONS: readonly number[] = [0, 60, 120, 180, 300, 600, 1800];
 
 export * from "./v3-buttons.ts";
+
+/**
+ * A reply the firmware sends to refuse a command outright: command id `0x0000`
+ * with the checksum flag clear and `0xff` in the sequence byte. It is not a
+ * malformed frame and not noise — an A7 V3 Ultra+ answers `0x0901` with one,
+ * about a second after the request, every time.
+ *
+ * Worth recognising because the alternative is spending the whole retry budget
+ * waiting for an answer that has already arrived.
+ */
+export function mchoseV3IsRejection(body: Uint8Array): boolean {
+  return mchoseV3ReplyCommand(body) === 0x0000
+    && (body[FLAGS_OFFSET] ?? 0) === 0
+    && (body[LENGTH_OFFSET] ?? 0) === 0;
+}
+
+/**
+ * A one-byte `0xff` payload, which means "ask again" rather than carrying data.
+ * A receiver whose mouse is not currently reachable answers `0x0900` with it.
+ *
+ * M HUB's own retry helper loops while the first payload byte is `0xff`. This
+ * is stricter — it requires the payload to be *only* that byte — because a
+ * button table legitimately starts with `0xff` when the first button carries no
+ * assignment, and the vendor's looser test would reject that as busy.
+ */
+export function mchoseV3IsBusy(payload: Uint8Array): boolean {
+  return payload.length === 1 && payload[0] === 0xff;
+}
