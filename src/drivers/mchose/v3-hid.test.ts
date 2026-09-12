@@ -447,7 +447,7 @@ describe("MCHOSE A7 V3 writes", () => {
   it("refuses an action whose encoding has never been captured", async () => {
     const { device, writes } = fakeMouse();
     await assert.rejects(
-      new MchoseV3HidClient(device).setButtonMapping("Back", "Keyboard"),
+      new MchoseV3HidClient(device).setButtonMapping("Back", "Teleport"),
       /Unknown button action/,
     );
     assert.equal(writes.has(MCHOSE_V3_COMMAND.writeButtons), false);
@@ -457,7 +457,9 @@ describe("MCHOSE A7 V3 writes", () => {
     const { device } = fakeMouse();
     const status = await new MchoseV3HidClient(device).readStatus();
     assert.equal(status.ui!.settingsReady, true);
-    assert.deepEqual(status.buttonOptions, ["Default", "Disabled"]);
+    assert.ok(status.buttonOptions!.length > 100, "M HUB's whole vocabulary");
+    assert.equal(status.buttonOptions![0], "Default");
+    assert.ok(status.buttonOptions!.includes("Alt + Tab"));
     assert.equal(status.ui!.dpiStageEditor!.maxDpi, 50000, "this model's own ceiling");
     assert.match(status.ui!.statusNote!, /not been confirmed on hardware/);
   });

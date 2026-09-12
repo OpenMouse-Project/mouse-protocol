@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   MCHOSE_V3_BODY_LENGTH,
   MCHOSE_V3_BUTTON_ACTIONS,
+  mchoseV3ButtonActionName,
   MCHOSE_V3_BUTTON_UNSET,
   MCHOSE_V3_SENSOR_MOTION_SYNC,
   MCHOSE_V3_SENSOR_RIPPLE,
@@ -559,17 +560,73 @@ test("the button table is written in the same variable-width shape it is read", 
   assert.deepEqual(data.slice(0, 3), [0, 0, 6], "profile, reserved, button count");
 });
 
-test("only actions with a captured encoding are offered", () => {
-  assert.deepEqual([...MCHOSE_V3_BUTTON_ACTIONS], ["Default", "Disabled"]);
+/**
+ * The vocabulary is M HUB's own, so the spot checks below are the vendor's
+ * hex strings split into type and value: "0x000008" is the back button,
+ * "0x13042b" is Alt+Tab, "0xfe0000" is a disabled button.
+ */
+test("the action vocabulary is MCHOSE's own, not the A7 V2's", () => {
+  const find = (label: string) => MCHOSE_V3_BUTTON_ACTIONS.find((a) => a.label === label)!;
+
   assert.deepEqual(mchoseV3ButtonAction("Back", "Default"), { type: 0x00, value: [0x00, 0x08] });
+  assert.deepEqual(mchoseV3ButtonAction("Left", "Right click"), { type: 0x00, value: [0x00, 0x02] });
+  assert.deepEqual(mchoseV3ButtonAction("Back", "Alt + Tab"), { type: 0x13, value: [0x04, 0x2b] });
+  assert.deepEqual(mchoseV3ButtonAction("Back", "Play / Pause"), { type: 0x14, value: [0x00, 0xcd] });
+  assert.deepEqual(mchoseV3ButtonAction("Back", "Copy"), { type: 0x16, value: [0x01, 0x06] });
+  assert.deepEqual(mchoseV3ButtonAction("DPI", "DPI +"), { type: 0x01, value: [0x00, 0x00, 0x02] });
   assert.deepEqual(
-    mchoseV3ButtonAction("DPI", "Disabled"),
-    { type: MCHOSE_V3_BUTTON_UNSET, value: [0xff, 0xff] },
+    mchoseV3ButtonAction("Back", "Switch to profile 2"), { type: 0x33, value: [0x00, 0x01] },
   );
-  // Nothing is invented for the actions whose values have never been seen.
-  assert.equal(mchoseV3ButtonAction("Left", "Keyboard"), null);
+
+  // "Disabled" is type 0xfe, the vendor's "forbidden". The 0xff a stock
+  // mouse reports is a button with no assignment at all, which M HUB never
+  // writes — mixing the two up would send a value the firmware never sends.
+  assert.deepEqual(mchoseV3ButtonAction("Back", "Disabled"), { type: 0xfe, value: [0x00, 0x00] });
+  assert.notEqual(find("Disabled").type, MCHOSE_V3_BUTTON_UNSET);
+
+  // The A7 V2's numbering means nothing here.
+  assert.equal(find("Play / Pause").type, 0x14, "not the V2's type 3");
+  assert.equal(find("Switch to profile 1").type, 0x33, "not the V2's type 10");
+
+  assert.equal(mchoseV3ButtonAction("Left", "Teleport"), null);
   assert.equal(mchoseV3ButtonAction("Nonexistent", "Default"), null);
 });
+
+test("every action's value is the width its type declares", () => {
+  for (const action of MCHOSE_V3_BUTTON_ACTIONS) {
+    if (action.label === "Default") continue;
+    const expected = action.type === 0x01 || action.type === 0x22 ? 3
+      : action.type === 0x23 || action.type === 0x24 ? 7 : 2;
+    assert.equal(
+      action.value.length, expected,
+      `${action.label}: type 0x${action.type.toString(16)} takes ${expected} value bytes`,
+    );
+  }
+});
+
+test("no two actions share a type and value", () => {
+  const seen = new Map<string, string>();
+  for (const action of MCHOSE_V3_BUTTON_ACTIONS) {
+    if (action.label === "Default") continue;
+    const key = `${action.type}:${action.value.join(",")}`;
+    assert.equal(seen.get(key), undefined, `${action.label} collides with ${seen.get(key)}`);
+    seen.set(key, action.label);
+  }
+});
+
+test("a stored assignment is named back, and a stock button reads as Default", () => {
+  const buttons = mchoseV3DecodeButtons(new Uint8Array(CAPTURE.buttons))!;
+  assert.equal(mchoseV3ButtonActionName("Left", buttons.Left!), "Default");
+  assert.equal(mchoseV3ButtonActionName("Back", buttons.Back!), "Default");
+  // The captured DPI button carries no assignment at all.
+  assert.equal(mchoseV3ButtonActionName("DPI", buttons.DPI!), "Not set");
+
+  assert.equal(mchoseV3ButtonActionName("Back", { type: 0x13, value: [0x04, 0x2b] }), "Alt + Tab");
+  assert.equal(mchoseV3ButtonActionName("Back", { type: 0xfe, value: [0x00, 0x00] }), "Disabled");
+  // A value the tables do not cover is reported as unknown, not as a guess.
+  assert.match(mchoseV3ButtonActionName("Back", { type: 0x77, value: [0x12] }), /^Unknown/);
+});
+
 
 test("a button assignment whose value is the wrong width is refused", () => {
   const buttons = mchoseV3DecodeButtons(new Uint8Array(CAPTURE.buttons))!;

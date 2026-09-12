@@ -1,6 +1,5 @@
 import {
   MCHOSE_V3_BUTTONS,
-  MCHOSE_V3_BUTTON_ACTIONS,
   MCHOSE_V3_COMMAND,
   MCHOSE_V3_DEBOUNCE_MAX_MS,
   MCHOSE_V3_DPI_MIN,
@@ -19,6 +18,7 @@ import {
   mchoseV3DecodeSensor,
   mchoseV3DecodeSettings,
   mchoseV3ButtonAction,
+  mchoseV3ButtonActionLabels,
   mchoseV3ButtonActionName,
   mchoseV3CheckSettings,
   mchoseV3Encode,
@@ -64,9 +64,9 @@ import { VENDOR_ID } from "../vendors.ts";
  *   carried through rather than zeroed;
  * - every setter verifies, and throws when the mouse reports something other
  *   than what it was told;
- * - the button vocabulary is two entries wide. The A7 V2's value tables were
- *   confirmed key by key; none of this generation's have been, and a button is
- *   the one setting where a wrong guess can leave someone unable to click.
+ * - the button vocabulary is M HUB's own, lifted from the vendor bundle's
+ *   action tables rather than guessed at. See `src/mchose/v3-buttons.ts`; the
+ *   type numbers are **not** the A7 V2's.
  *
  * {@link WRITE_SETTLE_MS} is the number most likely to be wrong: it is the A7
  * V2's figure, and this generation's has never been measured.
@@ -462,10 +462,10 @@ export class MchoseV3HidClient {
   /**
    * Reassign one button, leaving the other five exactly as they were read.
    *
-   * The action vocabulary is deliberately small. The A7 V2's value tables were
-   * confirmed key by key on hardware; none of this generation's have been, so
-   * only the actions whose encoding is visible in a real capture are offered
-   * rather than guessing at keyboard and media values.
+   * The vocabulary comes from M HUB's own action tables — see
+   * `src/mchose/v3-buttons.ts` — so nothing here is a guess at what a value
+   * means. What has not been verified is the firmware accepting the write,
+   * which is why the read-back below decides whether it worked.
    */
   async setButtonMapping(button: string, action: string): Promise<void> {
     await this.open();
@@ -567,10 +567,10 @@ export class MchoseV3HidClient {
       powerModes: sensor ? [...MCHOSE_V3_MODES] : undefined,
       buttonMappings: buttons
         ? Object.fromEntries(
-          Object.entries(buttons).map(([name, action]) => [name, mchoseV3ButtonActionName(action)]),
+          Object.entries(buttons).map(([name, action]) => [name, mchoseV3ButtonActionName(name, action)]),
         )
         : undefined,
-      buttonOptions: buttons ? [...MCHOSE_V3_BUTTON_ACTIONS] : undefined,
+      buttonOptions: buttons ? mchoseV3ButtonActionLabels() : undefined,
       firmware,
       ui: {
         family: "mchose-v3",

@@ -685,9 +685,41 @@ suspects if something misbehaves:
 - whether a write needs a separate save or commit command at all. Nothing in the
   vendor bundle suggests one, but nothing rules it out either.
 
-The button vocabulary is deliberately two entries wide — "Default" and
-"Disabled" — because those are the only two encodings that appear in a real
-capture. Keyboard, media, DPI, macro and profile actions all exist in the
-protocol; they stay unavailable until someone records what M HUB writes for
-them, since a button is the one setting where a wrong guess can leave someone
-unable to click.
+### The button vocabulary
+
+Taken from M HUB's own action tables, not guessed at. The vendor stores each
+action as a hex string whose first byte is the type and whose rest is the
+value: `"0x13042b"` is Alt+Tab, type `0x13`, modifier `0x04`, usage `0x2b`.
+
+**These type numbers are not the A7 V2's.** Nothing carries over.
+
+| Type | Value bytes | Order | Meaning |
+| --- | --- | --- | --- |
+| `0x00` | 2 | LE | mouse button — left `0001`, right `0002`, middle `0004`, forward `0010`, back `0008` |
+| `0x01` | 3 | LE | DPI — switch `000000`, + `000002`, − `000003` |
+| `0x05` | 2 | LE | wheel — up `0000`, down `0001` |
+| `0x11` | 2 | LE | keyboard key, value is `00` + HID usage |
+| `0x13` | 2 | **BE** | modifier + key, value is the modifier mask + usage |
+| `0x14` | 2 | LE | consumer control: media keys and screen brightness |
+| `0x16` | 2 | **BE** | system shortcut — copy `0106`, cut `011b`, paste `0119` |
+| `0x22` | 3 | LE | present in the width table, no entries in the vendor's lists |
+| `0x23` `0x24` | 7 | LE | likewise, and wide enough to be macro references |
+| `0x33` | 2 | LE | onboard profile — 1/2/3 `0000`/`0001`/`0002`, cycle `00ff` |
+| `0xfe` | 2 | LE | disabled, the vendor's "forbidden" |
+| `0xff` | 2 | — | **no assignment at all.** The firmware reports it, M HUB never writes it |
+
+> **`0xfe` and `0xff` are not the same thing.** A disabled button is `0xfe`;
+> `0xff` is a button carrying nothing, which is what a stock A7 V3 Ultra+
+> reports for its DPI button. Writing `0xff` would send a value the firmware
+> itself never sends.
+
+The letters, function keys and navigation keys are **derived** rather than
+listed: the vendor's table covers punctuation, digits, the numpad, the locks
+and the modifiers, and leaves the rest to its on-screen keyboard. Its own
+shortcut entries spell out the same standard HID usages under the same type
+(Ctrl+A is `0x04`, Ctrl+C `0x06`, Alt+F4 `0x3d`, Esc `0x29`), so the usage
+page is confirmed rather than assumed.
+
+Macros are still not writable: types `0x23`/`0x24` are wide enough to carry a
+reference, but the vendor's tables list nothing under them and the paged
+`0x090c` macro channel is not implemented.

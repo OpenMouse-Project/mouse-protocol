@@ -394,11 +394,10 @@ export function mchoseV3DecodeLiftOff(data: Uint8Array): number | null {
 }
 
 /**
- * Button action types. The same numbering as the V2's, except that the V3
- * marks an unassigned button `0xff` rather than leaving it at type 0, and its
- * value width varies with the type.
+ * Button action types are **not** the A7 V2's numbering; the vocabulary and
+ * the width of each value live in `./v3-buttons.ts`, which this file
+ * re-exports at the bottom.
  */
-export const MCHOSE_V3_BUTTON_UNSET = 0xff;
 
 /** Value byte counts by type; anything unlisted carries two. */
 const BUTTON_VALUE_WIDTH: Readonly<Record<number, number>> = {
@@ -748,61 +747,8 @@ export function mchoseV3EncodeButtons(
   return data;
 }
 
-/**
- * Factory value for each button — the mask a stock mouse carries under type 0,
- * read straight off a real A7 V3 Ultra+'s button table.
- */
-const BUTTON_DEFAULT_VALUE: Readonly<Record<string, readonly number[]>> = {
-  Left: [0x00, 0x01],
-  Right: [0x00, 0x02],
-  Middle: [0x00, 0x04],
-  Forward: [0x00, 0x10],
-  Back: [0x00, 0x08],
-  DPI: [0x00, 0x00],
-};
-
-/**
- * The actions this driver will write.
- *
- * Deliberately two. The A7 V2's type and value tables were confirmed key by key
- * on hardware; this generation's have not been, and a button is the one setting
- * where a wrong guess can leave someone unable to click. Both of these appear
- * verbatim in a real capture: five buttons on type 0 carrying their own mask,
- * and an unassigned one on type `0xff`.
- *
- * Keyboard, media, DPI and macro actions all exist in the protocol and are
- * listed in docs/mchose-protocol.md. They are not offered until someone with
- * the hardware captures what M HUB writes for them.
- */
-export const MCHOSE_V3_BUTTON_ACTIONS: readonly string[] = ["Default", "Disabled"];
-
-export function mchoseV3ButtonAction(
-  button: string,
-  action: string,
-): MchoseV3ButtonAssignment | null {
-  if (action === "Default") {
-    const value = BUTTON_DEFAULT_VALUE[button];
-    return value ? { type: 0x00, value: [...value] } : null;
-  }
-  if (action === "Disabled") return { type: MCHOSE_V3_BUTTON_UNSET, value: [0xff, 0xff] };
-  return null;
-}
-
-/** Name the action an assignment represents, for display. */
-export function mchoseV3ButtonActionName(action: MchoseV3ButtonAssignment): string {
-  switch (action.type) {
-    case 0x00: return "Default";
-    case 0x01: return "Mouse button";
-    case 0x02: return "Keyboard";
-    case 0x03: return "Media";
-    case 0x04: return "Macro";
-    case 0x05: return "DPI";
-    case 0x08: return "System";
-    case 0x0a: return "Profile";
-    case MCHOSE_V3_BUTTON_UNSET: return "Disabled";
-    default: return `Type ${action.type}`;
-  }
-}
 
 /** Sleep timeouts the panel offers, in seconds; 0 is "never". */
 export const MCHOSE_V3_SLEEP_OPTIONS: readonly number[] = [0, 60, 120, 180, 300, 600, 1800];
+
+export * from "./v3-buttons.ts";
