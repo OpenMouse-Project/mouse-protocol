@@ -26,26 +26,34 @@ import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
 
 /**
- * MCHOSE A7 V3 and its siblings — **read-only, and untested on hardware**.
+ * MCHOSE A7 V3 and its siblings — **read-only**.
  *
  * This generation abandoned the A7 V2's inverted feature reports for a
  * `0x4d`-magic output report (see `src/mchose/v3.ts`). The command set was read
- * out of MCHOSE's own M HUB bundle; unlike the V2 driver next door, none of it
- * has been exercised against a physical mouse.
+ * out of MCHOSE's own M HUB bundle, and the **reads** have since been confirmed
+ * against a real A7 V3 Ultra+ on its 2.4 GHz receiver: identity, battery and
+ * charge state, the DPI table, polling, profile, sleep, debounce, the sensor
+ * flags and the button table all came back correctly. See the capture notes in
+ * docs/mchose-protocol.md.
  *
- * That is why there are no setters here. Every value below is a read, so the
- * worst a wrong guess costs is a blank or nonsensical field — where a
- * speculative write could leave a stranger's mouse in a state they cannot get
- * out of. `settingsReady` is false for the same reason: the shell would
- * otherwise offer controls with nothing behind them. `valuesVerified` stays
- * true so the DPI and polling rate it does read are still worth showing.
+ * **The writes have not.** No setter is exposed, and that is the whole point of
+ * the split: a wrong read costs a blank field, where a speculative write could
+ * leave a stranger's mouse in a state they cannot get out of. Nothing here has
+ * ever put a byte into a V3's configuration, and the settle timings that the V2
+ * work could only find empirically are still unknown for this generation.
+ *
+ * `settingsReady` is false so the shell offers no inert controls;
+ * `valuesVerified` stays true so what it does read is still shown.
  *
  * Adding writes is a small change on top of this — the encoders are already in
- * the codec — but it should wait for someone with the hardware.
+ * the codec — but it should wait for someone who can watch the hardware.
  */
 
 const REPLY_TIMEOUT_MS = 600;
 const READ_ATTEMPTS = 3;
+
+/** `0x0901`'s target byte: the mouse rather than the receiver in front of it. */
+const VERSION_TARGET_MOUSE = 0;
 
 /** The receivers serve every model in the generation. */
 const LINK_PRODUCT_IDS: readonly number[] = Object.values(MCHOSE_V3_LINK_PRODUCT_IDS);
@@ -148,8 +156,13 @@ export class MchoseV3HidClient {
     return payload ? mchoseV3DecodeSettings(payload) : null;
   }
 
+  /**
+   * `0x0901` takes a target byte: 0 for the mouse, 1 for the receiver. Sent
+   * without one it answers with an **empty** data block rather than an error,
+   * which is how the first hardware capture came back with no firmware at all.
+   */
   private async readVersion(): Promise<string | null> {
-    const payload = await this.request(MCHOSE_V3_COMMAND.readVersion);
+    const payload = await this.request(MCHOSE_V3_COMMAND.readVersion, [VERSION_TARGET_MOUSE]);
     if (!payload || payload.length < 2) return null;
     const raw = `${(payload[0] ?? 0).toString(16).padStart(2, "0")}`
       + `${(payload[1] ?? 0).toString(16).padStart(2, "0")}`;
@@ -263,7 +276,7 @@ export class MchoseV3HidClient {
         statusNote: settings
           ? [
             liftOffHeight ? `Lift-off ${liftOffHeight}.` : "",
-            "Read-only: this model's protocol is implemented from vendor software and has not been confirmed on hardware.",
+            "Read-only: this driver can report settings but cannot change them yet.",
           ].filter(Boolean).join(" ")
           : "Read-only, and this mouse did not answer. Please report the model and how it is connected.",
       },

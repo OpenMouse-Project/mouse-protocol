@@ -180,7 +180,11 @@ const u16 = (data: Uint8Array, offset: number): number =>
 
 export interface MchoseV3DeviceInfo {
   vendorId: number;
-  /** The mouse's own product id, even when the host is talking to a receiver. */
+  /**
+   * **Not a model id**, despite looking like one: an A7 V3 Ultra+ reports
+   * `0x4026`, which MCHOSE's own table lists against the A5 V3 Ultra+. Use
+   * {@link mchoseV3FindProduct}, which prefers the USB product string.
+   */
   productId: number;
   /** Onboard profile count. */
   profileCount: number;
@@ -497,21 +501,35 @@ export const MCHOSE_V3_POLLING_RATES: Readonly<Record<number, readonly number[]>
 };
 
 /**
- * Resolve a model from the id `0x0900` reports, falling back to the product
- * string. An unrecognised device yields null rather than a wrong DPI ceiling.
+ * Resolve a model, **preferring the USB product string over the id `0x0900`
+ * reports**. An unrecognised device yields null rather than a wrong DPI ceiling.
+ *
+ * The id ordering is the opposite of the A7 V2's, and deliberately so. On the
+ * V2, the id inside the battery reply is decisive because the host-facing id is
+ * shared. Here that reasoning does not hold: a capture from a real **A7 V3
+ * Ultra+** has `0x0900` reporting `0x4026`, which this table — and MCHOSE's own
+ * — lists against the *A5 V3 Ultra+*. Trusting it named the wrong mouse and,
+ * through it, handed out a 42,000 DPI ceiling and a three-step lift-off ladder
+ * to a 50,000 DPI five-step model.
+ *
+ * Whatever `0x0900` byte 2 is — a sensor or platform id, shared across shells —
+ * it is not a model id. M HUB agrees: every model lookup in the vendor bundle
+ * keys off `navigator.device.productName`, never off this field. The id is kept
+ * only as a fallback for a device whose product string says nothing useful.
  */
 export function mchoseV3FindProduct(
   mouseProductId: number | null,
   productName?: string | null,
 ): MchoseV3Product | null {
-  const byId = MCHOSE_V3_PRODUCTS.find((product) => product.productId === mouseProductId);
-  if (byId) return byId;
   const name = productName?.trim().toUpperCase() ?? "";
-  if (!name) return null;
-  // Longest name first so "A7 V3 Pro+" is not swallowed by "A7 V3 Pro".
-  return [...MCHOSE_V3_PRODUCTS]
-    .sort((a, b) => b.name.length - a.name.length)
-    .find((product) => name.includes(product.name.toUpperCase())) ?? null;
+  if (name) {
+    // Longest name first so "A7 V3 Pro+" is not swallowed by "A7 V3 Pro".
+    const byName = [...MCHOSE_V3_PRODUCTS]
+      .sort((a, b) => b.name.length - a.name.length)
+      .find((product) => name.includes(product.name.toUpperCase()));
+    if (byName) return byName;
+  }
+  return MCHOSE_V3_PRODUCTS.find((product) => product.productId === mouseProductId) ?? null;
 }
 
 /** Polling rates available to a model. */

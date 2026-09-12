@@ -452,8 +452,12 @@ family and its siblings — use a second, unrelated protocol on the *same vendor
 id and the same usage page*. M HUB ships both UIs side by side, with a model
 list (`W8` in the bundle) picking which one a device gets.
 
-**Nothing in this section has been confirmed on hardware.** It is a reading of
-the vendor bundle, which is why `src/drivers/mchose/v3-hid.ts` only reads.
+**The reads in this section are confirmed on hardware; the writes are not.** An
+A7 V3 Ultra+ on its 2.4 GHz receiver (host PID `0x1014`/`0x1018`) answered
+`0x0900`, `0x0002`, `0x0003` and `0x0001` exactly as read out of the vendor
+bundle — see [what the hardware said](#what-the-hardware-said) at the end. No
+byte has ever been written to a V3, which is why
+`src/drivers/mchose/v3-hid.ts` only reads.
 
 | | A7 V2 | A7 V3 |
 | --- | --- | --- |
@@ -595,3 +599,48 @@ The reads are the whole driver today. To turn it into a full one:
 Do not skip step 3. The V2's stale-reply buffer meant a read taken too early
 returned a *different command's* payload, and one of those nearly went back out
 as a config write.
+
+### What the hardware said
+
+An **A7 V3 Ultra+** behind its receiver (host PID `0x1018`), from an OpenMouse
+diagnostic export dated 2026-09-12. Data blocks only; the framing is stripped.
+
+```
+OUT 0x0900                 -> 37 38 26 40 04 00 00 00 00 10 02 01 55 00 08 e4
+OUT 0x0002                 -> 00 41 41 03 00 41 00 08 08 08 08 …
+OUT 0x0003 [00]            -> 00 00 06 01 00 90 01 20 03 40 06 80 0c 00 19 50 c3
+OUT 0x0001 [00 00 06]      -> 00 01 00 00 02 00 00 04 00 00 10 00 00 08 00 ff ff ff
+OUT 0x0901                 -> (empty)
+```
+
+Everything decoded correctly: battery 85 % and charging, four profiles, DPI
+stages 400/800/1600/3200/6400/**50000** with the second active, 2000 Hz, a
+three-minute sleep timer, 8 ms on both debounce bytes, sensor `0x41` (eSports,
+every processing toggle off), and six stock button assignments.
+
+Two things the capture corrected.
+
+> **`0x0900`'s product id is not a model id.** This mouse's USB product string
+> is `MCHOSE A7 V3 Ultra+`, and it reports `0x4026` — the id MCHOSE's own table
+> gives the *A5 V3 Ultra+*. Believing it named the wrong mouse and, through it,
+> handed out a 42,000 DPI ceiling and a three-step lift-off ladder to a 50,000
+> DPI five-step model. `mchoseV3FindProduct` now prefers the product string and
+> keeps the id only as a fallback. M HUB agrees: every model lookup in the
+> vendor bundle keys off `navigator.device.productName`, never off this field.
+>
+> This is the opposite of the A7 V2's rule, where the id inside the battery
+> reply *is* decisive. Do not carry one habit across to the other generation.
+
+> **`0x0901` needs a target byte** — 0 for the mouse, 1 for the receiver. Sent
+> bare it answers with an empty data block rather than an error, which is why
+> the first capture shows no firmware version at all.
+
+Also worth recording: the `0xff01` collection on this receiver declares `0x4d`
+as an **input, output *and* feature** report. The driver uses output plus input
+and that works; the feature path is untried.
+
+The lift-off command `0x0009` still has not been exercised. The capture was
+taken while the driver believed it was talking to a three-step model, so it
+read lift-off from the sensor byte and never sent `0x0009`. With the model
+resolved correctly the Ultra+ now takes that branch, and a device that does not
+answer it degrades to a blank lift-off rather than a wrong one.

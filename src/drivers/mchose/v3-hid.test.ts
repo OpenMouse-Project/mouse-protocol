@@ -53,11 +53,15 @@ interface FakeOptions {
   silent?: number[];
   /** Emit an unrelated input report before every real answer. */
   noisy?: boolean;
+  /** Override the `0x0900` reply, to replay a real capture. */
+  deviceInfo?: number[];
 }
 
 function fakeMouse(options: FakeOptions = {}) {
   const listeners: Array<(event: unknown) => void> = [];
   const sent: number[] = [];
+  /** The data block sent with each command, so arguments can be asserted. */
+  const sentData = new Map<number, number[]>();
 
   const emit = (body: Uint8Array): void => {
     const event = { data: new DataView(body.buffer.slice(0)) };
@@ -84,8 +88,11 @@ function fakeMouse(options: FakeOptions = {}) {
       const body = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
       const command = body[3]! | (body[4]! << 8);
       sent.push(command);
+      sentData.set(command, [...body.subarray(7, 7 + body[2]!)]);
       if (options.silent?.includes(command)) return;
-      const answer = ANSWERS[command];
+      const answer = command === MCHOSE_V3_COMMAND.readDeviceInfo && options.deviceInfo
+        ? options.deviceInfo
+        : ANSWERS[command];
       if (!answer) return;
       queueMicrotask(() => {
         // The mouse pushes movement and battery down the same pipe; a driver
@@ -96,7 +103,7 @@ function fakeMouse(options: FakeOptions = {}) {
     },
   } as unknown as HIDDevice;
 
-  return { device, sent };
+  return { device, sent, sentData };
 }
 
 describe("MCHOSE A7 V3 driver", () => {
@@ -134,7 +141,8 @@ describe("MCHOSE A7 V3 driver", () => {
     const status = await new MchoseV3HidClient(device).readStatus();
 
     assert.equal(status.brand, "MCHOSE");
-    // Resolved from the id inside the device-info reply, not the receiver's.
+    // This fake's product string names no model, so the id in the device-info
+    // reply is the fallback that resolves it.
     assert.equal(status.name, "MCHOSE A7 V3 Ultra+");
     assert.equal(status.batteryPercent, 87);
     assert.equal(status.batteryState, "Discharging");
@@ -170,7 +178,7 @@ describe("MCHOSE A7 V3 driver", () => {
 
     assert.equal(status.ui!.settingsReady, false, "nothing here can be written yet");
     assert.equal(status.ui!.valuesVerified, true, "but what is shown was read off the mouse");
-    assert.match(status.ui!.statusNote!, /not been confirmed on hardware/);
+    assert.match(status.ui!.statusNote!, /cannot change them yet/);
     // The read-only promise is part of the contract, not just the prose.
     assert.equal("setDpi" in client, false);
     assert.equal("setPollingRate" in client, false);
@@ -214,5 +222,33 @@ describe("MCHOSE A7 V3 driver", () => {
     assert.equal(status.name, "MCHOSE A7 V3 Ultra+", "the receiver still knows the model");
     assert.equal(status.activeProfile, null, "but nothing behind the link answered");
     assert.equal(status.dpi, 0);
+  });
+
+  /**
+   * Replays the real A7 V3 Ultra+ capture: its 0x0900 reply carries 0x4026,
+   * the id MCHOSE lists for the A5 V3 Ultra+. Before the product string won,
+   * this mouse was named A5 V3 Ultra+ and inherited a 42,000 DPI ceiling and a
+   * three-step lift-off ladder it does not have.
+   */
+  it("names the mouse from its product string, not its reported id", async () => {
+    const { device } = fakeMouse({
+      productName: "MCHOSE A7 V3 Ultra+",
+      deviceInfo: [
+        0x37, 0x38, 0x26, 0x40, 0x04, 0x00, 0x00, 0x00,
+        0x00, 0x10, 0x02, 0x01, 0x55, 0x00, 0x08, 0xe4,
+      ],
+    });
+    const status = await new MchoseV3HidClient(device).readStatus();
+    assert.equal(status.name, "MCHOSE A7 V3 Ultra+");
+    assert.equal(status.batteryPercent, 85);
+    assert.equal(status.batteryState, "Charging");
+    assert.equal(status.profileCount, 4);
+  });
+
+  it("asks 0x0901 which side it wants the version from", async () => {
+    // Sent bare, the mouse answers with an empty block and no firmware at all.
+    const { device, sentData } = fakeMouse();
+    await new MchoseV3HidClient(device).readStatus();
+    assert.deepEqual(sentData.get(MCHOSE_V3_COMMAND.readVersion), [0], "the mouse, not the receiver");
   });
 });
