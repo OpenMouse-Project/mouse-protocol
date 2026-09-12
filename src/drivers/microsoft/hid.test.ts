@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MicrosoftHidClient } from "./hid.ts";
-import { MICROSOFT_PRODUCTS, REPORT_ID_READ, REPORT_ID_WRITE } from "../../microsoft/index.ts";
+import { MICROSOFT_PRODUCT_PRO, MICROSOFT_PRODUCT_CLASSIC, REPORT_ID_READ, REPORT_ID_WRITE, MICROSOFT_CLASSIC_USAGE_PAGE, MICROSOFT_CLASSIC_USAGE, MICROSOFT_PRO_USAGE_PAGE, MICROSOFT_PRO_USAGE } from "../../microsoft/index.ts";
 import { VENDOR_ID } from "../vendors.ts";
 
 const globals = globalThis as { window?: { setTimeout: typeof setTimeout } };
 globals.window ??= { setTimeout };
 
-function fakeMicrosoft(productId: number, options: { mockDpi: number; mockColor?: string; mockPolling?: number; mockLod?: number; isPro: boolean }) {
-  const sent: { reportId: number; data: Uint8Array }[] = [];
-  let listeners: Record<string, Function[]> = {};
-
+function fakeMicrosoft(productId: number, options: { isPro: boolean, mockDpi?: number, mockColor?: string, mockPolling?: number, mockLod?: number }) {
+  const sent: any[] = [];
+  const listeners: Record<string, Function[]> = {};
+  
   const device = {
     vendorId: VENDOR_ID.microsoft,
     productId,
@@ -22,16 +22,16 @@ function fakeMicrosoft(productId: number, options: { mockDpi: number; mockColor?
     sendFeatureReport: async (id: number, data: Uint8Array) => {
       sent.push({ reportId: id, data: new Uint8Array(data) });
       if (!options.isPro && id === REPORT_ID_WRITE && data[1] === 0x01) {
-        // Mock responding to a read request with an inputreport
         const property = data[0];
-        const reply = new Uint8Array(32);
+        const replyLength = 32;
+        const reply = new Uint8Array(replyLength);
         reply[0] = property;
         reply[1] = 0x00;
-        reply[2] = 0x03; // length
-        reply[3] = 0x00; // padding
-        if (property === 0x97) { // DPI read
-          reply[4] = options.mockDpi & 0xff;
-          reply[5] = (options.mockDpi >> 8) & 0xff;
+        reply[2] = 0x03;
+        reply[3] = 0x00;
+        if (property === 0x97) {
+          reply[4] = (options.mockDpi || 0) & 0xff;
+          reply[5] = ((options.mockDpi || 0) >> 8) & 0xff;
         }
         
         setTimeout(() => {
@@ -41,29 +41,27 @@ function fakeMicrosoft(productId: number, options: { mockDpi: number; mockColor?
       }
     },
     receiveFeatureReport: async (id: number) => {
-      if (!options.isPro) {
-        throw new Error("Failed to receive the feature report.");
-      }
+      if (!options.isPro) throw new Error("Classic uses inputreport");
       const request = sent[sent.length - 1];
       if (!request) throw new Error("No request sent");
       const property = request.data[0];
-      const reply = new Uint8Array(73);
-      reply[0] = id;
-      reply[1] = property;
-      reply[2] = 0x00;
-      reply[3] = 0x02; // length
-      if (property === 0x97) { // DPI
-        reply[4] = options.mockDpi & 0xff;
-        reply[5] = (options.mockDpi >> 8) & 0xff;
-      } else if (property === 0xB3 && options.mockColor) { // Color
+      const replyLength = 73;
+      const reply = new Uint8Array(replyLength);
+      reply[0] = property;
+      reply[1] = 0x00;
+      reply[2] = 0x02;
+      if (property === 0x97) {
+        reply[3] = (options.mockDpi || 0) & 0xff;
+        reply[4] = ((options.mockDpi || 0) >> 8) & 0xff;
+      } else if (property === 0xB3 && options.mockColor) {
         const hex = options.mockColor.replace(/^#/, "");
-        reply[4] = parseInt(hex.substring(0, 2), 16);
-        reply[5] = parseInt(hex.substring(2, 4), 16);
-        reply[6] = parseInt(hex.substring(4, 6), 16);
-      } else if (property === 0x84) { // Polling Rate
-        reply[4] = options.mockPolling ?? 0x00;
-      } else if (property === 0xB6) { // LOD
-        reply[4] = options.mockLod ?? 0x00;
+        reply[3] = parseInt(hex.substring(0, 2), 16);
+        reply[4] = parseInt(hex.substring(2, 4), 16);
+        reply[5] = parseInt(hex.substring(4, 6), 16);
+      } else if (property === 0x84) {
+        reply[3] = options.mockPolling ?? 0x00;
+      } else if (property === 0xB6) {
+        reply[3] = options.mockLod ?? 0x00;
       }
       return new DataView(reply.buffer);
     },
@@ -82,10 +80,10 @@ function fakeMicrosoft(productId: number, options: { mockDpi: number; mockColor?
 }
 
 test("isSupported accepts only known Microsoft products", () => {
-  const supportedPro = { vendorId: 0x045E, productId: 0x082a } as HIDDevice;
-  const supportedClassic = { vendorId: 0x045E, productId: 0x0823 } as HIDDevice;
-  const unsupported = { vendorId: 0x045E, productId: 0x1234 } as HIDDevice;
-  const otherVendor = { vendorId: 0x1532, productId: 0x082a } as HIDDevice;
+  const supportedPro = { vendorId: VENDOR_ID.microsoft, productId: MICROSOFT_PRODUCT_PRO, collections: [{usagePage: MICROSOFT_PRO_USAGE_PAGE, usage: MICROSOFT_PRO_USAGE}] } as HIDDevice;
+  const supportedClassic = { vendorId: VENDOR_ID.microsoft, productId: MICROSOFT_PRODUCT_CLASSIC, collections: [{usagePage: MICROSOFT_CLASSIC_USAGE_PAGE, usage: MICROSOFT_CLASSIC_USAGE}] } as HIDDevice;
+  const unsupported = { vendorId: VENDOR_ID.microsoft, productId: 0x0000, collections: [] } as HIDDevice;
+  const otherVendor = { vendorId: 0x1234, productId: MICROSOFT_PRODUCT_PRO, collections: [{usagePage: MICROSOFT_PRO_USAGE_PAGE, usage: MICROSOFT_PRO_USAGE}] } as HIDDevice;
   
   assert.equal(MicrosoftHidClient.isSupported(supportedPro), true);
   assert.equal(MicrosoftHidClient.isSupported(supportedClassic), true);
@@ -94,7 +92,7 @@ test("isSupported accepts only known Microsoft products", () => {
 });
 
 test("Pro Intellimouse reads DPI and Color via receiveFeatureReport", async () => {
-  const { device, sent } = fakeMicrosoft(0x082a, { isPro: true, mockDpi: 3200, mockColor: "#FF0000" });
+  const { device, sent } = fakeMicrosoft(MICROSOFT_PRODUCT_PRO, { isPro: true, mockDpi: 3200, mockColor: "#FF0000" });
   const client = new MicrosoftHidClient(device);
   
   const status = await client.readStatus();
@@ -108,7 +106,7 @@ test("Pro Intellimouse reads DPI and Color via receiveFeatureReport", async () =
 });
 
 test("Classic Intellimouse reads DPI via inputreport event", async () => {
-  const { device, sent } = fakeMicrosoft(0x0823, { isPro: false, mockDpi: 1600 });
+  const { device, sent } = fakeMicrosoft(MICROSOFT_PRODUCT_CLASSIC, { isPro: false, mockDpi: 1600 });
   const client = new MicrosoftHidClient(device);
   
   const status = await client.readStatus();
@@ -119,7 +117,7 @@ test("Classic Intellimouse reads DPI via inputreport event", async () => {
 });
 
 test("Pro Intellimouse setDpi and setLighting send correct padded payloads", async () => {
-  const { device, sent } = fakeMicrosoft(0x082a, { isPro: true, mockDpi: 800 });
+  const { device, sent } = fakeMicrosoft(MICROSOFT_PRODUCT_PRO, { isPro: true, mockDpi: 800 });
   const client = new MicrosoftHidClient(device);
   
   await client.setDpi(1600); // 0x0640
@@ -141,7 +139,7 @@ test("Pro Intellimouse setDpi and setLighting send correct padded payloads", asy
 });
 
 test("Classic Intellimouse setDpi sends correct 32-byte payload", async () => {
-  const { device, sent } = fakeMicrosoft(0x0823, { isPro: false, mockDpi: 400 });
+  const { device, sent } = fakeMicrosoft(MICROSOFT_PRODUCT_CLASSIC, { isPro: false, mockDpi: 400 });
   const client = new MicrosoftHidClient(device);
   
   await client.setDpi(3200); // 0x0C80
@@ -157,7 +155,7 @@ test("Classic Intellimouse setDpi sends correct 32-byte payload", async () => {
 
 test("Pro Intellimouse reads and writes polling rate and LOD", async () => {
   // mockPolling: 0x01 = 500Hz, mockLod: 0x01 = High
-  const { device, sent } = fakeMicrosoft(0x082a, { isPro: true, mockDpi: 800, mockPolling: 0x01, mockLod: 0x01 });
+  const { device, sent } = fakeMicrosoft(MICROSOFT_PRODUCT_PRO, { isPro: true, mockDpi: 800, mockPolling: 0x01, mockLod: 0x01 });
   const client = new MicrosoftHidClient(device);
   
   const status = await client.readStatus();

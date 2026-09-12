@@ -5,7 +5,7 @@ import {
   ROG_GLADIUS_II_PRODUCT_ID,
 } from "../asus/index.ts";
 import { ATK_COMPX_PRODUCT_IDS } from "./atk/products.ts";
-import { MICROSOFT_PRODUCTS } from "../microsoft/index.ts";
+import { MICROSOFT_PRODUCT_CLASSIC, MICROSOFT_PRODUCT_PRO, MICROSOFT_VENDOR_ID, MICROSOFT_CLASSIC_USAGE_PAGE, MICROSOFT_CLASSIC_USAGE, MICROSOFT_PRO_USAGE_PAGE, MICROSOFT_PRO_USAGE } from "../microsoft/index.ts";
 import { INCOTT_PRODUCT_IDS, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../incott/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { GEARHUB_PRODUCTS, GEARHUB_VENDOR_ID } from "@openmouse/protocol/gearhub";
@@ -131,7 +131,7 @@ export const VENDOR_ID = {
   mchoseA5Gen1: MCHOSE_A5_GEN1_VENDOR_ID,
   ksnakeUsb: 0xa8a4, // K-snake X11 wired
   ksnakeDongle: 0xa8a5, // K-snake X11 2.4 GHz dongle
-  microsoft: 0x045E,
+  microsoft: MICROSOFT_VENDOR_ID,
   dareu: DAREU_VENDOR_ID,
   // Shares 0x093a with Glorious's Pixart-based Model O 2 / I 2 family (see
   // `glorious` above); GloriousHidClient.isSupported() only claims its own
@@ -595,9 +595,10 @@ export const CORSAIR_HID_FILTERS: HIDDeviceFilter[] = CORSAIR_PRODUCT_IDS.map((p
   usage: CORSAIR_CONFIG_USAGE,
 }));
 
-export const MICROSOFT_HID_FILTERS: HIDDeviceFilter[] = [...MICROSOFT_PRODUCTS].map(
-  (productId) => ({ vendorId: VENDOR_ID.microsoft, productId, usagePage: 0x0C, usage: 0x01 }),
-);
+export const MICROSOFT_HID_FILTERS: HIDDeviceFilter[] = [
+  { vendorId: VENDOR_ID.microsoft, productId: MICROSOFT_PRODUCT_CLASSIC, usagePage: MICROSOFT_CLASSIC_USAGE_PAGE, usage: MICROSOFT_CLASSIC_USAGE }, // Classic
+  { vendorId: VENDOR_ID.microsoft, productId: MICROSOFT_PRODUCT_PRO, usagePage: MICROSOFT_PRO_USAGE_PAGE, usage: MICROSOFT_PRO_USAGE }, // Pro
+];
 
 /**
  * The Incott 8K wireless mouse (and its charging-state product id) answer the
