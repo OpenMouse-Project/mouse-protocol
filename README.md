@@ -40,12 +40,23 @@ checklist.
 | Brand | Import |
 | --- | --- |
 | ATK | `@openmouse/protocol/atk` |
+| Corsair | `@openmouse/protocol/corsair` |
+| Dareu | `@openmouse/protocol/dareu` |
 | Endgame Gear OP1/XM2 8K | `@openmouse/protocol/endgame-gear-op1` |
 | Endgame Gear wireless | `@openmouse/protocol/endgame-gear-we` |
+| Fantech | `@openmouse/protocol/fantech` |
 | Finalmouse | `@openmouse/protocol/finalmouse` |
+| G-Wolves | `@openmouse/protocol/gwolves` |
+| GearHub (Attack Shark / Lingbao) | `@openmouse/protocol/gearhub` |
+| Glorious | `@openmouse/protocol/glorious` |
+| Glorious classic (Model O/D/I) | `@openmouse/protocol/glorious-classic` |
+| HyperX | `@openmouse/protocol/hyperx` |
+| Incott | `@openmouse/protocol/incott` |
+| K-snake | `@openmouse/protocol/ksnake` |
 | Keychron | `@openmouse/protocol/keychron` |
 | Lamzu / CRDRAKO / Attack Shark | `@openmouse/protocol/lamzu` |
 | Logitech | `@openmouse/protocol/logitech` |
+| MCHOSE | `@openmouse/protocol/mchose` |
 | Microsoft | `@openmouse/protocol/microsoft` |
 | moddoMOUSE | `@openmouse/protocol/moddo` |
 | Ninjutso | `@openmouse/protocol/ninjutso` |
@@ -56,7 +67,10 @@ checklist.
 | SteelSeries Rival 3 (Gen 1) | `@openmouse/protocol/steelseries` |
 | Teevolution | `@openmouse/protocol/teevolution` |
 | VGN | `@openmouse/protocol/vgn` |
+| WALLHACK | `@openmouse/protocol/wallhack` |
 | WLMouse | `@openmouse/protocol/wlmouse` |
+| Wooting | `@openmouse/protocol/wooting` |
+| Zaunkoenig | `@openmouse/protocol/zaunkoenig` |
 
 An exported protocol means OpenMouse implements that wire format. It does not
 claim every mouse from that brand works. When a catalog provides a `verified`
