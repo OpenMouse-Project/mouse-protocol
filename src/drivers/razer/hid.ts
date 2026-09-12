@@ -188,6 +188,26 @@ export class RazerHidClient {
     if (this.device.opened) await this.device.close();
   }
 
+  /**
+   * Whether this collection actually answers the Razer protocol, tried by
+   * sending the firmware-version read rather than inferred from the
+   * collection's declared shape. `isSupported()`'s shape check (single
+   * collection, Generic Desktop Mouse) is right for every model verified so
+   * far, but WebHID does not validate report ids against the descriptor (see
+   * the note atop codec.ts), so a collection that fails the shape check can
+   * still genuinely answer report 0 — used as a fallback in
+   * `razerProbeControlInterface` for exactly that case, not as the normal
+   * detection path.
+   */
+  async probeReachable(): Promise<boolean> {
+    try {
+      await this.request(RAZER_READ.firmware);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   displayName(): string {
     const known = this.profile();
     return known ? `Razer ${known.model}` : this.device.productName || "Razer";
@@ -800,4 +820,49 @@ export class RazerHidClient {
   private delay(milliseconds: number): Promise<void> {
     return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
   }
+}
+
+/**
+ * Last-resort device selection for when none of the granted collections
+ * matched `RazerHidClient.isSupported()`'s shape check. Rather than guess a
+ * new shape, this tries the protocol itself against every Razer-vendor
+ * collection Chrome granted and returns the client for whichever one
+ * actually answers.
+ *
+ * This exists because the shape check assumes every model's control channel
+ * is a single Generic Desktop Mouse collection (verified true so far for
+ * every model this driver has been confirmed against) — a real assumption a
+ * given browser/OS combination could break for a specific model without any
+ * code here changing, since what collections get exposed to WebHID at all is
+ * decided below this driver, by the platform. Kept off the normal detection
+ * path (`registry.ts`'s `DEVICE_DRIVERS` entry still uses `isSupported()`
+ * alone) because sending real protocol traffic to every candidate is real
+ * device I/O, not a cheap shape check, and only worth it once the cheap
+ * check has already failed to find anything.
+ *
+ * `sendFeatureReport`/`receiveFeatureReport` reject immediately for a
+ * collection with no feature-report capability at all, so a wrong candidate
+ * costs one failed call, not a hang — see `write()`'s try/catch above.
+ */
+export async function razerProbeControlInterface(
+  devices: readonly HIDDevice[],
+): Promise<RazerHidClient | null> {
+  const candidates = devices.filter((device) => device.vendorId === VENDOR_ID.razer);
+  for (const device of candidates) {
+    const client = new RazerHidClient(device);
+    const tag = `[razer-probe] 0x${device.productId.toString(16).padStart(4, "0")} `
+      + device.collections.map((c) => `${(c.usagePage ?? 0).toString(16)}:${c.usage ?? 0}`).join(",");
+    try {
+      await client.open();
+      if (await client.probeReachable()) {
+        console.info(`${tag} -> answered`);
+        return client;
+      }
+      console.info(`${tag} -> opened, no reply`);
+    } catch (error) {
+      console.info(`${tag} -> ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await client.close().catch(() => undefined);
+  }
+  return null;
 }

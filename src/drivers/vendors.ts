@@ -330,6 +330,17 @@ export const RAZER_VIPER_V3_CONTROL_FILTERS: HIDDeviceFilter[] = [0x00c0, 0x00c1
  *   shape for them, and their extra buttons/wheel make a different interface
  *   layout plausible.
  */
+// Widened to match Razer's own Synapse Web: intercepting its live
+// navigator.hid.requestDevice() call (synapse.razer.com/dashboard, "Add
+// Device") for the models it currently offers (Viper V4 Pro 0xe5/0xe6,
+// DeathAdder V4 Pro 0xbe/0xbf/0xef/0xf0) showed filters of exactly
+// `{vendorId, productId, usagePage}` — usagePage 0x01 AND 0x0c, with NO
+// `usage` field at all. That already matched RAZER_VIPER_V4_CONTROL_FILTERS
+// below; it did not match this constant, which added a `usage: 0x02`
+// restriction Razer's own reference implementation does not apply. Dropped
+// here to follow the same pattern, on top of razerProbeControlInterface
+// (hid.ts) trying the real protocol against whatever gets granted rather
+// than assuming which single collection is correct.
 export const RAZER_HYPERSPEED_CONTROL_FILTERS: HIDDeviceFilter[] = [
   0x0078, // Viper (see RAZER_VIPER_CONTROL_FILTERS above; kept for the doc trail)
   0x007a, // Viper Ultimate (Wired)
@@ -344,7 +355,7 @@ export const RAZER_HYPERSPEED_CONTROL_FILTERS: HIDDeviceFilter[] = [
   0x00d6, 0x00d7, // Basilisk V3 Pro 35K Phantom Green
   0x00be, 0x00bf, // DeathAdder V4 Pro
   0x00ef, 0x00f0, // DeathAdder V4 Pro Carbon Fiber Edition
-].map((productId) => ({ vendorId: VENDOR_ID.razer, productId, usagePage: 0x01, usage: 0x02 }));
+].flatMap((productId) => [0x01, 0x0c].map((usagePage) => ({ vendorId: VENDOR_ID.razer, productId, usagePage })));
 
 // The Viper Mini answers on the same kind of single Generic Desktop Mouse
 // control interface as the V3 Pro, so it gets the same narrow collection filter.
