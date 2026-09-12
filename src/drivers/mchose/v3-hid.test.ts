@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { MchoseV3HidClient } from "./v3-hid.ts";
 import { MchoseHidClient } from "./hid.ts";
 import { MchoseDockHidClient } from "./dock-hid.ts";
-import { MCHOSE_V3_BODY_LENGTH, MCHOSE_V3_COMMAND } from "@openmouse/protocol/mchose";
+import {
+  MCHOSE_V3_BODY_LENGTH,
+  MCHOSE_V3_COMMAND,
+  mchoseV3IsBusy,
+  mchoseV3IsRejection,
+  mchoseV3Payload,
+} from "@openmouse/protocol/mchose";
 
 /** What an A7 V3 Ultra+ behind its receiver would answer, command by command. */
 const ANSWERS: Readonly<Record<number, number[]>> = {
@@ -53,6 +59,10 @@ interface FakeOptions {
   silent?: number[];
   /** Emit an unrelated input report before every real answer. */
   noisy?: boolean;
+  /** Answer these commands with the firmware's refusal frame. */
+  reject?: number[];
+  /** Answer everything with the one-byte ask-again a stranded receiver sends. */
+  busy?: boolean;
   /** Override the `0x0900` reply, to replay a real capture. */
   deviceInfo?: number[];
 }
@@ -89,6 +99,17 @@ function fakeMouse(options: FakeOptions = {}) {
       const command = body[3]! | (body[4]! << 8);
       sent.push(command);
       sentData.set(command, [...body.subarray(7, 7 + body[2]!)]);
+      if (options.reject?.includes(command)) {
+        // Command 0x0000, checksum flag clear, 0xff in the sequence byte.
+        const nak = new Uint8Array(MCHOSE_V3_BODY_LENGTH);
+        nak.set([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00]);
+        queueMicrotask(() => { emit(nak); });
+        return;
+      }
+      if (options.busy) {
+        queueMicrotask(() => { emit(frame(command, [0xff])); });
+        return;
+      }
       if (options.silent?.includes(command)) return;
       const answer = command === MCHOSE_V3_COMMAND.readDeviceInfo && options.deviceInfo
         ? options.deviceInfo
@@ -250,5 +271,86 @@ describe("MCHOSE A7 V3 driver", () => {
     const { device, sentData } = fakeMouse();
     await new MchoseV3HidClient(device).readStatus();
     assert.deepEqual(sentData.get(MCHOSE_V3_COMMAND.readVersion), [0], "the mouse, not the receiver");
+  });
+});
+
+/**
+ * Three reply shapes a real A7 V3 Ultra+ sends that are not data, captured
+ * 2026-09-12. Mistaking any of them for silence is what made a live mouse look
+ * dead.
+ */
+describe("MCHOSE A7 V3 reply handling", () => {
+  it("recognises the refusal the firmware sends for an unsupported command", () => {
+    // Verbatim: what 0x0901 answers, about a second after every request.
+    const nak = new Uint8Array(MCHOSE_V3_BODY_LENGTH);
+    nak.set([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00]);
+    assert.equal(mchoseV3IsRejection(nak), true);
+    // It carries command 0x0000, so it can never be mistaken for a payload.
+    assert.equal(mchoseV3Payload(nak, MCHOSE_V3_COMMAND.readVersion), null);
+
+    // A real reply is not a refusal.
+    const real = frame(MCHOSE_V3_COMMAND.readLiftOff, [0x04]);
+    assert.equal(mchoseV3IsRejection(real), false);
+  });
+
+  it("recognises the one-byte ask-again a receiver sends with no mouse behind it", () => {
+    const payload = mchoseV3Payload(
+      frame(MCHOSE_V3_COMMAND.readDeviceInfo, [0xff]), MCHOSE_V3_COMMAND.readDeviceInfo,
+    )!;
+    assert.equal(mchoseV3IsBusy(payload), true);
+
+    // Stricter than M HUB's own test, which looks at the first byte alone: a
+    // button table legitimately starts with 0xff when button one is unassigned.
+    const buttons = new Uint8Array([0xff, 0xff, 0xff, 0x00, 0x00, 0x02]);
+    assert.equal(mchoseV3IsBusy(buttons), false);
+  });
+
+  it("gives up on a refused command instead of spending the whole budget", async () => {
+    const { device, sent } = fakeMouse({ reject: [MCHOSE_V3_COMMAND.readVersion] });
+    const status = await new MchoseV3HidClient(device).readStatus();
+
+    const versionAsks = sent.filter((c) => c === MCHOSE_V3_COMMAND.readVersion).length;
+    assert.equal(versionAsks, 1, "asked once, told no, moved on");
+    // And a refusal on one command must not poison the rest of the read.
+    assert.equal(status.name, "MCHOSE A7 V3 Ultra+");
+    assert.equal(status.dpi, 800);
+    assert.deepEqual(status.firmware, []);
+  });
+
+  it("keeps reading the rest of the status after a command is refused", async () => {
+    const { device, sent } = fakeMouse({ reject: [MCHOSE_V3_COMMAND.readVersion] });
+    await new MchoseV3HidClient(device).readStatus();
+    // A device that says "no" is awake; the old code treated it as silence and
+    // abandoned every command after it.
+    for (const command of [
+      MCHOSE_V3_COMMAND.readDeviceInfo,
+      MCHOSE_V3_COMMAND.readSettings,
+      MCHOSE_V3_COMMAND.readDpi,
+      MCHOSE_V3_COMMAND.readButtons,
+    ]) {
+      assert.ok(sent.includes(command), `0x${command.toString(16)} was still asked`);
+    }
+  });
+
+  it("stops asking a receiver whose mouse is not reachable, and says so", async () => {
+    // A real receiver reports the paired mouse's name, which is how the panel
+    // still names the model while the mouse itself is unreachable.
+    const { device, sent } = fakeMouse({ busy: true, productName: "MCHOSE A7 V3 Ultra+" });
+    const status = await new MchoseV3HidClient(device).readStatus();
+
+    assert.equal(
+      sent.filter((c) => c === MCHOSE_V3_COMMAND.readDeviceInfo).length, 2,
+      "one retry, then stop — each ask costs a second on real hardware",
+    );
+    assert.match(status.ui!.statusNote!, /not reachable/);
+    assert.doesNotMatch(status.ui!.statusNote!, /did not answer/);
+    // The model still comes from the product string, so the panel is not blank.
+    assert.equal(status.name, "MCHOSE A7 V3 Ultra+");
+  });
+
+  it("still concludes nothing is listening when nothing ever arrives", async () => {
+    const { device } = fakeMouse({ silent: Object.values(MCHOSE_V3_COMMAND) });
+    const status = await new MchoseV3HidClient(device).readStatus();
+    assert.match(status.ui!.statusNote!, /did not answer/);
   });
 });

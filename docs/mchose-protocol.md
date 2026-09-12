@@ -644,3 +644,29 @@ taken while the driver believed it was talking to a three-step model, so it
 read lift-off from the sensor byte and never sent `0x0009`. With the model
 resolved correctly the Ultra+ now takes that branch, and a device that does not
 answer it degrades to a blank lift-off rather than a wrong one.
+
+### Replies that are not data
+
+Three shapes, all captured from a real A7 V3 Ultra+ on 2026-09-12. Reading any
+of them as silence is enough to make a working mouse look dead.
+
+| Shape | Meaning |
+| --- | --- |
+| command `0x0000`, flags `0x00`, length 0, `0xff` in the sequence byte | **refusal.** The firmware will not serve that command. Retrying changes nothing |
+| a payload that is the single byte `0xff` | **ask again.** The device is listening but cannot answer yet |
+| nothing at all | genuinely not listening |
+
+`0x0901` is answered with a refusal on an A7 V3 Ultra+, request after request.
+A receiver with no mouse reachable behind it answers `0x0900` with the one-byte
+ask-again — M HUB's own read helper loops while the first payload byte is `0xff`
+for exactly this reason. Distinguishing the three matters because only the last
+one justifies abandoning the rest of a status read.
+
+> **Timings.** On a cable, `0x0900`, `0x0002`, `0x0003` and `0x0001` answer in
+> **1–3 ms**. Every reply that is not immediate takes **almost exactly
+> 1.001 s** — the refusals above, and `0x0900` over an idle receiver. That looks
+> like a fixed deferral in the firmware rather than a variable delay, so a reply
+> timeout only has to clear one second. An earlier 600 ms budget sat just
+> underneath it, which meant those replies were always missed and then mistaken
+> for the *next* attempt's answer.
+
