@@ -2,7 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   MCHOSE_V3_BODY_LENGTH,
+  MCHOSE_V3_BUTTON_ACTIONS,
   MCHOSE_V3_BUTTON_UNSET,
+  MCHOSE_V3_SENSOR_MOTION_SYNC,
+  MCHOSE_V3_SENSOR_RIPPLE,
+  mchoseV3ButtonAction,
+  mchoseV3CheckSettings,
+  mchoseV3EncodeButtons,
+  mchoseV3EncodeDpiTable,
+  mchoseV3EncodeLiftOff,
+  mchoseV3EncodeSensor,
+  mchoseV3RoundDpi,
   MCHOSE_V3_COMMAND,
   MCHOSE_V3_MODES,
   MCHOSE_V3_PRODUCTS,
@@ -150,13 +160,16 @@ test("encoding settings restores the wire's rate slots", () => {
     angleTuning: -15,
     leftDebounceMs: 8,
     rightDebounceMs: 4,
+    extra: [],
   };
   const data = mchoseV3EncodeSettings(settings);
   assert.equal(data[1], 0x32, "wired slot 3 with stage 2");
   assert.equal(data[2], 0x62, "wireless slot 6 with stage 2");
   assert.equal(data[6], 0xf1, "the negative angle goes back out as two's complement");
   assert.deepEqual(
-    mchoseV3DecodeSettings(new Uint8Array(data)), settings,
+    mchoseV3DecodeSettings(new Uint8Array(data)),
+    // A block built from nothing pads the tail, exactly as M HUB does.
+    { ...settings, extra: new Array<number>(10).fill(0) },
     "a decode of the encode is the settings that went in",
   );
 });
@@ -411,4 +424,161 @@ test("the captured button table walks six stock assignments", () => {
   assert.deepEqual(buttons.Back!.value, [0x00, 0x08]);
   // ...and a DPI button the firmware marks unset rather than defaulted.
   assert.equal(buttons.DPI!.type, MCHOSE_V3_BUTTON_UNSET);
+});
+
+// ── Writes ───────────────────────────────────────────────────────────────────
+
+/**
+ * The whole reason the settings block carries an `extra` tail. A real A7 V3
+ * Ultra+ returns ten bytes of 0x08 past the nine named fields — the same value
+ * as its two debounce fields, so almost certainly the other buttons' debounce.
+ * M HUB pads that region with zeros; doing the same would set them all to 0 on
+ * every unrelated write.
+ */
+test("a settings write puts back the tail the mouse reported", () => {
+  const settings = mchoseV3DecodeSettings(new Uint8Array(CAPTURE.settings))!;
+  assert.deepEqual(settings.extra, new Array<number>(10).fill(0x08), "the mouse's own tail");
+
+  settings.sleep = 5;
+  const data = mchoseV3EncodeSettings(settings);
+  assert.deepEqual(
+    data.slice(9), new Array<number>(10).fill(0x08),
+    "the tail goes back untouched, not zeroed",
+  );
+  assert.equal(data[3], 5, "and the edited field did change");
+});
+
+test("a settings block is range-checked before it can reach the wire", () => {
+  const base = mchoseV3DecodeSettings(new Uint8Array(CAPTURE.settings))!;
+  assert.doesNotThrow(() => mchoseV3CheckSettings(base));
+
+  const bad = (edit: (s: MchoseV3Settings) => void): (() => void) => () => {
+    const copy: MchoseV3Settings = { ...base, extra: [...base.extra] };
+    edit(copy);
+    mchoseV3CheckSettings(copy);
+  };
+  assert.throws(bad((s) => { s.leftDebounceMs = 21; }), RangeError, "debounce past 20 ms");
+  assert.throws(bad((s) => { s.angleTuning = 31; }), RangeError, "angle past +30");
+  assert.throws(bad((s) => { s.angleTuning = -31; }), RangeError, "angle past -30");
+  assert.throws(bad((s) => { s.dpiIndex = 6; }), RangeError, "a seventh DPI stage");
+  assert.throws(bad((s) => { s.sleep = 61; }), RangeError, "more than an hour of sleep");
+});
+
+test("the sensor encoder changes one field and leaves the rest of the byte alone", () => {
+  // Bit 5 of the A7 V2's sensor byte was never explained; assigning rather than
+  // masking is how a codec quietly destroys a field it does not know about.
+  const before = 0b1010_0101;
+  const after = mchoseV3EncodeSensor(before, { motionSync: true });
+  assert.equal(after & MCHOSE_V3_SENSOR_MOTION_SYNC, MCHOSE_V3_SENSOR_MOTION_SYNC);
+  assert.equal(
+    after & ~MCHOSE_V3_SENSOR_MOTION_SYNC & 0xff,
+    before & ~MCHOSE_V3_SENSOR_MOTION_SYNC & 0xff,
+    "every other bit survived",
+  );
+
+  assert.equal(mchoseV3EncodeSensor(0xff, { rippleControl: false }) & MCHOSE_V3_SENSOR_RIPPLE, 0);
+  assert.equal(mchoseV3DecodeSensor(mchoseV3EncodeSensor(0x00, { modeIndex: 2 })).modeIndex, 2);
+  assert.equal(mchoseV3DecodeSensor(mchoseV3EncodeSensor(0x00, { liftOffIndex: 3 })).liftOffIndex, 3);
+  assert.throws(() => mchoseV3EncodeSensor(0, { liftOffIndex: 4 }), RangeError, "two bits only");
+  assert.throws(() => mchoseV3EncodeSensor(0, { modeIndex: 4 }), RangeError, "two bits here too");
+});
+
+/**
+ * A decode fed straight back into the encoder must be a no-op, including for
+ * the mode's unnamed fourth value: MCHOSE labels three of the two bits' four
+ * states, and a mouse reporting the fourth must not be blocked from having any
+ * other setting written.
+ */
+test("every sensor round trip survives its own encoder", () => {
+  for (const sensor of [0x00, 0x41, 0x45, 0x80, 0xff, 0b1010_1010]) {
+    const decoded = mchoseV3DecodeSensor(sensor);
+    const reencoded = mchoseV3EncodeSensor(sensor, decoded);
+    assert.equal(reencoded, sensor, `0x${sensor.toString(16)} came back changed`);
+  }
+});
+
+test("DPI is rounded to a step the firmware stores, and refused out of range", () => {
+  const ultra = mchoseV3FindProduct(0x4033)!;
+  assert.equal(mchoseV3RoundDpi(1600, ultra), 1600);
+  assert.equal(mchoseV3RoundDpi(1620, ultra), 1600, "rounds to the nearest 50");
+  assert.equal(mchoseV3RoundDpi(1630, ultra), 1650);
+  assert.equal(mchoseV3RoundDpi(50000, ultra), 50000);
+  assert.throws(() => mchoseV3RoundDpi(199, ultra), RangeError, "below the vendor's own floor");
+  assert.throws(() => mchoseV3RoundDpi(50050, ultra), RangeError, "past this model's ceiling");
+
+  // A 26,000 DPI model must not be handed the Ultra+'s ceiling.
+  assert.throws(() => mchoseV3RoundDpi(42000, mchoseV3FindProduct(0x4030)!), RangeError);
+});
+
+test("the DPI table encodes back into the shape it was decoded from", () => {
+  const dpi = mchoseV3DecodeDpi(new Uint8Array(CAPTURE.dpi))!;
+  const ultra = mchoseV3FindProduct(0x4033)!;
+  const data = mchoseV3EncodeDpiTable(dpi, ultra);
+
+  assert.equal(data[0], dpi.profileIndex);
+  assert.equal(data[1], dpi.axis);
+  assert.equal(data[2], 0, "hasSeparateY");
+  assert.equal(data[3], dpi.stageCount);
+  assert.equal(data[4], dpi.activeStage);
+  // Stage values go back little-endian, matching the read.
+  assert.deepEqual([...data.slice(5, 7)], [0x90, 0x01]);
+  assert.deepEqual([...data.slice(15, 17)], [0x50, 0xc3]);
+});
+
+test("a DPI table with an impossible shape is refused", () => {
+  const dpi = mchoseV3DecodeDpi(new Uint8Array(CAPTURE.dpi))!;
+  const ultra = mchoseV3FindProduct(0x4033)!;
+  assert.throws(
+    () => mchoseV3EncodeDpiTable({ ...dpi, activeStage: dpi.stageCount }, ultra),
+    RangeError,
+    "an active stage past the end of the enabled list",
+  );
+  assert.throws(() => mchoseV3EncodeDpiTable({ ...dpi, stageCount: 0 }, ultra), RangeError);
+  assert.throws(
+    () => mchoseV3EncodeDpiTable({ ...dpi, stages: dpi.stages.slice(0, 5) }, ultra),
+    RangeError,
+    "a short table would leave a stage holding whatever was there",
+  );
+});
+
+test("lift-off writes are bounded by the model's own ladder", () => {
+  const ultra = mchoseV3FindProduct(0x4033)!;
+  assert.deepEqual(mchoseV3EncodeLiftOff(1, 4, ultra), [1, 4]);
+  assert.throws(() => mchoseV3EncodeLiftOff(0, 5, ultra), RangeError, "five steps, not six");
+  // The three-step models must not be handed a five-step index.
+  assert.throws(() => mchoseV3EncodeLiftOff(0, 3, mchoseV3FindProduct(0x4031)!), RangeError);
+});
+
+test("the button table is written in the same variable-width shape it is read", () => {
+  const buttons = mchoseV3DecodeButtons(new Uint8Array(CAPTURE.buttons))!;
+  const data = mchoseV3EncodeButtons(0, buttons);
+  assert.deepEqual(
+    data.slice(3), [...CAPTURE.buttons],
+    "re-encoding an untouched table reproduces the capture byte for byte",
+  );
+  assert.deepEqual(data.slice(0, 3), [0, 0, 6], "profile, reserved, button count");
+});
+
+test("only actions with a captured encoding are offered", () => {
+  assert.deepEqual([...MCHOSE_V3_BUTTON_ACTIONS], ["Default", "Disabled"]);
+  assert.deepEqual(mchoseV3ButtonAction("Back", "Default"), { type: 0x00, value: [0x00, 0x08] });
+  assert.deepEqual(
+    mchoseV3ButtonAction("DPI", "Disabled"),
+    { type: MCHOSE_V3_BUTTON_UNSET, value: [0xff, 0xff] },
+  );
+  // Nothing is invented for the actions whose values have never been seen.
+  assert.equal(mchoseV3ButtonAction("Left", "Keyboard"), null);
+  assert.equal(mchoseV3ButtonAction("Nonexistent", "Default"), null);
+});
+
+test("a button assignment whose value is the wrong width is refused", () => {
+  const buttons = mchoseV3DecodeButtons(new Uint8Array(CAPTURE.buttons))!;
+  assert.throws(
+    () => mchoseV3EncodeButtons(0, { ...buttons, Left: { type: 0x00, value: [1] } }),
+    RangeError,
+    "a short value would shift every entry after it",
+  );
+  const withoutDpi = { ...buttons };
+  delete withoutDpi.DPI;
+  assert.throws(() => mchoseV3EncodeButtons(0, withoutDpi), /missing "DPI"/);
 });

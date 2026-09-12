@@ -644,3 +644,50 @@ taken while the driver believed it was talking to a three-step model, so it
 read lift-off from the sensor byte and never sent `0x0009`. With the model
 resolved correctly the Ultra+ now takes that branch, and a device that does not
 answer it degrades to a blank lift-off rather than a wrong one.
+
+### Writing
+
+Every V3 write **replaces a whole block**. There is no partial update and no
+read-modify-write on the device side, so a caller reads the block, edits the
+decoded structure and sends the whole thing back. That is why the encoders take
+a structure rather than a set of changes, and why a failed read has to abort the
+write instead of falling back to defaults.
+
+| Command | Data |
+| --- | --- |
+| `0x0102` | the `0x0002` settings block, same layout |
+| `0x0103` | `[profile, axis, hasY, count, activeStage, six uint16 stages]` |
+| `0x0104` | `[profile, stage, axis, dpi uint16]` — one stage, no table rewrite |
+| `0x0109` | `[profile, liftOffIndex]` |
+| `0x0101` | `[profile, 0, buttonCount]` then the variable-width button entries |
+
+> **The DPI write and read do not order their fields the same way.** The write
+> puts `hasSeparateY` third and the read puts it fifth. Copying a decoded table
+> straight into a write buffer silently swaps the stage count with it.
+
+**The settings block's tail is not padding.** M HUB writes ten zero bytes past
+the nine named fields, but a real A7 V3 Ultra+ *returns* ten bytes of `0x08`
+there — the same value as both its debounce fields, so most likely the debounce
+for the remaining buttons. Writing the vendor's zeros would quietly set them all
+to nothing on every unrelated write, so those bytes are carried through from the
+read instead.
+
+**The sensor byte must be masked, not assigned.** The A7 V2's bit 5 was never
+explained; a writer that assigns the byte destroys whatever a field it does not
+know about was holding.
+
+**None of these writes has been sent to a real device.** The framing under them
+is proven — the mouse answers frames built by the same encoder — but the
+firmware's response to each write is not. Two numbers are the likely first
+suspects if something misbehaves:
+
+- the settle delay before the read-back, currently the A7 V2's 400 ms;
+- whether a write needs a separate save or commit command at all. Nothing in the
+  vendor bundle suggests one, but nothing rules it out either.
+
+The button vocabulary is deliberately two entries wide — "Default" and
+"Disabled" — because those are the only two encodings that appear in a real
+capture. Keyboard, media, DPI, macro and profile actions all exist in the
+protocol; they stay unavailable until someone records what M HUB writes for
+them, since a button is the one setting where a wrong guess can leave someone
+unable to click.

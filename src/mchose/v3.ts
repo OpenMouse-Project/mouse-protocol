@@ -32,9 +32,12 @@
  *
  * The checksum is an XOR of `body[1]` through `body[6 + length]`.
  *
- * **Nothing in this file has been exercised on hardware.** It is a reading of
- * the vendor bundle, and the driver that uses it is read-only for that reason;
- * see docs/mchose-protocol.md.
+ * The **decoders** are confirmed against a real A7 V3 Ultra+; the framing that
+ * carries them is therefore confirmed too, since the mouse answered these
+ * frames. The **encoders below them have never been sent to a device.** Every
+ * write in this protocol replaces a whole block, so each one takes a structure
+ * a caller has just read back rather than a set of changes — see the Writes
+ * section and docs/mchose-protocol.md.
  */
 
 /** Output report the whole V3 command set rides on; also the `'M'` magic. */
@@ -248,6 +251,18 @@ export interface MchoseV3Settings {
   angleTuning: number;
   leftDebounceMs: number;
   rightDebounceMs: number;
+  /**
+   * Everything past the nine fields above, kept verbatim so a write can put it
+   * back untouched.
+   *
+   * M HUB pads this with ten zero bytes, but a real A7 V3 Ultra+ returns ten
+   * bytes of `0x08` here — the same value sitting in both debounce fields, so
+   * these are most likely the remaining buttons' debounce. Writing the
+   * vendor's zeros would quietly set them all to 0. Nothing here knows what
+   * they are, which is exactly why they are carried through rather than
+   * invented.
+   */
+  extra: number[];
 }
 
 /** `0x0002` — the settings the V2 kept in its one big config blob. */
@@ -266,6 +281,7 @@ export function mchoseV3DecodeSettings(data: Uint8Array): MchoseV3Settings | nul
     angleTuning: (data[6]! << 24) >> 24,
     leftDebounceMs: data[7]!,
     rightDebounceMs: data[8]!,
+    extra: [...data.slice(9)],
   };
 }
 
@@ -290,11 +306,15 @@ export function mchoseV3EncodeSettings(settings: MchoseV3Settings): number[] {
     settings.angleTuning & 0xff,
     settings.leftDebounceMs & 0xff,
     settings.rightDebounceMs & 0xff,
-    // The vendor pads ten zero bytes past the block; the firmware may well
-    // read them, so they are not dropped.
-    ...new Array<number>(10).fill(0),
+    // Whatever the mouse had here goes straight back. Ten zeros only when a
+    // caller built settings from nothing, which matches M HUB's own padding.
+    ...(settings.extra.length ? settings.extra.map((byte) => byte & 0xff)
+      : new Array<number>(SETTINGS_EXTRA_BYTES).fill(0)),
   ];
 }
+
+/** Bytes past the nine named settings fields, as M HUB pads them. */
+const SETTINGS_EXTRA_BYTES = 10;
 
 /**
  * Sensor byte layout — **note that it is not the V2's**. The V2 puts lift-off
@@ -561,3 +581,228 @@ export function mchoseV3LiftOffStop(
   if (index === steps - 1) return "High";
   return "Medium";
 }
+
+// ── Writes ───────────────────────────────────────────────────────────────────
+//
+// Every write below replaces a whole block: this protocol has no partial
+// update, so a caller must read, edit the decoded object and send it back.
+// That is why each encoder takes a full structure rather than a set of changes.
+
+/** DPI bounds. The vendor's own slider starts at 200 and steps in 50s. */
+export const MCHOSE_V3_DPI_MIN = 200;
+export const MCHOSE_V3_DPI_STEP = 50;
+
+/** The firmware takes 0-20 ms, the same window as the A7 V2's. */
+export const MCHOSE_V3_DEBOUNCE_MAX_MS = 20;
+
+/** Auto-sleep in minutes, where 0 means never. */
+export const MCHOSE_V3_SLEEP_MAX_MINUTES = 60;
+
+export const MCHOSE_V3_ANGLE_TUNING_MIN = -30;
+export const MCHOSE_V3_ANGLE_TUNING_MAX = 30;
+
+function checkRange(name: string, value: number, min: number, max: number): void {
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new RangeError(`${name} must be an integer from ${min} to ${max}.`);
+  }
+}
+
+/**
+ * Round a DPI to something the firmware stores exactly, and refuse anything
+ * outside the model's range rather than clamping — a silently clamped value
+ * reads back as a mismatch and looks like a protocol fault.
+ */
+export function mchoseV3RoundDpi(dpi: number, product: MchoseV3Product): number {
+  checkRange("DPI", Math.round(dpi), MCHOSE_V3_DPI_MIN, product.dpiMax);
+  const rounded = Math.round(dpi / MCHOSE_V3_DPI_STEP) * MCHOSE_V3_DPI_STEP;
+  return Math.min(Math.max(rounded, MCHOSE_V3_DPI_MIN), product.dpiMax);
+}
+
+/**
+ * Validate a settings block before it goes near the wire. The block is written
+ * whole, so one bad field would be written alongside eight good ones.
+ */
+export function mchoseV3CheckSettings(settings: MchoseV3Settings): void {
+  checkRange("Profile", settings.profileIndex, 0, 15);
+  checkRange("DPI stage", settings.dpiIndex, 0, MCHOSE_V3_DPI_STAGES - 1);
+  checkRange("Wired polling", settings.wiredRateIndex, 0, 15);
+  checkRange("Wireless polling", settings.wirelessRateIndex, 0, 15);
+  checkRange("Sleep", settings.sleep, 0, MCHOSE_V3_SLEEP_MAX_MINUTES);
+  checkRange("Left debounce", settings.leftDebounceMs, 0, MCHOSE_V3_DEBOUNCE_MAX_MS);
+  checkRange("Right debounce", settings.rightDebounceMs, 0, MCHOSE_V3_DEBOUNCE_MAX_MS);
+  checkRange(
+    "Angle tuning", settings.angleTuning,
+    MCHOSE_V3_ANGLE_TUNING_MIN, MCHOSE_V3_ANGLE_TUNING_MAX,
+  );
+  checkRange("Sensor flags", settings.sensor, 0, 0xff);
+}
+
+/**
+ * Rewrite the sensor byte, changing only the named fields and **preserving
+ * every bit this codec does not claim**. The A7 V2 taught this the hard way:
+ * its bit 5 was never explained, and assigning the byte rather than masking it
+ * would have cleared whatever it meant.
+ */
+export function mchoseV3EncodeSensor(
+  current: number,
+  changes: Partial<Omit<MchoseV3Sensor, "liftOffIndex">> & { liftOffIndex?: number },
+): number {
+  let sensor = current & 0xff;
+  const set = (mask: number, on: boolean): void => {
+    sensor = on ? (sensor | mask) : (sensor & ~mask & 0xff);
+  };
+  if (changes.rippleControl !== undefined) set(MCHOSE_V3_SENSOR_RIPPLE, changes.rippleControl);
+  if (changes.angleSnapping !== undefined) set(MCHOSE_V3_SENSOR_LINEAR, changes.angleSnapping);
+  if (changes.motionSync !== undefined) set(MCHOSE_V3_SENSOR_MOTION_SYNC, changes.motionSync);
+  if (changes.glassMode !== undefined) set(MCHOSE_V3_SENSOR_GLASS, changes.glassMode);
+  if (changes.modeIndex !== undefined) {
+    // Bounded by the field, not by the label table: the mode is two bits and
+    // MCHOSE names only three of the four, so a faithful decode of an unknown
+    // 0b11 has to survive being written straight back. Picking a *new* mode
+    // goes through the name lookup in the driver, which cannot produce a 3.
+    checkRange("Mode", changes.modeIndex, 0, MCHOSE_V3_SENSOR_MODE_MASK);
+    sensor = (sensor & ~MCHOSE_V3_SENSOR_MODE_MASK & 0xff) | changes.modeIndex;
+  }
+  if (changes.liftOffIndex !== undefined) {
+    // Only the models that keep lift-off here, and only two bits of it.
+    checkRange("Lift-off", changes.liftOffIndex, 0, MCHOSE_V3_SENSOR_LOD_MASK >> MCHOSE_V3_SENSOR_LOD_SHIFT);
+    sensor = (sensor & ~MCHOSE_V3_SENSOR_LOD_MASK & 0xff)
+      | ((changes.liftOffIndex << MCHOSE_V3_SENSOR_LOD_SHIFT) & MCHOSE_V3_SENSOR_LOD_MASK);
+  }
+  return sensor;
+}
+
+/**
+ * `0x0103` — the whole DPI table for one axis. Six stages go out every time,
+ * so the untouched ones must be the values just read back.
+ */
+export function mchoseV3EncodeDpiTable(dpi: MchoseV3Dpi, product: MchoseV3Product): number[] {
+  checkRange("Stage count", dpi.stageCount, 1, MCHOSE_V3_DPI_STAGES);
+  checkRange("Active stage", dpi.activeStage, 0, dpi.stageCount - 1);
+  if (dpi.stages.length !== MCHOSE_V3_DPI_STAGES) {
+    throw new RangeError(`The DPI table needs all ${MCHOSE_V3_DPI_STAGES} stages.`);
+  }
+  const data = [
+    dpi.profileIndex & 0xff,
+    dpi.axis & 0xff,
+    dpi.hasSeparateY ? 1 : 0,
+    dpi.stageCount & 0xff,
+    dpi.activeStage & 0xff,
+  ];
+  for (const stage of dpi.stages) {
+    const value = mchoseV3RoundDpi(stage, product);
+    data.push(value & 0xff, (value >> 8) & 0xff);
+  }
+  return data;
+}
+
+/** `0x0104` — one stage, without rewriting the table around it. */
+export function mchoseV3EncodeSingleDpi(
+  profileIndex: number,
+  stage: number,
+  axis: number,
+  dpi: number,
+  product: MchoseV3Product,
+): number[] {
+  checkRange("Stage", stage, 0, MCHOSE_V3_DPI_STAGES - 1);
+  const value = mchoseV3RoundDpi(dpi, product);
+  return [profileIndex & 0xff, stage & 0xff, axis & 0xff, value & 0xff, (value >> 8) & 0xff];
+}
+
+/** `0x0109` — lift-off on the models that keep it outside the sensor byte. */
+export function mchoseV3EncodeLiftOff(
+  profileIndex: number,
+  index: number,
+  product: MchoseV3Product,
+): number[] {
+  checkRange("Lift-off", index, 0, product.liftOffDistances.length - 1);
+  return [profileIndex & 0xff, index & 0xff];
+}
+
+/**
+ * `0x0101` — the button table, written whole in the same variable-width shape
+ * it is read in. Every button goes out, so the ones not being changed must be
+ * the assignments just read back.
+ */
+export function mchoseV3EncodeButtons(
+  profileIndex: number,
+  buttons: Readonly<Record<string, MchoseV3ButtonAssignment>>,
+): number[] {
+  const data = [profileIndex & 0xff, 0, MCHOSE_V3_BUTTONS.length];
+  for (const name of MCHOSE_V3_BUTTONS) {
+    const action = buttons[name];
+    if (!action) throw new Error(`The button table is missing "${name}".`);
+    const width = BUTTON_VALUE_WIDTH[action.type] ?? 2;
+    if (action.value.length !== width) {
+      throw new RangeError(
+        `"${name}": type 0x${action.type.toString(16)} takes ${width} value bytes, not ${action.value.length}.`,
+      );
+    }
+    data.push(action.type & 0xff);
+    // Decode reversed all but the two big-endian types, so encoding mirrors it.
+    const value = BUTTON_BIG_ENDIAN_TYPES.has(action.type)
+      ? [...action.value]
+      : [...action.value].reverse();
+    for (const byte of value) data.push(byte & 0xff);
+  }
+  return data;
+}
+
+/**
+ * Factory value for each button — the mask a stock mouse carries under type 0,
+ * read straight off a real A7 V3 Ultra+'s button table.
+ */
+const BUTTON_DEFAULT_VALUE: Readonly<Record<string, readonly number[]>> = {
+  Left: [0x00, 0x01],
+  Right: [0x00, 0x02],
+  Middle: [0x00, 0x04],
+  Forward: [0x00, 0x10],
+  Back: [0x00, 0x08],
+  DPI: [0x00, 0x00],
+};
+
+/**
+ * The actions this driver will write.
+ *
+ * Deliberately two. The A7 V2's type and value tables were confirmed key by key
+ * on hardware; this generation's have not been, and a button is the one setting
+ * where a wrong guess can leave someone unable to click. Both of these appear
+ * verbatim in a real capture: five buttons on type 0 carrying their own mask,
+ * and an unassigned one on type `0xff`.
+ *
+ * Keyboard, media, DPI and macro actions all exist in the protocol and are
+ * listed in docs/mchose-protocol.md. They are not offered until someone with
+ * the hardware captures what M HUB writes for them.
+ */
+export const MCHOSE_V3_BUTTON_ACTIONS: readonly string[] = ["Default", "Disabled"];
+
+export function mchoseV3ButtonAction(
+  button: string,
+  action: string,
+): MchoseV3ButtonAssignment | null {
+  if (action === "Default") {
+    const value = BUTTON_DEFAULT_VALUE[button];
+    return value ? { type: 0x00, value: [...value] } : null;
+  }
+  if (action === "Disabled") return { type: MCHOSE_V3_BUTTON_UNSET, value: [0xff, 0xff] };
+  return null;
+}
+
+/** Name the action an assignment represents, for display. */
+export function mchoseV3ButtonActionName(action: MchoseV3ButtonAssignment): string {
+  switch (action.type) {
+    case 0x00: return "Default";
+    case 0x01: return "Mouse button";
+    case 0x02: return "Keyboard";
+    case 0x03: return "Media";
+    case 0x04: return "Macro";
+    case 0x05: return "DPI";
+    case 0x08: return "System";
+    case 0x0a: return "Profile";
+    case MCHOSE_V3_BUTTON_UNSET: return "Disabled";
+    default: return `Type ${action.type}`;
+  }
+}
+
+/** Sleep timeouts the panel offers, in seconds; 0 is "never". */
+export const MCHOSE_V3_SLEEP_OPTIONS: readonly number[] = [0, 60, 120, 180, 300, 600, 1800];
