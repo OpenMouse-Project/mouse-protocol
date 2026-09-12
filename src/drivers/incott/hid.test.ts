@@ -171,7 +171,11 @@ function defaultState() {
     // the exact values verified on hardware 2026-09-08. Stage 1 (800 DPI) is
     // active by default.
     dpiStagesWire: [7, 15, 31, 47, 63, 127],
-    activeDpiStage: 1, // 0x83/0x06's answer.
+    // Y starts equal to X, as the factory table has it. That equality is
+    // exactly what hid the per-axis read from an earlier probe.
+    dpiStagesWireY: [7, 15, 31, 47, 63, 127],
+    activeDpiStage: 1, // 0x83 response byte 3.
+    dpiStageCount: 6, // 0x83 response byte 2 — the cycle length, not an echo.
     pollingWire: 0, // 1000 Hz
     lodWire: 0, // 10 tenths mm -> Medium
     motionSync: 1,
@@ -181,8 +185,15 @@ function defaultState() {
     debounceMs: 4,
     sleepSeconds: 60,
     receiverLed: 0,
+    // Read from hardware 2026-09-11: 09 85 02 03 0a.
+    fireKeyTimes: 3,
+    fireKeyIntervalMs: 10,
     batteryByte: 0x38 as number | null, // 56%, captured 2026-09-07
     identity: [0x01, 0x0e, 0x02, 0xf0, 0xf1, 0x00, 0xff] as number[] | null,
+    // The factory bindings read from hardware 2026-09-08, by WIRE index.
+    // Note index 3 is Back and index 4 is Forward — the transposition in
+    // INCOTT_BUTTON_WIRE_INDEX.
+    buttons: [0x00f00001, 0x00f10001, 0x00f20001, 0x00f30001, 0x00f40001, 0x00030007] as number[],
   };
 }
 
@@ -221,6 +232,8 @@ function vendorCollection(usagePage: number = INCOTT_USAGE_PAGE): HIDCollectionI
 function fakeDevice(options: FakeOptions = {}) {
   const state: FakeState = { ...defaultState(), ...options.state };
   const sent: Uint8Array[] = [];
+  // OUTPUT reports, which only the macro upload uses.
+  const outputs: Array<{ reportId: number; bytes: Uint8Array }> = [];
   let buffer = new Uint8Array(64);
   let opened = false;
   // Only "inputreport" is ever registered by this driver; a single slot is
@@ -235,14 +248,22 @@ function fakeDevice(options: FakeOptions = {}) {
       case 0x81:
         return frame(0x81, state.pollingWire);
       case 0x82: {
-        // Per-stage DPI value read, little-endian at bytes 3-4. See
-        // incottDecodeDpiStage.
-        const wire = state.dpiStagesWire[sub];
-        return wire === undefined ? null : frame(0x82, sub, wire & 0xff, (wire >> 8) & 0xff);
+        // Per-stage DPI value read, little-endian at bytes 3-4. Request byte
+        // 2 selects the axis (0 both/X, 1 X, 2 Y) and the reply echoes it at
+        // byte 8 — see incottEncodeQueryDpiAxis.
+        const axis = payload[2] ?? 0;
+        const table = axis === 2 ? state.dpiStagesWireY : state.dpiStagesWire;
+        const wire = table[sub];
+        if (wire === undefined) return null;
+        return frame(0x82, sub, wire & 0xff, (wire >> 8) & 0xff, 0, 0, 0, axis);
       }
       case 0x83:
-        // Active DPI *stage index* (0-5). See incottDecodeDpiStageIndex.
-        return sub === 0x06 ? frame(0x83, 0x06, state.activeDpiStage) : null;
+        // The DPI cycle: byte 2 the stage COUNT, byte 3 the active index.
+        // Answers whatever sub-command was sent, because byte 2 is data, not
+        // an echo — real hardware answers `09 83 00` with `09 83 06 01`, and
+        // this fake used to answer only sub 0x06, which is what let the
+        // driver's wrong echo assumption pass its tests.
+        return frame(0x83, state.dpiStageCount, state.activeDpiStage);
       case 0x84:
         // sub 0x00 is the legacy packed byte-7 form (still decodable via
         // incottDecodeLiftOff/incottDecodeMotionSync, cross-checked against
@@ -257,8 +278,15 @@ function fakeDevice(options: FakeOptions = {}) {
         return null;
       case 0x85:
         if (sub === 0x01) return frame(0x85, 0x01, state.debounceMs);
+        if (sub === 0x02) return frame(0x85, 0x02, state.fireKeyTimes, state.fireKeyIntervalMs);
         if (sub === 0x03) return frame(0x85, 0x03, state.sleepSeconds & 0xff, (state.sleepSeconds >> 8) & 0xff);
         return null;
+      case 0x86: {
+        // Echoes the button index, then the 32-bit binding little-endian.
+        const code = state.buttons[sub];
+        if (code === undefined) return null;
+        return frame(0x86, sub, code & 0xff, (code >>> 8) & 0xff, (code >>> 16) & 0xff, (code >>> 24) & 0xff);
+      }
       case 0x88:
         return frame(0x88, state.receiverLed);
       case 0x89:
@@ -284,12 +312,19 @@ function fakeDevice(options: FakeOptions = {}) {
     // cmd 0x02: `sub` here is a DPI STAGE INDEX (0-5), not a fixed
     // sub-command — the bug this driver used to have. See incottEncodeSetDpi.
     if (cmd === 0x02 && sub >= 0 && sub < state.dpiStagesWire.length) {
-      state.dpiStagesWire[sub] = value | ((payload[3] ?? 0) << 8);
+      // Payload byte 7 is the axis: 0 writes both, 1 X only, 2 Y only.
+      const wire = value | ((payload[3] ?? 0) << 8);
+      const axis = payload[7] ?? 0;
+      if (axis !== 2) state.dpiStagesWire[sub] = wire;
+      if (axis !== 1) state.dpiStagesWireY[sub] = wire;
     }
-    // cmd 0x03/sub 0x06: SELECTS the active stage — must never touch
-    // dpiStagesWire. This is the operation IncottHIDApp mislabels "set DPI"
-    // and the one the driver's setDpi() used to be conflated with.
-    else if (cmd === 0x03 && sub === 0x06 && value >= 0 && value < state.dpiStagesWire.length) {
+    // cmd 0x03: writes the CYCLE — byte 1 the stage count, byte 2 the active
+    // index. Must never touch dpiStagesWire: this is the operation
+    // IncottHIDApp mislabels "set DPI" and the one the driver's setDpi() used
+    // to be conflated with. The count is stored, so a driver that sends a
+    // hardcoded 6 here visibly resizes a shorter cycle.
+    else if (cmd === 0x03 && sub >= 1 && sub <= state.dpiStagesWire.length && value >= 0 && value < sub) {
+      state.dpiStageCount = sub;
       state.activeDpiStage = value;
     }
     else if (cmd === 0x01) state.pollingWire = sub; // no sub-command: wire value sits at byte 1
@@ -299,8 +334,14 @@ function fakeDevice(options: FakeOptions = {}) {
     else if (cmd === 0x04 && sub === 0x04) state.motionSync = value;
     else if (cmd === 0x04 && sub === 0x05) state.performanceMode = value;
     else if (cmd === 0x05 && sub === 0x01) state.debounceMs = value;
+    else if (cmd === 0x05 && sub === 0x02) { state.fireKeyTimes = value; state.fireKeyIntervalMs = payload[3] ?? 0; }
     else if (cmd === 0x05 && sub === 0x03) state.sleepSeconds = value | ((payload[3] ?? 0) << 8);
     else if (cmd === 0x08) state.receiverLed = sub; // no sub-command: mode sits at byte 1
+    // cmd 0x06: `sub` is the button WIRE index, then the 32-bit action.
+    else if (cmd === 0x06 && sub >= 0 && sub < state.buttons.length) {
+      state.buttons[sub] =
+        ((value | ((payload[3] ?? 0) << 8) | ((payload[4] ?? 0) << 16) | ((payload[5] ?? 0) << 24)) >>> 0);
+    }
   };
 
   const device = {
@@ -316,6 +357,13 @@ function fakeDevice(options: FakeOptions = {}) {
     },
     close: async () => {
       opened = false;
+    },
+    // Only the macro upload sends these; everything else is a feature report.
+    sendReport: async (reportId: number, data: BufferSource) => {
+      const view = ArrayBuffer.isView(data)
+        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+        : new Uint8Array(data as ArrayBuffer);
+      outputs.push({ reportId, bytes: new Uint8Array(view) });
     },
     sendFeatureReport: async (_reportId: number, data: BufferSource) => {
       const view = ArrayBuffer.isView(data)
@@ -348,6 +396,7 @@ function fakeDevice(options: FakeOptions = {}) {
   return {
     device: device as unknown as HIDDevice,
     sent,
+    outputs,
     state,
     /**
      * Simulates the mouse's unsolicited input report arriving — only fires
@@ -436,9 +485,11 @@ test("readStatus decodes every field from the device's current state", async () 
   // active.
   const status = await client.readStatus();
   assert.equal(status.brand, "Incott");
-  // Normalized for display (see incottNormalizeProductName): the raw string
-  // remains available as client.device.productName.
-  assert.equal(status.name, "8K wireless");
+  // Read FROM THE DEVICE, not from the product string: the dongle reports a
+  // generic "incott 8K wireless mouse" with no model in it, while the
+  // identity reply names the model (see `incottDecodeIdentity`). The raw
+  // string remains available as client.device.productName.
+  assert.equal(status.name, "G23V2 Pro");
   assert.equal(device.productName, "incott 8K wireless mouse", "the raw product string stays available on the device");
   assert.equal(status.connectionType, "Wireless");
   assert.equal(status.dpi, 800);
@@ -469,7 +520,7 @@ test("readStatus decodes every field from the device's current state", async () 
   assert.equal(status.ui?.family, "incott");
   assert.equal(status.ui?.showAdvancedSection, true);
   assert.equal(status.ui?.hideSignalCard, true);
-  assert.equal(status.ui?.defaultDisplayName, "8K wireless");
+  assert.equal(status.ui?.defaultDisplayName, "G23V2 Pro");
   assert.equal(status.ui?.hideUnsupportedPollingRates, true);
   assert.equal(status.ui?.pollingNote, "Up to 8,000 Hz wireless; 1,000 Hz over the cable.");
   // The mouse has a real internal battery even while wired, so the app's
@@ -481,7 +532,7 @@ test("readStatus decodes every field from the device's current state", async () 
   assert.equal(status.activeDpiStage, 1);
   assert.deepEqual(status.ui?.dpiStageEditor, {
     maxStages: 6,
-    countEditable: false,
+    countEditable: true,
     minDpi: 50,
     maxDpi: 45000,
     stepDpi: 50,
@@ -599,15 +650,181 @@ test("supportedPollingRates offers the full ladder over the wireless connection"
   assert.equal(status.ui?.pollingNote, "Up to 8,000 Hz wireless; 1,000 Hz over the cable.");
 });
 
-test("readStatus normalizes the wired product string down to its real model name", async () => {
-  // Verified 2026-09-08: the real model name is only present in the wired
-  // product string. The wireless dongle's string is a generic name with no
-  // model in it — readStatus tidies whichever raw string it gets without
-  // inventing a model when wireless.
+test("readStatus trims the published stage table to the cycle the mouse actually uses", async () => {
+  // The device keeps six stored values regardless; only the first `count` are
+  // in the rotation, and offering the rest would let the user select a stage
+  // the mouse never visits.
+  const { device } = fakeDevice({ state: { dpiStageCount: 4, activeDpiStage: 2 } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.deepEqual(status.dpiStages, [400, 800, 1600, 2400]);
+  assert.equal(status.activeDpiStage, 2);
+  assert.equal(status.dpi, 1600);
+});
+
+test("REGRESSION: a cycle shorter than six still reads, instead of failing the sub-echo match", async () => {
+  // 0x83's byte 2 is the stage count, which the driver used to require to
+  // equal the 0x06 it sent. On a four-stage mouse every DPI read returned
+  // null and the whole settings grid was hidden.
+  const { device } = fakeDevice({ state: { dpiStageCount: 3, activeDpiStage: 0 } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.ui?.settingsReady, true);
+  assert.equal(status.activeDpiStage, 0);
+  assert.deepEqual(status.dpiStages, [400, 800, 1600]);
+});
+
+test("REGRESSION: selecting a stage preserves the cycle length instead of resetting it to six", async () => {
+  // The count shares the write with the index. Sending a hardcoded 0x06 here
+  // silently grew a four-stage cycle back to six every time the user picked a
+  // different DPI stage.
+  const { device, state } = fakeDevice({ state: { dpiStageCount: 4, activeDpiStage: 0 } });
+  await new IncottHidClient(device, fast).setActiveDpiStage(3);
+  assert.equal(state.activeDpiStage, 3);
+  assert.equal(state.dpiStageCount, 4, "the cycle length must survive a stage select");
+});
+
+test("setActiveDpiStage refuses a stage outside the mouse's current cycle", async () => {
+  const { device, state } = fakeDevice({ state: { dpiStageCount: 3, activeDpiStage: 0 } });
+  await assert.rejects(
+    () => new IncottHidClient(device, fast).setActiveDpiStage(4),
+    /outside this mouse's 3-stage cycle/,
+  );
+  assert.equal(state.activeDpiStage, 0, "nothing was written");
+});
+
+test("setDpiStageCount resizes the cycle and leaves every stored DPI value alone", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  const before = [...state.dpiStagesWire];
+  await client.setDpiStageCount(3);
+  assert.equal(state.dpiStageCount, 3);
+  assert.deepEqual(state.dpiStagesWire, before, "stage values are untouched by a resize");
+  const status = await client.readStatus();
+  assert.deepEqual(status.dpiStages, [400, 800, 1600]);
+});
+
+test("setDpiStageCount clamps an active stage that would fall outside the new cycle", async () => {
+  // The active index rides along in the same write, so it cannot be left
+  // pointing past the end of the shortened cycle.
+  const { device, state } = fakeDevice({ state: { activeDpiStage: 5 } });
+  await new IncottHidClient(device, fast).setDpiStageCount(2);
+  assert.equal(state.dpiStageCount, 2);
+  assert.equal(state.activeDpiStage, 1);
+});
+
+test("setDpiStageCount rejects a count outside 1-6 without writing", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(() => client.setDpiStageCount(0), RangeError);
+  await assert.rejects(() => client.setDpiStageCount(7), RangeError);
+  assert.equal(state.dpiStageCount, 6);
+});
+
+test("the stage-count picker is hidden when the cycle cannot be read", async () => {
+  // setDpiStageCount needs a real current count to preserve the active stage;
+  // offering the control against an unreadable one would write a guess.
+  const { device } = fakeDevice({ silent: [0x83] });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.ui?.dpiStageEditor?.countEditable, false);
+});
+
+test("readStatus publishes the six factory bindings by physical button name", async () => {
+  const { device } = fakeDevice();
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.deepEqual(status.buttonMappings, {
+    Left: "Left click",
+    Right: "Right click",
+    Middle: "Middle click",
+    // Proves the wire transposition is undone: wire index 4 holds 0x00F40001
+    // (forward) and is published as Forward, not as the button at array
+    // position 4.
+    Forward: "Forward",
+    Back: "Back",
+    DPI: "DPI cycle",
+  });
+  assert.equal(status.buttonOptions?.[0], "Left click");
+  assert.ok(status.buttonOptions?.includes("Disabled"));
+});
+
+test("readStatus hides the remapper entirely when a button read fails", async () => {
+  // Partial assignments would be published as real ones, and the shared
+  // remapper writes back what it shows.
+  const { device } = fakeDevice({ silent: [0x86] });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.buttonMappings, undefined);
+  assert.equal(status.buttonOptions, undefined);
+});
+
+test("readStatus reports an unrecognised binding as a raw code, not as a known action", async () => {
+  // Nothing this driver can name — not a mouse, media, keyboard or macro
+  // encoding — so it must be reported rather than mislabelled.
+  const { device } = fakeDevice({ state: { buttons: [0x12345678, 0x00f10001, 0x00f20001, 0x00f30001, 0x00f40001, 0x00030007] } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.buttonMappings?.Left, "Unknown (0x12345678)");
+});
+
+test("readStatus labels a keyboard binding read back from the mouse", async () => {
+  const { device } = fakeDevice({ state: { buttons: [0x00f00001, 0x00f10001, 0x00060100, 0x00f30001, 0x00f40001, 0x00030007] } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.buttonMappings?.Middle, "Ctrl + C");
+});
+
+test("setButtonMapping writes the action and verifies the read-back", async () => {
+  const { device } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setButtonMapping("Middle", "Mute");
+  const status = await client.readStatus();
+  assert.equal(status.buttonMappings?.Middle, "Mute");
+  // Nothing else moved.
+  assert.equal(status.buttonMappings?.Left, "Left click");
+  assert.equal(status.buttonMappings?.DPI, "DPI cycle");
+});
+
+test("setButtonMapping addresses Forward and Back by their wire index, not their position", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setButtonMapping("Forward", "Disabled");
+  // Wire index 4 is Forward. If the driver had used the display position (3)
+  // it would have silently disabled Back instead.
+  assert.equal(state.buttons[4], 0);
+  assert.equal(state.buttons[3], 0x00f30001, "Back is untouched");
+});
+
+test("setButtonMapping rejects an unknown button or action without writing", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(() => client.setButtonMapping("Thumb", "Mute"), /no "Thumb" button/);
+  await assert.rejects(() => client.setButtonMapping("Middle", "Teleport"), /Unknown button action/);
+  assert.deepEqual(state.buttons, [0x00f00001, 0x00f10001, 0x00f20001, 0x00f30001, 0x00f40001, 0x00030007]);
+});
+
+test("setButtonMapping throws when the mouse does not take the binding", async () => {
+  const { device } = fakeDevice({ ignoreWrites: true });
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(() => client.setButtonMapping("Middle", "Mute"), /instead of Mute/);
+});
+
+test("readStatus reports the same model name wired as wireless", async () => {
+  // The wired product string does carry a model ("incott Esports G23V2Pro
+  // mouse", verified 2026-09-08) while the dongle's does not, so relying on
+  // it would name the mouse differently depending on how it is plugged in.
+  // The identity reply is the same either way, so the name is too. The raw
+  // string stays available for anything that wants it.
   const { device } = fakeDevice({ productId: INCOTT_PRODUCT_ID_WIRED, productName: "incott Esports G23V2Pro mouse" });
   const status = await new IncottHidClient(device, fast).readStatus();
-  assert.equal(status.name, "Esports G23V2Pro");
+  assert.equal(status.name, "G23V2 Pro");
   assert.equal(device.productName, "incott Esports G23V2Pro mouse", "the raw string stays available on the device");
+});
+
+test("readStatus falls back to the product string when the model code is unknown", async () => {
+  // An Incott model this table has never seen must report whatever the
+  // device called itself, never a guess.
+  const { device } = fakeDevice({
+    productId: INCOTT_PRODUCT_ID_WIRED,
+    productName: "incott Esports G99 mouse",
+    state: { identity: [0x01, 0x7f, 0x02, 0xf0, 0xf1, 0x00, 0xff] },
+  });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.name, "Esports G99");
 });
 
 test("firmware falls back to a plain notice when identity cannot be read", async () => {
@@ -620,7 +837,9 @@ test("readStatus degrades to identity-only fields rather than fabricate the poll
   const { device } = fakeDevice({ silent: [0x81] });
   const client = new IncottHidClient(device, fast);
   const status = await client.readStatus();
-  assert.equal(status.name, "8K wireless");
+  // The identity query still answers here — only 0x81 is silent — so the
+  // model is still read from the device.
+  assert.equal(status.name, "G23V2 Pro");
   assert.equal(status.brand, "Incott");
   assert.equal(status.pollingRateHz, 0, "inert placeholder, never rendered because settingsReady is false");
   assert.equal(status.ui?.settingsReady, false);
@@ -1109,4 +1328,184 @@ test("REGRESSION: battery is not read from the 0x8e/0x01 feature-report reply, e
   assert.notEqual(status.batteryPercent, 56);
   assert.equal(status.batteryPercent, null);
   assert.equal(status.batteryState, "Unknown");
+});
+
+test("getFireKey reads the rapid-fire parameters", async () => {
+  const { device } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  assert.deepEqual(await client.getFireKey(), { times: 3, intervalMs: 10 });
+});
+
+test("setFireKey writes both parameters and verifies the read-back", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  assert.deepEqual(await client.setFireKey(2, 50), { times: 2, intervalMs: 50 });
+  assert.deepEqual([state.fireKeyTimes, state.fireKeyIntervalMs], [2, 50]);
+});
+
+test("setFireKey throws when the mouse does not take the value", async () => {
+  const { device } = fakeDevice({ ignoreWrites: true });
+  await assert.rejects(() => new IncottHidClient(device, fast).setFireKey(1, 20), /instead of 1 at 20 ms/);
+});
+
+test("setFireKey rejects out-of-range values without writing", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(() => client.setFireKey(4, 10), RangeError);
+  await assert.rejects(() => client.setFireKey(3, 300), RangeError);
+  assert.deepEqual([state.fireKeyTimes, state.fireKeyIntervalMs], [3, 10]);
+});
+
+test("readStatus publishes dpiY for the active stage", async () => {
+  // Stage 1 is active; give its axes different values.
+  const { device } = fakeDevice({ state: { dpiStagesWireY: [7, 31, 31, 47, 63, 127] } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.dpi, 800, "X");
+  assert.equal(status.dpiY, 1600, "Y");
+  // The capability flag the shared UI gates the X/Y display on.
+  assert.equal(status.supportsSeparateDpiAxes, true);
+});
+
+test("readStatus omits dpiY rather than mirroring X when the axis read fails", async () => {
+  // Claiming the axes match would be a fabricated reading; the app falls
+  // back to showing a single number instead.
+  const { device } = fakeDevice({ silent: [0x82] });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.dpiY, undefined);
+  assert.equal(status.supportsSeparateDpiAxes, undefined, "no axes claimed without a reading");
+});
+
+test("setDpiStageAxis writes one axis and leaves the other alone", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setDpiStageAxis(2, 3200, "y");
+  assert.equal(await client.readDpiStageAxis(2, "y"), 3200);
+  assert.equal(await client.readDpiStageAxis(2, "x"), 1600, "X untouched");
+  assert.equal(state.dpiStagesWire[2], 31, "the X table did not move");
+});
+
+test("setDpiStageAxis with 'both' moves the two axes together", async () => {
+  const { device } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setDpiStageAxis(4, 400, "both");
+  assert.equal(await client.readDpiStageAxis(4, "x"), 400);
+  assert.equal(await client.readDpiStageAxis(4, "y"), 400);
+});
+
+test("REGRESSION: reading X then Y on one stage does not return X twice", async () => {
+  // The two requests carry an identical command and sub-command, so without
+  // matching the axis echo at byte 8 the second read is satisfied by the
+  // first's latched frame — the reading that made this driver conclude no
+  // per-axis read existed.
+  const { device } = fakeDevice({ state: { dpiStagesWireY: [7, 15, 63, 47, 63, 127] } });
+  const client = new IncottHidClient(device, fast);
+  assert.equal(await client.readDpiStageAxis(2, "x"), 1600);
+  assert.equal(await client.readDpiStageAxis(2, "y"), 3200);
+});
+
+test("readStatus publishes the receiver LED mode and rapid-fire settings", async () => {
+  const { device } = fakeDevice({ state: { receiverLed: 2, fireKeyTimes: 2, fireKeyIntervalMs: 40 } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.incottReceiverLedMode, 2);
+  assert.equal(status.incottFireKeyTimes, 2);
+  assert.equal(status.incottFireKeyIntervalMs, 40);
+});
+
+test("readStatus omits the receiver LED over the cable, where it has no meaning", async () => {
+  // There is no dongle in wired mode, so the control is absent rather than
+  // present-but-inert. Rapid fire is unaffected: it lives in the mouse.
+  const { device } = fakeDevice({ productId: INCOTT_PRODUCT_ID_WIRED });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.incottReceiverLedMode, undefined);
+  assert.equal(status.incottFireKeyTimes, 3);
+});
+
+test("readStatus omits both rather than guessing when the queries fail", async () => {
+  const { device } = fakeDevice({ silent: [0x85, 0x88] });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.incottReceiverLedMode, undefined);
+  assert.equal(status.incottFireKeyTimes, undefined);
+  assert.equal(status.incottFireKeyIntervalMs, undefined);
+});
+
+test("setFireKey accepts 0 times, which is hold-to-fire rather than no fire", async () => {
+  // Confirmed against the vendor software 2026-09-11: 0 makes the button
+  // fire continuously while held and stop on release.
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  assert.deepEqual(await client.setFireKey(0, 25), { times: 0, intervalMs: 25 });
+  assert.equal(state.fireKeyTimes, 0);
+});
+
+test("setAxisDpi writes both axes of the active stage", async () => {
+  const { device } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setAxisDpi(800, 3200);
+  // Stage 1 is the active one in the default fake state.
+  assert.equal(await client.readDpiStageAxis(1, "x"), 800);
+  assert.equal(await client.readDpiStageAxis(1, "y"), 3200);
+});
+
+test("setAxisDpi sends a single linked write when the axes match", async () => {
+  const { device, sent } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setAxisDpi(1600, 1600);
+  const dpiWrites = sent.filter((payload) => payload[0] === 0x02);
+  assert.equal(dpiWrites.length, 1, "one write, not one per axis");
+  assert.equal(dpiWrites[0]![7], 0, "the 'both' axis flag");
+});
+
+test("uploadMacro interleaves ten headers with ten 32-byte output reports", async () => {
+  // Exactly the shape captured from the vendor tool: an 8-byte feature
+  // report announcing each chunk, then the chunk itself as an OUTPUT report
+  // on the same id.
+  const { device, sent, outputs } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.uploadMacro({
+    bufferId: 3,
+    loop: "untilAnyKey",
+    cycles: 1,
+    uid: 0x8fba0e90,
+    steps: [{ key: 0x0f, press: true, delayMs: 124 }, { key: 0x0f, press: false, delayMs: 1510 }],
+  });
+
+  const headers = sent.filter((payload) => payload[0] === 0x07);
+  assert.equal(headers.length, 10);
+  assert.equal(outputs.length, 10);
+  assert.ok(outputs.every((report) => report.bytes.length === 32), "every chunk is 32 bytes");
+  assert.ok(outputs.every((report) => report.reportId === 0x09), "same report id as the feature path");
+  headers.forEach((header, index) => {
+    assert.deepEqual([...header.slice(0, 5)], [0x07, 0x0a, index, 0x20, 0x03]);
+  });
+  // The chunks rejoin into the buffer the encoder produced.
+  const rejoined = outputs.flatMap((report) => [...report.bytes]);
+  assert.equal(rejoined.length, 320);
+  assert.deepEqual(rejoined.slice(0, 8), [0x03, 0x01, 0x01, 0x00, 0x01, 0x0f, 0x7c, 0x00]);
+});
+
+test("uploadMacro fails clearly on a transport with no output-report support", async () => {
+  const { device } = fakeDevice();
+  delete (device as unknown as { sendReport?: unknown }).sendReport;
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(
+    () => client.uploadMacro({ bufferId: 0, loop: "cycle", cycles: 1, uid: 0, steps: [] }),
+    /cannot send output reports/,
+  );
+});
+
+test("readStatus offers a PAW3395 model only the DPI its sensor reaches", async () => {
+  // A Ghero or any other PAW3395 unit in this family: the vendor's table
+  // stops at 32000 there, and advertising 45000 would offer DPI the mouse
+  // may silently refuse.
+  const { device } = fakeDevice({ state: { identity: [0x01, 0x01, 0x02, 0xf0, 0xf0, 0x00, 0xff] } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.name, "Ghero", "model code 0x01");
+  assert.equal(status.ui?.dpiStageEditor?.maxDpi, 32000);
+});
+
+test("readStatus keeps the full ceiling when identity cannot be read", async () => {
+  // Narrowing on a guess would hide DPI the mouse can actually reach.
+  const { device } = fakeDevice({ state: { identity: null } });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.ui?.dpiStageEditor?.maxDpi, 45000);
 });

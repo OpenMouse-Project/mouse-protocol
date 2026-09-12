@@ -1,0 +1,35 @@
+# Onboard profiles: the index is real, the storage is not (2026-09-11)
+# node-hid, 093A:522C (wireless). Browser tab closed — the app's refresh
+# timer contends for the shared response buffer and blanks every read.
+
+# 1. The index is genuinely on-device: readable, writable, and it sticks.
+09 86 09  ->  09 86 09 00 00 00 00 00 02     profile 0
+   wrote 09 06 09 01  -> index reads 1
+   wrote 09 06 09 02  -> index reads 2
+   wrote 09 06 09 03  -> index reads 3       (0-3, four slots)
+
+# 2. But every slot reported IDENTICAL settings:
+#      DPI 400/800/1600/2400/3200/6400 | cycle 6@1 | poll 0 | lod 0 | deb 4 | fire 3/10
+#
+#    That is the AMBIGUOUS case, not an answer — equally consistent with
+#    "no per-profile storage" and "per-profile storage where all four slots
+#    happen to match". The same trap that made the per-axis DPI read look
+#    non-existent. Making them differ is what settles it:
+
+   on profile 0: stage 0 = 400 DPI
+   switch to profile 1, write stage 0 = 1000  -> reads 1000
+   switch to profile 0                        -> reads 1000   <-- NOT 400
+
+# 3. THE RESULT: there is ONE settings store. Writing on one slot changes
+#    what every other slot reports, so the profile index does not gate any
+#    device behaviour. It is a number the mouse remembers, nothing more.
+#
+#    This explains the 2026-09-10 capture without contradiction: the vendor
+#    tool replays ~23 setting writes on every profile switch BECAUSE the
+#    mouse stores nothing per slot. The index is a host-readable signal —
+#    press the "Profile switch" button (favProfile, 0x0000F10A) and the
+#    mouse bumps the index; software that is running notices and pushes the
+#    matching configuration from ITS OWN storage.
+#
+#    Consequence: with no such software running, switching profiles — by
+#    button or by command — changes nothing the user can perceive.

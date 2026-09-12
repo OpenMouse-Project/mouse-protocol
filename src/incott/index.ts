@@ -145,6 +145,14 @@ export const INCOTT_CMD_SET_TIMING = 0x05;
  * nothing here interprets them.
  */
 export const INCOTT_CMD_SET_BUTTON = 0x06;
+/**
+ * Announces one 32-byte chunk of a macro buffer:
+ * `09 07 <chunks> <chunk index> <bytes per chunk> <buffer id>`.
+ *
+ * Each header is followed by the chunk itself as a 32-byte OUTPUT report on
+ * the same id — see `IncottHidClient.uploadMacro`.
+ */
+export const INCOTT_CMD_MACRO_CHUNK = 0x07;
 export const INCOTT_CMD_SET_RECEIVER_LED = 0x08;
 
 /**
@@ -254,23 +262,364 @@ export const INCOTT_INPUT_REPORT_ID = INCOTT_REPORT_ID;
  *   1 -> 01 00 f1    4 -> 01 00 f4
  *   2 -> 01 00 f2    5 -> 07 00 03
  * (left, right, middle, forward, back, DPI — physically, in some order).
- * This was previously `INCOTT_CMD_UNKNOWN_86`, decoded only for the vendor
- * tool's own `09 86 09` query (still unexplained, kept as
- * `INCOTT_SUB_UNKNOWN_86_VENDOR_QUERY`). See `incottDecodeButtonBinding` —
- * only the raw three bytes are exposed; what `type`/`code` mean inside them
- * is NOT established and is not guessed at here.
+ * This was previously `INCOTT_CMD_UNKNOWN_86`. Sub-command `0x09` on the
+ * same command reads the onboard profile index instead — see
+ * `INCOTT_SUB_PROFILE_INDEX`. The binding itself is a 32-bit little-endian
+ * action word; see `incottDecodeButtonBinding`.
  */
 export const INCOTT_CMD_QUERY_BUTTON = 0x86;
 /** Button count: left, right, middle, forward, back, DPI. */
 export const INCOTT_BUTTON_COUNT = 6;
 /**
- * The vendor tool's own query, `09 86 09` — not a button index (buttons only
- * go up to 5). Its payload is still undecoded.
+ * Reads the onboard profile INDEX, `09 86 09` — not a button index, since
+ * buttons only go up to 5. Counterpart of the `09 06 09 <index>` write.
+ *
+ * Neither is implemented, and that is a finding rather than an omission: the
+ * index is real and sticks (0-3), but it gates nothing. Writing a setting
+ * while on one slot changes what every other slot reports, so there is a
+ * single settings store and the vendor replays every setting on a switch
+ * because the mouse holds none of them. Publishing OpenMouse's
+ * `profileCount`/`setProfile` contract — which describes ONBOARD profiles —
+ * would hand the user a selector that appears to work and does not. See
+ * `captures/incott-8k-wireless/profile-index-2026-09-11.hex`.
  */
-export const INCOTT_SUB_UNKNOWN_86_VENDOR_QUERY = 0x09;
+export const INCOTT_SUB_PROFILE_INDEX = 0x09;
 
-/** Sub-command for the DPI *active stage index* query (`0x83`). */
-export const INCOTT_SUB_DPI_STAGE = 0x06;
+/**
+ * Physical buttons, in left-to-right display order.
+ */
+export const INCOTT_BUTTON_NAMES = ["Left", "Right", "Middle", "Forward", "Back", "DPI"] as const;
+export type IncottButtonName = (typeof INCOTT_BUTTON_NAMES)[number];
+
+/**
+ * Display order -> WIRE index. **These are not the same**, and assuming they
+ * were would silently swap two buttons.
+ *
+ * The vendor's per-model key table carries an explicit `matrix` field and
+ * addresses the device with it (`setMsK(dvar.key[i].matrix, code)`), not with
+ * the array position. For this family Forward sits at array index 3 with
+ * `matrix = 4`, and Back at array index 4 with `matrix = 3` — the two are
+ * transposed. Every other button's matrix equals its position.
+ */
+export const INCOTT_BUTTON_WIRE_INDEX: Readonly<Record<IncottButtonName, number>> = {
+  Left: 0,
+  Right: 1,
+  Middle: 2,
+  Forward: 4,
+  Back: 3,
+  DPI: 5,
+};
+
+/**
+ * Button actions, label -> 32-bit action word, in display order.
+ *
+ * Transcribed from the vendor bundle's `kf_hw()` encoder. One row is
+ * confirmed against this contributor's hardware: the factory DPI button reads
+ * back `07 00 03`, which is `0x00030007` little-endian — the value `kf_hw`
+ * returns for that function.
+ *
+ * NOT covered here: macros (`slot << 16 | 9`), which need the `0x07` upload
+ * command, and `fmeFAVOR`, which the vendor defines as a constant but has no
+ * case for in its own encoder, so there is no code to send.
+ */
+const MOUSE_AND_MEDIA_ACTIONS: ReadonlyArray<readonly [string, number]> = [
+  ["Left click", 0x00f00001],
+  ["Right click", 0x00f10001],
+  ["Middle click", 0x00f20001],
+  ["Forward", 0x00f40001],
+  ["Back", 0x00f30001],
+  ["DPI cycle", 0x00030007],
+  ["DPI +", 0x00010007],
+  ["DPI -", 0x00020007],
+  ["Rapid fire", 0x0218f00a],
+  ["Profile switch", 0x0000f10a],
+  ["Media player", 0x01830003],
+  ["Play/Pause", 0x00cd0003],
+  ["Stop", 0x00b70003],
+  ["Previous track", 0x00b60003],
+  ["Next track", 0x00b50003],
+  ["Volume up", 0x00e90003],
+  ["Volume down", 0x00ea0003],
+  ["Mute", 0x00e20003],
+  ["Email", 0x018a0003],
+  ["Calculator", 0x01920003],
+  ["File explorer", 0x01940003],
+  ["Browser home", 0x02230003],
+  ["Browser refresh", 0x02270003],
+  ["Browser forward", 0x02250003],
+  ["Browser back", 0x02240003],
+  ["Browser search", 0x02210003],
+  ["Disabled", 0x00000000],
+];
+
+/** HID keyboard modifier bits, as the vendor's encoder packs them at byte 1. */
+const MODIFIER_CTRL = 0x01;
+const MODIFIER_SHIFT = 0x02;
+const MODIFIER_ALT = 0x04;
+const MODIFIER_GUI = 0x08;
+
+/**
+ * Standard HID keyboard usage codes. Labels are display names, not key-cap
+ * legends, so they stay readable in a flat picker.
+ */
+const KEY_USAGES: ReadonlyArray<readonly [string, number]> = [
+  ...Array.from({ length: 26 }, (_, i) => [String.fromCharCode(65 + i), 0x04 + i] as const),
+  ...Array.from({ length: 9 }, (_, i) => [String(i + 1), 0x1e + i] as const),
+  ["0", 0x27],
+  ...Array.from({ length: 12 }, (_, i) => [`F${i + 1}`, 0x3a + i] as const),
+  ["Enter", 0x28], ["Escape", 0x29], ["Backspace", 0x2a], ["Tab", 0x2b], ["Space", 0x2c],
+  ["Insert", 0x49], ["Delete", 0x4c], ["Home", 0x4a], ["End", 0x4d],
+  ["Page Up", 0x4b], ["Page Down", 0x4e],
+  ["Up", 0x52], ["Down", 0x51], ["Left", 0x50], ["Right", 0x4f],
+  ["Caps Lock", 0x39], ["Num Lock", 0x53], ["Scroll Lock", 0x47],
+  ["Print Screen", 0x46], ["Pause", 0x48], ["Context Menu", 0x65],
+  ["Left Ctrl", 0xe0], ["Left Shift", 0xe1], ["Left Alt", 0xe2], ["Left Windows", 0xe3],
+  ["Right Ctrl", 0xe4], ["Right Shift", 0xe5], ["Right Alt", 0xe6], ["Right Windows", 0xe7],
+];
+
+/** Common chords, since the flat picker cannot express "any key + any modifier". */
+const KEY_SHORTCUTS: ReadonlyArray<readonly [string, number, number]> = [
+  ["Ctrl + A", MODIFIER_CTRL, 0x04], ["Ctrl + C", MODIFIER_CTRL, 0x06],
+  ["Ctrl + V", MODIFIER_CTRL, 0x19], ["Ctrl + X", MODIFIER_CTRL, 0x1b],
+  ["Ctrl + Z", MODIFIER_CTRL, 0x1d], ["Ctrl + Y", MODIFIER_CTRL, 0x1c],
+  ["Ctrl + S", MODIFIER_CTRL, 0x16], ["Ctrl + O", MODIFIER_CTRL, 0x12],
+  ["Ctrl + N", MODIFIER_CTRL, 0x11], ["Ctrl + T", MODIFIER_CTRL, 0x17],
+  ["Ctrl + W", MODIFIER_CTRL, 0x1a], ["Ctrl + F", MODIFIER_CTRL, 0x09],
+  ["Ctrl + Shift + Escape", MODIFIER_CTRL | MODIFIER_SHIFT, 0x29],
+  ["Alt + Tab", MODIFIER_ALT, 0x2b], ["Alt + F4", MODIFIER_ALT, 0x3d],
+  ["Alt + Left", MODIFIER_ALT, 0x50], ["Alt + Right", MODIFIER_ALT, 0x4f],
+  ["Win + D", MODIFIER_GUI, 0x07], ["Win + E", MODIFIER_GUI, 0x08],
+  ["Win + L", MODIFIER_GUI, 0x0f], ["Win + R", MODIFIER_GUI, 0x15],
+  ["Win + S", MODIFIER_GUI, 0x16], ["Win + Tab", MODIFIER_GUI, 0x2b],
+];
+
+/**
+ * A keyboard action word, from the vendor's `kf_hw()` keyboard branch:
+ *
+ *     no modifier:   (keycode & 255) << 8  | 128
+ *     with modifier: (keycode & 255) << 16 | (modifiers & 255) << 8
+ *
+ * The two forms are genuinely different shapes, not one with a zero
+ * modifier — an unmodified key sets the `0x80` marker in the low byte and
+ * puts the keycode one byte lower than a chord does.
+ */
+export function incottKeyboardActionCode(keycode: number, modifiers = 0): number {
+  return modifiers === 0
+    ? (((keycode & 0xff) << 8) | 0x80) >>> 0
+    : (((keycode & 0xff) << 16) | ((modifiers & 0xff) << 8)) >>> 0;
+}
+
+/**
+ * Everything a button can be set to, in display order: the mouse, DPI and
+ * media actions above, then individual keys, then common chords.
+ *
+ * Keyboard bindings are enumerated rather than left out. The encoding is
+ * parametric (any of 256 keycodes against any of 256 modifier masks) and the
+ * shared `buttonOptions` contract is a flat list of labels, so the full space
+ * cannot be offered — but a curated list covers what people actually bind,
+ * and it is the same approach the MCHOSE driver in this repo already takes.
+ */
+export const INCOTT_BUTTON_ACTIONS: ReadonlyArray<readonly [string, number]> = [
+  ...MOUSE_AND_MEDIA_ACTIONS,
+  ...KEY_USAGES.map(([label, usage]) => [label, incottKeyboardActionCode(usage)] as const),
+  ...KEY_SHORTCUTS.map(
+    ([label, modifiers, usage]) => [label, incottKeyboardActionCode(usage, modifiers)] as const,
+  ),
+];
+
+/** Macro loop modes, in wire order. */
+export const INCOTT_MACRO_LOOP_MODES = ["untilKeyRelease", "untilAnyKey", "cycle"] as const;
+export type IncottMacroLoop = (typeof INCOTT_MACRO_LOOP_MODES)[number];
+
+/** One key event in a macro: a press or a release, then a delay. */
+export interface IncottMacroStep {
+  /** HID keyboard usage code. */
+  key: number;
+  /** True for a key-down event, false for key-up. */
+  press: boolean;
+  /** Delay after this event, milliseconds, 16-bit. */
+  delayMs: number;
+}
+
+export interface IncottMacro {
+  /** Which of the ten on-device macro buffers this occupies, 0-9. */
+  bufferId: number;
+  loop: IncottMacroLoop;
+  /** Repeat count, used by the `cycle` loop mode. */
+  cycles: number;
+  steps: readonly IncottMacroStep[];
+  /** The vendor's own identifier for the macro; echoed back in the buffer. */
+  uid: number;
+}
+
+/** A macro buffer is always this long, in ten 32-byte chunks. */
+export const INCOTT_MACRO_BUFFER_BYTES = 320;
+export const INCOTT_MACRO_CHUNK_BYTES = 32;
+export const INCOTT_MACRO_CHUNK_COUNT = INCOTT_MACRO_BUFFER_BYTES / INCOTT_MACRO_CHUNK_BYTES;
+export const INCOTT_MACRO_BUFFER_COUNT = 10;
+/** Steps occupy bytes 4..287 at four bytes each, so 71 fit. */
+export const INCOTT_MACRO_MAX_STEPS = 71;
+
+/**
+ * Builds the 320-byte macro buffer, transcribed from the vendor bundle's
+ * `juji_to_hw()`.
+ *
+ *     [0]        buffer id
+ *     [1]        loop mode (0 until key release, 1 until any key, 2 cycle)
+ *     [2..3]     cycle count, LE16
+ *     [4+4n]     event flags: bit 0 always set, bit 7 set for a RELEASE
+ *     [5+4n]     HID keyboard usage code
+ *     [6..7+4n]  delay after the event, LE16 milliseconds
+ *     [288..293] the ASCII name "Macro" followed by '1' + buffer id
+ *     [304..307] (steps + 1) * 4 + 128, LE32
+ *     [308..311] 16, 0, 232, 232 — constant in every buffer the vendor builds
+ *     [312..315] uid, LE32
+ *     [316..317] steps * 2, LE16
+ *     [318]      step count
+ *
+ * The buffer goes out as ten 32-byte chunks, each announced by
+ * `incottEncodeMacroChunkHeader` and then carried by a 32-byte OUTPUT report
+ * on the same report id — the only place this protocol uses an output report
+ * at all. That transport is not recoverable from the vendor bundle (the call
+ * carrying each chunk is defined in none of the files its page loads, and the
+ * HID method names resolve through variables at runtime), so it was captured
+ * from the running tool instead: see
+ * `captures/incott-8k-wireless/macro-upload-2026-09-11.hex`, and
+ * `IncottHidClient.uploadMacro` for the sender.
+ *
+ * Pinned byte-for-byte to that capture. There is no macro READ command, so
+ * nothing here can be verified against the device after the fact.
+ */
+export function incottEncodeMacroBuffer(macro: IncottMacro): Uint8Array {
+  if (!Number.isInteger(macro.bufferId) || macro.bufferId < 0 || macro.bufferId >= INCOTT_MACRO_BUFFER_COUNT) {
+    throw new RangeError(`Macro buffer id out of range: ${macro.bufferId}`);
+  }
+  if (macro.steps.length > INCOTT_MACRO_MAX_STEPS) {
+    throw new RangeError(`Macro has ${macro.steps.length} steps; the buffer holds ${INCOTT_MACRO_MAX_STEPS}`);
+  }
+  const out = new Uint8Array(INCOTT_MACRO_BUFFER_BYTES);
+  out[0] = macro.bufferId & 0xff;
+  out[1] = INCOTT_MACRO_LOOP_MODES.indexOf(macro.loop);
+  out[2] = macro.cycles & 0xff;
+  out[3] = (macro.cycles >> 8) & 0xff;
+
+  macro.steps.forEach((step, index) => {
+    const at = 4 + index * 4;
+    // Bit 0 is set on every event; bit 7 marks a release. A press is 0x01.
+    out[at] = (step.press ? 0x00 : 0x80) | 0x01;
+    out[at + 1] = step.key & 0xff;
+    out[at + 2] = step.delayMs & 0xff;
+    out[at + 3] = (step.delayMs >> 8) & 0xff;
+  });
+
+  // "Macro" + the 1-based buffer number, as the vendor names its slots.
+  out.set([0x4d, 0x61, 0x63, 0x72, 0x6f], 288);
+  out[293] = 0x31 + macro.bufferId;
+
+  // (steps + 1) * 4 + 128. An earlier transcription of this read
+  // `(steps + 1) * 132`, because the deobfuscation pass used to recover the
+  // vendor's source folded the constant `4 + 128` into `132` before anyone
+  // read it. Pinned to a real captured buffer now (2026-09-11).
+  const size = (macro.steps.length + 1) * 4 + 128;
+  out[304] = size & 0xff;
+  out[305] = (size >> 8) & 0xff;
+  out[306] = (size >> 16) & 0xff;
+  out[307] = (size >> 24) & 0xff;
+  out[308] = 16;
+  out[310] = 232;
+  out[311] = 232;
+  out[312] = macro.uid & 0xff;
+  out[313] = (macro.uid >>> 8) & 0xff;
+  out[314] = (macro.uid >>> 16) & 0xff;
+  out[315] = (macro.uid >>> 24) & 0xff;
+  const len = macro.steps.length * 2;
+  out[316] = len & 0xff;
+  out[317] = (len >> 8) & 0xff;
+  out[318] = macro.steps.length;
+  return out;
+}
+
+/**
+ * The 8-byte header announcing one chunk of a macro buffer:
+ * `09 07 0a <chunk index> 20 <buffer id>`.
+ *
+ * See `incottEncodeMacroBuffer` for why nothing sends this yet. Note the
+ * vendor slices its own payload as `mda.slice(i * 32, i * 64)`, which yields
+ * an EMPTY chunk for `i = 0` and over-long ones after — visibly a bug in its
+ * own uploader, and not reproduced here.
+ */
+export function incottEncodeMacroChunkHeader(chunkIndex: number, bufferId: number): Uint8Array {
+  if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= INCOTT_MACRO_CHUNK_COUNT) {
+    throw new RangeError(`Macro chunk index out of range: ${chunkIndex}`);
+  }
+  if (!Number.isInteger(bufferId) || bufferId < 0 || bufferId >= INCOTT_MACRO_BUFFER_COUNT) {
+    throw new RangeError(`Macro buffer id out of range: ${bufferId}`);
+  }
+  return payload(INCOTT_CMD_MACRO_CHUNK, INCOTT_MACRO_CHUNK_COUNT, chunkIndex, INCOTT_MACRO_CHUNK_BYTES, bufferId);
+}
+
+/** Splits a macro buffer into the ten chunks the upload sends. */
+export function incottMacroChunks(buffer: Uint8Array): Uint8Array[] {
+  if (buffer.length !== INCOTT_MACRO_BUFFER_BYTES) {
+    throw new RangeError(`Macro buffer must be ${INCOTT_MACRO_BUFFER_BYTES} bytes, got ${buffer.length}`);
+  }
+  return Array.from({ length: INCOTT_MACRO_CHUNK_COUNT }, (_, index) =>
+    buffer.slice(index * INCOTT_MACRO_CHUNK_BYTES, (index + 1) * INCOTT_MACRO_CHUNK_BYTES),
+  );
+}
+
+/**
+ * Label for a 32-bit action word, or null when it is not one this driver
+ * knows.
+ *
+ * Macro bindings are named rather than listed: the vendor encodes them as
+ * `slot << 16 | 9` (confirmed 2026-09-11, where binding a button to macro
+ * slot 3 wrote `0x00030009`), so a label can be derived for any slot without
+ * putting ten entries in the picker. `incottButtonActionCode` deliberately
+ * does NOT reverse these — nothing can assign a macro until there is a UI to
+ * author one — so a macro binding reads back correctly and is left alone.
+ */
+export function incottButtonActionLabel(code: number): string | null {
+  for (const [label, value] of INCOTT_BUTTON_ACTIONS) {
+    if (value === code) return label;
+  }
+  if ((code & 0xffff) === INCOTT_BUTTON_MACRO_MARKER) {
+    const slot = code >>> 16;
+    if (slot < INCOTT_MACRO_BUFFER_COUNT) return `Macro ${slot + 1}`;
+  }
+  return null;
+}
+
+/** Low half of a macro button binding: `slot << 16 | 9`. */
+export const INCOTT_BUTTON_MACRO_MARKER = 0x0009;
+
+/** 32-bit action word for a label, or null when the label is not in the table. */
+export function incottButtonActionCode(label: string): number | null {
+  for (const [name, value] of INCOTT_BUTTON_ACTIONS) {
+    if (name === label) return value;
+  }
+  return null;
+}
+
+/**
+ * How many DPI stages the cycle uses by default — and the value this driver
+ * spent two sessions mistaking for a sub-command.
+ *
+ * `0x83`'s reply byte 2 is the stage COUNT, not an echo. Proven by the
+ * captures: the vendor sends `09 83 00` and gets `09 83 06 01` back, and a
+ * bare `09 83` sweep with no sub-command gets the same `06` — a byte the
+ * request never contained cannot be an echo. Byte 3 is the active index,
+ * which varies (`00`/`01`/`03`/`05`) while byte 2 stays `06`.
+ *
+ * This matters twice over:
+ *   - `0x83` must NOT be treated as sub-echoing when matching responses. It
+ *     belongs with `0x81`/`0x88`/`0x89`/`0x8f`, where byte 2 is data.
+ *   - the `0x03` write carries the count alongside the index
+ *     (`09 03 <count> <stage>`), so writing a hardcoded `06` while selecting
+ *     a stage would reset a four-stage cycle back to six — the same shape of
+ *     bug as the old `INCOTT_SUB_SET_DPI` constant below.
+ */
+export const INCOTT_DPI_STAGE_COUNT_DEFAULT = 6;
 /**
  * Number of DPI stages the table holds. Both the `0x02` write and the `0x82`
  * read take a stage index in this range as their second payload byte — see
@@ -308,6 +657,38 @@ export const INCOTT_SUB_MOTION_SYNC = 0x04;
  */
 export const INCOTT_SUB_PERFORMANCE = 0x05;
 export const INCOTT_SUB_DEBOUNCE = 0x01;
+/**
+ * Fire Key (rapid-fire) parameters, `09 05 02 <times> <interval ms>`.
+ *
+ * The last unidentified command in this protocol, settled 2026-09-11. The
+ * vendor calls it `setFKeyPm(lp, ir)` and only ever calls it for a button
+ * bound to `favFIRE`, deriving both values from that button's `itemdata` and
+ * clamping them to 3 and 255 respectively. Its own UI names the two fields:
+ * "Fire Key" / "Keep left-clicking according to the interval and times".
+ *
+ * Read back at `0x85`/`0x02`. On this hardware: `09 85 02 03 0a` — three
+ * clicks, 10 ms apart.
+ */
+export const INCOTT_SUB_FIRE_KEY = 0x02;
+/**
+ * Clicks per press, 1-3 — the ceiling the vendor clamps to.
+ *
+ * `INCOTT_FIRE_KEY_TIMES_HOLD` (0) is a real fourth setting, not an absence
+ * of one: it switches the button from a fixed burst to firing continuously
+ * while held. Confirmed against the vendor software 2026-09-11 by the device
+ * owner, which is the only way it could have been established — the value is
+ * in range for the write either way, so a round-trip proves nothing about
+ * what it MEANS.
+ */
+export const INCOTT_FIRE_KEY_MAX_TIMES = 3;
+/**
+ * Fire key "times" value that means hold-to-fire: the button keeps clicking
+ * at the configured interval for as long as it is held, and stops on
+ * release. See `INCOTT_FIRE_KEY_MAX_TIMES`.
+ */
+export const INCOTT_FIRE_KEY_TIMES_HOLD = 0;
+/** Milliseconds between clicks in a burst, one byte. */
+export const INCOTT_FIRE_KEY_MAX_INTERVAL_MS = 255;
 export const INCOTT_SUB_SLEEP = 0x03;
 export const INCOTT_SUB_NONE = 0x00;
 
@@ -330,15 +711,36 @@ export const INCOTT_SUB_NONE = 0x00;
  * of 50:
  *   sensor 0x3395 (PAW3395): 32000
  *   sensor 0x3950 (PAW3950): 45000
- * There is no known way to read which sensor variant is fitted to a given
- * unit, so `INCOTT_DPI_MAX` uses the higher of the two known ceilings. A
- * PAW3395 unit is expected to refuse anything above 32000; the existing
- * write-cache/read-back verification in `IncottHidClient.setDpi` is relied on
- * to report that honestly rather than this module guessing which sensor is
- * present.
+ * The fitted sensor IS readable — the identity reply carries it (see
+ * `incottDecodeIdentity`) — so `readStatus` narrows the ceiling it OFFERS to
+ * whichever sensor answered, via `incottDpiMaxForSensor`. This constant stays
+ * the higher of the two: it is the bound on what the protocol can express,
+ * and the encoder must keep accepting a value the app is entitled to send.
+ * That mirrors the polling rate, where `supportedPollingRates` narrows by
+ * connection while `incottEncodeSetPollingRate` still accepts the full
+ * ladder.
  */
 export const INCOTT_DPI_MIN = 50;
 export const INCOTT_DPI_MAX = 45000;
+/** The PAW3395's ceiling in the vendor's own DPI table. */
+export const INCOTT_DPI_MAX_PAW3395 = 32000;
+
+/**
+ * The DPI ceiling to OFFER for a fitted sensor, matching the table the vendor
+ * builds in `getStDPI`.
+ *
+ * Worth being precise about what this is and is not. It is the vendor's UI
+ * limit, not a proven firmware limit: this contributor's PAW3950 accepted
+ * 45000 over the cable even though the connection-indexed sensor byte read
+ * PAW3395 there (see `captures/incott-8k-wireless/wired-dpi-ceiling-2026-09-11.hex`),
+ * so a real PAW3395 unit has never been tested and may well accept more. It
+ * is used because offering exactly what the vendor offers cannot surprise
+ * anyone, and because the alternative — advertising 45000 to a Ghero — risks
+ * a silent refusal on a model nobody here can test.
+ */
+export function incottDpiMaxForSensor(sensorId: number | null): number {
+  return sensorId === INCOTT_SENSOR_PAW3395 ? INCOTT_DPI_MAX_PAW3395 : INCOTT_DPI_MAX;
+}
 export const INCOTT_DPI_STEP = 50;
 
 /**
@@ -510,35 +912,82 @@ export function incottValidateDpi(dpi: number): void {
  * PAYLOAD INDEX 7 IS AN AXIS BYTE, discovered 2026-09-10: the full write is
  * `02 <stage> <lo> <hi> 00 00 00 <axis>`, where `axis` 0 = both axes, 1 = X
  * only, 2 = Y only. This encoder always emits trailing zeros (see `payload`),
- * so it has only ever written axis 0 (both) — correct, but now for a known
- * reason rather than by accident. Independent X/Y is deliberately NOT
- * implemented: probing `0x82` with the axis byte set to 0, 1 and 2 returned
- * the identical value every time, i.e. there is no per-axis READ yet, and
- * this driver never ships a write it cannot verify. See
- * `docs/incott-testing.md` for the open question (find the read the vendor
- * tool uses to display separate X and Y DPI values) that would unblock this.
+ * and the `axis` argument selects it. Independent X/Y IS implemented and
+ * hardware-verified — the matching per-axis read is `incottEncodeQueryDpiAxis`,
+ * which an earlier probe concluded did not exist because X and Y happened to
+ * be equal at the time.
  */
-export function incottEncodeSetDpi(stage: number, dpi: number): Uint8Array {
+/**
+ * Which axis a DPI write targets, and which one a read asks for.
+ *
+ * On the WRITE the value rides at payload byte 7; on the READ it is request
+ * byte 2 and the reply echoes it back at byte 8. Hardware-verified
+ * 2026-09-11: writing X=800/Y=1600, X=2400/Y=400 and X=1000/Y=1000 to one
+ * stage read back exactly, each axis independently.
+ *
+ * `both` is what a plain `incottEncodeSetDpi` sends, and what reading with no
+ * axis byte returns.
+ */
+export const INCOTT_DPI_AXIS = { both: 0, x: 1, y: 2 } as const;
+export type IncottDpiAxis = keyof typeof INCOTT_DPI_AXIS;
+
+export function incottEncodeSetDpi(stage: number, dpi: number, axis: IncottDpiAxis = "both"): Uint8Array {
   if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
     throw new RangeError(`DPI stage out of range: ${stage}`);
   }
   incottValidateDpi(dpi);
   const wire = dpi / INCOTT_DPI_STEP - 1;
-  return payload(INCOTT_CMD_SET_DPI, stage, wire & 0xff, (wire >> 8) & 0xff);
+  return payload(
+    INCOTT_CMD_SET_DPI,
+    stage,
+    wire & 0xff,
+    (wire >> 8) & 0xff,
+    0,
+    0,
+    0,
+    INCOTT_DPI_AXIS[axis],
+  );
 }
 
 /**
- * Selects which of the six DPI stages is active — `09 03 06 <idx>`. Does NOT
- * write a DPI value and does NOT alter any stage's stored value; see
- * `INCOTT_CMD_SET_DPI_STAGE` for the hardware proof (select 0/3/5/1, table
- * unchanged) and for why this is a distinct operation from
- * `incottEncodeSetDpi`, which edits a stage's stored value.
+ * `09 82 <stage> <axis>` — reads one axis of one stage.
+ *
+ * WHY THIS EXISTS, given a plain `09 82 <stage>` already reads a value: this
+ * driver previously recorded that no per-axis read existed, on the strength
+ * of a probe where all three axis values came back identical. They were
+ * identical because X and Y were BOTH at the factory 1600 at the time — the
+ * probe could not tell "no per-axis read" from "per-axis read whose axes
+ * happen to match". Confirmed 2026-09-11 by setting them apart first.
  */
-export function incottEncodeSetActiveDpiStage(stage: number): Uint8Array {
+export function incottEncodeQueryDpiAxis(stage: number, axis: IncottDpiAxis): Uint8Array {
   if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
     throw new RangeError(`DPI stage out of range: ${stage}`);
   }
-  return payload(INCOTT_CMD_SET_DPI_STAGE, INCOTT_SUB_DPI_STAGE, stage);
+  return payload(INCOTT_CMD_QUERY_DPI_STAGE_VALUE, stage, INCOTT_DPI_AXIS[axis]);
+}
+
+/**
+ * Writes the DPI cycle: `09 03 <count> <stage>` — how many stages the cycle
+ * uses, and which one is active. Does NOT write a DPI value and does NOT
+ * alter any stage's stored value; see `INCOTT_CMD_SET_DPI_STAGE` for the
+ * hardware proof (select 0/3/5/1, table unchanged) and for why this is a
+ * distinct operation from `incottEncodeSetDpi`, which edits a stage's stored
+ * value.
+ *
+ * `count` IS REQUIRED, and callers must pass what the device currently
+ * reports rather than a constant — the byte used to be hardcoded `0x06` in
+ * the belief that it was a sub-command, which would silently reset a
+ * four-stage cycle to six every time a stage was selected. See
+ * `INCOTT_DPI_STAGE_COUNT_DEFAULT`.
+ */
+export function incottEncodeSetDpiCycle(count: number, stage: number): Uint8Array {
+  if (!Number.isInteger(count) || count < 1 || count > INCOTT_DPI_STAGE_COUNT) {
+    throw new RangeError(`DPI stage count out of range: ${count}`);
+  }
+  if (!Number.isInteger(stage) || stage < 0 || stage >= count) {
+    throw new RangeError(`DPI stage ${stage} out of range for a ${count}-stage cycle`);
+  }
+  return payload(INCOTT_CMD_SET_DPI_STAGE, count, stage);
 }
 
 export function incottEncodeSetPollingRate(hz: number): Uint8Array {
@@ -559,19 +1008,31 @@ export function incottEncodeSetToggle(kind: IncottToggleKind, on: boolean): Uint
 }
 
 /**
- * Encodes a raw three-byte button binding write, `09 06 <button 0..5>
- * <b0> <b1> <b2>`. Codec only, by design (see `INCOTT_CMD_SET_BUTTON`): the
- * meaning of the three bytes (key code, macro reference, remap target — the
- * fields are unnamed here on purpose) is NOT established, so this neither
- * interprets nor validates them beyond fitting in a byte. Round-trip
- * confirmed on hardware 2026-09-08: writing `01 00 f0` to button 0 read back
- * byte for byte via `incottDecodeButtonBinding`.
+ * Encodes a button binding write, `09 06 <button 0..5> <32-bit action, LE>`.
+ *
+ * The action is a 32-bit little-endian word — see `INCOTT_BUTTON_ACTIONS`
+ * for the labelled codes. Confirmed against hardware: this unit's factory
+ * binding for the DPI button reads back `07 00 03`, and the vendor's own
+ * encoder returns `0x00030007` for that function, which is the same word.
+ *
+ * `button` is the WIRE index, which is not the physical left-to-right order
+ * — see `INCOTT_BUTTON_WIRE_INDEX`.
  */
-export function incottEncodeSetButtonBinding(button: number, raw: readonly [number, number, number]): Uint8Array {
+export function incottEncodeSetButtonBinding(button: number, code: number): Uint8Array {
   if (!Number.isInteger(button) || button < 0 || button >= INCOTT_BUTTON_COUNT) {
     throw new RangeError(`Button index out of range: ${button}`);
   }
-  return payload(INCOTT_CMD_SET_BUTTON, button, raw[0], raw[1], raw[2]);
+  if (!Number.isInteger(code) || code < 0 || code > 0xffffffff) {
+    throw new RangeError(`Button action code out of range: ${code}`);
+  }
+  return payload(
+    INCOTT_CMD_SET_BUTTON,
+    button,
+    code & 0xff,
+    (code >>> 8) & 0xff,
+    (code >>> 16) & 0xff,
+    (code >>> 24) & 0xff,
+  );
 }
 
 /**
@@ -614,9 +1075,65 @@ export function incottEncodeQuery(cmd: number, sub: number = INCOTT_SUB_NONE): U
   return payload(cmd, sub);
 }
 
+/**
+ * The models that share `093A:522C`/`093A:622C`. All six enumerate under the
+ * same two product ids, so the USB descriptor cannot tell them apart — the
+ * model is carried in the identity reply instead (`incottDecodeIdentity`).
+ *
+ * "Zero 29"/"Zero 39" are the English series names the vendor's own
+ * `text_en` bundle uses (`msg94`/`msg95`); its code calls the same two models
+ * `G29` and `FM23` internally and renders them as 零29/零39.
+ */
+export type IncottModel = "Ghero" | "G23" | "G24" | "G23V2" | "Zero 29" | "Zero 39";
+
+/**
+ * Identity byte 3 -> model, transcribed from the vendor configurator's own
+ * `readDps()` dispatch. That dispatch is authoritative for all six models in
+ * a way one owner's device can never be; only the `0x0e` row is confirmed
+ * against hardware here, since this contributor has only a G23V2.
+ *
+ * `0x08` and `0x0e` BOTH mean G23V2 — the vendor tests them in a single
+ * branch (`8 == rData[2] || 14 == rData[2]`). Two hardware revisions of one
+ * model is the obvious reading, but that is an inference; what is certain is
+ * that the vendor maps both to the same name.
+ */
+const INCOTT_MODEL_BY_CODE: ReadonlyMap<number, IncottModel> = new Map<number, IncottModel>([
+  [0x01, "Ghero"],
+  [0x02, "G23"],
+  [0x03, "G24"],
+  [0x06, "Zero 29"],
+  [0x08, "G23V2"],
+  [0x09, "Zero 39"],
+  [0x0e, "G23V2"],
+]);
+
+/** PixArt PAW3395 — capped at 32000 DPI in the vendor's own DPI table. */
+export const INCOTT_SENSOR_PAW3395 = 0x3395;
+/** PixArt PAW3950 — capped at 45000 DPI, and what the "Pro" suffix means. */
+export const INCOTT_SENSOR_PAW3950 = 0x3950;
+
+/** Identity byte 2 is a fixed `0x01` guard; the vendor rejects the device otherwise. */
+const INCOTT_IDENTITY_GUARD = 0x01;
+/** Identity sensor byte: `0xF1` selects the PAW3950 profile, anything else the PAW3395. */
+const INCOTT_IDENTITY_SENSOR_PAW3950 = 0xf1;
+/** Identity byte 4 — `0x02` is the 8 KHz receiver. */
+const INCOTT_IDENTITY_8K_RECEIVER = 0x02;
+
 export interface IncottDeviceIdentity {
   /** Space-separated hex of the identity payload, for the details panel. */
   raw: string;
+  /** Decoded model, or null when byte 3 carries a code this table does not know. */
+  model: IncottModel | null;
+  /** Raw byte 3, kept even when unrecognised so an unknown model can still be reported. */
+  modelCode: number | null;
+  /** Model plus a " Pro" suffix when the PAW3950 is fitted, e.g. "G23V2 Pro". */
+  displayName: string | null;
+  /** The FITTED sensor: `INCOTT_SENSOR_PAW3395` or `INCOTT_SENSOR_PAW3950`. */
+  sensorId: number | null;
+  /** True when the PAW3950 is fitted — what the vendor's "Pro" suffix means. */
+  isPro: boolean;
+  /** True when byte 4 reports the 8 KHz receiver. */
+  is8KReceiver: boolean;
 }
 
 /**
@@ -625,27 +1142,61 @@ export interface IncottDeviceIdentity {
  * The device latches a single shared response buffer, so a frame left over
  * from an earlier query will otherwise be decoded as a real value.
  */
-export function incottFrameMatches(frame: Uint8Array, cmd: number, sub: number | null): boolean {
+export function incottFrameMatches(
+  frame: Uint8Array,
+  cmd: number,
+  sub: number | null,
+  axis: number | null = null,
+): boolean {
   if (frame.length < 3) return false;
   if (frame[0] !== INCOTT_REPORT_ID) return false;
   if (frame[1] !== cmd) return false;
   if (sub !== null && frame[2] !== sub) return false;
+  // The per-axis DPI read echoes the requested axis at byte 8. Reading X and
+  // then Y on the SAME stage sends two requests whose command and sub-command
+  // are identical, so without this the second read can be satisfied by the
+  // first one's latched reply and both axes report the same number — which
+  // is exactly the reading that made this driver conclude no per-axis read
+  // existed. See `incottEncodeQueryDpiAxis`.
+  if (axis !== null && frame[8] !== axis) return false;
   return true;
 }
 
+/** The DPI cycle as the device reports it: how many stages, and which is live. */
+export interface IncottDpiCycle {
+  /** Stages in the cycle, 1..`INCOTT_DPI_STAGE_COUNT`. */
+  count: number;
+  /** Active stage, 0-based and always below `count`. */
+  active: number;
+}
+
 /**
- * `0x83`/`0x06` returns which of the six DPI stages is currently active
- * (0-5) at response byte 3 — proven wrong to be a DPI-value index on
- * hardware 2026-09-07: decoding byte 3 through `INCOTT_DPI_DEFAULT_STAGE_PRESETS`
- * used to yield 800 DPI, which matched the vendor UI only by coincidence (the
- * device happened to be on stage 1 of 6). Combine with
- * `incottDecodeDpiStage` at this index to get the actual DPI value — see
- * `IncottHidClient.readStatus`.
+ * `09 83` -> `<count> <active>` at response bytes 2 and 3.
+ *
+ * Byte 3 was proven not to be a DPI-value index on hardware 2026-09-07:
+ * decoding it through `INCOTT_DPI_DEFAULT_STAGE_PRESETS` used to yield 800
+ * DPI, matching the vendor UI only by coincidence (the device happened to be
+ * on stage 1 of 6). Combine with `incottDecodeDpiStage` at `active` to get
+ * the actual DPI value — see `IncottHidClient.readStatus`.
+ *
+ * Byte 2 was then mistaken for a sub-command echo, because the count on the
+ * only device available is 6 and the driver happened to send `06`. It is
+ * data: `09 83 00` and a bare `09 83` both answer `06`. Matching it as an
+ * echo would reject every reply from a mouse whose cycle is not six stages
+ * long, so this decoder matches on the COMMAND ONLY — see
+ * `INCOTT_DPI_STAGE_COUNT_DEFAULT`.
  */
-export function incottDecodeDpiStageIndex(frame: Uint8Array): number | null {
-  if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_DPI_STAGE)) return null;
-  const index = frame[3];
-  return index !== undefined && index >= 0 && index <= 5 ? index : null;
+export function incottDecodeDpiCycle(frame: Uint8Array): IncottDpiCycle | null {
+  if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_DPI_STAGE, null)) return null;
+  const count = frame[2];
+  const active = frame[3];
+  if (count === undefined || active === undefined) return null;
+  if (count < 1 || count > INCOTT_DPI_STAGE_COUNT) return null;
+  // An active index outside the cycle is not a reading this driver can make
+  // sense of, and guessing a fallback would put the DPI panel on the wrong
+  // stage. Report nothing instead.
+  if (active >= count) return null;
+  return { count, active };
 }
 
 /**
@@ -659,6 +1210,24 @@ export function incottDecodeDpiStageIndex(frame: Uint8Array): number | null {
  */
 export function incottDecodeDpiStage(frame: Uint8Array, stage: number): number | null {
   if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_DPI_STAGE_VALUE, stage)) return null;
+  if (frame.length < 5) return null;
+  const wire = frame[3]! | (frame[4]! << 8);
+  const dpi = (wire + 1) * INCOTT_DPI_STEP;
+  return dpi >= INCOTT_DPI_MIN && dpi <= INCOTT_DPI_MAX ? dpi : null;
+}
+
+/**
+ * One axis of one stage, from a reply to `incottEncodeQueryDpiAxis`. The
+ * requested axis MUST be matched at byte 8 — see `incottFrameMatches`.
+ */
+export function incottDecodeDpiStageAxis(
+  frame: Uint8Array,
+  stage: number,
+  axis: IncottDpiAxis,
+): number | null {
+  if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_DPI_STAGE_VALUE, stage, INCOTT_DPI_AXIS[axis])) {
+    return null;
+  }
   if (frame.length < 5) return null;
   const wire = frame[3]! | (frame[4]! << 8);
   const dpi = (wire + 1) * INCOTT_DPI_STEP;
@@ -762,6 +1331,41 @@ export function incottDecodeSleep(frame: Uint8Array): number | null {
   if (frame.length < 5) return null;
   const value = frame[3] | (frame[4] << 8);
   return value >= INCOTT_SLEEP_MIN_S && value <= INCOTT_SLEEP_MAX_S ? value : null;
+}
+
+/** How a Fire Key button behaves: how many clicks it sends, and how fast. */
+export interface IncottFireKey {
+  /** Clicks sent per press, 0-3. */
+  times: number;
+  /** Milliseconds between those clicks, 0-255. */
+  intervalMs: number;
+}
+
+/**
+ * `09 05 02 <times> <interval ms>` — see `INCOTT_SUB_FIRE_KEY`.
+ *
+ * These are the settings for whichever button is bound to "Rapid fire"; they
+ * are global to the device rather than per-button, since the command carries
+ * no button index.
+ */
+export function incottEncodeSetFireKey(times: number, intervalMs: number): Uint8Array {
+  if (!Number.isInteger(times) || times < 0 || times > INCOTT_FIRE_KEY_MAX_TIMES) {
+    throw new RangeError(`Fire key times out of range: ${times}`);
+  }
+  if (!Number.isInteger(intervalMs) || intervalMs < 0 || intervalMs > INCOTT_FIRE_KEY_MAX_INTERVAL_MS) {
+    throw new RangeError(`Fire key interval out of range: ${intervalMs} ms`);
+  }
+  return payload(INCOTT_CMD_SET_TIMING, INCOTT_SUB_FIRE_KEY, times, intervalMs);
+}
+
+/** `09 85 02` -> times at byte 3, interval at byte 4. */
+export function incottDecodeFireKey(frame: Uint8Array): IncottFireKey | null {
+  if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_TIMING, INCOTT_SUB_FIRE_KEY)) return null;
+  if (frame.length < 5) return null;
+  const times = frame[3]!;
+  const intervalMs = frame[4]!;
+  if (times > INCOTT_FIRE_KEY_MAX_TIMES) return null;
+  return { times, intervalMs };
 }
 
 export function incottDecodeReceiverLed(frame: Uint8Array): number | null {
@@ -875,36 +1479,114 @@ export function incottDecodeInputStatus(byte0: number, byte1: number): IncottInp
 }
 
 /**
- * Raw three-byte binding read back from a button. Field names are
- * deliberately generic (`b0`/`b1`/`b2`), not `type`/`code`: what each byte
- * means (key code, macro reference, remap target) is NOT established. This
- * is a codec for the wire bytes only — see `INCOTT_CMD_QUERY_BUTTON`.
+ * A button's current binding: the raw 32-bit action word, plus the label
+ * when it is one this driver knows.
+ *
+ * `label` is null for a binding the action table does not cover — a keyboard
+ * key, a macro, or an action from a model this contributor cannot test. The
+ * `code` is always reported so an unrecognised binding round-trips
+ * unchanged rather than being flattened to a default.
  */
 export interface IncottButtonBinding {
   button: number;
-  b0: number;
-  b1: number;
-  b2: number;
+  code: number;
+  label: string | null;
 }
 
 /**
- * `09 86 <button 0..5>` -> response bytes 3-5 = the raw binding. Round-trip
- * confirmed on hardware 2026-09-08 (see `INCOTT_CMD_QUERY_BUTTON`). Codec
- * only: nothing here interprets `b0`/`b1`/`b2` as a key, macro, or action —
- * that mapping is unverified and out of scope for this driver.
+ * `09 86 <button 0..5>` -> response bytes 3-6 = the binding, 32-bit
+ * little-endian.
+ *
+ * PREVIOUSLY A BUG: this read only bytes 3-5 and reported them as three
+ * unnamed bytes, silently truncating the top byte. Every action in
+ * `INCOTT_BUTTON_ACTIONS` whose code exceeds 24 bits — "Rapid fire"
+ * (`0x0218F00A`) among them — decoded to a different value than was
+ * written. The vendor reads the same four bytes
+ * (`rData[5]<<24|rData[4]<<16|rData[3]<<8|rData[2]`).
  */
 export function incottDecodeButtonBinding(frame: Uint8Array, button: number): IncottButtonBinding | null {
   if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_BUTTON, button)) return null;
-  if (frame.length < 6) return null;
-  return { button, b0: frame[3]!, b1: frame[4]!, b2: frame[5]! };
+  if (frame.length < 7) return null;
+  const code = ((frame[6]! << 24) | (frame[5]! << 16) | (frame[4]! << 8) | frame[3]!) >>> 0;
+  return { button, code, label: incottButtonActionLabel(code) };
 }
 
+/**
+ * Decodes the identity reply (`09 8f 00` -> `09 8f 01 0e 02 f0 f1 00 ff`).
+ *
+ * Byte map, transcribed from the vendor configurator's `readDps()` and
+ * confirmed byte-for-byte against this contributor's G23V2 (capture
+ * 2026-09-07, `captures/incott-8k-wireless/query-sweep-0x80-0x8f.hex`):
+ *
+ *     byte 2  guard, always 0x01   -- the vendor abandons the device otherwise
+ *     byte 3  model code           -- 0x0e = G23V2, see INCOTT_MODEL_BY_CODE
+ *     byte 4  receiver type        -- 0x02 = 8 KHz receiver
+ *     byte 5  sensor slot A          -- 0xF0 -> PAW3395, 0xF1 -> PAW3950
+ *     byte 6  sensor slot B          -- same encoding, 0x00 when unpopulated
+ *
+ * THE SENSOR SLOT MOVES WITH THE RECEIVER, so neither byte alone is "the"
+ * sensor. Two wired captures of the same mouse:
+ *
+ *     cable + dongle (2026-09-08):  09 8f 01 0e 02 f0 f1 00 ff
+ *     cable only     (2026-09-11):  09 8f 01 0e 00 f1 00 00 00
+ *
+ * With the dongle present, byte 4 reports the receiver and the `0xF1` sits at
+ * byte 6; with the dongle gone, byte 4 is `0x00` and the same `0xF1` sits at
+ * byte 5. This is why the vendor indexes by connection
+ * (`let i = this.iswireless ? 5 : 4` over its report-id-less buffer, i.e.
+ * frame bytes 6:5) — that is correct behaviour, not the cosmetic bug an
+ * earlier version of this comment claimed.
+ *
+ * WHY ANY SLOT, NOT THE CONNECTION-INDEXED ONE: the fitted sensor is settled
+ * independently of this frame. A PAW3395 stops at 32000 DPI in the vendor's
+ * own table, and this mouse stored and read back 45000 over the CABLE
+ * (`captures/incott-8k-wireless/wired-dpi-ceiling-2026-09-11.hex`). It is a
+ * PAW3950 on every link, so the answer is whichever slot carries `0xF1`. The
+ * vendor's index disagrees in exactly one configuration — cable AND dongle
+ * attached, where it reads byte 5's `0xF0` and drops the "Pro" — and that is
+ * the one case where a capability byte cannot be describing this mouse.
+ *
+ * The same capture also shows there is NO wired DPI ceiling to model: 45000
+ * is accepted over the cable, so `INCOTT_DPI_MAX` stays flat across links,
+ * unlike the polling rate (`INCOTT_POLLING_STEPS_HZ_WIRED`).
+ *
+ * Returns `null` ONLY when the report id or command echo is wrong — `open()`
+ * uses that as its collection-liveness probe. A frame that is well-formed
+ * but too short, or whose guard byte is not `0x01`, still yields an identity
+ * carrying `raw` with every decoded field left null: an unreadable model is
+ * reported as unknown, never guessed.
+ */
 export function incottDecodeIdentity(frame: Uint8Array): IncottDeviceIdentity | null {
   if (frame[0] !== INCOTT_REPORT_ID || frame[1] !== INCOTT_CMD_QUERY_IDENTITY) return null;
   const raw = Array.from(frame.slice(2, 9))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join(" ");
-  return { raw };
+  const unknown: IncottDeviceIdentity = {
+    raw,
+    model: null,
+    modelCode: null,
+    displayName: null,
+    sensorId: null,
+    isPro: false,
+    is8KReceiver: false,
+  };
+  if (frame.length < 7) return unknown;
+  if (frame[2] !== INCOTT_IDENTITY_GUARD) return unknown;
+  const modelCode = frame[3]!;
+  const model = INCOTT_MODEL_BY_CODE.get(modelCode) ?? null;
+  const sensorId = frame[5] === INCOTT_IDENTITY_SENSOR_PAW3950 || frame[6] === INCOTT_IDENTITY_SENSOR_PAW3950
+    ? INCOTT_SENSOR_PAW3950
+    : INCOTT_SENSOR_PAW3395;
+  const isPro = sensorId === INCOTT_SENSOR_PAW3950;
+  return {
+    raw,
+    model,
+    modelCode,
+    displayName: model === null ? null : isPro ? `${model} Pro` : model,
+    sensorId,
+    isPro,
+    is8KReceiver: frame[4] === INCOTT_IDENTITY_8K_RECEIVER,
+  };
 }
 
 /**
@@ -931,20 +1613,17 @@ export function incottIsWiredProduct(productId: number): boolean {
  * "incott Esports G23V2Pro mouse" -> "Esports G23V2Pro"
  * "incott 8K wireless mouse"      -> "8K wireless"
  *
- * WHY THIS EXISTS: the real model name ("Esports G23V2Pro") is only present
- * in the WIRED product string — hardware-verified 2026-09-08. The wireless
- * dongle's product string ("incott 8K wireless mouse") is a generic name
- * with no model in it at all, and there is no way to read the model while
- * connected wirelessly: this driver does NOT infer or guess a model in that
- * case, since doing so would be a fabricated value. This function only
- * TIDIES whatever raw string the device actually reported; it never invents
- * one.
+ * WHY THIS EXISTS: the product string names a model only over the CABLE
+ * ("incott Esports G23V2Pro mouse", hardware-verified 2026-09-08); the
+ * wireless dongle reports a generic "incott 8K wireless mouse" with no model
+ * in it at all. This function only TIDIES whatever raw string the device
+ * actually reported; it never invents one.
  *
- * The identity query's reply (`09 8f 00` -> `01 0e 02 f0 f1 00 ff`, see
- * `incottDecodeIdentity`) has NOT been decoded — its byte layout is unknown
- * — so it is not currently a source for the model name either, wired or
- * wireless. If a future capture decodes it, this comment is the place to
- * update.
+ * This is now the FALLBACK, not the primary source. The identity reply's
+ * byte layout has since been decoded (`incottDecodeIdentity`), so
+ * `IncottHidClient.readStatus` prefers the model read from the device —
+ * which works wirelessly too — and drops back to this function only when the
+ * identity query fails or reports a model code the table does not know.
  */
 export function incottNormalizeProductName(raw: string): string {
   const words = raw.trim().split(/\s+/).filter((word) => word.length > 0);

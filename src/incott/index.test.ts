@@ -3,11 +3,15 @@ import test from "node:test";
 
 import {
   incottDecodeBattery,
+  incottButtonActionCode,
+  incottButtonActionLabel,
   incottDecodeButtonBinding,
   incottDecodeDebounce,
   incottDecodeDpiStage,
-  incottDecodeDpiStageIndex,
+  incottDecodeDpiCycle,
+  incottDecodeFireKey,
   incottDecodeIdentity,
+  incottDpiMaxForSensor,
   incottDecodeInputStatus,
   incottDecodeLiftOff,
   incottDecodeLiftOffDirect,
@@ -18,10 +22,13 @@ import {
   incottDecodeSleep,
   incottDecodeToggle,
   incottEncodeQuery,
-  incottEncodeSetActiveDpiStage,
+  incottEncodeMacroBuffer,
+  incottEncodeMacroChunkHeader,
   incottEncodeSetButtonBinding,
   incottEncodeSetDebounce,
   incottEncodeSetDpi,
+  incottEncodeSetDpiCycle,
+  incottEncodeSetFireKey,
   incottEncodeSetLiftOff,
   incottEncodeSetPerformanceMode,
   incottEncodeSetPollingRate,
@@ -30,12 +37,17 @@ import {
   incottEncodeSetToggle,
   incottFrameMatches,
   incottIsWiredProduct,
+  incottKeyboardActionCode,
+  incottMacroChunks,
   incottLiftOffLabel,
   incottLiftOffTenths,
   incottNormalizeProductName,
   incottPerformanceModeFromWire,
   incottPerformanceModeToWire,
   incottValidateDpi,
+  INCOTT_BUTTON_ACTIONS,
+  INCOTT_BUTTON_NAMES,
+  INCOTT_BUTTON_WIRE_INDEX,
   INCOTT_PERFORMANCE_MODE_FROM_WIRE,
   INCOTT_PERFORMANCE_MODE_NAMES,
   INCOTT_PERFORMANCE_MODE_TO_WIRE,
@@ -43,6 +55,9 @@ import {
   INCOTT_POLLING_STEPS_HZ_WIRED,
   INCOTT_PRODUCT_ID,
   INCOTT_PRODUCT_ID_WIRED,
+  INCOTT_SENSOR_PAW3395,
+  INCOTT_SENSOR_PAW3950,
+  type IncottMacroLoop,
 } from "./index.ts";
 
 const bytes = (frame: Uint8Array): number[] => Array.from(frame);
@@ -177,34 +192,51 @@ test("incottFrameMatches rejects a frame carrying the wrong report ID", () => {
   assert.equal(incottFrameMatches(wrong, 0x85, 0x03), false);
 });
 
-test("0x83/0x06 decodes the active DPI STAGE INDEX, not a DPI value", () => {
-  // Captured 2026-09-07 against the vendor tool: 09 83 06 01 -> stage 1 of 6.
-  // Decoding byte 3 as an index into the six default presets used to yield
-  // 800 DPI here, which matched the vendor UI only by coincidence.
-  assert.equal(incottDecodeDpiStageIndex(frame(0x83, 0x06, 0x01)), 1);
-  assert.equal(incottDecodeDpiStageIndex(frame(0x83, 0x06, 0x00)), 0);
-  assert.equal(incottDecodeDpiStageIndex(frame(0x83, 0x06, 0x05)), 5);
+test("0x83 decodes the stage COUNT and the active index, not a DPI value", () => {
+  // Captured 2026-09-07 against the vendor tool: 09 83 06 01 -> a six-stage
+  // cycle sitting on stage 1. Decoding byte 3 as an index into the six
+  // default presets used to yield 800 DPI here, which matched the vendor UI
+  // only by coincidence.
+  assert.deepEqual(incottDecodeDpiCycle(frame(0x83, 0x06, 0x01)), { count: 6, active: 1 });
+  assert.deepEqual(incottDecodeDpiCycle(frame(0x83, 0x06, 0x00)), { count: 6, active: 0 });
+  assert.deepEqual(incottDecodeDpiCycle(frame(0x83, 0x06, 0x05)), { count: 6, active: 5 });
 });
 
-test("DPI stage index returns null outside 0-5", () => {
-  assert.equal(incottDecodeDpiStageIndex(frame(0x83, 0x06, 0x06)), null);
+test("REGRESSION: 0x83 byte 2 is data, so a cycle shorter than six still decodes", () => {
+  // This is what the old decoder got wrong. It required byte 2 to equal the
+  // 0x06 the driver had sent, treating it as a sub-command echo — which only
+  // held because the count on the device under test happened to be six. A
+  // four-stage mouse would have failed every DPI read.
+  assert.deepEqual(incottDecodeDpiCycle(frame(0x83, 0x04, 0x03)), { count: 4, active: 3 });
+  assert.deepEqual(incottDecodeDpiCycle(frame(0x83, 0x01, 0x00)), { count: 1, active: 0 });
 });
 
-test("incottEncodeSetActiveDpiStage encodes 09 03 06 <idx> for every stage 0-5", () => {
-  // Command 0x03, sub-command INCOTT_SUB_DPI_STAGE (0x06), then the stage
-  // index — verified on hardware 2026-09-08 by selecting stages 0, 3, 5, then
-  // 1 and reading each back correctly via 0x83/0x06.
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(0)).slice(0, 3), [0x03, 0x06, 0x00]);
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(1)).slice(0, 3), [0x03, 0x06, 0x01]);
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(2)).slice(0, 3), [0x03, 0x06, 0x02]);
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(3)).slice(0, 3), [0x03, 0x06, 0x03]);
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(4)).slice(0, 3), [0x03, 0x06, 0x04]);
-  assert.deepEqual(bytes(incottEncodeSetActiveDpiStage(5)).slice(0, 3), [0x03, 0x06, 0x05]);
+test("DPI cycle rejects a count out of range or an active stage outside it", () => {
+  assert.equal(incottDecodeDpiCycle(frame(0x83, 0x07, 0x00)), null, "count above the table size");
+  assert.equal(incottDecodeDpiCycle(frame(0x83, 0x00, 0x00)), null, "zero-length cycle");
+  assert.equal(incottDecodeDpiCycle(frame(0x83, 0x04, 0x04)), null, "active stage past the cycle");
+  assert.equal(incottDecodeDpiCycle(frame(0x83, 0x06, 0x06)), null);
 });
 
-test("incottEncodeSetActiveDpiStage rejects a stage index outside 0-5", () => {
-  assert.throws(() => incottEncodeSetActiveDpiStage(6), RangeError);
-  assert.throws(() => incottEncodeSetActiveDpiStage(-1), RangeError);
+test("incottEncodeSetDpiCycle encodes 09 03 <count> <idx> for every stage 0-5", () => {
+  // Verified on hardware 2026-09-08 by selecting stages 0, 3, 5, then 1 and
+  // reading each back correctly.
+  for (let stage = 0; stage < 6; stage += 1) {
+    assert.deepEqual(bytes(incottEncodeSetDpiCycle(6, stage)).slice(0, 3), [0x03, 0x06, stage]);
+  }
+  // A shorter cycle writes its own count, not a hardcoded six.
+  assert.deepEqual(bytes(incottEncodeSetDpiCycle(3, 2)).slice(0, 3), [0x03, 0x03, 0x02]);
+});
+
+test("incottEncodeSetDpiCycle rejects a stage outside the cycle it is given", () => {
+  assert.throws(() => incottEncodeSetDpiCycle(3, 3), RangeError);
+  assert.throws(() => incottEncodeSetDpiCycle(0, 0), RangeError);
+  assert.throws(() => incottEncodeSetDpiCycle(7, 0), RangeError);
+});
+
+test("incottEncodeSetDpiCycle rejects a stage index outside 0-5", () => {
+  assert.throws(() => incottEncodeSetDpiCycle(6, 6), RangeError);
+  assert.throws(() => incottEncodeSetDpiCycle(6, -1), RangeError);
 });
 
 test("selecting the active stage (0x03) is byte-for-byte distinct from editing a stage's value (0x02) — the bug this driver used to have", () => {
@@ -214,7 +246,7 @@ test("selecting the active stage (0x03) is byte-for-byte distinct from editing a
   // commands with different opcodes and different payload shapes: the select
   // carries only a stage index (no DPI value at all), the edit carries a
   // 2-byte DPI wire value and no fixed sub-command byte.
-  const select = incottEncodeSetActiveDpiStage(4);
+  const select = incottEncodeSetDpiCycle(6, 4);
   const edit = incottEncodeSetDpi(4, 3200);
   assert.notEqual(select[0], edit[0], "different command bytes (0x03 vs 0x02)");
   assert.deepEqual(bytes(select).slice(0, 3), [0x03, 0x06, 0x04]);
@@ -461,34 +493,112 @@ test("input-report decode rejects out-of-byte-range inputs", () => {
   assert.equal(incottDecodeInputStatus(0x00, 256), null);
 });
 
-test("button binding encodes the raw three-byte payload under command 0x06", () => {
+test("button binding encodes the 32-bit action little-endian under command 0x06", () => {
   // Captured 2026-09-08: the vendor tool wrote `09 06 00 01 00 f0` to button
-  // 0. This is a codec for the raw bytes only — see incottEncodeSetButtonBinding.
-  assert.deepEqual(bytes(incottEncodeSetButtonBinding(0, [0x01, 0x00, 0xf0])).slice(0, 5), [0x06, 0x00, 0x01, 0x00, 0xf0]);
+  // 0, which is 0x00F00001 (left click) little-endian.
+  assert.deepEqual(
+    bytes(incottEncodeSetButtonBinding(0, 0x00f00001)).slice(0, 6),
+    [0x06, 0x00, 0x01, 0x00, 0xf0, 0x00],
+  );
+  // A code needing all four bytes: rapid fire. The old three-byte codec
+  // dropped the 0x02 here.
+  assert.deepEqual(
+    bytes(incottEncodeSetButtonBinding(5, 0x0218f00a)).slice(0, 6),
+    [0x06, 0x05, 0x0a, 0xf0, 0x18, 0x02],
+  );
 });
 
 test("button binding rejects a button index outside 0-5", () => {
-  assert.throws(() => incottEncodeSetButtonBinding(6, [0, 0, 0]), RangeError);
-  assert.throws(() => incottEncodeSetButtonBinding(-1, [0, 0, 0]), RangeError);
+  assert.throws(() => incottEncodeSetButtonBinding(6, 0), RangeError);
+  assert.throws(() => incottEncodeSetButtonBinding(-1, 0), RangeError);
 });
 
-test("button binding decodes all six buttons, pinned to the real capture", () => {
-  // Captured on real hardware 2026-09-08, reading each of the six buttons
-  // (left, right, middle, forward, back, DPI, in some physical order):
-  //   09 86 00 -> bytes 3-5 = 01 00 f0
-  //   09 86 01 -> bytes 3-5 = 01 00 f1
-  //   09 86 02 -> bytes 3-5 = 01 00 f2
-  //   09 86 03 -> bytes 3-5 = 01 00 f3
-  //   09 86 04 -> bytes 3-5 = 01 00 f4
-  //   09 86 05 -> bytes 3-5 = 07 00 03
-  // Button 0's read-back matches byte-for-byte what the vendor tool wrote
-  // (`09 06 00 01 00 f0`) — the round-trip proof this codec is correct.
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x00, 0x01, 0x00, 0xf0), 0), { button: 0, b0: 0x01, b1: 0x00, b2: 0xf0 });
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x01, 0x01, 0x00, 0xf1), 1), { button: 1, b0: 0x01, b1: 0x00, b2: 0xf1 });
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x02, 0x01, 0x00, 0xf2), 2), { button: 2, b0: 0x01, b1: 0x00, b2: 0xf2 });
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x03, 0x01, 0x00, 0xf3), 3), { button: 3, b0: 0x01, b1: 0x00, b2: 0xf3 });
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x04, 0x01, 0x00, 0xf4), 4), { button: 4, b0: 0x01, b1: 0x00, b2: 0xf4 });
-  assert.deepEqual(incottDecodeButtonBinding(frame(0x86, 0x05, 0x07, 0x00, 0x03), 5), { button: 5, b0: 0x07, b1: 0x00, b2: 0x03 });
+test("every factory binding read from hardware decodes to the vendor's own action code", () => {
+  // Captured on real hardware 2026-09-08, reading each of the six buttons.
+  // Every one matches the code the vendor bundle's `kf_hw()` encoder returns
+  // for that function — an independent confirmation of the whole mouse
+  // action table, not just one row.
+  //
+  // Note buttons 3 and 4: wire index 3 answers 0xF3 (fmsBACK) and wire index
+  // 4 answers 0xF4 (fmsFORWARD). That is the `matrix` transposition in
+  // INCOTT_BUTTON_WIRE_INDEX, confirmed on hardware.
+  const expected: ReadonlyArray<readonly [number, number, number, string]> = [
+    [0, 0xf0, 0x00f00001, "Left click"],
+    [1, 0xf1, 0x00f10001, "Right click"],
+    [2, 0xf2, 0x00f20001, "Middle click"],
+    [3, 0xf3, 0x00f30001, "Back"],
+    [4, 0xf4, 0x00f40001, "Forward"],
+  ];
+  for (const [index, high, code, label] of expected) {
+    assert.deepEqual(
+      incottDecodeButtonBinding(frame(0x86, index, 0x01, 0x00, high), index),
+      { button: index, code, label },
+    );
+  }
+  // The DPI button: `07 00 03` -> 0x00030007, kf_hw's favDPI.
+  assert.deepEqual(
+    incottDecodeButtonBinding(frame(0x86, 0x05, 0x07, 0x00, 0x03), 5),
+    { button: 5, code: 0x00030007, label: "DPI cycle" },
+  );
+});
+
+test("button binding decodes the top byte instead of truncating it", () => {
+  // Regression: the decoder used to read only frame bytes 3-5, so rapid fire
+  // (0x0218F00A) came back as 0x0018F00A and matched no action at all.
+  assert.deepEqual(
+    incottDecodeButtonBinding(frame(0x86, 0x03, 0x0a, 0xf0, 0x18, 0x02), 3),
+    { button: 3, code: 0x0218f00a, label: "Rapid fire" },
+  );
+});
+
+test("button binding reports an unknown action's raw code rather than a label", () => {
+  // Not a mouse, media, keyboard or macro encoding — nothing this driver can
+  // name, so it must round-trip as a raw value rather than be mislabelled.
+  const binding = incottDecodeButtonBinding(frame(0x86, 0x00, 0x78, 0x56, 0x34, 0x12), 0);
+  assert.equal(binding?.code, 0x12345678);
+  assert.equal(binding?.label, null);
+});
+
+test("keyboard actions use a different shape with and without modifiers", () => {
+  // From the vendor's kf_hw() keyboard branch. An unmodified key sets the
+  // 0x80 marker in the low byte and sits one byte lower than a chord does —
+  // they are not the same form with a zero modifier.
+  assert.equal(incottKeyboardActionCode(0x04), 0x00000480, "'A' alone");
+  assert.equal(incottKeyboardActionCode(0x04, 0x01), 0x00040100, "Ctrl + A");
+  assert.equal(incottKeyboardActionCode(0x29, 0x01 | 0x02), 0x00290300, "Ctrl + Shift + Escape");
+});
+
+test("the action table offers keyboard keys and chords, and every label is unique", () => {
+  // The picker keys on the label, so a duplicate would make one action
+  // unreachable and silently write the other.
+  const labels = INCOTT_BUTTON_ACTIONS.map(([label]) => label);
+  assert.equal(new Set(labels).size, labels.length);
+
+  assert.equal(incottButtonActionCode("A"), 0x00000480);
+  assert.equal(incottButtonActionCode("F1"), 0x00003a80);
+  assert.equal(incottButtonActionCode("Ctrl + C"), 0x00060100);
+  assert.equal(incottButtonActionCode("Alt + Tab"), 0x002b0400);
+  // Still round-trips back to a label, so a key binding read from the mouse
+  // is not reported as unknown.
+  assert.equal(incottButtonActionLabel(0x00000480), "A");
+  assert.equal(incottButtonActionLabel(0x00060100), "Ctrl + C");
+});
+
+test("button action labels and codes round-trip through the table", () => {
+  for (const [label, code] of INCOTT_BUTTON_ACTIONS) {
+    assert.equal(incottButtonActionCode(label), code, label);
+    assert.equal(incottButtonActionLabel(code), label, label);
+  }
+  assert.equal(incottButtonActionCode("Not a real action"), null);
+  assert.equal(incottButtonActionLabel(0x12345678), null);
+});
+
+test("Forward and Back are transposed between display order and the wire", () => {
+  // The vendor addresses buttons by a `matrix` field, not array position.
+  // Getting this wrong swaps two buttons silently.
+  assert.equal(INCOTT_BUTTON_WIRE_INDEX.Forward, 4);
+  assert.equal(INCOTT_BUTTON_WIRE_INDEX.Back, 3);
+  assert.deepEqual(INCOTT_BUTTON_NAMES.map((n) => INCOTT_BUTTON_WIRE_INDEX[n]), [0, 1, 2, 4, 3, 5]);
 });
 
 test("button binding rejects a frame answering a different button (sub-command echo)", () => {
@@ -511,6 +621,89 @@ test("identity returns the raw payload for display", () => {
 
 test("identity returns null when the frame is not an identity response", () => {
   assert.equal(incottDecodeIdentity(frame(0x84, 0x00)), null);
+});
+
+// The capture this contributor's hardware produced, wired and wireless
+// alike: 09 8f 01 0e 02 f0 f1 00 ff. Byte 3 (0x0e) is the model, byte 4
+// (0x02) the receiver, bytes 5/6 (f0/f1) the wired/wireless sensor.
+const IDENTITY_G23V2 = frame(0x8f, 0x01, 0x0e, 0x02, 0xf0, 0xf1, 0x00, 0xff);
+
+test("identity decodes the model, sensor and receiver from the G23V2 capture", () => {
+  const identity = incottDecodeIdentity(IDENTITY_G23V2);
+  assert.equal(identity?.model, "G23V2");
+  assert.equal(identity?.modelCode, 0x0e);
+  assert.equal(identity?.is8KReceiver, true);
+});
+
+test("identity finds the PAW3950 whichever slot the receiver puts it in", () => {
+  // The sensor slot MOVES with the receiver. Both of these are the same
+  // physical mouse on the cable, captured with and without the dongle
+  // plugged in — see `incottDecodeIdentity`.
+  const withDongle = incottDecodeIdentity(IDENTITY_G23V2);
+  assert.equal(withDongle?.sensorId, INCOTT_SENSOR_PAW3950);
+  assert.equal(withDongle?.displayName, "G23V2 Pro");
+  assert.equal(withDongle?.is8KReceiver, true);
+
+  // Cable only, captured 2026-09-11: 0xF1 has moved to byte 5 and byte 6 is
+  // empty. Reading byte 6 alone reported a PAW3395 here and dropped the
+  // "Pro" — the bug this replaced.
+  const cableOnly = incottDecodeIdentity(frame(0x8f, 0x01, 0x0e, 0x00, 0xf1, 0x00, 0x00, 0x00));
+  assert.equal(cableOnly?.sensorId, INCOTT_SENSOR_PAW3950);
+  assert.equal(cableOnly?.displayName, "G23V2 Pro");
+  assert.equal(cableOnly?.is8KReceiver, false, "no dongle, so no 8K receiver");
+});
+
+test("identity reports the PAW3395 only when no slot carries 0xf1", () => {
+  const identity = incottDecodeIdentity(frame(0x8f, 0x01, 0x0e, 0x02, 0xf0, 0xf0, 0x00, 0xff));
+  assert.equal(identity?.sensorId, INCOTT_SENSOR_PAW3395);
+  assert.equal(identity?.isPro, false);
+  assert.equal(identity?.displayName, "G23V2");
+});
+
+test("identity maps every model code the vendor's own dispatch knows", () => {
+  const codeToModel: ReadonlyArray<readonly [number, string]> = [
+    [0x01, "Ghero"],
+    [0x02, "G23"],
+    [0x03, "G24"],
+    [0x06, "Zero 29"],
+    [0x08, "G23V2"],
+    [0x09, "Zero 39"],
+    [0x0e, "G23V2"],
+  ];
+  for (const [code, model] of codeToModel) {
+    const identity = incottDecodeIdentity(frame(0x8f, 0x01, code, 0x02, 0xf0, 0xf0, 0x00, 0xff));
+    assert.equal(identity?.model, model, `model code 0x${code.toString(16)}`);
+    // byte 6 is 0xf0 here, so the PAW3395 profile and no "Pro" suffix.
+    assert.equal(identity?.displayName, model);
+  }
+});
+
+test("identity reports an unknown model code rather than guessing one", () => {
+  const identity = incottDecodeIdentity(frame(0x8f, 0x01, 0x7f, 0x02, 0xf0, 0xf1, 0x00, 0xff));
+  assert.notEqual(identity, null);
+  assert.equal(identity?.model, null);
+  assert.equal(identity?.displayName, null);
+  // The raw code is still surfaced, so an unrecognised device can be reported.
+  assert.equal(identity?.modelCode, 0x7f);
+});
+
+test("identity decodes no model when the guard byte is not 0x01", () => {
+  // The vendor abandons the device entirely on this; here it degrades to
+  // raw-only rather than decoding whatever happens to sit at byte 3.
+  const identity = incottDecodeIdentity(frame(0x8f, 0x00, 0x0e, 0x02, 0xf0, 0xf1, 0x00, 0xff));
+  assert.notEqual(identity, null);
+  assert.equal(identity?.model, null);
+  assert.equal(identity?.modelCode, null);
+  assert.equal(identity?.sensorId, null);
+});
+
+test("identity decodes no model from a frame too short to carry one", () => {
+  // Built directly rather than through `frame`, which always pads to 64.
+  const identity = incottDecodeIdentity(new Uint8Array([0x09, 0x8f, 0x01, 0x0e]));
+  assert.notEqual(identity, null);
+  assert.equal(identity?.model, null);
+  assert.equal(identity?.sensorId, null);
+  assert.equal(identity?.isPro, false);
 });
 
 test("incottIsWiredProduct is true only for the wired product id (0x622C), hardware-verified 2026-09-08", () => {
@@ -614,4 +807,151 @@ test("REGRESSION: the performance-mode mapping is NOT the vendor UI's left-to-ri
   assert.notEqual(incottPerformanceModeToWire("HP"), INCOTT_PERFORMANCE_MODE_NAMES.indexOf("HP"));
   assert.deepEqual(INCOTT_PERFORMANCE_MODE_TO_WIRE, { HP: 2, Corded: 1, LP: 0 });
   assert.deepEqual(INCOTT_PERFORMANCE_MODE_FROM_WIRE, { 2: "HP", 1: "Corded", 0: "LP" });
+});
+
+test("macro loop modes map to their wire values in order", () => {
+  const at = (loop: IncottMacroLoop): number =>
+    incottEncodeMacroBuffer({ bufferId: 0, loop, cycles: 0, uid: 0, steps: [] })[1]!;
+  assert.equal(at("untilKeyRelease"), 0);
+  assert.equal(at("untilAnyKey"), 1);
+  assert.equal(at("cycle"), 2);
+});
+
+test("macro encoders reject an out-of-range buffer, chunk or step count", () => {
+  const base = { bufferId: 0, loop: "cycle" as const, cycles: 0, uid: 0, steps: [] };
+  assert.throws(() => incottEncodeMacroBuffer({ ...base, bufferId: 10 }), RangeError);
+  assert.throws(
+    () => incottEncodeMacroBuffer({
+      ...base,
+      steps: Array.from({ length: 72 }, () => ({ key: 4, press: true, delayMs: 0 })),
+    }),
+    RangeError,
+  );
+  assert.throws(() => incottEncodeMacroChunkHeader(10, 0), RangeError);
+  assert.throws(() => incottEncodeMacroChunkHeader(0, 10), RangeError);
+});
+
+test("macro chunk headers announce ten 32-byte chunks under command 0x07", () => {
+  assert.deepEqual(bytes(incottEncodeMacroChunkHeader(0, 3)).slice(0, 5), [0x07, 0x0a, 0x00, 0x20, 0x03]);
+  assert.deepEqual(bytes(incottEncodeMacroChunkHeader(9, 0)).slice(0, 5), [0x07, 0x0a, 0x09, 0x20, 0x00]);
+});
+
+test("macro chunking covers the whole buffer without the vendor's slice bug", () => {
+  // The vendor slices `mda.slice(i * 32, i * 64)`, which is EMPTY for i = 0.
+  const buffer = incottEncodeMacroBuffer({
+    bufferId: 0, loop: "cycle", cycles: 1, uid: 0,
+    steps: [{ key: 0x04, press: true, delayMs: 1 }],
+  });
+  const chunks = incottMacroChunks(buffer);
+  assert.equal(chunks.length, 10);
+  assert.ok(chunks.every((chunk) => chunk.length === 32));
+  assert.deepEqual([...chunks.flatMap((chunk) => [...chunk])], [...buffer], "chunks rejoin to the original");
+  assert.throws(() => incottMacroChunks(new Uint8Array(319)), RangeError);
+});
+
+test("fire key encodes times and interval under 0x05/0x02", () => {
+  // The last unidentified command in the protocol. The vendor's setFKeyPm
+  // clamps its two arguments to 3 and 255, and its UI labels them "times"
+  // and "interval" ("Keep left-clicking according to the interval and
+  // times").
+  assert.deepEqual(bytes(incottEncodeSetFireKey(3, 10)).slice(0, 4), [0x05, 0x02, 0x03, 0x0a]);
+  assert.deepEqual(bytes(incottEncodeSetFireKey(1, 255)).slice(0, 4), [0x05, 0x02, 0x01, 0xff]);
+});
+
+test("fire key rejects a times or interval the device cannot hold", () => {
+  assert.throws(() => incottEncodeSetFireKey(4, 10), RangeError);
+  assert.throws(() => incottEncodeSetFireKey(-1, 10), RangeError);
+  assert.throws(() => incottEncodeSetFireKey(3, 256), RangeError);
+  assert.throws(() => incottEncodeSetFireKey(3, -1), RangeError);
+});
+
+test("fire key decodes the live hardware reading", () => {
+  // Read from the device 2026-09-11: 09 85 02 03 0a.
+  assert.deepEqual(incottDecodeFireKey(frame(0x85, 0x02, 0x03, 0x0a)), { times: 3, intervalMs: 10 });
+  assert.deepEqual(incottDecodeFireKey(frame(0x85, 0x02, 0x01, 0x32)), { times: 1, intervalMs: 50 });
+});
+
+test("fire key rejects a frame from another sub-command or one too short", () => {
+  assert.equal(incottDecodeFireKey(frame(0x85, 0x01, 0x04)), null, "debounce, not fire key");
+  assert.equal(incottDecodeFireKey(frame(0x85, 0x03, 0x3c, 0x00)), null, "sleep, not fire key");
+  assert.equal(incottDecodeFireKey(new Uint8Array([0x09, 0x85, 0x02, 0x03])), null, "no interval byte");
+  assert.equal(incottDecodeFireKey(frame(0x85, 0x02, 0x09, 0x0a)), null, "times above the maximum");
+});
+
+test("the macro buffer reproduces a real capture byte for byte", () => {
+  // Captured from Incott's own configurator 2026-09-11 saving "first macro"
+  // to buffer 3: L/K/F/Y pressed and released with the delays shown in the
+  // vendor UI, looping until any key is pressed, one cycle.
+  const buffer = incottEncodeMacroBuffer({
+    bufferId: 3,
+    loop: "untilAnyKey",
+    cycles: 1,
+    uid: 0x8fba0e90,
+    steps: [
+      { key: 0x0f, press: true, delayMs: 124 },   // L down
+      { key: 0x0f, press: false, delayMs: 1510 }, // L up
+      { key: 0x0e, press: true, delayMs: 157 },   // K down
+      { key: 0x0e, press: false, delayMs: 1104 }, // K up
+      { key: 0x09, press: true, delayMs: 135 },   // F down
+      { key: 0x09, press: false, delayMs: 1713 }, // F up
+      { key: 0x1c, press: true, delayMs: 140 },   // Y down
+      { key: 0x1c, press: false, delayMs: 0 },    // Y up
+    ],
+  });
+  const hex = (from: number, to: number): string =>
+    [...buffer.slice(from, to)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+
+  // Chunk 0 exactly as the vendor sent it.
+  assert.equal(
+    hex(0, 32),
+    "03 01 01 00 01 0f 7c 00 81 0f e6 05 01 0e 9d 00 81 0e 50 04 01 09 87 00 81 09 b1 06 01 1c 8c 00",
+  );
+  // Chunk 1: the final release, then the step area runs out into zeros.
+  assert.equal(hex(32, 36), "81 1c 00 00");
+  assert.ok(buffer.slice(36, 288).every((byte) => byte === 0), "nothing between the steps and the trailer");
+  // Chunk 9, the trailer. 0xa4 = 164 = (8 + 1) * 4 + 128 — the constant an
+  // earlier transcription had as 132.
+  assert.equal(
+    hex(288, 320),
+    "4d 61 63 72 6f 34 00 00 00 00 00 00 00 00 00 00 a4 00 00 00 10 00 e8 e8 90 0e ba 8f 10 00 08 00",
+  );
+});
+
+test("macro chunk headers match the captured upload", () => {
+  // TX feature  07 0a 00 20 03  ... through  07 0a 09 20 03
+  for (let index = 0; index < 10; index += 1) {
+    assert.deepEqual(
+      bytes(incottEncodeMacroChunkHeader(index, 3)).slice(0, 5),
+      [0x07, 0x0a, index, 0x20, 0x03],
+    );
+  }
+});
+
+test("a macro button binding reads back as its slot", () => {
+  // The capture ended with `06 04 09 00 03 00` — button wire index 4 bound to
+  // macro slot 3, encoded as slot << 16 | 9.
+  assert.equal(incottButtonActionLabel(0x00030009), "Macro 4");
+  assert.equal(incottButtonActionLabel(0x00000009), "Macro 1");
+  const binding = incottDecodeButtonBinding(frame(0x86, 0x04, 0x09, 0x00, 0x03, 0x00), 4);
+  assert.equal(binding?.label, "Macro 4");
+  // Not offered as a writable option: there is no UI to author one.
+  assert.equal(incottButtonActionCode("Macro 4"), null);
+});
+
+test("the offered DPI ceiling follows the fitted sensor", () => {
+  // The vendor builds its DPI table from the sensor: PAW3395 stops at 32000,
+  // PAW3950 reaches 45000. Every Incott model shares one protocol and one
+  // device definition, so this is the only thing that varies between them.
+  assert.equal(incottDpiMaxForSensor(INCOTT_SENSOR_PAW3395), 32000);
+  assert.equal(incottDpiMaxForSensor(INCOTT_SENSOR_PAW3950), 45000);
+  // Unknown or unreadable falls back to the higher ceiling: narrowing on a
+  // guess would hide DPI the mouse can actually reach.
+  assert.equal(incottDpiMaxForSensor(null), 45000);
+  assert.equal(incottDpiMaxForSensor(0x1234), 45000);
+});
+
+test("the encoder still accepts the full range regardless of sensor", () => {
+  // Same split as the polling rate: readStatus narrows what is OFFERED, the
+  // codec keeps accepting anything the protocol can express.
+  assert.doesNotThrow(() => incottEncodeSetDpi(0, 45000));
 });

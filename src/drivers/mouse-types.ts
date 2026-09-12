@@ -215,6 +215,21 @@ export interface MouseStatus {
   finalmouseDongleLedMode?: number | null;
   finalmouseTournamentScrollMode?: number | null;
   finalmouseTournamentScrollTimeoutMs?: number | null;
+  /**
+   * Incott's 2.4 GHz receiver LED: 0 connect & polling rate, 1 battery
+   * status, 2 battery warning. A property of the dongle, so it is omitted
+   * entirely over the cable rather than reported as a value the user cannot
+   * act on. Does not fit `dongleLedEnabled`, which is a boolean.
+   */
+  incottReceiverLedMode?: number | null;
+  /**
+   * Incott's "Fire Key" rapid-fire settings: how many clicks a press sends
+   * (1-3) and the gap between them in milliseconds (0-255). Global to the
+   * device — the command carries no button index, so these apply to whichever
+   * button is bound to the rapid-fire action.
+   */
+  incottFireKeyTimes?: number | null;
+  incottFireKeyIntervalMs?: number | null;
   signalStrength?: number | null;
   motionSync?: boolean | null;
   /** On-device DPI stages, where supported (Teevolution, Ninjutso, …). */

@@ -1,9 +1,14 @@
 import type { MouseStatus, MouseUiHints } from "../mouse-types.ts";
 import {
+  incottButtonActionCode,
+  incottDecodeButtonBinding,
   incottDecodeDebounce,
   incottDecodeDpiStage,
-  incottDecodeDpiStageIndex,
+  incottDecodeDpiStageAxis,
+  incottDecodeDpiCycle,
+  incottDecodeFireKey,
   incottDecodeIdentity,
+  incottDpiMaxForSensor,
   incottDecodeInputStatus,
   incottDecodeLiftOffDirect,
   incottDecodePerformanceMode,
@@ -11,10 +16,15 @@ import {
   incottDecodeReceiverLed,
   incottDecodeSleep,
   incottDecodeToggle,
+  incottEncodeMacroBuffer,
+  incottEncodeMacroChunkHeader,
   incottEncodeQuery,
-  incottEncodeSetActiveDpiStage,
+  incottEncodeQueryDpiAxis,
+  incottEncodeSetButtonBinding,
   incottEncodeSetDebounce,
   incottEncodeSetDpi,
+  incottEncodeSetDpiCycle,
+  incottEncodeSetFireKey,
   incottEncodeSetLiftOff,
   incottEncodeSetPerformanceMode,
   incottEncodeSetPollingRate,
@@ -23,12 +33,17 @@ import {
   incottEncodeSetToggle,
   incottFrameMatches,
   incottIsWiredProduct,
+  incottMacroChunks,
   incottLiftOffLabel,
   incottLiftOffTenths,
   incottNormalizeProductName,
   incottPerformanceModeFromWire,
   incottPerformanceModeToWire,
   incottValidateDpi,
+  INCOTT_BUTTON_ACTIONS,
+  INCOTT_BUTTON_NAMES,
+  INCOTT_BUTTON_WIRE_INDEX,
+  INCOTT_CMD_QUERY_BUTTON,
   INCOTT_CMD_QUERY_DPI_STAGE,
   INCOTT_CMD_QUERY_DPI_STAGE_VALUE,
   INCOTT_CMD_QUERY_IDENTITY,
@@ -37,6 +52,7 @@ import {
   INCOTT_CMD_QUERY_SENSOR,
   INCOTT_CMD_QUERY_TIMING,
   INCOTT_DEBOUNCE_MAX_MS,
+  INCOTT_DPI_AXIS,
   INCOTT_DPI_DEFAULT_STAGE_PRESETS,
   INCOTT_DPI_MAX,
   INCOTT_DPI_MIN,
@@ -52,7 +68,7 @@ import {
   INCOTT_RESPONSE_LENGTH,
   INCOTT_SUB_ANGLE_SNAP,
   INCOTT_SUB_DEBOUNCE,
-  INCOTT_SUB_DPI_STAGE,
+  INCOTT_SUB_FIRE_KEY,
   INCOTT_SUB_LOD,
   INCOTT_SUB_MOTION_SYNC,
   INCOTT_SUB_NONE,
@@ -61,7 +77,11 @@ import {
   INCOTT_SUB_SLEEP,
   INCOTT_USAGE_PAGE,
   INCOTT_VENDOR_ID,
+  type IncottDpiAxis,
+  type IncottDpiCycle,
+  type IncottFireKey,
   type IncottInputStatus,
+  type IncottMacro,
 } from "../../incott/index.ts";
 
 type LiftOffLevel = "Low" | "Medium" | "High";
@@ -74,6 +94,13 @@ type LiftOffLevel = "Low" | "Medium" | "High";
 export interface FeatureTransport {
   sendFeatureReport(reportId: number, data: BufferSource): Promise<void>;
   receiveFeatureReport(reportId: number): Promise<DataView>;
+  /**
+   * OUTPUT report, used only by the macro upload — every other command in
+   * this protocol is an 8-byte FEATURE report. Optional because most
+   * transports (and the test fakes that predate macros) have no reason to
+   * implement it; `uploadMacro` reports a clear error when it is absent.
+   */
+  sendReport?(reportId: number, data: BufferSource): Promise<void>;
 }
 
 export interface IncottTransactionOptions {
@@ -119,8 +146,13 @@ export class IncottTransactionQueue {
    * no matching frame arrives. Never rejects: a device that stops answering
    * yields null so the caller can render an em dash instead of a stale value.
    */
-  request(payload: Uint8Array, cmd: number, sub: number | null): Promise<Uint8Array | null> {
-    const run = this.tail.then(() => this.exchange(payload, cmd, sub));
+  request(
+    payload: Uint8Array,
+    cmd: number,
+    sub: number | null,
+    axis: number | null = null,
+  ): Promise<Uint8Array | null> {
+    const run = this.tail.then(() => this.exchange(payload, cmd, sub, axis));
     // Keep the chain alive even if one exchange throws.
     this.tail = run.catch(() => undefined);
     return run;
@@ -143,10 +175,29 @@ export class IncottTransactionQueue {
     return run;
   }
 
+  /**
+   * Sends a 32-byte OUTPUT report, the macro upload's data path. Queued with
+   * everything else so it cannot interleave with the 8-byte header that
+   * announces it, and followed by a settle delay because the vendor waits
+   * 80 ms between the two halves of each chunk.
+   */
+  sendOutput(reportId: number, payload: Uint8Array): Promise<void> {
+    const run = this.tail.then(async () => {
+      if (!this.transport.sendReport) {
+        throw new Error("This transport cannot send output reports, which the macro upload needs.");
+      }
+      await this.transport.sendReport(reportId, toArrayBuffer(payload));
+      await this.sleep(this.settleMs);
+    });
+    this.tail = run.catch(() => undefined);
+    return run;
+  }
+
   private async exchange(
     payload: Uint8Array,
     cmd: number,
     sub: number | null,
+    axis: number | null = null,
   ): Promise<Uint8Array | null> {
     try {
       // Discard anything latched by a previous exchange before sending.
@@ -155,7 +206,7 @@ export class IncottTransactionQueue {
       for (let attempt = 0; attempt < this.attempts; attempt += 1) {
         if (this.settleMs > 0) await this.sleep(this.settleMs);
         const frame = await this.read();
-        if (frame && incottFrameMatches(frame, cmd, sub)) return frame;
+        if (frame && incottFrameMatches(frame, cmd, sub, axis)) return frame;
       }
       return null;
     } catch {
@@ -261,16 +312,23 @@ export async function incottSelectCollection<T extends FeatureTransport>(
  * this list to matter to. `incottDecodeBattery`'s own frame-matching in
  * `src/incott/index.ts` is unaffected by this list either way.
  *
- * `0x86` (button reads) shows the identical sub-echo pattern but is not
- * queried anywhere in this driver — see `INCOTT_CMD_QUERY_BUTTON` in
- * `src/incott/index.ts` for where to add it if a button read is ever wired
- * up here.
+ * `0x86` echoes the button index in the same position, and MUST stay in this
+ * list now that buttons are read: six reads go out back to back, and the
+ * device latches a single shared response buffer, so matching on the command
+ * byte alone would let button 2's reply satisfy button 3's request.
+ *
+ * `0x83` WAS in this list and has been removed. Its byte 2 is the DPI stage
+ * COUNT, not an echo — `09 83 00` answers `09 83 06 01` — so treating it as
+ * one only worked because this contributor's mouse has a six-stage cycle and
+ * the driver happened to send `06`. On a mouse configured for four stages
+ * every DPI read would have been rejected. See
+ * `INCOTT_DPI_STAGE_COUNT_DEFAULT`.
  */
 const SUB_ECHOING_QUERIES: readonly number[] = [
-  INCOTT_CMD_QUERY_DPI_STAGE,
   INCOTT_CMD_QUERY_DPI_STAGE_VALUE,
   INCOTT_CMD_QUERY_SENSOR,
   INCOTT_CMD_QUERY_TIMING,
+  INCOTT_CMD_QUERY_BUTTON,
 ];
 
 function toggleWord(value: boolean | null): string {
@@ -561,14 +619,14 @@ export class IncottHidClient {
     // CONNECTION is wired, and charging is a consequence of that, not what
     // the id itself encodes. See `incottIsWiredProduct`.
     const wired = incottIsWiredProduct(this.device.productId);
-    // The real model name ("Esports G23V2Pro") lives only in the WIRED
-    // product string; wireless reports a generic "incott 8K wireless mouse"
-    // with no model in it, and there is no way to read a model over the air
-    // — see `incottNormalizeProductName`'s doc comment. `this.device` stays
-    // public, so `client.device.productName` remains available as the
+    // Fallback display name only — the model read from the device wins where
+    // one is available, and `name` is settled below once the identity query
+    // has answered. The product string names a model over the cable
+    // ("incott Esports G23V2Pro mouse") but is a generic "incott 8K wireless
+    // mouse" on the dongle, so it cannot be the primary source. `this.device`
+    // stays public, so `client.device.productName` remains available as the
     // untouched raw string for anything that wants it.
     const rawName = this.device.productName || "Incott wireless mouse";
-    const name = incottNormalizeProductName(rawName);
 
     // WIRED-MODE BUG, hardware-verified 2026-09-08 (see `open()`'s class
     // comment): when `open()`'s identity probe found this collection dead,
@@ -585,9 +643,14 @@ export class IncottHidClient {
     // value. Per the driver's graceful-degradation contract, a device that
     // stops answering yields `dpi: null` / an omitted `dpiStages` here rather
     // than throwing or fabricating a value.
-    const activeDpiStage = dead
+    // One query answers both how many stages the cycle uses and which is
+    // live — see `incottDecodeDpiCycle`. The count is NOT assumed to be six:
+    // it is written back verbatim by every stage select, and publishing six
+    // rows for a four-stage cycle would offer stages the mouse never visits.
+    const dpiCycle = dead
       ? null
-      : incottDecodeDpiStageIndex(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_DPI_STAGE));
+      : incottDecodeDpiCycle(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_NONE));
+    const activeDpiStage = dpiCycle?.active ?? null;
     // Six sequential queries, deliberately NOT parallelized: the device has a
     // single shared response buffer (see `IncottTransactionQueue`'s class
     // comment), and concurrent requests would corrupt each other's replies.
@@ -601,11 +664,22 @@ export class IncottHidClient {
     }
     // `dpiStages` is populated only when every one of the six stages
     // answered — a partial table is never fabricated with a placeholder for
-    // the stage(s) that did not.
+    // the stage(s) that did not. It is then trimmed to the stages the cycle
+    // actually uses: the device keeps all six stored values, but the ones
+    // past `count` are not in the rotation and must not be offered as if
+    // they were.
     const dpiStages = dpiStageReads.every((value): value is number => value !== null)
-      ? dpiStageReads
+      ? dpiStageReads.slice(0, dpiCycle?.count ?? dpiStageReads.length)
       : null;
     const dpi = activeDpiStage === null ? null : dpiStageReads[activeDpiStage] ?? null;
+    // The active stage's Y axis, which the plain stage read above does not
+    // distinguish — that returns X. Published so the shared "X n · Y n DPI"
+    // summary is truthful on a mouse whose axes differ; omitted rather than
+    // mirrored from X when the read fails, so the app falls back to one
+    // number instead of claiming the axes match.
+    const dpiY = dead || activeDpiStage === null
+      ? null
+      : await this.readDpiStageAxis(activeDpiStage, "y");
     const pollingRateHz = dead
       ? null
       : incottDecodePollingRate(await this.query(INCOTT_CMD_QUERY_POLLING, INCOTT_SUB_NONE));
@@ -669,11 +743,24 @@ export class IncottHidClient {
     // right now, so it is used here instead of inferring the state from the
     // connection.
     const batteryCharging = this.lastInputStatus?.charging ?? null;
-    // Section 13 of the IncottHub spec: the identity byte layout is unknown,
-    // so the raw hex is shown rather than pretending to parse a version.
+    // The identity reply carries the model, the sensor and the receiver type
+    // — see `incottDecodeIdentity` for the byte map. The raw hex is still
+    // published under `firmware` below, because the remaining bytes (7-8) are
+    // genuinely undecoded and a capture of them is what a second model's
+    // owner would need to send.
     const identity = dead
       ? null
       : incottDecodeIdentity(await this.query(INCOTT_CMD_QUERY_IDENTITY, INCOTT_SUB_NONE));
+
+    // The model READ FROM THE DEVICE is preferred over the product string:
+    // it is the only source that works on the 2.4 GHz dongle, where the
+    // product string has no model in it. All six Incott models share the
+    // same two product ids, so this is the only thing that tells them apart
+    // at all. Falls back to the tidied product string whenever the identity
+    // query failed or returned a model code outside the known table — an
+    // unrecognised model reports whatever the device called itself rather
+    // than a guess.
+    const name = identity?.displayName ?? incottNormalizeProductName(rawName);
 
     // The owner confirmed on hardware that the mouse only reaches 1000 Hz
     // over the cable — 2000/4000/8000 Hz are wireless-only (see
@@ -683,12 +770,29 @@ export class IncottHidClient {
     // failure on every attempt.
     const supportedPollingRates = wired ? [...INCOTT_POLLING_STEPS_HZ_WIRED] : [...INCOTT_POLLING_STEPS_HZ];
 
+    // The receiver LED belongs to the 2.4 GHz dongle and means nothing over
+    // the cable, so it is not read at all when wired — the card then hides
+    // itself rather than offering a control that cannot do anything. See
+    // `setReceiverLed`.
+    const receiverLedMode = dead || wired
+      ? null
+      : incottDecodeReceiverLed(await this.query(INCOTT_CMD_QUERY_RECEIVER_LED, INCOTT_SUB_NONE));
+    // Rapid-fire parameters, global to the device — see `INCOTT_SUB_FIRE_KEY`.
+    const fireKey = dead ? null : await this.getFireKey();
+
+    // All six bindings, or nothing. A partial read would render some buttons
+    // with a real assignment and the rest with a fabricated default, which is
+    // worse than hiding the remapper: the shared UI writes back whatever it
+    // shows, so a wrong reading becomes a wrong write the moment anything
+    // else on the card is changed.
+    const buttonMappings = dead ? null : await this.readButtonMappings();
+
     const ui: MouseUiHints = {
       family: "incott",
       // The advanced section is the only place debounce, sleep, motion sync,
-      // angle snapping and ripple control render; Incott has no lighting, no
-      // onboard profiles, and no button remapping, so those cards stay hidden
-      // on their own (nothing populates the fields that gate them).
+      // angle snapping and ripple control render; Incott has no lighting and
+      // no onboard profiles, so those cards stay hidden on their own
+      // (nothing populates the fields that gate them).
       showAdvancedSection: true,
       // No command reports link quality.
       hideSignalCard: true,
@@ -737,7 +841,16 @@ export class IncottHidClient {
       // PAW3395 unit is expected to have a write above 32000 refused by the
       // existing read-back verification in `setDpi`/`setDpiStageValue`
       // rather than this module guessing which sensor is present.
-      dpiStageEditor: { maxStages: INCOTT_DPI_STAGE_COUNT, countEditable: false, minDpi: INCOTT_DPI_MIN, maxDpi: INCOTT_DPI_MAX, stepDpi: INCOTT_DPI_STEP },
+      // `countEditable` only while the cycle actually read: the count picker
+      // writes through `setDpiStageCount`, which needs a real current count
+      // to preserve the active stage, and offering it against an unreadable
+      // one would write a guess.
+      // The ceiling follows the FITTED SENSOR, which the identity reply
+      // reports: the PAW3395 models in this family stop at 32000 in the
+      // vendor's own table where the PAW3950 reaches 45000. Falls back to the
+      // higher value when identity could not be read, since narrowing on a
+      // guess would hide DPI the mouse can actually do.
+      dpiStageEditor: { maxStages: INCOTT_DPI_STAGE_COUNT, countEditable: dpiCycle !== null, minDpi: INCOTT_DPI_MIN, maxDpi: incottDpiMaxForSensor(identity?.sensorId ?? null), stepDpi: INCOTT_DPI_STEP },
     };
 
     return {
@@ -750,6 +863,14 @@ export class IncottHidClient {
       // go here, but `ui.settingsReady: false` above means the app never
       // renders it.
       dpi: dpi ?? 0,
+      ...(dpiY !== null ? { dpiY, supportsSeparateDpiAxes: true } : {}),
+      // Omitted, not nulled, when unreadable or inapplicable: the app's
+      // Incott card renders only the fields that are present, so a wired
+      // connection simply has no receiver-LED control rather than a dead one.
+      ...(receiverLedMode !== null ? { incottReceiverLedMode: receiverLedMode } : {}),
+      ...(fireKey !== null
+        ? { incottFireKeyTimes: fireKey.times, incottFireKeyIntervalMs: fireKey.intervalMs }
+        : {}),
       // All six stages' stored values, only when every one of them answered
       // — see the loop above. Omitted (not fabricated) on a partial read.
       ...(dpiStages !== null ? { dpiStages } : {}),
@@ -771,6 +892,12 @@ export class IncottHidClient {
       batteryState: batteryCharging === null ? "Unknown" : batteryCharging ? "Charging" : "Discharging",
       liftOffDistance: liftOffTenths === null ? null : incottLiftOffLabel(liftOffTenths),
       supportedLiftOffDistances: ["Low", "Medium", "High"],
+      // Both fields together, or neither: the shared remapper only renders
+      // when it has the current assignments AND the list of actions it may
+      // write back.
+      ...(buttonMappings !== null
+        ? { buttonMappings, buttonOptions: INCOTT_BUTTON_ACTIONS.map(([label]) => label) }
+        : {}),
       motionSync,
       rippleControl,
       angleSnapping,
@@ -797,7 +924,7 @@ export class IncottHidClient {
    */
   async setDpi(dpi: number): Promise<number> {
     incottValidateDpi(dpi);
-    const stage = incottDecodeDpiStageIndex(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_DPI_STAGE));
+    const stage = (await this.readDpiCycle())?.active ?? null;
     if (stage === null) throw new Error("Could not read the active DPI stage to write.");
     await this.write(incottEncodeSetDpi(stage, dpi));
     const got = incottDecodeDpiStage(await this.query(INCOTT_CMD_QUERY_DPI_STAGE_VALUE, stage), stage);
@@ -806,21 +933,103 @@ export class IncottHidClient {
   }
 
   /**
-   * SELECTS which of the six DPI stages is active (`09 03 06 <idx>`) —
-   * distinct from `setDpi`/`setDpiStageValue`, which EDIT a stage's stored
-   * value. Confirmed on hardware 2026-09-08 that a select never touches any
-   * stage's stored value (see `INCOTT_CMD_SET_DPI_STAGE` in
-   * `src/incott/index.ts`), so unlike every value setter in this client this
-   * one reads back `0x83`/`0x06` — the active index — not a DPI value.
+   * Sets both DPI axes on the ACTIVE stage — the shape a generic X/Y control
+   * needs, where `setDpiStageAxis` is per-stage and per-axis.
+   *
+   * Mirrors the vendor's own `setResolution`: one write with the "both" flag
+   * when the axes match, two axis-flagged writes when they differ. Named to
+   * match the method proposed upstream for a brand-agnostic axis control; if
+   * the maintainers settle on a different name this is the one line to
+   * rename.
+   */
+  async setAxisDpi(dpiX: number, dpiY: number): Promise<void> {
+    incottValidateDpi(dpiX);
+    incottValidateDpi(dpiY);
+    const stage = (await this.readDpiCycle())?.active ?? null;
+    if (stage === null) throw new Error("Could not read the active DPI stage to write.");
+    if (dpiX === dpiY) {
+      await this.setDpiStageAxis(stage, dpiX, "both");
+      return;
+    }
+    await this.setDpiStageAxis(stage, dpiX, "x");
+    await this.setDpiStageAxis(stage, dpiY, "y");
+  }
+
+  /**
+   * Uploads one macro into an on-device buffer.
+   *
+   * Ten 32-byte chunks, each announced by an 8-byte feature report and then
+   * carried by a 32-byte OUTPUT report on the same id — the only place this
+   * protocol uses an output report at all. Captured from the vendor tool
+   * 2026-09-11; see `captures/incott-8k-wireless/macro-upload-2026-09-11.hex`.
+   *
+   * The device does not acknowledge any of it, so unlike every other setter
+   * here there is nothing to verify against: there is no macro read command.
+   * Bind a button to `Macro <n>` and press it — that is the only confirmation
+   * available.
+   */
+  async uploadMacro(macro: IncottMacro): Promise<void> {
+    const chunks = incottMacroChunks(incottEncodeMacroBuffer(macro));
+    for (const [index, chunk] of chunks.entries()) {
+      await this.write(incottEncodeMacroChunkHeader(index, macro.bufferId));
+      await this.queue.sendOutput(INCOTT_REPORT_ID, chunk);
+    }
+  }
+
+  /** Reads the DPI cycle (stage count + active stage) in one query. */
+  private async readDpiCycle(): Promise<IncottDpiCycle | null> {
+    return incottDecodeDpiCycle(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_NONE));
+  }
+
+  /**
+   * SELECTS which DPI stage is active (`09 03 <count> <idx>`) — distinct from
+   * `setDpi`/`setDpiStageValue`, which EDIT a stage's stored value. Confirmed
+   * on hardware 2026-09-08 that a select never touches any stage's stored
+   * value (see `INCOTT_CMD_SET_DPI_STAGE` in `src/incott/index.ts`), so
+   * unlike every value setter in this client this one reads back the active
+   * index rather than a DPI value.
+   *
+   * The stage count is READ FIRST and written back unchanged. It shares the
+   * write with the index, so sending a constant here would silently resize a
+   * cycle that is not six stages long — see
+   * `INCOTT_DPI_STAGE_COUNT_DEFAULT`.
    */
   async setActiveDpiStage(stage: number): Promise<number> {
     if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
       throw new RangeError(`DPI stage out of range: ${stage}`);
     }
-    await this.write(incottEncodeSetActiveDpiStage(stage));
-    const got = incottDecodeDpiStageIndex(await this.query(INCOTT_CMD_QUERY_DPI_STAGE, INCOTT_SUB_DPI_STAGE));
+    const cycle = await this.readDpiCycle();
+    if (cycle === null) throw new Error("Could not read the DPI stage cycle to write.");
+    if (stage >= cycle.count) {
+      throw new RangeError(`DPI stage ${stage} is outside this mouse's ${cycle.count}-stage cycle.`);
+    }
+    await this.write(incottEncodeSetDpiCycle(cycle.count, stage));
+    const got = (await this.readDpiCycle())?.active ?? null;
     if (got !== stage) throw new Error(`The mouse kept DPI stage ${got ?? "an unreadable"} instead of ${stage}.`);
     return stage;
+  }
+
+  /**
+   * Sets how many stages the DPI cycle rotates through (`09 03 <count>
+   * <idx>`). The stored value of every stage is left alone — stages above
+   * the new count keep their values and simply stop being visited.
+   *
+   * The active stage rides along in the same write, so it is clamped into
+   * the new cycle rather than left pointing past the end.
+   */
+  async setDpiStageCount(count: number): Promise<number> {
+    if (!Number.isInteger(count) || count < 1 || count > INCOTT_DPI_STAGE_COUNT) {
+      throw new RangeError(`DPI stage count out of range: ${count}`);
+    }
+    const cycle = await this.readDpiCycle();
+    if (cycle === null) throw new Error("Could not read the DPI stage cycle to write.");
+    const active = Math.min(cycle.active, count - 1);
+    await this.write(incottEncodeSetDpiCycle(count, active));
+    const got = await this.readDpiCycle();
+    if (got?.count !== count) {
+      throw new Error(`The mouse kept ${got?.count ?? "an unreadable"} DPI stages instead of ${count}.`);
+    }
+    return count;
   }
 
   /**
@@ -925,6 +1134,80 @@ export class IncottHidClient {
    * omit the wiring outright when wired, matching the other wireless-only
    * behavior in this driver (see `INCOTT_POLLING_STEPS_HZ_WIRED`).
    */
+  /**
+   * Reads all six button bindings, keyed by the physical button name.
+   *
+   * Returns null unless every button answered: see the call site in
+   * `readStatus` for why a partial read is not published. A binding the
+   * action table does not know (a keyboard key, a macro) reports its raw code
+   * as `Unknown (0x...)` rather than being shown as one of the offered
+   * actions — the shared remapper writes back what it displays, so labelling
+   * an unknown binding as a known action would rewrite it on the next edit.
+   */
+  private async readButtonMappings(): Promise<Record<string, string> | null> {
+    const mappings: Record<string, string> = {};
+    for (const name of INCOTT_BUTTON_NAMES) {
+      const index = INCOTT_BUTTON_WIRE_INDEX[name];
+      const binding = incottDecodeButtonBinding(await this.query(INCOTT_CMD_QUERY_BUTTON, index), index);
+      if (binding === null) return null;
+      mappings[name] = binding.label ?? `Unknown (0x${binding.code.toString(16).padStart(8, "0")})`;
+    }
+    return mappings;
+  }
+
+  /**
+   * Reassigns one button, then reads it back and refuses to report success
+   * unless the device actually took the value.
+   *
+   * `button` is a physical name; the wire index it maps to is NOT the same
+   * number (Forward and Back are transposed — see
+   * `INCOTT_BUTTON_WIRE_INDEX`). This is a standalone command, so it cannot
+   * disturb DPI, polling or the other five buttons.
+   */
+  async setButtonMapping(button: string, actionLabel: string): Promise<void> {
+    const name = INCOTT_BUTTON_NAMES.find((candidate) => candidate === button);
+    if (name === undefined) throw new Error(`This mouse has no "${button}" button.`);
+    const code = incottButtonActionCode(actionLabel);
+    if (code === null) throw new Error(`Unknown button action "${actionLabel}".`);
+
+    const index = INCOTT_BUTTON_WIRE_INDEX[name];
+    await this.write(incottEncodeSetButtonBinding(index, code));
+    const applied = incottDecodeButtonBinding(await this.query(INCOTT_CMD_QUERY_BUTTON, index), index);
+    if (applied === null) throw new Error("The mouse did not confirm the button change.");
+    if (applied.code !== code) {
+      throw new Error(`The mouse kept ${applied.label ?? "another binding"} on ${name} instead of ${actionLabel}.`);
+    }
+  }
+
+  /**
+   * Reads the Fire Key (rapid-fire) parameters — how many clicks a button
+   * bound to "Rapid fire" sends, and how far apart. Global to the device: the
+   * command carries no button index.
+   */
+  async getFireKey(): Promise<IncottFireKey | null> {
+    return incottDecodeFireKey(await this.query(INCOTT_CMD_QUERY_TIMING, INCOTT_SUB_FIRE_KEY));
+  }
+
+  /**
+   * Writes the Fire Key parameters and verifies the read-back.
+   *
+   * Not advertised through `MouseStatus`: the shared contract has no
+   * rapid-fire field, so there is no generic control to publish this behind —
+   * the same position `setReceiverLed` is in. Kept for protocol parity and
+   * for whoever wires a control up.
+   */
+  async setFireKey(times: number, intervalMs: number): Promise<IncottFireKey> {
+    await this.write(incottEncodeSetFireKey(times, intervalMs));
+    const got = await this.getFireKey();
+    if (got === null) throw new Error("The mouse did not confirm the fire key change.");
+    if (got.times !== times || got.intervalMs !== intervalMs) {
+      throw new Error(
+        `The mouse kept ${got.times} clicks at ${got.intervalMs} ms instead of ${times} at ${intervalMs} ms.`,
+      );
+    }
+    return got;
+  }
+
   async setReceiverLed(mode: number): Promise<number> {
     await this.write(incottEncodeSetReceiverLed(mode));
     const got = incottDecodeReceiverLed(await this.query(INCOTT_CMD_QUERY_RECEIVER_LED, INCOTT_SUB_NONE));
@@ -1008,6 +1291,52 @@ export class IncottHidClient {
   private async query(cmd: number, sub: number): Promise<Uint8Array> {
     const matchSub = SUB_ECHOING_QUERIES.includes(cmd) ? sub : null;
     return (await this.queue.request(incottEncodeQuery(cmd, sub), cmd, matchSub)) ?? new Uint8Array(INCOTT_RESPONSE_LENGTH);
+  }
+
+  /**
+   * Reads ONE AXIS of one DPI stage. Separate from `query` because the axis
+   * has to be matched in the reply as well as sent: X and Y on the same stage
+   * are two requests with an identical command and sub-command, so the second
+   * would otherwise accept the first's latched frame.
+   */
+  private async queryDpiAxis(stage: number, axis: IncottDpiAxis): Promise<Uint8Array> {
+    const frame = await this.queue.request(
+      incottEncodeQueryDpiAxis(stage, axis),
+      INCOTT_CMD_QUERY_DPI_STAGE_VALUE,
+      stage,
+      INCOTT_DPI_AXIS[axis],
+    );
+    return frame ?? new Uint8Array(INCOTT_RESPONSE_LENGTH);
+  }
+
+  /** Reads one axis of one stage, or null when the device does not answer. */
+  async readDpiStageAxis(stage: number, axis: IncottDpiAxis): Promise<number | null> {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
+      throw new RangeError(`DPI stage out of range: ${stage}`);
+    }
+    return incottDecodeDpiStageAxis(await this.queryDpiAxis(stage, axis), stage, axis);
+  }
+
+  /**
+   * Writes one axis of one stage and verifies it by reading that axis back.
+   *
+   * Independent X and Y are real on this device — hardware-verified
+   * 2026-09-11, see `INCOTT_DPI_AXIS`. Writing `"both"` is what the ordinary
+   * `setDpiStageValue` does.
+   */
+  async setDpiStageAxis(stage: number, dpi: number, axis: IncottDpiAxis): Promise<number> {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= INCOTT_DPI_STAGE_COUNT) {
+      throw new RangeError(`DPI stage out of range: ${stage}`);
+    }
+    incottValidateDpi(dpi);
+    await this.write(incottEncodeSetDpi(stage, dpi, axis));
+    // "both" has no axis of its own to read back; X is the axis it lands on.
+    const readAxis: IncottDpiAxis = axis === "both" ? "x" : axis;
+    const got = await this.readDpiStageAxis(stage, readAxis);
+    if (got !== dpi) {
+      throw new Error(`The mouse kept ${got ?? "an unreadable"} ${readAxis.toUpperCase()} DPI instead of ${dpi}.`);
+    }
+    return dpi;
   }
 
   private async write(payload: Uint8Array): Promise<void> {
