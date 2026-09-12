@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { MchoseV3HidClient } from "./v3-hid.ts";
 import { MchoseHidClient } from "./hid.ts";
 import { MchoseDockHidClient } from "./dock-hid.ts";
-import { MCHOSE_V3_BODY_LENGTH, MCHOSE_V3_COMMAND } from "@openmouse/protocol/mchose";
+import {
+  MCHOSE_V3_BODY_LENGTH,
+  MCHOSE_V3_COMMAND,
+  mchoseV3IsBusy,
+  mchoseV3IsRejection,
+  mchoseV3Payload,
+} from "@openmouse/protocol/mchose";
 
 /** What an A7 V3 Ultra+ behind its receiver would answer, command by command. */
 const ANSWERS: Readonly<Record<number, number[]>> = {
@@ -53,11 +59,71 @@ interface FakeOptions {
   silent?: number[];
   /** Emit an unrelated input report before every real answer. */
   noisy?: boolean;
+  /** Record writes but never apply them, as a firmware ignoring a command would. */
+  ignoreWrites?: boolean;
+
+  /** Answer these commands with the firmware's refusal frame. */
+  reject?: number[];
+  /** Answer everything with the one-byte ask-again a stranded receiver sends. */
+  busy?: boolean;
+  /** Override the `0x0900` reply, to replay a real capture. */
+  deviceInfo?: number[];
+}
+
+/** Which slice of the fake's state each read command serves. */
+const STATE_BY_READ: Readonly<Record<number, "settings" | "dpi" | "buttons" | "liftOff">> = {
+  [MCHOSE_V3_COMMAND.readSettings]: "settings",
+  [MCHOSE_V3_COMMAND.readDpi]: "dpi",
+  [MCHOSE_V3_COMMAND.readButtons]: "buttons",
+  [MCHOSE_V3_COMMAND.readLiftOff]: "liftOff",
+};
+
+/**
+ * Apply a write the way the firmware would, so the driver's read-back
+ * verification is actually exercised rather than always agreeing with itself.
+ */
+function applyWrite(
+  state: { settings: number[]; dpi: number[]; buttons: number[]; liftOff: number[] },
+  command: number,
+  data: number[],
+): void {
+  switch (command) {
+    case MCHOSE_V3_COMMAND.writeSettings:
+      state.settings = data.slice(0, state.settings.length);
+      break;
+    case MCHOSE_V3_COMMAND.writeDpi: {
+      // The write and read orders differ: the write puts hasSeparateY third
+      // and the read puts it fifth. Getting this backwards in the fake would
+      // hide a driver that had it backwards too.
+      const [profile, axis, hasY, count, active, ...stages] = data;
+      state.dpi = [profile!, axis!, count!, active!, hasY!, ...stages];
+      break;
+    }
+    case MCHOSE_V3_COMMAND.writeLiftOff:
+      state.liftOff = [data[1]!];
+      break;
+    case MCHOSE_V3_COMMAND.writeButtons:
+      state.buttons = data.slice(3);
+      break;
+    default:
+      break;
+  }
 }
 
 function fakeMouse(options: FakeOptions = {}) {
   const listeners: Array<(event: unknown) => void> = [];
   const sent: number[] = [];
+  /** Mutable device state, so a write is visible to the read that follows. */
+  const state = {
+    settings: [...ANSWERS[MCHOSE_V3_COMMAND.readSettings]!],
+    dpi: [...ANSWERS[MCHOSE_V3_COMMAND.readDpi]!],
+    buttons: [...ANSWERS[MCHOSE_V3_COMMAND.readButtons]!],
+    liftOff: [...ANSWERS[MCHOSE_V3_COMMAND.readLiftOff]!],
+  };
+  /** Every write, by command, so the exact bytes can be asserted. */
+  const writes = new Map();
+  /** The data block sent with each command, so arguments can be asserted. */
+  const sentData = new Map<number, number[]>();
 
   const emit = (body: Uint8Array): void => {
     const event = { data: new DataView(body.buffer.slice(0)) };
@@ -84,8 +150,33 @@ function fakeMouse(options: FakeOptions = {}) {
       const body = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
       const command = body[3]! | (body[4]! << 8);
       sent.push(command);
+      sentData.set(command, [...body.subarray(7, 7 + body[2]!)]);
+      if (command >= 0x0100 && command <= 0x01ff) {
+        writes.set(command, [...body.subarray(7, 7 + body[2]!)]);
+        if (!options.ignoreWrites) applyWrite(state, command, writes.get(command));
+        return;
+      }
+      if (options.reject?.includes(command)) {
+        // Command 0x0000, checksum flag clear, 0xff in the sequence byte.
+        const nak = new Uint8Array(MCHOSE_V3_BODY_LENGTH);
+        nak.set([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00]);
+        queueMicrotask(() => { emit(nak); });
+        return;
+      }
+      if (options.busy) {
+        queueMicrotask(() => { emit(frame(command, [0xff])); });
+        return;
+      }
       if (options.silent?.includes(command)) return;
-      const answer = ANSWERS[command];
+      const live = STATE_BY_READ[command];
+      if (live) {
+        const current = state[live];
+        queueMicrotask(() => { emit(frame(command, current)); });
+        return;
+      }
+      const answer = command === MCHOSE_V3_COMMAND.readDeviceInfo && options.deviceInfo
+        ? options.deviceInfo
+        : ANSWERS[command];
       if (!answer) return;
       queueMicrotask(() => {
         // The mouse pushes movement and battery down the same pipe; a driver
@@ -96,7 +187,7 @@ function fakeMouse(options: FakeOptions = {}) {
     },
   } as unknown as HIDDevice;
 
-  return { device, sent };
+  return { device, sent, sentData, writes };
 }
 
 describe("MCHOSE A7 V3 driver", () => {
@@ -134,7 +225,8 @@ describe("MCHOSE A7 V3 driver", () => {
     const status = await new MchoseV3HidClient(device).readStatus();
 
     assert.equal(status.brand, "MCHOSE");
-    // Resolved from the id inside the device-info reply, not the receiver's.
+    // This fake's product string names no model, so the id in the device-info
+    // reply is the fallback that resolves it.
     assert.equal(status.name, "MCHOSE A7 V3 Ultra+");
     assert.equal(status.batteryPercent, 87);
     assert.equal(status.batteryState, "Discharging");
@@ -161,20 +253,6 @@ describe("MCHOSE A7 V3 driver", () => {
       assert.equal(status.liftOffDistance, "High");
       assert.match(status.ui!.statusNote!, /1\.7 mm/, "the real height survives in the note");
     });
-  });
-
-  it("offers no settings, and says why", async () => {
-    const { device } = fakeMouse();
-    const client = new MchoseV3HidClient(device);
-    const status = await client.readStatus();
-
-    assert.equal(status.ui!.settingsReady, false, "nothing here can be written yet");
-    assert.equal(status.ui!.valuesVerified, true, "but what is shown was read off the mouse");
-    assert.match(status.ui!.statusNote!, /not been confirmed on hardware/);
-    // The read-only promise is part of the contract, not just the prose.
-    assert.equal("setDpi" in client, false);
-    assert.equal("setPollingRate" in client, false);
-    assert.equal("setLiftOffDistance" in client, false);
   });
 
   it("ignores unrelated input reports while waiting for its answer", async () => {
@@ -214,5 +292,278 @@ describe("MCHOSE A7 V3 driver", () => {
     assert.equal(status.name, "MCHOSE A7 V3 Ultra+", "the receiver still knows the model");
     assert.equal(status.activeProfile, null, "but nothing behind the link answered");
     assert.equal(status.dpi, 0);
+  });
+
+  /**
+   * Replays the real A7 V3 Ultra+ capture: its 0x0900 reply carries 0x4026,
+   * the id MCHOSE lists for the A5 V3 Ultra+. Before the product string won,
+   * this mouse was named A5 V3 Ultra+ and inherited a 42,000 DPI ceiling and a
+   * three-step lift-off ladder it does not have.
+   */
+  it("names the mouse from its product string, not its reported id", async () => {
+    const { device } = fakeMouse({
+      productName: "MCHOSE A7 V3 Ultra+",
+      deviceInfo: [
+        0x37, 0x38, 0x26, 0x40, 0x04, 0x00, 0x00, 0x00,
+        0x00, 0x10, 0x02, 0x01, 0x55, 0x00, 0x08, 0xe4,
+      ],
+    });
+    const status = await new MchoseV3HidClient(device).readStatus();
+    assert.equal(status.name, "MCHOSE A7 V3 Ultra+");
+    assert.equal(status.batteryPercent, 85);
+    assert.equal(status.batteryState, "Charging");
+    assert.equal(status.profileCount, 4);
+  });
+
+  it("asks 0x0901 which side it wants the version from", async () => {
+    // Sent bare, the mouse answers with an empty block and no firmware at all.
+    const { device, sentData } = fakeMouse();
+    await new MchoseV3HidClient(device).readStatus();
+    assert.deepEqual(sentData.get(MCHOSE_V3_COMMAND.readVersion), [0], "the mouse, not the receiver");
+  });
+});
+
+describe("MCHOSE A7 V3 writes", () => {
+  it("reads, edits and writes back the whole settings block", async () => {
+    const { device, writes } = fakeMouse();
+    await new MchoseV3HidClient(device).setPollingRate(1000);
+
+    const write = writes.get(MCHOSE_V3_COMMAND.writeSettings)!;
+    assert.ok(write, "a settings write went out");
+    // The block that came back from the read, with one nibble changed.
+    assert.equal(write[0], 0x01, "the profile it read, not a default");
+    assert.equal(write[3], 0x0a, "sleep untouched");
+    assert.equal(write[5], 0x45, "sensor flags untouched");
+    assert.equal(write[6], 0xf1, "the negative angle survived the round trip");
+  });
+
+  it("writes only the link it is connected through", async () => {
+    const wireless = fakeMouse();
+    await new MchoseV3HidClient(wireless.device).setPollingRate(1000);
+    const overRf = wireless.writes.get(MCHOSE_V3_COMMAND.writeSettings)!;
+    assert.equal(overRf[1], 0x32, "the wired byte is exactly what was read");
+    assert.notEqual(overRf[2], 0x62, "and the wireless byte moved");
+
+    const wired = fakeMouse({ productId: 0x4033 });
+    await new MchoseV3HidClient(wired.device).setPollingRate(2000);
+    const overCable = wired.writes.get(MCHOSE_V3_COMMAND.writeSettings)!;
+    assert.equal(overCable[2], 0x62, "the wireless byte is exactly what was read");
+    assert.notEqual(overCable[1], 0x32, "and the wired byte moved");
+  });
+
+  it("refuses a rate the model does not have, without writing anything", async () => {
+    const { device, writes } = fakeMouse();
+    await assert.rejects(
+      new MchoseV3HidClient(device).setPollingRate(16000),
+      /does not support/,
+    );
+    assert.equal(writes.has(MCHOSE_V3_COMMAND.writeSettings), false, "nothing was sent");
+  });
+
+  it("refuses a DPI outside the model's range, without writing anything", async () => {
+    const { device, writes } = fakeMouse();
+    await assert.rejects(new MchoseV3HidClient(device).setDpi(90000), RangeError);
+    assert.equal(writes.has(MCHOSE_V3_COMMAND.writeDpi), false);
+  });
+
+  it("rounds a DPI to a step the firmware stores", async () => {
+    const { device, writes } = fakeMouse();
+    await new MchoseV3HidClient(device).setDpi(1637);
+    const write = writes.get(MCHOSE_V3_COMMAND.writeDpi)!;
+    // Stage 1 is the active one in the fake's table; 1637 rounds to 1650.
+    assert.deepEqual(write.slice(7, 9), [1650 & 0xff, 1650 >> 8]);
+  });
+
+  it("leaves the other DPI stages exactly as they were read", async () => {
+    const { device, writes } = fakeMouse();
+    await new MchoseV3HidClient(device).setDpi(1650);
+    const write = writes.get(MCHOSE_V3_COMMAND.writeDpi)!;
+    assert.deepEqual(write.slice(5, 7), [0x90, 0x01], "stage 0 untouched");
+    assert.deepEqual(write.slice(9, 11), [0x40, 0x06], "stage 2 untouched");
+    assert.deepEqual(write.slice(15, 17), [0x50, 0xc3], "stage 5 untouched");
+  });
+
+  it("does not let the active stage point past a shortened list", async () => {
+    const { device, writes } = fakeMouse();
+    await new MchoseV3HidClient(device).setDpiStageCount(1);
+    const write = writes.get(MCHOSE_V3_COMMAND.writeDpi)!;
+    assert.equal(write[3], 1, "one stage");
+    assert.equal(write[4], 0, "and the active stage pulled back into range");
+  });
+
+  it("moves one sensor bit and preserves the rest of the byte", async () => {
+    const { device, writes } = fakeMouse();
+    await new MchoseV3HidClient(device).setMotionSync(true);
+    const write = writes.get(MCHOSE_V3_COMMAND.writeSettings)!;
+    // Read sensor was 0x45: ripple on, eSports, lift-off 2.
+    assert.equal(write[5], 0x55, "motion sync added, nothing else disturbed");
+  });
+
+  it("takes the dedicated lift-off command on a five-step model", async () => {
+    const { device, writes } = fakeMouse();
+    await new MchoseV3HidClient(device).setLiftOffDistance("1.7 mm");
+    assert.deepEqual(writes.get(MCHOSE_V3_COMMAND.writeLiftOff), [0x01, 4]);
+    assert.equal(
+      writes.has(MCHOSE_V3_COMMAND.writeSettings), false,
+      "the sensor byte is not where this model keeps it",
+    );
+  });
+
+  it("refuses a lift-off step the model does not have", async () => {
+    const { device, writes } = fakeMouse();
+    await assert.rejects(new MchoseV3HidClient(device).setLiftOffDistance("2 mm"), /no 2 mm/);
+    assert.equal(writes.size, 0);
+  });
+
+  it("throws when the mouse reports something other than what it was told", async () => {
+    // The mouse answers every read with its original block, so the read-back
+    // never matches — which is exactly what a silently ignored write looks like.
+    const { device } = fakeMouse({ ignoreWrites: true });
+    await assert.rejects(
+      new MchoseV3HidClient(device).setPollingRate(1000),
+      /did not accept/,
+    );
+  });
+
+  it("aborts rather than writing defaults over a block it could not read", async () => {
+    const { device, writes } = fakeMouse({ silent: [MCHOSE_V3_COMMAND.readSettings] });
+    await assert.rejects(
+      new MchoseV3HidClient(device).setDebounceTime(4),
+      /did not return its settings/,
+    );
+    assert.equal(writes.size, 0, "nothing invented and sent");
+  });
+
+  it("moves both primary debounce fields together", async () => {
+    const { device, writes } = fakeMouse();
+    await new MchoseV3HidClient(device).setDebounceTime(4);
+    const write = writes.get(MCHOSE_V3_COMMAND.writeSettings)!;
+    assert.equal(write[7], 4);
+    assert.equal(write[8], 4, "the right button cannot be left on a value nobody can see");
+  });
+
+  it("refuses a debounce the firmware will not take", async () => {
+    const { device, writes } = fakeMouse();
+    await assert.rejects(new MchoseV3HidClient(device).setDebounceTime(30), RangeError);
+    assert.equal(writes.size, 0);
+  });
+
+  it("treats a zero sleep timeout as never", async () => {
+    const { device, writes } = fakeMouse();
+    await new MchoseV3HidClient(device).setSleepTimeout(0);
+    const write = writes.get(MCHOSE_V3_COMMAND.writeSettings)!;
+    assert.equal(write[3], 0, "no minutes");
+    assert.equal(write[4], 1, "and the mode byte agrees");
+  });
+
+  it("rewrites the button table with five entries untouched", async () => {
+    const { device, writes } = fakeMouse();
+    await new MchoseV3HidClient(device).setButtonMapping("Back", "Disabled");
+    const write = writes.get(MCHOSE_V3_COMMAND.writeButtons)!;
+    assert.deepEqual(write.slice(0, 3), [0x01, 0, 6], "profile, reserved, count");
+    // The fake's table: left type 1 (4 bytes), then four 3-byte entries.
+    assert.deepEqual(write.slice(3, 7), [0x01, 0x00, 0x00, 0x01], "left untouched");
+    assert.equal(write[write.length - 3], 0x05, "the DPI button kept its own action");
+  });
+
+  it("refuses an action whose encoding has never been captured", async () => {
+    const { device, writes } = fakeMouse();
+    await assert.rejects(
+      new MchoseV3HidClient(device).setButtonMapping("Back", "Teleport"),
+      /Unknown button action/,
+    );
+    assert.equal(writes.has(MCHOSE_V3_COMMAND.writeButtons), false);
+  });
+
+  it("offers the settings grid now that something is behind it", async () => {
+    const { device } = fakeMouse();
+    const status = await new MchoseV3HidClient(device).readStatus();
+    assert.equal(status.ui!.settingsReady, true);
+    assert.ok(status.buttonOptions!.length > 100, "M HUB's whole vocabulary");
+    assert.equal(status.buttonOptions![0], "Default");
+    assert.ok(status.buttonOptions!.includes("Alt + Tab"));
+    assert.equal(status.ui!.dpiStageEditor!.maxDpi, 50000, "this model's own ceiling");
+    assert.match(status.ui!.statusNote!, /not been confirmed on hardware/);
+  });
+});
+
+/**
+ * Three reply shapes a real A7 V3 Ultra+ sends that are not data, captured
+ * 2026-09-12. Mistaking any of them for silence is what made a live mouse look
+ * dead.
+ */
+describe("MCHOSE A7 V3 reply handling", () => {
+  it("recognises the refusal the firmware sends for an unsupported command", () => {
+    // Verbatim: what 0x0901 answers, about a second after every request.
+    const nak = new Uint8Array(MCHOSE_V3_BODY_LENGTH);
+    nak.set([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00]);
+    assert.equal(mchoseV3IsRejection(nak), true);
+    // It carries command 0x0000, so it can never be mistaken for a payload.
+    assert.equal(mchoseV3Payload(nak, MCHOSE_V3_COMMAND.readVersion), null);
+
+    // A real reply is not a refusal.
+    const real = frame(MCHOSE_V3_COMMAND.readLiftOff, [0x04]);
+    assert.equal(mchoseV3IsRejection(real), false);
+  });
+
+  it("recognises the one-byte ask-again a receiver sends with no mouse behind it", () => {
+    const payload = mchoseV3Payload(
+      frame(MCHOSE_V3_COMMAND.readDeviceInfo, [0xff]), MCHOSE_V3_COMMAND.readDeviceInfo,
+    )!;
+    assert.equal(mchoseV3IsBusy(payload), true);
+
+    // Stricter than M HUB's own test, which looks at the first byte alone: a
+    // button table legitimately starts with 0xff when button one is unassigned.
+    const buttons = new Uint8Array([0xff, 0xff, 0xff, 0x00, 0x00, 0x02]);
+    assert.equal(mchoseV3IsBusy(buttons), false);
+  });
+
+  it("gives up on a refused command instead of spending the whole budget", async () => {
+    const { device, sent } = fakeMouse({ reject: [MCHOSE_V3_COMMAND.readVersion] });
+    const status = await new MchoseV3HidClient(device).readStatus();
+
+    const versionAsks = sent.filter((c) => c === MCHOSE_V3_COMMAND.readVersion).length;
+    assert.equal(versionAsks, 1, "asked once, told no, moved on");
+    // And a refusal on one command must not poison the rest of the read.
+    assert.equal(status.name, "MCHOSE A7 V3 Ultra+");
+    assert.equal(status.dpi, 800);
+    assert.deepEqual(status.firmware, []);
+  });
+
+  it("keeps reading the rest of the status after a command is refused", async () => {
+    const { device, sent } = fakeMouse({ reject: [MCHOSE_V3_COMMAND.readVersion] });
+    await new MchoseV3HidClient(device).readStatus();
+    // A device that says "no" is awake; the old code treated it as silence and
+    // abandoned every command after it.
+    for (const command of [
+      MCHOSE_V3_COMMAND.readDeviceInfo,
+      MCHOSE_V3_COMMAND.readSettings,
+      MCHOSE_V3_COMMAND.readDpi,
+      MCHOSE_V3_COMMAND.readButtons,
+    ]) {
+      assert.ok(sent.includes(command), `0x${command.toString(16)} was still asked`);
+    }
+  });
+
+  it("stops asking a receiver whose mouse is not reachable, and says so", async () => {
+    // A real receiver reports the paired mouse's name, which is how the panel
+    // still names the model while the mouse itself is unreachable.
+    const { device, sent } = fakeMouse({ busy: true, productName: "MCHOSE A7 V3 Ultra+" });
+    const status = await new MchoseV3HidClient(device).readStatus();
+
+    assert.equal(
+      sent.filter((c) => c === MCHOSE_V3_COMMAND.readDeviceInfo).length, 2,
+      "one retry, then stop — each ask costs a second on real hardware",
+    );
+    assert.match(status.ui!.statusNote!, /not reachable/);
+    assert.doesNotMatch(status.ui!.statusNote!, /did not answer/);
+    // The model still comes from the product string, so the panel is not blank.
+    assert.equal(status.name, "MCHOSE A7 V3 Ultra+");
+  });
+
+  it("still concludes nothing is listening when nothing ever arrives", async () => {
+    const { device } = fakeMouse({ silent: Object.values(MCHOSE_V3_COMMAND) });
+    const status = await new MchoseV3HidClient(device).readStatus();
+    assert.match(status.ui!.statusNote!, /did not answer/);
   });
 });

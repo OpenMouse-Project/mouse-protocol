@@ -141,7 +141,9 @@ export class MchoseDockHidClient {
         settingsReady: false,
         defaultDisplayName: "MCHOSE MagDock",
         statusNote: lighting
-          ? "Charging base — lighting only. The A7 V2 mice have no LEDs of their own."
+          // Not just the V2's base: an A7 V3 owner's MagDock enumerates
+          // identically and reads correctly through this same driver.
+          ? "Charging base — lighting only. The A7 mice have no LEDs of their own."
           : "Charging base — the lighting state could not be read.",
       },
     };

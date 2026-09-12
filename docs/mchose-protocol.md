@@ -452,8 +452,12 @@ family and its siblings — use a second, unrelated protocol on the *same vendor
 id and the same usage page*. M HUB ships both UIs side by side, with a model
 list (`W8` in the bundle) picking which one a device gets.
 
-**Nothing in this section has been confirmed on hardware.** It is a reading of
-the vendor bundle, which is why `src/drivers/mchose/v3-hid.ts` only reads.
+**The reads in this section are confirmed on hardware; the writes are not.** An
+A7 V3 Ultra+ on its 2.4 GHz receiver (host PID `0x1014`/`0x1018`) answered
+`0x0900`, `0x0002`, `0x0003` and `0x0001` exactly as read out of the vendor
+bundle — see [what the hardware said](#what-the-hardware-said) at the end. No
+byte has ever been written to a V3, which is why
+`src/drivers/mchose/v3-hid.ts` only reads.
 
 | | A7 V2 | A7 V3 |
 | --- | --- | --- |
@@ -595,3 +599,152 @@ The reads are the whole driver today. To turn it into a full one:
 Do not skip step 3. The V2's stale-reply buffer meant a read taken too early
 returned a *different command's* payload, and one of those nearly went back out
 as a config write.
+
+### What the hardware said
+
+An **A7 V3 Ultra+** behind its receiver (host PID `0x1018`), from an OpenMouse
+diagnostic export dated 2026-09-12. Data blocks only; the framing is stripped.
+
+```
+OUT 0x0900                 -> 37 38 26 40 04 00 00 00 00 10 02 01 55 00 08 e4
+OUT 0x0002                 -> 00 41 41 03 00 41 00 08 08 08 08 …
+OUT 0x0003 [00]            -> 00 00 06 01 00 90 01 20 03 40 06 80 0c 00 19 50 c3
+OUT 0x0001 [00 00 06]      -> 00 01 00 00 02 00 00 04 00 00 10 00 00 08 00 ff ff ff
+OUT 0x0901                 -> (empty)
+```
+
+Everything decoded correctly: battery 85 % and charging, four profiles, DPI
+stages 400/800/1600/3200/6400/**50000** with the second active, 2000 Hz, a
+three-minute sleep timer, 8 ms on both debounce bytes, sensor `0x41` (eSports,
+every processing toggle off), and six stock button assignments.
+
+Two things the capture corrected.
+
+> **`0x0900`'s product id is not a model id.** This mouse's USB product string
+> is `MCHOSE A7 V3 Ultra+`, and it reports `0x4026` — the id MCHOSE's own table
+> gives the *A5 V3 Ultra+*. Believing it named the wrong mouse and, through it,
+> handed out a 42,000 DPI ceiling and a three-step lift-off ladder to a 50,000
+> DPI five-step model. `mchoseV3FindProduct` now prefers the product string and
+> keeps the id only as a fallback. M HUB agrees: every model lookup in the
+> vendor bundle keys off `navigator.device.productName`, never off this field.
+>
+> This is the opposite of the A7 V2's rule, where the id inside the battery
+> reply *is* decisive. Do not carry one habit across to the other generation.
+
+> **`0x0901` needs a target byte** — 0 for the mouse, 1 for the receiver. Sent
+> bare it answers with an empty data block rather than an error, which is why
+> the first capture shows no firmware version at all.
+
+Also worth recording: the `0xff01` collection on this receiver declares `0x4d`
+as an **input, output *and* feature** report. The driver uses output plus input
+and that works; the feature path is untried.
+
+The lift-off command `0x0009` still has not been exercised. The capture was
+taken while the driver believed it was talking to a three-step model, so it
+read lift-off from the sensor byte and never sent `0x0009`. With the model
+resolved correctly the Ultra+ now takes that branch, and a device that does not
+answer it degrades to a blank lift-off rather than a wrong one.
+
+### Writing
+
+Every V3 write **replaces a whole block**. There is no partial update and no
+read-modify-write on the device side, so a caller reads the block, edits the
+decoded structure and sends the whole thing back. That is why the encoders take
+a structure rather than a set of changes, and why a failed read has to abort the
+write instead of falling back to defaults.
+
+| Command | Data |
+| --- | --- |
+| `0x0102` | the `0x0002` settings block, same layout |
+| `0x0103` | `[profile, axis, hasY, count, activeStage, six uint16 stages]` |
+| `0x0104` | `[profile, stage, axis, dpi uint16]` — one stage, no table rewrite |
+| `0x0109` | `[profile, liftOffIndex]` |
+| `0x0101` | `[profile, 0, buttonCount]` then the variable-width button entries |
+
+> **The DPI write and read do not order their fields the same way.** The write
+> puts `hasSeparateY` third and the read puts it fifth. Copying a decoded table
+> straight into a write buffer silently swaps the stage count with it.
+
+**The settings block's tail is not padding.** M HUB writes ten zero bytes past
+the nine named fields, but a real A7 V3 Ultra+ *returns* ten bytes of `0x08`
+there — the same value as both its debounce fields, so most likely the debounce
+for the remaining buttons. Writing the vendor's zeros would quietly set them all
+to nothing on every unrelated write, so those bytes are carried through from the
+read instead.
+
+**The sensor byte must be masked, not assigned.** The A7 V2's bit 5 was never
+explained; a writer that assigns the byte destroys whatever a field it does not
+know about was holding.
+
+**None of these writes has been sent to a real device.** The framing under them
+is proven — the mouse answers frames built by the same encoder — but the
+firmware's response to each write is not. Two numbers are the likely first
+suspects if something misbehaves:
+
+- the settle delay before the read-back, currently the A7 V2's 400 ms;
+- whether a write needs a separate save or commit command at all. Nothing in the
+  vendor bundle suggests one, but nothing rules it out either.
+
+### The button vocabulary
+
+Taken from M HUB's own action tables, not guessed at. The vendor stores each
+action as a hex string whose first byte is the type and whose rest is the
+value: `"0x13042b"` is Alt+Tab, type `0x13`, modifier `0x04`, usage `0x2b`.
+
+**These type numbers are not the A7 V2's.** Nothing carries over.
+
+| Type | Value bytes | Order | Meaning |
+| --- | --- | --- | --- |
+| `0x00` | 2 | LE | mouse button — left `0001`, right `0002`, middle `0004`, forward `0010`, back `0008` |
+| `0x01` | 3 | LE | DPI — switch `000000`, + `000002`, − `000003` |
+| `0x05` | 2 | LE | wheel — up `0000`, down `0001` |
+| `0x11` | 2 | LE | keyboard key, value is `00` + HID usage |
+| `0x13` | 2 | **BE** | modifier + key, value is the modifier mask + usage |
+| `0x14` | 2 | LE | consumer control: media keys and screen brightness |
+| `0x16` | 2 | **BE** | system shortcut — copy `0106`, cut `011b`, paste `0119` |
+| `0x22` | 3 | LE | present in the width table, no entries in the vendor's lists |
+| `0x23` `0x24` | 7 | LE | likewise, and wide enough to be macro references |
+| `0x33` | 2 | LE | onboard profile — 1/2/3 `0000`/`0001`/`0002`, cycle `00ff` |
+| `0xfe` | 2 | LE | disabled, the vendor's "forbidden" |
+| `0xff` | 2 | — | **no assignment at all.** The firmware reports it, M HUB never writes it |
+
+> **`0xfe` and `0xff` are not the same thing.** A disabled button is `0xfe`;
+> `0xff` is a button carrying nothing, which is what a stock A7 V3 Ultra+
+> reports for its DPI button. Writing `0xff` would send a value the firmware
+> itself never sends.
+
+The letters, function keys and navigation keys are **derived** rather than
+listed: the vendor's table covers punctuation, digits, the numpad, the locks
+and the modifiers, and leaves the rest to its on-screen keyboard. Its own
+shortcut entries spell out the same standard HID usages under the same type
+(Ctrl+A is `0x04`, Ctrl+C `0x06`, Alt+F4 `0x3d`, Esc `0x29`), so the usage
+page is confirmed rather than assumed.
+
+Macros are still not writable: types `0x23`/`0x24` are wide enough to carry a
+reference, but the vendor's tables list nothing under them and the paged
+`0x090c` macro channel is not implemented.
+
+### Replies that are not data
+
+Three shapes, all captured from a real A7 V3 Ultra+ on 2026-09-12. Reading any
+of them as silence is enough to make a working mouse look dead.
+
+| Shape | Meaning |
+| --- | --- |
+| command `0x0000`, flags `0x00`, length 0, `0xff` in the sequence byte | **refusal.** The firmware will not serve that command. Retrying changes nothing |
+| a payload that is the single byte `0xff` | **ask again.** The device is listening but cannot answer yet |
+| nothing at all | genuinely not listening |
+
+`0x0901` is answered with a refusal on an A7 V3 Ultra+, request after request.
+A receiver with no mouse reachable behind it answers `0x0900` with the one-byte
+ask-again — M HUB's own read helper loops while the first payload byte is `0xff`
+for exactly this reason. Distinguishing the three matters because only the last
+one justifies abandoning the rest of a status read.
+
+> **Timings.** On a cable, `0x0900`, `0x0002`, `0x0003` and `0x0001` answer in
+> **1–3 ms**. Every reply that is not immediate takes **almost exactly
+> 1.001 s** — the refusals above, and `0x0900` over an idle receiver. That looks
+> like a fixed deferral in the firmware rather than a variable delay, so a reply
+> timeout only has to clear one second. An earlier 600 ms budget sat just
+> underneath it, which meant those replies were always missed and then mistaken
+> for the *next* attempt's answer.
