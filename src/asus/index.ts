@@ -12,12 +12,27 @@ export const GLADIUS_II_MIN_DPI = 100;
 export const GLADIUS_II_MAX_DPI = 12000;
 export const GLADIUS_II_DPI_STEP = 100;
 
+export const GLADIUS_II_PROFILE_COUNT = 3;
+
 export const GLADIUS_II_POLLING_RATES = [
   125,
   250,
   500,
   1000,
 ] as const;
+
+export const GLADIUS_II_DEBOUNCE_MS = [
+  12,
+  16,
+  20,
+  24,
+  28,
+  32,
+] as const;
+
+export type GladiusIILiftOffDistance =
+  | "Low"
+  | "High";
 
 export interface GladiusIISettings {
   dpiStages: [number, number];
@@ -31,62 +46,113 @@ export interface GladiusIIProfile {
   activeDpiStage: number;
 }
 
+export interface GladiusIIRawLightingZone {
+  zone: number;
+  mode: number;
+  brightness: number;
+  red: number;
+  green: number;
+  blue: number;
+  direction: number;
+  randomColor: boolean;
+  speed: number;
+}
+
 function requirePrefix(
   data: Uint8Array,
   expected: readonly number[],
   name: string,
 ): void {
   if (data.length < expected.length) {
-    throw new Error(`${name} reply is too short.`);
+    throw new Error(
+      `${name} reply is too short.`,
+    );
   }
 
-  for (let i = 0; i < expected.length; i++) {
+  for (
+    let i = 0;
+    i < expected.length;
+    i++
+  ) {
     if (data[i] !== expected[i]) {
       throw new Error(
         `${name} reply has unexpected byte ${i}: ` +
-        `0x${data[i]?.toString(16).padStart(2, "0")}`,
+          `0x${data[i]
+            ?.toString(16)
+            .padStart(2, "0")}`,
       );
     }
   }
 }
 
-function readUint16LE(data: Uint8Array, offset: number): number {
-  return data[offset] | (data[offset + 1] << 8);
+function readUint16LE(
+  data: Uint8Array,
+  offset: number,
+): number {
+  return (
+    data[offset] |
+    (data[offset + 1] << 8)
+  );
 }
 
-function decodeDpiWord(value: number): number {
-  return (value + 1) * GLADIUS_II_DPI_STEP;
+function decodeDpiWord(
+  value: number,
+): number {
+  return (
+    (value + 1) *
+    GLADIUS_II_DPI_STEP
+  );
 }
 
-/**
- * WebHID payload:
- *
- * 12 04 00 00
- * [DPI1 lo hi]
- * [DPI2 lo hi]
- * [poll]
- * 00
- * [debounce]
- * 00
- * [angle snap]
- */
+function request(
+  ...bytes: number[]
+): Uint8Array {
+  const data = new Uint8Array(
+    ASUS_REPORT_SIZE,
+  );
+
+  data.set(bytes);
+
+  return data;
+}
+
+/* ---------------------------------
+ * READ DECODERS
+ * --------------------------------- */
+
 export function decodeGladiusIISettings(
   data: Uint8Array,
 ): GladiusIISettings {
-  requirePrefix(data, [0x12, 0x04, 0x00], "Gladius II settings");
+  requirePrefix(
+    data,
+    [0x12, 0x04, 0x00],
+    "Gladius II settings",
+  );
 
   if (data.length < 13) {
-    throw new Error("Gladius II settings reply is incomplete.");
+    throw new Error(
+      "Gladius II settings reply is incomplete.",
+    );
   }
 
-  const dpi1 = decodeDpiWord(readUint16LE(data, 4));
-  const dpi2 = decodeDpiWord(readUint16LE(data, 6));
+  const dpi1 = decodeDpiWord(
+    readUint16LE(data, 4),
+  );
+
+  const dpi2 = decodeDpiWord(
+    readUint16LE(data, 6),
+  );
 
   const pollingRaw = data[8];
 
-  const pollingRateHz = GLADIUS_II_POLLING_RATES[pollingRaw];
+  const pollingRateHz =
+    GLADIUS_II_POLLING_RATES[
+      pollingRaw
+    ];
 
-  if (pollingRateHz === undefined) {
+  if (
+    pollingRateHz === undefined
+  ) {
     throw new Error(
       `Unknown Gladius II polling value 0x${pollingRaw
         .toString(16)
@@ -94,12 +160,12 @@ export function decodeGladiusIISettings(
     );
   }
 
-  const debounceRaw = data[10];
+  const debounceRaw =
+    data[10];
 
-  // ASUS values 0x02..0x07 map to:
-  // 12, 16, 20, 24, 28, 32 ms.
   const debounceMs =
-    debounceRaw >= 0x02 && debounceRaw <= 0x07
+    debounceRaw >= 0x02 &&
+    debounceRaw <= 0x07
       ? debounceRaw * 4 + 4
       : null;
 
@@ -107,67 +173,183 @@ export function decodeGladiusIISettings(
     dpiStages: [dpi1, dpi2],
     pollingRateHz,
     debounceMs,
-    angleSnapping: data[12] === 0x01,
+    angleSnapping:
+      data[12] === 0x01,
   };
 }
 
-/**
- * WebHID payload:
- *
- * 12 00 00 ...
- *
- * G-Helper's packet indices include the HID report-id byte.
- * WebHID removes that byte, therefore:
- *
- * packet[11] -> data[10] = onboard profile
- * packet[12] -> data[11] = active DPI stage (1-based)
- */
 export function decodeGladiusIIProfile(
   data: Uint8Array,
 ): GladiusIIProfile {
-  requirePrefix(data, [0x12, 0x00, 0x00], "Gladius II profile");
+  requirePrefix(
+    data,
+    [0x12, 0x00, 0x00],
+    "Gladius II profile",
+  );
 
   if (data.length < 12) {
-    throw new Error("Gladius II profile reply is incomplete.");
+    throw new Error(
+      "Gladius II profile reply is incomplete.",
+    );
   }
 
-  const onboardProfileRaw = data[10];
-  const dpiStageRaw = data[11];
+  const onboardProfileRaw =
+    data[10];
 
-  if (dpiStageRaw < 1 || dpiStageRaw > 2) {
+  const dpiStageRaw =
+    data[11];
+
+  if (
+    dpiStageRaw < 1 ||
+    dpiStageRaw > 2
+  ) {
     throw new Error(
       `Invalid Gladius II DPI stage ${dpiStageRaw}.`,
     );
   }
 
   return {
-    // ASUS profile is zero-based.
-    onboardProfile: onboardProfileRaw + 1,
+    onboardProfile:
+      onboardProfileRaw + 1,
 
-    // OpenMouse DPI stage is zero-based.
-    activeDpiStage: dpiStageRaw - 1,
+    activeDpiStage:
+      dpiStageRaw - 1,
   };
 }
 
-function request(...bytes: number[]): Uint8Array {
-  const data = new Uint8Array(ASUS_REPORT_SIZE);
-  data.set(bytes);
-  return data;
+export function decodeGladiusIILiftOffDistance(
+  data: Uint8Array,
+): GladiusIILiftOffDistance {
+  requirePrefix(
+    data,
+    [0x12, 0x06],
+    "Gladius II lift-off",
+  );
+
+  if (data.length < 8) {
+    throw new Error(
+      "Gladius II lift-off reply is incomplete.",
+    );
+  }
+
+  const raw = data[7];
+
+  if (raw === 0) {
+    return "Low";
+  }
+
+  if (raw === 1) {
+    return "High";
+  }
+
+  throw new Error(
+    `Unknown Gladius II lift-off value ${raw}.`,
+  );
 }
+
+export function decodeGladiusIILighting(
+  data: Uint8Array,
+): GladiusIIRawLightingZone[] {
+  requirePrefix(
+    data,
+    [0x12, 0x03, 0x00],
+    "Gladius II lighting",
+  );
+
+  if (data.length < 23) {
+    throw new Error(
+      "Gladius II lighting reply is incomplete.",
+    );
+  }
+
+  const direction = data[20];
+  const randomColor =
+    data[21] === 0x01;
+  const speed = data[22];
+
+  const zones: GladiusIIRawLightingZone[] =
+    [];
+
+  for (let zone = 0; zone < 3; zone++) {
+    const offset =
+      4 + zone * 5;
+
+    zones.push({
+      zone,
+      mode: data[offset],
+      brightness:
+        data[offset + 1],
+      red: data[offset + 2],
+      green: data[offset + 3],
+      blue: data[offset + 4],
+      direction,
+      randomColor,
+      speed,
+    });
+  }
+
+  return zones;
+}
+
+/* ---------------------------------
+ * READ REQUESTS
+ * --------------------------------- */
+
+export function gladiusIIReadSettingsRequest(): Uint8Array {
+  return request(
+    0x12,
+    0x04,
+    0x00,
+  );
+}
+
+export function gladiusIIReadProfileRequest(): Uint8Array {
+  return request(
+    0x12,
+    0x00,
+  );
+}
+
+export function gladiusIIReadLiftOffRequest(): Uint8Array {
+  return request(
+    0x12,
+    0x06,
+  );
+}
+
+export function gladiusIIReadLightingRequest(): Uint8Array {
+  return request(
+    0x12,
+    0x03,
+    0x00,
+  );
+}
+
+/* ---------------------------------
+ * DPI
+ * --------------------------------- */
 
 export function gladiusIISetDpiRequest(
   stage: number,
   dpi: number,
 ): Uint8Array {
-  if (!Number.isInteger(stage) || stage < 0 || stage > 1) {
-    throw new Error("Gladius II DPI stage must be 0 or 1.");
+  if (
+    !Number.isInteger(stage) ||
+    stage < 0 ||
+    stage > 1
+  ) {
+    throw new Error(
+      "Gladius II DPI stage must be 0 or 1.",
+    );
   }
 
   if (
     !Number.isInteger(dpi) ||
     dpi < GLADIUS_II_MIN_DPI ||
     dpi > GLADIUS_II_MAX_DPI ||
-    dpi % GLADIUS_II_DPI_STEP !== 0
+    dpi %
+      GLADIUS_II_DPI_STEP !==
+      0
   ) {
     throw new Error(
       `Gladius II DPI must be ${GLADIUS_II_MIN_DPI}-${GLADIUS_II_MAX_DPI} in ${GLADIUS_II_DPI_STEP}-DPI steps.`,
@@ -175,7 +357,8 @@ export function gladiusIISetDpiRequest(
   }
 
   const encoded =
-    (dpi - GLADIUS_II_DPI_STEP) /
+    (dpi -
+      GLADIUS_II_DPI_STEP) /
     GLADIUS_II_DPI_STEP;
 
   return request(
@@ -188,12 +371,40 @@ export function gladiusIISetDpiRequest(
   );
 }
 
+export function gladiusIISetActiveDpiStageRequest(
+  stage: number,
+): Uint8Array {
+  if (
+    !Number.isInteger(stage) ||
+    stage < 0 ||
+    stage > 1
+  ) {
+    throw new Error(
+      "Gladius II DPI stage must be 0 or 1.",
+    );
+  }
+
+  return request(
+    0x51,
+    0x31,
+    0x09,
+    0x00,
+    stage + 1,
+  );
+}
+
+/* ---------------------------------
+ * POLLING
+ * --------------------------------- */
+
 export function gladiusIISetPollingRateRequest(
   pollingRateHz: number,
 ): Uint8Array {
-  const rateIndex = GLADIUS_II_POLLING_RATES.findIndex(
-    (rate) => rate === pollingRateHz,
-  );
+  const rateIndex =
+    GLADIUS_II_POLLING_RATES.findIndex(
+      (rate) =>
+        rate === pollingRateHz,
+    );
 
   if (rateIndex === -1) {
     throw new Error(
@@ -210,14 +421,156 @@ export function gladiusIISetPollingRateRequest(
   );
 }
 
+/* ---------------------------------
+ * ONBOARD PROFILE
+ * --------------------------------- */
+
+export function gladiusIISetProfileRequest(
+  profile: number,
+): Uint8Array {
+  if (
+    !Number.isInteger(profile) ||
+    profile < 1 ||
+    profile >
+      GLADIUS_II_PROFILE_COUNT
+  ) {
+    throw new Error(
+      `Gladius II profile must be 1-${GLADIUS_II_PROFILE_COUNT}.`,
+    );
+  }
+
+  return request(
+    0x50,
+    0x02,
+    profile - 1,
+  );
+}
+
+/* ---------------------------------
+ * ANGLE SNAPPING
+ * --------------------------------- */
+
+export function gladiusIISetAngleSnappingRequest(
+  enabled: boolean,
+): Uint8Array {
+  return request(
+    0x51,
+    0x31,
+    0x04,
+    0x00,
+    enabled ? 0x01 : 0x00,
+  );
+}
+
+/* ---------------------------------
+ * DEBOUNCE
+ * --------------------------------- */
+
+export function gladiusIISetDebounceRequest(
+  milliseconds: number,
+): Uint8Array {
+  if (
+    !GLADIUS_II_DEBOUNCE_MS.some(
+      (value) =>
+        value === milliseconds,
+    )
+  ) {
+    throw new Error(
+      `Gladius II debounce must be one of: ${GLADIUS_II_DEBOUNCE_MS.join(", ")} ms.`,
+    );
+  }
+
+  const raw =
+    milliseconds / 4 - 1;
+
+  return request(
+    0x51,
+    0x31,
+    0x03,
+    0x00,
+    raw,
+  );
+}
+
+/* ---------------------------------
+ * LIFT-OFF DISTANCE
+ * --------------------------------- */
+
+export function gladiusIISetLiftOffRequest(
+  value: GladiusIILiftOffDistance,
+): Uint8Array {
+  const raw =
+    value === "High"
+      ? 1
+      : 0;
+
+  return request(
+    0x51,
+    0x35,
+    0xff,
+    0x00,
+    0xff,
+    raw,
+  );
+}
+
+/* ---------------------------------
+ * RGB
+ * --------------------------------- */
+
+export function gladiusIISetLightingRequest(
+  zone: number,
+  mode: number,
+  brightness: number,
+  red: number,
+  green: number,
+  blue: number,
+  direction = 0,
+  randomColor = 0,
+  speed = 0,
+): Uint8Array {
+  if (
+    !Number.isInteger(zone) ||
+    zone < 0 ||
+    zone > 2
+  ) {
+    throw new Error(
+      "Gladius II RGB zone must be 0, 1, or 2.",
+    );
+  }
+
+  if (
+    brightness < 0 ||
+    brightness > 4
+  ) {
+    throw new Error(
+      "Gladius II RGB brightness must be 0-4.",
+    );
+  }
+
+  return request(
+    0x51,
+    0x28,
+    zone,
+    0x00,
+    mode,
+    brightness,
+    red,
+    green,
+    blue,
+    direction,
+    randomColor,
+    speed,
+  );
+}
+
+/* ---------------------------------
+ * SAVE
+ * --------------------------------- */
+
 export function gladiusIISaveRequest(): Uint8Array {
-  return request(0x50, 0x03);
-}
-
-export function gladiusIIReadSettingsRequest(): Uint8Array {
-  return request(0x12, 0x04, 0x00);
-}
-
-export function gladiusIIReadProfileRequest(): Uint8Array {
-  return request(0x12, 0x00);
+  return request(
+    0x50,
+    0x03,
+  );
 }
