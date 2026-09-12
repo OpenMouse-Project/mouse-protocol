@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   MCHOSE_V3_BODY_LENGTH,
+  MCHOSE_V3_BUTTON_UNSET,
   MCHOSE_V3_COMMAND,
   MCHOSE_V3_MODES,
   MCHOSE_V3_PRODUCTS,
@@ -305,4 +306,109 @@ test("a V3 reply does not decode as a plausible A7 V2 config", () => {
     asV2 === null || asV2.dpiStages[0]! < 50 || asV2.dpiStages[0]! > 42000,
     "a V3 frame must not pass as a V2 config with a believable DPI stage",
   );
+});
+
+/**
+ * Captured from a real **MCHOSE A7 V3 Ultra+** on its 2.4 GHz receiver
+ * (host PID 0x1018), 2026-09-12. These are the exact data blocks the mouse
+ * returned, lifted out of an OpenMouse diagnostic export.
+ */
+const CAPTURE = {
+  deviceInfo: [
+    0x37, 0x38, 0x26, 0x40, 0x04, 0x00, 0x00, 0x00,
+    0x00, 0x10, 0x02, 0x01, 0x55, 0x00, 0x08, 0xe4,
+  ],
+  settings: [
+    0x00, 0x41, 0x41, 0x03, 0x00, 0x41, 0x00, 0x08, 0x08,
+    0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+  ],
+  dpi: [
+    0x00, 0x00, 0x06, 0x01, 0x00,
+    0x90, 0x01, 0x20, 0x03, 0x40, 0x06, 0x80, 0x0c, 0x00, 0x19, 0x50, 0xc3,
+  ],
+  buttons: [
+    0x00, 0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x04, 0x00,
+    0x00, 0x10, 0x00, 0x00, 0x08, 0x00, 0xff, 0xff, 0xff,
+  ],
+};
+
+test("the captured A7 V3 Ultra+ device info decodes to its real state", () => {
+  const info = mchoseV3DecodeDeviceInfo(new Uint8Array(CAPTURE.deviceInfo))!;
+  assert.equal(info.vendorId, 0x3837);
+  assert.equal(info.batteryPercent, 85);
+  assert.equal(info.chargeStatus, 1, "it was on the dock, charging");
+  assert.equal(info.profileCount, 4);
+  assert.notEqual(info.connectStatus, 0, "the mouse was linked");
+});
+
+/**
+ * The reason {@link mchoseV3FindProduct} prefers the product string. This exact
+ * reply came from a mouse whose USB product string reads "MCHOSE A7 V3 Ultra+",
+ * and its `0x0900` id is the one MCHOSE's table gives the A5 V3 Ultra+.
+ */
+test("a real A7 V3 Ultra+ reports an id belonging to another model", () => {
+  const info = mchoseV3DecodeDeviceInfo(new Uint8Array(CAPTURE.deviceInfo))!;
+  assert.equal(info.productId, 0x4026);
+  assert.equal(
+    MCHOSE_V3_PRODUCTS.find((p) => p.productId === 0x4026)!.name, "A5 V3 Ultra+",
+    "the id alone names the wrong mouse",
+  );
+
+  const resolved = mchoseV3FindProduct(info.productId, "MCHOSE A7 V3 Ultra+")!;
+  assert.equal(resolved.name, "A7 V3 Ultra+", "the product string must win");
+  // The consequences of getting this wrong, both visible to the user.
+  assert.equal(resolved.dpiMax, 50000, "not the A5's 42000");
+  assert.equal(resolved.liftOffDistances.length, 5, "not the A5's three-step ladder");
+  assert.equal(resolved.liftOffCommand, true, "and so lift-off comes from 0x0009");
+});
+
+test("the id still resolves a model when the product string says nothing", () => {
+  assert.equal(mchoseV3FindProduct(0x4033, "USB Receiver")!.name, "A7 V3 Ultra+");
+  assert.equal(mchoseV3FindProduct(0x4033, null)!.name, "A7 V3 Ultra+");
+  assert.equal(mchoseV3FindProduct(null, "Some Other Mouse"), null);
+});
+
+test("the captured settings block decodes to the state the mouse was in", () => {
+  const settings = mchoseV3DecodeSettings(new Uint8Array(CAPTURE.settings))!;
+  assert.equal(settings.profileIndex, 0);
+  assert.equal(settings.dpiIndex, 1);
+  // Slot 4 on the wire is option 3, which is 2000 Hz on an 8K model.
+  assert.equal(settings.wirelessRateIndex, 3);
+  assert.equal(mchoseV3PollingRates(mchoseV3FindProduct(0x4033)!)[settings.wirelessRateIndex], 2000);
+  assert.equal(settings.sleep, 3, "three minutes");
+  assert.equal(settings.leftDebounceMs, 8);
+  assert.equal(settings.rightDebounceMs, 8);
+  assert.equal(settings.angleTuning, 0);
+
+  const sensor = mchoseV3DecodeSensor(settings.sensor);
+  assert.equal(MCHOSE_V3_MODES[sensor.modeIndex], "eSports");
+  assert.equal(sensor.motionSync, false);
+  assert.equal(sensor.angleSnapping, false);
+  assert.equal(sensor.rippleControl, false);
+  assert.equal(sensor.glassMode, false);
+});
+
+test("the captured DPI table decodes to six stages with the second active", () => {
+  const dpi = mchoseV3DecodeDpi(new Uint8Array(CAPTURE.dpi))!;
+  assert.equal(dpi.stageCount, 6);
+  assert.equal(dpi.activeStage, 1);
+  assert.equal(dpi.hasSeparateY, false);
+  assert.deepEqual(dpi.stages, [400, 800, 1600, 3200, 6400, 50000]);
+  assert.equal(dpi.stages[dpi.activeStage], 800);
+  // The top stage is the A7 V3 Ultra+'s ceiling, and another reason the id's
+  // A5 V3 Ultra+ (42000) cannot be the right model.
+  assert.equal(dpi.stages[5], mchoseV3FindProduct(0x4033)!.dpiMax);
+});
+
+test("the captured button table walks six stock assignments", () => {
+  const buttons = mchoseV3DecodeButtons(new Uint8Array(CAPTURE.buttons))!;
+  assert.equal(Object.keys(buttons).length, 6);
+  // Five factory-default buttons carrying their own mouse-button mask...
+  for (const name of ["Left", "Right", "Middle", "Forward", "Back"]) {
+    assert.equal(buttons[name]!.type, 0x00, `${name} is on its factory default`);
+  }
+  assert.deepEqual(buttons.Left!.value, [0x00, 0x01]);
+  assert.deepEqual(buttons.Back!.value, [0x00, 0x08]);
+  // ...and a DPI button the firmware marks unset rather than defaulted.
+  assert.equal(buttons.DPI!.type, MCHOSE_V3_BUTTON_UNSET);
 });

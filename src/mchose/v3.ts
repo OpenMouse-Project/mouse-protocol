@@ -180,7 +180,11 @@ const u16 = (data: Uint8Array, offset: number): number =>
 
 export interface MchoseV3DeviceInfo {
   vendorId: number;
-  /** The mouse's own product id, even when the host is talking to a receiver. */
+  /**
+   * **Not a model id**, despite looking like one: an A7 V3 Ultra+ reports
+   * `0x4026`, which MCHOSE's own table lists against the A5 V3 Ultra+. Use
+   * {@link mchoseV3FindProduct}, which prefers the USB product string.
+   */
   productId: number;
   /** Onboard profile count. */
   profileCount: number;
@@ -497,21 +501,35 @@ export const MCHOSE_V3_POLLING_RATES: Readonly<Record<number, readonly number[]>
 };
 
 /**
- * Resolve a model from the id `0x0900` reports, falling back to the product
- * string. An unrecognised device yields null rather than a wrong DPI ceiling.
+ * Resolve a model, **preferring the USB product string over the id `0x0900`
+ * reports**. An unrecognised device yields null rather than a wrong DPI ceiling.
+ *
+ * The id ordering is the opposite of the A7 V2's, and deliberately so. On the
+ * V2, the id inside the battery reply is decisive because the host-facing id is
+ * shared. Here that reasoning does not hold: a capture from a real **A7 V3
+ * Ultra+** has `0x0900` reporting `0x4026`, which this table — and MCHOSE's own
+ * — lists against the *A5 V3 Ultra+*. Trusting it named the wrong mouse and,
+ * through it, handed out a 42,000 DPI ceiling and a three-step lift-off ladder
+ * to a 50,000 DPI five-step model.
+ *
+ * Whatever `0x0900` byte 2 is — a sensor or platform id, shared across shells —
+ * it is not a model id. M HUB agrees: every model lookup in the vendor bundle
+ * keys off `navigator.device.productName`, never off this field. The id is kept
+ * only as a fallback for a device whose product string says nothing useful.
  */
 export function mchoseV3FindProduct(
   mouseProductId: number | null,
   productName?: string | null,
 ): MchoseV3Product | null {
-  const byId = MCHOSE_V3_PRODUCTS.find((product) => product.productId === mouseProductId);
-  if (byId) return byId;
   const name = productName?.trim().toUpperCase() ?? "";
-  if (!name) return null;
-  // Longest name first so "A7 V3 Pro+" is not swallowed by "A7 V3 Pro".
-  return [...MCHOSE_V3_PRODUCTS]
-    .sort((a, b) => b.name.length - a.name.length)
-    .find((product) => name.includes(product.name.toUpperCase())) ?? null;
+  if (name) {
+    // Longest name first so "A7 V3 Pro+" is not swallowed by "A7 V3 Pro".
+    const byName = [...MCHOSE_V3_PRODUCTS]
+      .sort((a, b) => b.name.length - a.name.length)
+      .find((product) => name.includes(product.name.toUpperCase()));
+    if (byName) return byName;
+  }
+  return MCHOSE_V3_PRODUCTS.find((product) => product.productId === mouseProductId) ?? null;
 }
 
 /** Polling rates available to a model. */
@@ -542,4 +560,32 @@ export function mchoseV3LiftOffStop(
   if (index === 0) return "Low";
   if (index === steps - 1) return "High";
   return "Medium";
+}
+
+/**
+ * A reply the firmware sends to refuse a command outright: command id `0x0000`
+ * with the checksum flag clear and `0xff` in the sequence byte. It is not a
+ * malformed frame and not noise — an A7 V3 Ultra+ answers `0x0901` with one,
+ * about a second after the request, every time.
+ *
+ * Worth recognising because the alternative is spending the whole retry budget
+ * waiting for an answer that has already arrived.
+ */
+export function mchoseV3IsRejection(body: Uint8Array): boolean {
+  return mchoseV3ReplyCommand(body) === 0x0000
+    && (body[FLAGS_OFFSET] ?? 0) === 0
+    && (body[LENGTH_OFFSET] ?? 0) === 0;
+}
+
+/**
+ * A one-byte `0xff` payload, which means "ask again" rather than carrying data.
+ * A receiver whose mouse is not currently reachable answers `0x0900` with it.
+ *
+ * M HUB's own retry helper loops while the first payload byte is `0xff`. This
+ * is stricter — it requires the payload to be *only* that byte — because a
+ * button table legitimately starts with `0xff` when the first button carries no
+ * assignment, and the vendor's looser test would reject that as busy.
+ */
+export function mchoseV3IsBusy(payload: Uint8Array): boolean {
+  return payload.length === 1 && payload[0] === 0xff;
 }
