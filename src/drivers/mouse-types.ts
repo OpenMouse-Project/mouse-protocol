@@ -148,7 +148,7 @@ export interface AtkReceiverInfo {
 }
 
 export interface MouseStatus {
-  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Lingbao" | "GearHub" | "Corsair" | "Microsoft" | "Dareu" | "Incott" | "HyperX";
+  brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Lingbao" | "GearHub" | "Corsair" | "Microsoft" | "Dareu" | "Incott" | "HyperX" | "ASUS";
   name: string;
   /** Driver-supplied UI policy (optional; keeps control.ts brand-agnostic). */
   ui?: MouseUiHints;
@@ -321,7 +321,7 @@ export interface MouseStatus {
   /** Logitech onboard profile format (HID++ 0x8100), which selects the layout. */
   onboardProfileFormat?: {
     id: number;
-    name: string;
+    name: string; 
     base: string;
     supported: boolean;
     /** False when the layout comes from vendor code but was never confirmed on hardware. */

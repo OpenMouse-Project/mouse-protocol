@@ -1,3 +1,9 @@
+import {
+  ASUS_GLADIUS_II_USAGE,
+  ASUS_GLADIUS_II_USAGE_PAGE,
+  ASUS_VENDOR_ID,
+  ROG_GLADIUS_II_PRODUCT_ID,
+} from "../asus/index.ts";
 import { ATK_COMPX_PRODUCT_IDS } from "./atk/products.ts";
 import { MICROSOFT_PRODUCTS } from "../microsoft/index.ts";
 import { INCOTT_PRODUCT_IDS, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../incott/index.ts";
@@ -86,6 +92,7 @@ import {
 } from "@openmouse/protocol/hyperx";
 
 export const VENDOR_ID = {
+  asus: ASUS_VENDOR_ID,
   pulsar: 0x3710,
   endgameGear: 0x3367,
   wlmouse: 0x36a7,
@@ -133,6 +140,24 @@ export const VENDOR_ID = {
   hyperxKingston: HYPERX_VENDOR_ID_KINGSTON,
   hyperxHp: HYPERX_VENDOR_ID_HP,
 } as const;
+
+/**
+ * ROG Gladius II P502 configuration interface.
+ *
+ * Hardware verified:
+ * VID 0x0B05
+ * PID 0x1845
+ * Usage Page 0xFF01
+ * Usage 0x0001
+ */
+export const ASUS_GLADIUS_II_HID_FILTERS: HIDDeviceFilter[] = [
+  {
+    vendorId: ASUS_VENDOR_ID,
+    productId: ROG_GLADIUS_II_PRODUCT_ID,
+    usagePage: ASUS_GLADIUS_II_USAGE_PAGE,
+    usage: ASUS_GLADIUS_II_USAGE,
+  },
+];
 
 export const MCHOSE_A5_HID_FILTERS: HIDDeviceFilter[] = [
   ...[...MCHOSE_A5_GEN1_PRODUCTS.keys()].map((productId) => ({
@@ -539,6 +564,7 @@ export const HYPERX_HID_FILTERS: HIDDeviceFilter[] = [
 ];
 
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
+  ...ASUS_GLADIUS_II_HID_FILTERS,
   ...DAREU_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
