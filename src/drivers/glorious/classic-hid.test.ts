@@ -80,20 +80,31 @@ test("a numbered config report is used for every write, not the unnumbered defau
   for (const report of sent) assert.equal(report.reportId, 7, "every write should use the discovered report id");
 });
 
-test("a shorter declared feature report is not sent at the full 64-byte length", async () => {
-  // The real 0x320f:0x823a unit's numbered report 7 also declared a length
-  // WebHID rejected the driver's fixed 64-byte payload against, throwing
-  // "Failed to write the feature report." on every write.
+test("a report length other than 64 bytes refuses writes instead of guessing at the layout", async () => {
+  // The real 0x320f:0x823a unit's numbered report 7 declares a 263-byte
+  // length. Resizing the driver's 64-byte payload to fit no longer errors
+  // at the WebHID level, but a diagnostic confirmed the mouse silently
+  // ignores it - the write ACKs and nothing on the mouse changes. Refuse
+  // instead of sending a payload with an unconfirmed byte layout.
   const { device, sent } = fakeDevice(VENDOR_ID.gloriousClassicIWired, 0x823a);
   const report = device.collections[0].featureReports[0] as { reportId: number; items: Array<{ reportSize: number; reportCount: number }> };
   report.reportId = 7;
-  report.items = [{ reportSize: 8, reportCount: 32 }];
+  report.items = [{ reportSize: 8, reportCount: 263 }];
   const client = new GloriousClassicHidClient(device);
 
-  await client.setDpi(1600);
+  assert.deepEqual(client.getDpiOptions(), []);
+  assert.deepEqual(client.getSupportedPollingRates(), []);
+  await assert.rejects(() => client.setDpi(1600), /not confirmed/);
+  await assert.rejects(() => client.setPollingRate(500), /not confirmed/);
+  await assert.rejects(() => client.setLiftOffDistance("High"), /not confirmed/);
+  await assert.rejects(() => client.setDebounceTime(4), /not confirmed/);
+  await assert.rejects(() => client.setRgb({ effect: "solid", rate: 0, colors: ["#ff0000"] }), /not confirmed/);
+  assert.equal(sent.length, 0, "nothing should be sent once the report length is unconfirmed");
 
-  assert.ok(sent.length > 0);
-  for (const report of sent) assert.equal(report.payload.length, 32, "payload must match the device's declared 32-byte report");
+  const status = await client.readStatus();
+  assert.equal(status.dpi, 0);
+  assert.equal(status.pollingRateHz, 0);
+  assert.equal(status.liftOffDistance, null);
 });
 
 test("rejects an unrecognized VID/PID pair", () => {
