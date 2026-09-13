@@ -32,11 +32,14 @@ import { GLORIOUS_CLASSIC_PRODUCTS, VENDOR_ID } from "../vendors.ts";
  * D-, Model I, Model O V2 — plus the newer "core2" 8000Hz-class mice, Model
  * O3 Wireless and Model D 2 PRO 4K/8KHz Edition, on a reduced feature set —
  * see the `generation` doc comment on `GLORIOUS_CLASSIC_PRODUCTS` in
- * vendors.ts for why). The config channel is a 64-byte feature report -
- * unnumbered (id 0) on most units, but a real "Model O V2 Wired"
- * (0x320f:0x823a) carries it as numbered report 7 instead; the report id is
- * detected per device rather than assumed. See ../../glorious-classic/index.ts
- * for the payload layout, which does not depend on the report id.
+ * vendors.ts for why). The config channel is a feature report, usually 64
+ * bytes and unnumbered (id 0), but a real "Model O V2 Wired" (0x320f:0x823a)
+ * carries it as numbered report 7 with its own, possibly shorter, declared
+ * length - both the report id and its byte length are read from the
+ * device's own descriptor rather than assumed, and every payload (always
+ * built at the fixed 64-byte length below) is resized to fit before it is
+ * sent. See ../../glorious-classic/index.ts for the payload layout, which
+ * does not depend on the report id or length.
  *
  * DPI, polling rate, lift-off distance, and RGB are all write-only on this
  * protocol (neither glorious-ctl nor mxw, the two tools this was ported
@@ -86,19 +89,27 @@ export class GloriousClassicHidClient {
   readonly pollIntervalMs = 0;
   readonly device: HIDDevice;
   /**
-   * The vendor collection's feature report id. Most units use the unnumbered
-   * report (0, GLORIOUS_CLASSIC_REPORT_ID); a real "Model O V2 Wired"
-   * (0x320f:0x823a) instead carries it as numbered report 7. Discovered at
-   * connect time rather than assumed - WebHID takes the report id separately
-   * from the payload bytes, so the wire encoding itself does not change,
-   * only which report number carries it.
+   * The vendor collection's feature report id and byte length. Most units
+   * use the unnumbered report (id 0, GLORIOUS_CLASSIC_REPORT_ID) at the full
+   * 64-byte length every payload below is built at; a real "Model O V2
+   * Wired" (0x320f:0x823a) instead carries it as numbered report 7, and
+   * sending a 64-byte report there fails outright ("failed to write the
+   * feature report") because the device's own descriptor declares a
+   * shorter length for it. Both are read from the device at connect time
+   * rather than assumed, and every payload is resized to fit before it is
+   * sent - the actual command bytes are always well under the shortest
+   * length seen in practice, so truncating (or zero-padding, if a unit
+   * somehow declares more than 64) never touches meaningful data.
    */
   private readonly reportId: number;
+  private readonly reportLength: number;
   private lastRgb: GloriousClassicRgb = GLORIOUS_CLASSIC_DEFAULT_RGB;
 
   constructor(device: HIDDevice) {
     this.device = device;
-    this.reportId = GloriousClassicHidClient.findConfigReportId(device) ?? GLORIOUS_CLASSIC_REPORT_ID;
+    const config = GloriousClassicHidClient.findConfigReport(device);
+    this.reportId = config?.reportId ?? GLORIOUS_CLASSIC_REPORT_ID;
+    this.reportLength = config?.length ?? GLORIOUS_CLASSIC_PACKET_LENGTH;
   }
 
   static isSupported(device: HIDDevice): boolean {
@@ -107,27 +118,41 @@ export class GloriousClassicHidClient {
       && device.vendorId !== VENDOR_ID.gloriousClassicIWired
       && device.vendorId !== VENDOR_ID.gloriousO3) return false;
     if (!GLORIOUS_CLASSIC_PRODUCTS.has(device.productId)) return false;
-    return this.findConfigReportId(device) !== null;
+    return this.findConfigReport(device) !== null;
   }
 
-  /** The feature-report id carried by whichever collection is the config channel, or null. */
-  private static findConfigReportId(device: HIDDevice): number | null {
+  /** The feature-report id and byte length carried by the config channel collection, or null. */
+  private static findConfigReport(device: HIDDevice): { reportId: number; length: number } | null {
     for (const collection of device.collections) {
-      const found = this.findConfigReportIdIn(collection);
+      const found = this.findConfigReportIn(collection);
       if (found !== null) return found;
     }
     return null;
   }
 
-  private static findConfigReportIdIn(collection: HIDCollectionInfo): number | null {
+  private static findConfigReportIn(collection: HIDCollectionInfo): { reportId: number; length: number } | null {
     if (CLASSIC_USAGE_PAGES.includes(collection.usagePage) && collection.featureReports.length > 0) {
-      return collection.featureReports[0].reportId;
+      const report = collection.featureReports[0];
+      const bits = report.items.reduce((sum, item) => sum + (item.reportSize ?? 0) * (item.reportCount ?? 0), 0);
+      return { reportId: report.reportId, length: bits > 0 ? Math.ceil(bits / 8) : GLORIOUS_CLASSIC_PACKET_LENGTH };
     }
     for (const child of collection.children) {
-      const found = this.findConfigReportIdIn(child);
+      const found = this.findConfigReportIn(child);
       if (found !== null) return found;
     }
     return null;
+  }
+
+  /** Resizes a payload (always built at GLORIOUS_CLASSIC_PACKET_LENGTH) to the device's real declared length. */
+  private fitPayload(payload: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+    if (payload.length === this.reportLength) return payload;
+    const resized = new Uint8Array(this.reportLength);
+    resized.set(payload.subarray(0, Math.min(payload.length, this.reportLength)));
+    return resized;
+  }
+
+  private async send(payload: Uint8Array<ArrayBuffer>): Promise<void> {
+    await this.device.sendFeatureReport(this.reportId, this.fitPayload(payload));
   }
 
   async open(): Promise<void> {
@@ -208,14 +233,8 @@ export class GloriousClassicHidClient {
     const rounded = Math.round(dpi);
     state.stageDpis[state.activeStage] = rounded;
     await this.open();
-    await this.device.sendFeatureReport(
-      this.reportId,
-      buildGloriousClassicDpiStagesPayload(state.stageDpis, state.profileId),
-    );
-    await this.device.sendFeatureReport(
-      this.reportId,
-      buildGloriousClassicActiveStagePayload(state.activeStage + 1, state.profileId),
-    );
+    await this.send(buildGloriousClassicDpiStagesPayload(state.stageDpis, state.profileId));
+    await this.send(buildGloriousClassicActiveStagePayload(state.activeStage + 1, state.profileId));
     this.saveState(state);
     return rounded;
   }
@@ -228,7 +247,7 @@ export class GloriousClassicHidClient {
     if (intervalMs === null) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
     const state = this.loadState();
     await this.open();
-    await this.device.sendFeatureReport(this.reportId, buildGloriousClassicPollingRatePayload(intervalMs));
+    await this.send(buildGloriousClassicPollingRatePayload(intervalMs));
     state.pollingIntervalMs = intervalMs;
     this.saveState(state);
     return pollingRateHz;
@@ -242,7 +261,7 @@ export class GloriousClassicHidClient {
     if (!millimetres) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
     const state = this.loadState();
     await this.open();
-    await this.device.sendFeatureReport(this.reportId, buildGloriousClassicLiftOffPayload(millimetres));
+    await this.send(buildGloriousClassicLiftOffPayload(millimetres));
     state.lodMm = millimetres;
     this.saveState(state);
     return value;
@@ -255,7 +274,7 @@ export class GloriousClassicHidClient {
     const state = this.loadState();
     const clamped = Math.round(milliseconds);
     await this.open();
-    await this.device.sendFeatureReport(this.reportId, buildGloriousClassicDebouncePayload(clamped, state.profileId));
+    await this.send(buildGloriousClassicDebouncePayload(clamped, state.profileId));
     state.debounceMs = clamped;
     this.saveState(state);
     return clamped;
@@ -267,13 +286,13 @@ export class GloriousClassicHidClient {
 
   async setRgb(rgb: GloriousClassicRgb): Promise<GloriousClassicRgb> {
     await this.open();
-    await this.device.sendFeatureReport(this.reportId, buildGloriousClassicRgbPayload(rgb));
+    await this.send(buildGloriousClassicRgbPayload(rgb));
     this.lastRgb = rgb;
     return rgb;
   }
 
   private async readBattery(): Promise<GloriousClassicBattery> {
-    await this.device.sendFeatureReport(this.reportId, buildGloriousClassicBatteryRequestPayload());
+    await this.send(buildGloriousClassicBatteryRequestPayload());
     await this.delay(BATTERY_RESPONSE_DELAY_MS);
     const view = await this.device.receiveFeatureReport(this.reportId);
     const body = new Uint8Array(view.buffer, view.byteOffset, Math.min(view.byteLength, GLORIOUS_CLASSIC_PACKET_LENGTH));
