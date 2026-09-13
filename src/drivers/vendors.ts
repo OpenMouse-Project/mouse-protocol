@@ -252,6 +252,15 @@ export const GLORIOUS_CLASSIC_PRODUCTS: ReadonlyMap<number, { name: string; wire
   [0x2014, { name: "Model D- Wireless", wireless: false, generation: "core1" }],
   [0x2025, { name: "Model D- Wireless", wireless: true, generation: "core1" }],
   [0x2033, { name: "Model O 2 Wireless", wireless: true, generation: "core1" }],
+  // "core1" here is unconfirmed, despite the name overlap with 0x2033 above -
+  // a real unit is on a completely different VID (gloriousClassicIWired,
+  // 0x320f, not gloriousClassic's 0x258a) and its feature report declares
+  // 263 bytes, not the 64 every other core1 device (including 0x2033) uses.
+  // A diagnostic confirmed the driver's core1 payloads write without error
+  // but do nothing on the mouse - see isConfirmedReportLength() in
+  // classic-hid.ts, which is what actually gates writes at runtime (not this
+  // label). Model I 2 Wireless/Wired below (0x821a/0x831a) share this same
+  // VID and are equally unconfirmed for the same reason.
   [0x823a, { name: "Model O V2 Wired", wireless: false, generation: "core1" }],
   [0x2015, { name: "Model O Pro", wireless: false, generation: "core1" }],
   [0x2027, { name: "Model O Pro Wireless receiver", wireless: true, generation: "core1" }],
@@ -260,8 +269,8 @@ export const GLORIOUS_CLASSIC_PRODUCTS: ReadonlyMap<number, { name: string; wire
   [0x201a, { name: "Model D 2 PRO", wireless: false, generation: "core1" }],
   [0x2034, { name: "Model D 2 PRO Wireless receiver", wireless: true, generation: "core1" }],
   [0x1503, { name: "Model I", wireless: false, generation: "core1" }],
-  [0x821a, { name: "Model I 2 Wireless", wireless: false, generation: "core1" }],
-  [0x831a, { name: "Model I 2 Wired", wireless: false, generation: "core1" }],
+  [0x821a, { name: "Model I 2 Wireless", wireless: false, generation: "core1" }], // unconfirmed - see the note on 0x823a above
+  [0x831a, { name: "Model I 2 Wired", wireless: false, generation: "core1" }], // unconfirmed - see the note on 0x823a above
   // core2 — RGB/debounce/battery only, see the doc comment above.
   [0xa312, { name: "Model O3 Wireless", wireless: true, generation: "core2" }],
   [0xa300, { name: "Model O3 Wireless receiver", wireless: true, generation: "core2" }],
