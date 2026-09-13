@@ -58,6 +58,28 @@ test("recognizes a Model D Wireless whose config lives on the 0xffff:0 collectio
   assert.equal(GloriousClassicHidClient.isSupported(device), true);
 });
 
+test("recognizes a Model O V2 Wired whose config channel is numbered report 7", () => {
+  // A real 0x320f:0x823a rejected connection entirely: its `usage 0xff01:1`
+  // collection carries feature report id 7, not the unnumbered report (0)
+  // every other classic-family device uses.
+  const { device } = fakeDevice(VENDOR_ID.gloriousClassicIWired, 0x823a, "Model O 2 Wired Mouse");
+  (device.collections[0].featureReports[0] as { reportId: number }).reportId = 7;
+  assert.equal(GloriousClassicHidClient.isSupported(device), true);
+});
+
+test("a numbered config report is used for every write, not the unnumbered default", async () => {
+  const { device, sent } = fakeDevice(VENDOR_ID.gloriousClassicIWired, 0x823a);
+  (device.collections[0].featureReports[0] as { reportId: number }).reportId = 7;
+  const client = new GloriousClassicHidClient(device);
+
+  await client.setDpi(1600);
+  await client.setPollingRate(500);
+  await client.setLiftOffDistance("High");
+
+  assert.ok(sent.length >= 3);
+  for (const report of sent) assert.equal(report.reportId, 7, "every write should use the discovered report id");
+});
+
 test("rejects an unrecognized VID/PID pair", () => {
   const { device } = fakeDevice(VENDOR_ID.gloriousO3, 0x1234);
   assert.equal(GloriousClassicHidClient.isSupported(device), false);
