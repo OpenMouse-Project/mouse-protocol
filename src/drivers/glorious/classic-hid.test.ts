@@ -80,6 +80,22 @@ test("a numbered config report is used for every write, not the unnumbered defau
   for (const report of sent) assert.equal(report.reportId, 7, "every write should use the discovered report id");
 });
 
+test("a shorter declared feature report is not sent at the full 64-byte length", async () => {
+  // The real 0x320f:0x823a unit's numbered report 7 also declared a length
+  // WebHID rejected the driver's fixed 64-byte payload against, throwing
+  // "Failed to write the feature report." on every write.
+  const { device, sent } = fakeDevice(VENDOR_ID.gloriousClassicIWired, 0x823a);
+  const report = device.collections[0].featureReports[0] as { reportId: number; items: Array<{ reportSize: number; reportCount: number }> };
+  report.reportId = 7;
+  report.items = [{ reportSize: 8, reportCount: 32 }];
+  const client = new GloriousClassicHidClient(device);
+
+  await client.setDpi(1600);
+
+  assert.ok(sent.length > 0);
+  for (const report of sent) assert.equal(report.payload.length, 32, "payload must match the device's declared 32-byte report");
+});
+
 test("rejects an unrecognized VID/PID pair", () => {
   const { device } = fakeDevice(VENDOR_ID.gloriousO3, 0x1234);
   assert.equal(GloriousClassicHidClient.isSupported(device), false);
