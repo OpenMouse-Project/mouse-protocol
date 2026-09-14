@@ -182,3 +182,21 @@ test("a mouse behind the shared receiver is named after the mouse", async () => 
   const status = await new WLMouseHidClient(device).readStatus();
   assert.equal(status.name, "WLmouse Beast Max");
 });
+
+function fakeDescriptorDevice(productId: number): HIDDevice {
+  return {
+    vendorId: VENDOR_ID.wlmouse,
+    productId,
+    collections: [{ featureReports: [{ reportId: 0 }], children: [] }],
+  } as unknown as HIDDevice;
+}
+
+test("a normal WLMouse product with the compx feature report is supported", () => {
+  assert.equal(WLMouseHidClient.isSupported(fakeDescriptorDevice(0xa883)), true);
+});
+
+test("Beast X 4K (0xa887) is rejected despite matching the descriptor shape", () => {
+  // Its firmware only speaks the desktop-software protocol, not compx — every
+  // request times out. See DESKTOP_SOFTWARE_ONLY_PRODUCTS in hid.ts.
+  assert.equal(WLMouseHidClient.isSupported(fakeDescriptorDevice(0xa887)), false);
+});

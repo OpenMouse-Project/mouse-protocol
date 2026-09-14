@@ -18,6 +18,14 @@ import {
 
 export { WLMOUSE_VENDOR_ID };
 
+// Beast X 4K (0xa887) exposes the same HID descriptor shape as the other Beast X
+// variants (including a feature report at COMPX_REPORT_ID), so isSupported() below
+// would otherwise match it — but its firmware only speaks WLMouse's desktop-software
+// protocol, not the compx page/command protocol. Every request times out on all
+// interface splits instead of getting a reply. Confirmed via community report
+// (Windows + Fedora, product 36a7:a887): ioctl(GFEATURE) timeout on 7/7 splits.
+const DESKTOP_SOFTWARE_ONLY_PRODUCTS = new Set([0xa887]);
+
 const RESPONSE_ATTEMPTS = 12;
 const RESPONSE_DELAY_MS = 30;
 const WAKE_DELAY_MS = 300;
@@ -148,6 +156,7 @@ export class WLMouseHidClient {
 
   static isSupported(device: HIDDevice): boolean {
     return device.vendorId === WLMOUSE_VENDOR_ID
+      && !DESKTOP_SOFTWARE_ONLY_PRODUCTS.has(device.productId)
       && device.collections.some((collection) => this.hasConfigReport(collection));
   }
 
