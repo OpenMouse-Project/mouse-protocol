@@ -463,8 +463,8 @@ same approach `src/mchose/buttons.ts` already takes in this repo. 127 actions
 in total. This was initially recorded as impossible to offer; that was wrong,
 and the MCHOSE driver was the counter-example sitting in the same tree.
 
-**Still NOT offered:** macros (`slot << 16 | 9`), which need the `0x07`
-upload command.
+Macros (`slot << 16 | 9`) are offered as `Macro 1`-`Macro 10`, generated
+rather than listed in the table.
 
 ### Battery (2026-09-07, DISPROVEN 2026-09-08 — see the top of this document)
 
@@ -1269,10 +1269,13 @@ did. The encoder is now pinned byte-for-byte to that capture.
 
 The capture ended with `06 04 09 00 03 00`, binding wire button 4 to
 `0x00030009` — the `fJuji` encoding `slot << 16 | 9`.
-`incottButtonActionLabel` now names these (`Macro 4`) instead of reporting
-raw hex. `incottButtonActionCode` deliberately does NOT reverse them: nothing
-can assign a macro until there is a UI to author one, so an existing macro
-binding reads back correctly and is left alone.
+`incottButtonActionLabel` names these (`Macro 4`) and
+`incottButtonActionCode` now writes them, via `incottMacroButtonCode`. That
+reversal was deliberately absent at first: until `uploadMacro` existed,
+offering a macro as a writable action would have bound a button to a buffer
+nothing could fill. All ten slots are published in `buttonOptions`, because
+the device offers no way to ask which slots hold a macro — binding an empty
+one is accepted and does nothing, exactly as it does in the vendor tool.
 
 ### Why there is no UI for this either
 

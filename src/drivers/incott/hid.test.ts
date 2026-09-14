@@ -1555,3 +1555,21 @@ test("readStatus keeps the full ceiling when identity cannot be read", async () 
   const status = await new IncottHidClient(device, fast).readStatus();
   assert.equal(status.ui?.dpiStageEditor?.maxDpi, 45000);
 });
+
+test("the ten macro slots are offered as button actions", async () => {
+  const { device } = fakeDevice();
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.ok(status.buttonOptions?.includes("Macro 1"));
+  assert.ok(status.buttonOptions?.includes("Macro 10"));
+  assert.equal(status.buttonOptions?.includes("Macro 11"), false);
+});
+
+test("setButtonMapping can point a button at a macro slot", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setButtonMapping("Forward", "Macro 4");
+  // slot 3 << 16 | 9, and Forward is wire index 4.
+  assert.equal(state.buttons[4], 0x00030009);
+  const status = await client.readStatus();
+  assert.equal(status.buttonMappings?.Forward, "Macro 4");
+});

@@ -39,6 +39,7 @@ import {
   incottIsWiredProduct,
   incottKeyboardActionCode,
   incottMacroChunks,
+  incottMacroKeyLabel,
   incottLiftOffLabel,
   incottLiftOffTenths,
   incottNormalizeProductName,
@@ -46,6 +47,7 @@ import {
   incottPerformanceModeToWire,
   incottValidateDpi,
   INCOTT_BUTTON_ACTIONS,
+  INCOTT_MACRO_MOUSE_KEYS,
   INCOTT_BUTTON_NAMES,
   INCOTT_BUTTON_WIRE_INDEX,
   INCOTT_PERFORMANCE_MODE_FROM_WIRE,
@@ -972,8 +974,15 @@ test("a macro button binding reads back as its slot", () => {
   assert.equal(incottButtonActionLabel(0x00000009), "Macro 1");
   const binding = incottDecodeButtonBinding(frame(0x86, 0x04, 0x09, 0x00, 0x03, 0x00), 4);
   assert.equal(binding?.label, "Macro 4");
-  // Not offered as a writable option: there is no UI to author one.
-  assert.equal(incottButtonActionCode("Macro 4"), null);
+  // Writable now that uploadMacro exists — until it did, offering this would
+  // have bound a button to a buffer nothing could fill.
+  assert.equal(incottButtonActionCode("Macro 4"), 0x00030009);
+  assert.equal(incottButtonActionCode("Macro 1"), 0x00000009);
+  assert.equal(incottButtonActionCode("Macro 10"), 0x00090009);
+  // Slots outside 1-10 are not bindings.
+  assert.equal(incottButtonActionCode("Macro 11"), null);
+  assert.equal(incottButtonActionCode("Macro 0"), null);
+  assert.equal(incottButtonActionCode("Macro"), null);
 });
 
 test("the offered DPI ceiling follows the fitted sensor", () => {
@@ -992,4 +1001,36 @@ test("the encoder still accepts the full range regardless of sensor", () => {
   // Same split as the polling rate: readStatus narrows what is OFFERED, the
   // codec keeps accepting anything the protocol can express.
   assert.doesNotThrow(() => incottEncodeSetDpi(0, 45000));
+});
+
+test("a macro step can be a mouse button, not just a keyboard key", () => {
+  // The vendor keeps both in one table, and a click macro is the common case.
+  // These are the same codes the button action words use.
+  assert.equal(INCOTT_MACRO_MOUSE_KEYS.left, 0xf0);
+  assert.equal(INCOTT_MACRO_MOUSE_KEYS.right, 0xf1);
+  assert.equal(INCOTT_MACRO_MOUSE_KEYS.middle, 0xf2);
+
+  const buffer = incottEncodeMacroBuffer({
+    bufferId: 0,
+    loop: "untilKeyRelease",
+    cycles: 0,
+    uid: 0,
+    steps: [
+      { key: INCOTT_MACRO_MOUSE_KEYS.left, press: true, delayMs: 40 },
+      { key: INCOTT_MACRO_MOUSE_KEYS.left, press: false, delayMs: 40 },
+    ],
+  });
+  // Press 0x01 / release 0x81, exactly as a keyboard step encodes.
+  assert.deepEqual([...buffer.slice(4, 12)], [0x01, 0xf0, 40, 0, 0x81, 0xf0, 40, 0]);
+});
+
+test("macro step keys resolve to display names", () => {
+  assert.equal(incottMacroKeyLabel(0xf0), "Left click");
+  assert.equal(incottMacroKeyLabel(0xf1), "Right click");
+  assert.equal(incottMacroKeyLabel(0xf2), "Middle click");
+  assert.equal(incottMacroKeyLabel(0x04), "A");
+  assert.equal(incottMacroKeyLabel(0x3a), "F1");
+  assert.equal(incottMacroKeyLabel(0x2c), "Space");
+  // A code with no name is reported as such rather than guessed at.
+  assert.equal(incottMacroKeyLabel(0x99), null);
 });

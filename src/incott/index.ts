@@ -433,7 +433,12 @@ export type IncottMacroLoop = (typeof INCOTT_MACRO_LOOP_MODES)[number];
 
 /** One key event in a macro: a press or a release, then a delay. */
 export interface IncottMacroStep {
-  /** HID keyboard usage code. */
+  /**
+   * What the step presses: a standard HID keyboard usage code, or one of
+   * `INCOTT_MACRO_MOUSE_KEYS` for a mouse button. The vendor's own key table
+   * carries both in one list, which is why a macro can click as well as type
+   * — and click macros are the common case.
+   */
   key: number;
   /** True for a key-down event, false for key-up. */
   press: boolean;
@@ -452,6 +457,34 @@ export interface IncottMacro {
   uid: number;
 }
 
+/**
+ * Mouse buttons as macro steps. The vendor keeps keyboard keys and mouse
+ * buttons in a single table (`vkPOS` in its `define` bundle), so a macro step
+ * takes either — and the codes are the same ones the button action words use
+ * (`0x00F00001` is a left click). Nothing else in the table falls outside the
+ * HID keyboard range.
+ */
+export const INCOTT_MACRO_MOUSE_KEYS = {
+  left: 0xf0,
+  right: 0xf1,
+  middle: 0xf2,
+} as const;
+
+/**
+ * Display name for a macro step's key, or null when it is a code this driver
+ * has no name for. Mouse buttons first, since they sit outside the keyboard
+ * range and are the ones a click macro is built from.
+ */
+export function incottMacroKeyLabel(key: number): string | null {
+  if (key === INCOTT_MACRO_MOUSE_KEYS.left) return "Left click";
+  if (key === INCOTT_MACRO_MOUSE_KEYS.right) return "Right click";
+  if (key === INCOTT_MACRO_MOUSE_KEYS.middle) return "Middle click";
+  for (const [label, usage] of KEY_USAGES) {
+    if (usage === key) return label;
+  }
+  return null;
+}
+
 /** A macro buffer is always this long, in ten 32-byte chunks. */
 export const INCOTT_MACRO_BUFFER_BYTES = 320;
 export const INCOTT_MACRO_CHUNK_BYTES = 32;
@@ -468,7 +501,7 @@ export const INCOTT_MACRO_MAX_STEPS = 71;
  *     [1]        loop mode (0 until key release, 1 until any key, 2 cycle)
  *     [2..3]     cycle count, LE16
  *     [4+4n]     event flags: bit 0 always set, bit 7 set for a RELEASE
- *     [5+4n]     HID keyboard usage code
+ *     [5+4n]     HID keyboard usage, or a mouse button (INCOTT_MACRO_MOUSE_KEYS)
  *     [6..7+4n]  delay after the event, LE16 milliseconds
  *     [288..293] the ASCII name "Macro" followed by '1' + buffer id
  *     [304..307] (steps + 1) * 4 + 128, LE32
@@ -598,8 +631,36 @@ export function incottButtonActionCode(label: string): number | null {
   for (const [name, value] of INCOTT_BUTTON_ACTIONS) {
     if (name === label) return value;
   }
-  return null;
+  return incottMacroButtonCode(label);
 }
+
+/**
+ * `"Macro 1".."Macro 10"` -> the binding that points a button at that macro
+ * buffer, or null for anything else.
+ *
+ * Split out from the action table because the ten slots are generated rather
+ * than listed, and because this used to refuse on purpose: until `uploadMacro`
+ * existed nothing could author a macro, so offering one as a writable action
+ * would have bound a button to an empty buffer. Now that a macro can be
+ * written, binding to one is the point.
+ *
+ * Binding to a slot that has never been uploaded is still possible and still
+ * does nothing — the same behaviour the vendor tool has, since the device
+ * offers no way to ask which slots are populated.
+ */
+export function incottMacroButtonCode(label: string): number | null {
+  const match = /^Macro (\d+)$/.exec(label);
+  if (!match) return null;
+  const slot = Number(match[1]) - 1;
+  if (!Number.isInteger(slot) || slot < 0 || slot >= INCOTT_MACRO_BUFFER_COUNT) return null;
+  return ((slot << 16) | INCOTT_BUTTON_MACRO_MARKER) >>> 0;
+}
+
+/** `"Macro 1".."Macro 10"`, in slot order — the labels the above accepts. */
+export const INCOTT_MACRO_BUTTON_LABELS: readonly string[] = Array.from(
+  { length: INCOTT_MACRO_BUFFER_COUNT },
+  (_, slot) => `Macro ${slot + 1}`,
+);
 
 /**
  * How many DPI stages the cycle uses by default — and the value this driver

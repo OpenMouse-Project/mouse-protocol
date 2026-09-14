@@ -42,6 +42,7 @@ import {
   incottPerformanceModeToWire,
   incottValidateDpi,
   INCOTT_BUTTON_ACTIONS,
+  INCOTT_MACRO_BUTTON_LABELS,
   INCOTT_BUTTON_NAMES,
   INCOTT_BUTTON_WIRE_INDEX,
   INCOTT_CMD_QUERY_BUTTON,
@@ -907,7 +908,17 @@ export class IncottHidClient {
       // when it has the current assignments AND the list of actions it may
       // write back.
       ...(buttonMappings !== null
-        ? { buttonMappings, buttonOptions: INCOTT_BUTTON_ACTIONS.map(([label]) => label) }
+        ? {
+            buttonMappings,
+            // The ten macro slots are offered alongside the fixed actions.
+            // Nothing can ask the device which slots hold a macro, so all
+            // ten are listed: binding an empty one is accepted and simply
+            // does nothing, which is what the vendor tool does too.
+            buttonOptions: [
+              ...INCOTT_BUTTON_ACTIONS.map(([label]) => label),
+              ...INCOTT_MACRO_BUTTON_LABELS,
+            ],
+          }
         : {}),
       motionSync,
       rippleControl,
