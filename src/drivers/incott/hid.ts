@@ -1,6 +1,8 @@
 import type { MouseStatus, MouseUiHints } from "../mouse-types.ts";
 import {
   incottButtonActionCode,
+  incottMacroBindingForButton,
+  incottMacroSlotFromBinding,
   incottDecodeButtonBinding,
   incottDecodeDebounce,
   incottDecodeDpiStage,
@@ -42,7 +44,7 @@ import {
   incottPerformanceModeToWire,
   incottValidateDpi,
   INCOTT_BUTTON_ACTIONS,
-  INCOTT_MACRO_BUTTON_LABELS,
+  INCOTT_MACRO_ACTION_LABEL,
   INCOTT_BUTTON_NAMES,
   INCOTT_BUTTON_WIRE_INDEX,
   INCOTT_CMD_QUERY_BUTTON,
@@ -915,13 +917,15 @@ export class IncottHidClient {
       ...(buttonMappings !== null
         ? {
             buttonMappings,
-            // The ten macro slots are offered alongside the fixed actions.
-            // Nothing can ask the device which slots hold a macro, so all
-            // ten are listed: binding an empty one is accepted and simply
-            // does nothing, which is what the vendor tool does too.
+            // One "Macro" entry, not ten numbered slots: a button can only
+            // run the buffer carrying its own index, so offering a choice of
+            // slot would list combinations the device ignores. Nothing can
+            // ask which buffers hold a macro, so the option is always
+            // present; choosing it on a button with no macro uploaded is
+            // accepted and does nothing, as in the vendor tool.
             buttonOptions: [
               ...INCOTT_BUTTON_ACTIONS.map(([label]) => label),
-              ...INCOTT_MACRO_BUTTON_LABELS,
+              INCOTT_MACRO_ACTION_LABEL,
             ],
           }
         : {}),
@@ -1177,6 +1181,17 @@ export class IncottHidClient {
       const index = INCOTT_BUTTON_WIRE_INDEX[name];
       const binding = incottDecodeButtonBinding(await this.query(INCOTT_CMD_QUERY_BUTTON, index), index);
       if (binding === null) return null;
+      // A macro binding is only meaningful against the button it was read
+      // from: the slot it names should be that button's own index. One
+      // pointing elsewhere was written by something that had the model wrong,
+      // so report it rather than showing it as a working macro.
+      const macroSlot = incottMacroSlotFromBinding(binding.code);
+      if (macroSlot !== null) {
+        mappings[name] = macroSlot === INCOTT_BUTTON_NAMES.indexOf(name)
+          ? INCOTT_MACRO_ACTION_LABEL
+          : `Macro (buffer ${macroSlot})`;
+        continue;
+      }
       mappings[name] = binding.label ?? `Unknown (0x${binding.code.toString(16).padStart(8, "0")})`;
     }
     return mappings;
@@ -1194,7 +1209,11 @@ export class IncottHidClient {
   async setButtonMapping(button: string, actionLabel: string): Promise<void> {
     const name = INCOTT_BUTTON_NAMES.find((candidate) => candidate === button);
     if (name === undefined) throw new Error(`This mouse has no "${button}" button.`);
-    const code = incottButtonActionCode(actionLabel);
+    // "Macro" resolves per button: the buffer a button runs is its own
+    // display index, so the binding cannot be looked up from the label alone.
+    const code = actionLabel === INCOTT_MACRO_ACTION_LABEL
+      ? incottMacroBindingForButton(name)
+      : incottButtonActionCode(actionLabel);
     if (code === null) throw new Error(`Unknown button action "${actionLabel}".`);
 
     const index = INCOTT_BUTTON_WIRE_INDEX[name];

@@ -631,36 +631,56 @@ export function incottButtonActionCode(label: string): number | null {
   for (const [name, value] of INCOTT_BUTTON_ACTIONS) {
     if (name === label) return value;
   }
-  return incottMacroButtonCode(label);
+  // "Macro" alone cannot be resolved here: which buffer it means depends on
+  // the button being written, so `IncottHidClient.setButtonMapping` handles it.
+  return null;
 }
 
 /**
- * `"Macro 1".."Macro 10"` -> the binding that points a button at that macro
- * buffer, or null for anything else.
+ * The macro buffer a button runs is its own DISPLAY-ORDER index — buffers are
+ * not free-standing slots a button can be pointed at.
  *
- * Split out from the action table because the ten slots are generated rather
- * than listed, and because this used to refuse on purpose: until `uploadMacro`
- * existed nothing could author a macro, so offering one as a writable action
- * would have bound a button to an empty buffer. Now that a macro can be
- * written, binding to one is the point.
+ * HARDWARE-CONFIRMED 2026-09-14, after the opposite assumption shipped and did
+ * nothing. The vendor's apply loop uses one `i` for all three writes:
  *
- * Binding to a slot that has never been uploaded is still possible and still
- * does nothing — the same behaviour the vendor tool has, since the device
- * offers no way to ask which slots are populated.
+ *     await this.setJuJi(i, b);                  // upload to buffer i
+ *     let code = this.kf_hw(pf.key[i], i);       // i << 16 | 9
+ *     await this.setMsK(dvar.key[i].matrix, code);
+ *
+ * Its own capture agrees: buffer 3, code 0x00030009, written to matrix 4 —
+ * Forward is display index 3 and wire index 4. Uploading the same macro to
+ * buffer 0 and binding Forward to 0x00000009 is accepted by the device and
+ * silently never fires.
+ *
+ * Note this is the DISPLAY index, not the wire index the binding is written
+ * to: Forward is 3 here and 4 there (see `INCOTT_BUTTON_WIRE_INDEX`). Getting
+ * the two the wrong way round is the obvious trap.
  */
-export function incottMacroButtonCode(label: string): number | null {
-  const match = /^Macro (\d+)$/.exec(label);
-  if (!match) return null;
-  const slot = Number(match[1]) - 1;
-  if (!Number.isInteger(slot) || slot < 0 || slot >= INCOTT_MACRO_BUFFER_COUNT) return null;
-  return ((slot << 16) | INCOTT_BUTTON_MACRO_MARKER) >>> 0;
+export function incottMacroSlotForButton(button: IncottButtonName): number {
+  return INCOTT_BUTTON_NAMES.indexOf(button);
 }
 
-/** `"Macro 1".."Macro 10"`, in slot order — the labels the above accepts. */
-export const INCOTT_MACRO_BUTTON_LABELS: readonly string[] = Array.from(
-  { length: INCOTT_MACRO_BUFFER_COUNT },
-  (_, slot) => `Macro ${slot + 1}`,
-);
+/** The binding that makes a button run its own macro buffer. */
+export function incottMacroBindingForButton(button: IncottButtonName): number {
+  return ((incottMacroSlotForButton(button) << 16) | INCOTT_BUTTON_MACRO_MARKER) >>> 0;
+}
+
+/**
+ * The buffer a macro binding points at, or null when the code is not a macro
+ * binding at all.
+ */
+export function incottMacroSlotFromBinding(code: number): number | null {
+  if ((code & 0xffff) !== INCOTT_BUTTON_MACRO_MARKER) return null;
+  const slot = code >>> 16;
+  return slot < INCOTT_MACRO_BUFFER_COUNT ? slot : null;
+}
+
+/**
+ * The single action label offered for macros. There is deliberately no
+ * "Macro 1".."Macro 10" list: a button can only run the buffer with its own
+ * index, so a per-slot choice would offer combinations the hardware ignores.
+ */
+export const INCOTT_MACRO_ACTION_LABEL = "Macro";
 
 /**
  * How many DPI stages the cycle uses by default — and the value this driver

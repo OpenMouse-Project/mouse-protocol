@@ -40,6 +40,9 @@ import {
   incottKeyboardActionCode,
   incottMacroChunks,
   incottMacroKeyLabel,
+  incottMacroBindingForButton,
+  incottMacroSlotForButton,
+  incottMacroSlotFromBinding,
   incottLiftOffLabel,
   incottLiftOffTenths,
   incottNormalizeProductName,
@@ -974,14 +977,8 @@ test("a macro button binding reads back as its slot", () => {
   assert.equal(incottButtonActionLabel(0x00000009), "Macro 1");
   const binding = incottDecodeButtonBinding(frame(0x86, 0x04, 0x09, 0x00, 0x03, 0x00), 4);
   assert.equal(binding?.label, "Macro 4");
-  // Writable now that uploadMacro exists — until it did, offering this would
-  // have bound a button to a buffer nothing could fill.
-  assert.equal(incottButtonActionCode("Macro 4"), 0x00030009);
-  assert.equal(incottButtonActionCode("Macro 1"), 0x00000009);
-  assert.equal(incottButtonActionCode("Macro 10"), 0x00090009);
-  // Slots outside 1-10 are not bindings.
-  assert.equal(incottButtonActionCode("Macro 11"), null);
-  assert.equal(incottButtonActionCode("Macro 0"), null);
+  // "Macro" cannot be resolved from the label alone: which buffer it means
+  // depends on the button being written. See incottMacroBindingForButton.
   assert.equal(incottButtonActionCode("Macro"), null);
 });
 
@@ -1033,4 +1030,30 @@ test("macro step keys resolve to display names", () => {
   assert.equal(incottMacroKeyLabel(0x2c), "Space");
   // A code with no name is reported as such rather than guessed at.
   assert.equal(incottMacroKeyLabel(0x99), null);
+});
+
+test("a button runs the macro buffer carrying its own display index", () => {
+  // HARDWARE-CONFIRMED: uploading to buffer 0 and binding Forward to
+  // 0x00000009 is accepted and never fires. Forward's macro lives in buffer 3
+  // — its display index — and the binding names that same 3.
+  assert.equal(incottMacroSlotForButton("Left"), 0);
+  assert.equal(incottMacroSlotForButton("Forward"), 3);
+  assert.equal(incottMacroSlotForButton("Back"), 4);
+  assert.equal(incottMacroBindingForButton("Forward"), 0x00030009);
+  assert.equal(incottMacroBindingForButton("Left"), 0x00000009);
+});
+
+test("the macro buffer is the DISPLAY index, never the wire index", () => {
+  // Forward is display 3 and wire 4; Back is display 4 and wire 3. Using the
+  // wire index here would point each at the other's buffer.
+  assert.notEqual(incottMacroSlotForButton("Forward"), INCOTT_BUTTON_WIRE_INDEX.Forward);
+  assert.notEqual(incottMacroSlotForButton("Back"), INCOTT_BUTTON_WIRE_INDEX.Back);
+  assert.equal(incottMacroSlotForButton("Forward"), INCOTT_BUTTON_WIRE_INDEX.Back);
+});
+
+test("a macro binding decodes back to the buffer it names", () => {
+  assert.equal(incottMacroSlotFromBinding(0x00030009), 3);
+  assert.equal(incottMacroSlotFromBinding(0x00000009), 0);
+  assert.equal(incottMacroSlotFromBinding(0x00f00001), null, "a left click is not a macro");
+  assert.equal(incottMacroSlotFromBinding(0x000a0009), null, "buffer past the ten that exist");
 });

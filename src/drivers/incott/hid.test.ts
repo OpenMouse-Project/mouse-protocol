@@ -1556,20 +1556,32 @@ test("readStatus keeps the full ceiling when identity cannot be read", async () 
   assert.equal(status.ui?.dpiStageEditor?.maxDpi, 45000);
 });
 
-test("the ten macro slots are offered as button actions", async () => {
+test("one Macro action is offered, not a slot per buffer", async () => {
+  // A button can only run the buffer with its own index, so a numbered list
+  // would offer combinations the device ignores.
   const { device } = fakeDevice();
   const status = await new IncottHidClient(device, fast).readStatus();
-  assert.ok(status.buttonOptions?.includes("Macro 1"));
-  assert.ok(status.buttonOptions?.includes("Macro 10"));
-  assert.equal(status.buttonOptions?.includes("Macro 11"), false);
+  assert.ok(status.buttonOptions?.includes("Macro"));
+  assert.equal(status.buttonOptions?.includes("Macro 1"), false);
 });
 
-test("setButtonMapping can point a button at a macro slot", async () => {
+test("Macro binds a button to the buffer carrying its own display index", async () => {
   const { device, state } = fakeDevice();
   const client = new IncottHidClient(device, fast);
-  await client.setButtonMapping("Forward", "Macro 4");
-  // slot 3 << 16 | 9, and Forward is wire index 4.
+  await client.setButtonMapping("Forward", "Macro");
+  // Forward is display index 3 and wire index 4: the binding names 3 and is
+  // written at 4. Hardware-confirmed — naming 0 there never fires.
   assert.equal(state.buttons[4], 0x00030009);
   const status = await client.readStatus();
-  assert.equal(status.buttonMappings?.Forward, "Macro 4");
+  assert.equal(status.buttonMappings?.Forward, "Macro");
+});
+
+test("a macro binding pointing at another button's buffer is reported, not shown as working", async () => {
+  // Forward is display index 3, so a binding naming buffer 0 was written by
+  // something with the model wrong and will not fire.
+  const { device } = fakeDevice({
+    state: { buttons: [0x00f00001, 0x00f10001, 0x00f20001, 0x00f30001, 0x00000009, 0x00030007] },
+  });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.buttonMappings?.Forward, "Macro (buffer 0)");
 });
