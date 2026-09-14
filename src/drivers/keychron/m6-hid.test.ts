@@ -205,6 +205,38 @@ test("rejects stages past the count the mouse reports", async () => {
   await assert.rejects(m6.setDpiStageValue(4, 800), /between 1 and 3/);
 });
 
+test("the stage count grows and shrinks without disturbing the stored DPI", async () => {
+  const fake = new FakeM6Device();
+  const m6 = client(fake);
+  assert.equal(await m6.setDpiStageCount(5), 5);
+  // Growing reveals slots the mouse was already holding, it does not invent them.
+  assert.deepEqual((await m6.readStatus()).dpiStages, [400, 800, 1600, 3200, 5000]);
+  assert.equal(lastSent(fake, 0x40)?.[14], 5);
+  assert.equal(await m6.setDpiStageCount(2), 2);
+  assert.deepEqual((await m6.readStatus()).dpiStages, [400, 800]);
+  // Shrinking keeps the hidden slots intact for the next time they are shown.
+  assert.equal(await m6.setDpiStageCount(5), 5);
+  assert.deepEqual((await m6.readStatus()).dpiStages, [400, 800, 1600, 3200, 5000]);
+});
+
+test("shrinking below the active stage pulls it back into range", async () => {
+  const fake = new FakeM6Device();
+  const m6 = client(fake);
+  await m6.setActiveDpiStage(2);
+  assert.equal((await m6.readStatus()).activeDpiStage, 2);
+  await m6.setDpiStageCount(1);
+  const status = await m6.readStatus();
+  assert.equal(status.activeDpiStage, 0);
+  assert.equal(status.dpi, 400);
+});
+
+test("rejects a stage count the mouse cannot hold", async () => {
+  const m6 = client(new FakeM6Device());
+  for (const count of [0, 6, 2.5, Number.NaN]) {
+    await assert.rejects(m6.setDpiStageCount(count), /between 1 and 5/);
+  }
+});
+
 test("writes the polling rate as an index into the mouse's table", async () => {
   const fake = new FakeM6Device();
   assert.equal(await client(fake).setPollingRate(4000), 4000);

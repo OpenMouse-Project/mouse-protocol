@@ -184,7 +184,7 @@ export class KeychronM6HidClient {
         statusNote: "Lift-off: Low is 0.7 mm, Medium is 1 mm, High is 2 mm.",
         dpiStageEditor: {
           maxStages: DPI_STAGE_COUNT,
-          countEditable: false,
+          countEditable: true,
           minDpi: DPI_MIN,
           maxDpi: DPI_MAX,
           stepDpi: DPI_STEP,
@@ -245,6 +245,24 @@ export class KeychronM6HidClient {
     await this.writeSettings(this.dpiSettingsPacket(settings));
     const confirmed = (await this.readSettings()).activeDpiStage;
     if (confirmed !== stage) throw new Error(`The Keychron M6 kept DPI stage ${confirmed + 1}.`);
+    return confirmed;
+  }
+
+  async setDpiStageCount(count: number): Promise<number> {
+    if (!Number.isInteger(count) || count < 1 || count > DPI_STAGE_COUNT) {
+      throw new Error(`The Keychron M6 holds between 1 and ${DPI_STAGE_COUNT} DPI stages.`);
+    }
+    const settings = await this.readSettings();
+    settings.stageCount = count;
+    // All five hardware slots keep their DPI; the count only decides how many
+    // the DPI button cycles through. The active stage rides along on the same
+    // packet, so shrinking past it would write a stage the mouse cannot hold.
+    if (settings.activeDpiStage >= count) settings.activeDpiStage = count - 1;
+    await this.writeSettings(this.dpiSettingsPacket(settings));
+    const confirmed = (await this.readSettings()).stageCount;
+    if (confirmed !== count) {
+      throw new Error(`The Keychron M6 kept ${confirmed} DPI stages instead of ${count}.`);
+    }
     return confirmed;
   }
 
