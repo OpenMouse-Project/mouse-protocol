@@ -188,8 +188,13 @@ export class IncottTransactionQueue {
       if (!this.transport.sendReport) {
         throw new Error("This transport cannot send output reports, which the macro upload needs.");
       }
-      await this.transport.sendReport(reportId, toArrayBuffer(payload));
+      // The settle happens BEFORE the chunk, not after it. The vendor waits
+      // 80 ms between announcing a chunk and sending it, which reads as the
+      // device needing that gap to get ready for the output report; waiting
+      // afterwards instead would leave the header and its payload
+      // back-to-back with the pause in the wrong place.
       await this.sleep(this.settleMs);
+      await this.transport.sendReport(reportId, toArrayBuffer(payload));
     });
     this.tail = run.catch(() => undefined);
     return run;
