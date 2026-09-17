@@ -90,10 +90,17 @@ import {
   HYPERX_VENDOR_ID_HP,
   HYPERX_VENDOR_ID_KINGSTON,
 } from "@openmouse/protocol/hyperx";
+import { RAWM_PRODUCT_IDS, RAWM_USAGE, RAWM_USAGE_PAGE, RAWM_VENDOR_ID } from "@openmouse/protocol/rawm";
+import {
+  RYUNIX_PRODUCT_IDS,
+  RYUNIX_USAGE,
+  RYUNIX_USAGE_PAGE,
+  RYUNIX_VENDOR_ID,
+} from "@openmouse/protocol/ryunix";
 
 export const VENDOR_ID = {
   asus: ASUS_VENDOR_ID,
-  ryunix: 0x04F3,
+  ryunix: RYUNIX_VENDOR_ID,
   pulsar: 0x3710,
   endgameGear: 0x3367,
   wlmouse: 0x36a7,
@@ -102,6 +109,7 @@ export const VENDOR_ID = {
   attackshark: 0x373e,
   logitech: 0x046d,
   orbital: 0x1915,
+  rawm: RAWM_VENDOR_ID,
   razer: 0x1532,
   teevolution: 0x3554,
   vgn: 0x3554,
@@ -253,6 +261,15 @@ export const GLORIOUS_CLASSIC_PRODUCTS: ReadonlyMap<number, { name: string; wire
   [0x2014, { name: "Model D- Wireless", wireless: false, generation: "core1" }],
   [0x2025, { name: "Model D- Wireless", wireless: true, generation: "core1" }],
   [0x2033, { name: "Model O 2 Wireless", wireless: true, generation: "core1" }],
+  // "core1" here is unconfirmed, despite the name overlap with 0x2033 above -
+  // a real unit is on a completely different VID (gloriousClassicIWired,
+  // 0x320f, not gloriousClassic's 0x258a) and its feature report declares
+  // 263 bytes, not the 64 every other core1 device (including 0x2033) uses.
+  // A diagnostic confirmed the driver's core1 payloads write without error
+  // but do nothing on the mouse - see isConfirmedReportLength() in
+  // classic-hid.ts, which is what actually gates writes at runtime (not this
+  // label). Model I 2 Wireless/Wired below (0x821a/0x831a) share this same
+  // VID and are equally unconfirmed for the same reason.
   [0x823a, { name: "Model O V2 Wired", wireless: false, generation: "core1" }],
   [0x2015, { name: "Model O Pro", wireless: false, generation: "core1" }],
   [0x2027, { name: "Model O Pro Wireless receiver", wireless: true, generation: "core1" }],
@@ -261,8 +278,8 @@ export const GLORIOUS_CLASSIC_PRODUCTS: ReadonlyMap<number, { name: string; wire
   [0x201a, { name: "Model D 2 PRO", wireless: false, generation: "core1" }],
   [0x2034, { name: "Model D 2 PRO Wireless receiver", wireless: true, generation: "core1" }],
   [0x1503, { name: "Model I", wireless: false, generation: "core1" }],
-  [0x821a, { name: "Model I 2 Wireless", wireless: false, generation: "core1" }],
-  [0x831a, { name: "Model I 2 Wired", wireless: false, generation: "core1" }],
+  [0x821a, { name: "Model I 2 Wireless", wireless: false, generation: "core1" }], // unconfirmed - see the note on 0x823a above
+  [0x831a, { name: "Model I 2 Wired", wireless: false, generation: "core1" }], // unconfirmed - see the note on 0x823a above
   // core2 — RGB/debounce/battery only, see the doc comment above.
   [0xa312, { name: "Model O3 Wireless", wireless: true, generation: "core2" }],
   [0xa300, { name: "Model O3 Wireless receiver", wireless: true, generation: "core2" }],
@@ -631,11 +648,13 @@ export const HYPERX_HID_FILTERS: HIDDeviceFilter[] = [
   ...HYPERX_KINGSTON_HID_FILTERS,
   ...HYPERX_HP_HID_FILTERS,
 ];
+export const RYUNIX_HID_FILTERS: HIDDeviceFilter[] = [...RYUNIX_PRODUCT_IDS].map((productId) => ({
+  vendorId: RYUNIX_VENDOR_ID,
+  productId,
+  usagePage: RYUNIX_USAGE_PAGE,
+  usage: RYUNIX_USAGE,
+}));
 
-export const RYUNIX_HID_FILTERS = [
-  { vendorId: VENDOR_ID.ryunix, productId: 0x026E}, // Wired Telemetry Interface
-  { vendorId: VENDOR_ID.ryunix, productId: 0x026F}, // Wireless Telemetry Interface
-];
 
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ASUS_GLADIUS_II_HID_FILTERS,
@@ -663,6 +682,12 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.lamzu },
   ...LAMZU_INCA_HID_FILTERS,
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
+  ...[...RAWM_PRODUCT_IDS].map((productId) => ({
+    vendorId: VENDOR_ID.rawm,
+    productId,
+    usagePage: RAWM_USAGE_PAGE,
+    usage: RAWM_USAGE,
+  })),
   // MCHOSE ships keyboards and audio devices under 0x3837 too, so this stays
   // narrowed to the mouse configuration collection rather than the whole VID.
   ...MCHOSE_A5_HID_FILTERS,

@@ -172,6 +172,10 @@
     "./hyperx": {
       "types": "./dist/hyperx/index.d.ts",
       "import": "./dist/hyperx/index.js"
+    },
+    "./ryunix": {
+      "types": "./dist/ryunix/index.d.ts",
+      "import": "./dist/ryunix/index.js"
     }
   },
   "scripts": {

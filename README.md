@@ -65,6 +65,7 @@ checklist.
 | Pulsar | `@openmouse/protocol/pulsar` |
 | Razer legacy/current | `@openmouse/protocol/razer` |
 | Razer V4 | `@openmouse/protocol/razer-v4` |
+| Ryunix | `@openmouse/protocol/ryunix` |
 | SteelSeries Rival 3 (Gen 1) | `@openmouse/protocol/steelseries` |
 | Teevolution | `@openmouse/protocol/teevolution` |
 | VGN | `@openmouse/protocol/vgn` |

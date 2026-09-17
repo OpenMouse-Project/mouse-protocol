@@ -130,6 +130,32 @@ Before submitting a driver pull request, run both the package check and the
 OpenMouse check against your local package. A new product entry must also keep
 the driver registry overlap tests passing.
 
+## Preparing a clean pull request
+
+Start from the current `main` branch and rebase or merge it into your topic
+branch before requesting review. Edit the existing source in place rather than
+uploading complete copies of shared files from an older checkout; replacing a
+shared file can silently remove drivers added after that copy was made.
+
+Keep source files on LF line endings. Before pushing, inspect both
+`git diff --check` and the pull request's **Files changed** tab. A small driver
+addition should not show every line in unrelated files as removed and added.
+If it does, restore those files from `main` and reapply only the intended
+changes.
+
+Use a focused Conventional Commit pull request title because squash merges use
+the title as the release commit. Examples:
+
+```text
+feat: add Ryunix Kyu Pro MX1 telemetry
+fix: reject truncated HyperX replies
+docs: explain hardware capture sanitization
+```
+
+Pull requests from first-time contributors require a maintainer to approve the
+GitHub Actions run. This approval only starts CI; the change still needs review
+and all checks must pass before merge.
+
 ## Pull requests
 
 Keep a pull request focused on one protocol family or closely related change.
