@@ -141,6 +141,10 @@
       "types": "./dist/dareu/index.d.ts",
       "import": "./dist/dareu/index.js"
     },
+    "./redragon": {
+      "types": "./dist/redragon/index.d.ts",
+      "import": "./dist/redragon/index.js"
+    },
     "./drivers": {
       "types": "./dist/drivers/index.d.ts",
       "import": "./dist/drivers/index.js"

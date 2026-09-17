@@ -28,3 +28,4 @@ export * as hyperx from "./hyperx/index.js";
 export * as valkyrie from "./valkyrie/index.js";
 export * as incott from "./incott/index.js";
 export * as ryunix from "./ryunix/index.js";
+export * as redragon from "./redragon/index.js";

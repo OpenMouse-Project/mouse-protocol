@@ -97,6 +97,12 @@ import {
   RYUNIX_USAGE_PAGE,
   RYUNIX_VENDOR_ID,
 } from "@openmouse/protocol/ryunix";
+import {
+  REDRAGON_CONFIG_USAGE,
+  REDRAGON_CONFIG_USAGE_PAGE,
+  REDRAGON_PRODUCT_IDS,
+  REDRAGON_VENDOR_ID,
+} from "@openmouse/protocol/redragon";
 
 export const VENDOR_ID = {
   asus: ASUS_VENDOR_ID,
@@ -142,6 +148,7 @@ export const VENDOR_ID = {
   ksnakeDongle: 0xa8a5, // K-snake X11 2.4 GHz dongle
   microsoft: MICROSOFT_VENDOR_ID,
   dareu: DAREU_VENDOR_ID,
+  redragon: REDRAGON_VENDOR_ID,
   // Shares 0x093a with Glorious's Pixart-based Model O 2 / I 2 family (see
   // `glorious` above); GloriousHidClient.isSupported() only claims its own
   // catalogue product ids, so the two never overlap.
@@ -182,6 +189,14 @@ export const DAREU_HID_FILTERS: HIDDeviceFilter[] = [...DAREU_PRODUCT_IDS].map((
   productId,
   usagePage: DAREU_COMMAND_USAGE_PAGE,
   usage: DAREU_COMMAND_USAGE,
+}));
+
+/** Holtek config collection measured on the M724 K1NG 1K (usbmon + usbhid-dump). */
+export const REDRAGON_HID_FILTERS: HIDDeviceFilter[] = [...REDRAGON_PRODUCT_IDS].map((productId) => ({
+  vendorId: REDRAGON_VENDOR_ID,
+  productId,
+  usagePage: REDRAGON_CONFIG_USAGE_PAGE,
+  usage: REDRAGON_CONFIG_USAGE,
 }));
 
 /**
@@ -659,6 +674,7 @@ export const RYUNIX_HID_FILTERS: HIDDeviceFilter[] = [...RYUNIX_PRODUCT_IDS].map
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ASUS_GLADIUS_II_HID_FILTERS,
   ...DAREU_HID_FILTERS,
+  ...REDRAGON_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
     productId,
