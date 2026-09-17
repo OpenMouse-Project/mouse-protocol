@@ -188,7 +188,7 @@ export class FinalmouseHidClient {
   private async waitForReport(afterRevision: number, timeoutMs: number): Promise<void> {
     if (this.reportRevision > afterRevision) return;
     await new Promise<void>((resolve) => {
-      let timer = 0;
+      let timer: ReturnType<typeof setTimeout> | 0 = 0;
       const finish = (): void => {
         clearTimeout(timer);
         this.reportWaiters.delete(finish);
