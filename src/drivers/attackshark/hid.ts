@@ -235,6 +235,7 @@ type ProtocolFamily = "1d57" | "1d57-x11" | "25a7" | "373e" | null;
 
 function detectFamily(device: HIDDevice): ProtocolFamily {
   if (device.vendorId === VID_1D57) {
+    if (/delux/i.test(device.productName || "")) return null;
     // Native HID adapters (Tauri's TauriHidDevice, the Node/Bridge adapter)
     // cannot parse the report descriptor and report no collections at all,
     // so every collection-based gate below would refuse these units. On that

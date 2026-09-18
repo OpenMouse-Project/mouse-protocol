@@ -180,6 +180,10 @@
     "./ryunix": {
       "types": "./dist/ryunix/index.d.ts",
       "import": "./dist/ryunix/index.js"
+    },
+    "./delux": {
+      "types": "./dist/delux/index.d.ts",
+      "import": "./dist/delux/index.js"
     }
   },
   "scripts": {

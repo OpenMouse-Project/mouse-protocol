@@ -29,3 +29,4 @@ export * as valkyrie from "./valkyrie/index.js";
 export * as incott from "./incott/index.js";
 export * as ryunix from "./ryunix/index.js";
 export * as redragon from "./redragon/index.js";
+export * as delux from "./delux/index.js";
