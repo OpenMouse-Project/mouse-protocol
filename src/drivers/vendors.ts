@@ -1,9 +1,4 @@
 import {
-  DELUX_COMPX_VENDOR_ID,
-  DELUX_OEM_VENDOR_ID,
-  DELUX_VENDOR_ID,
-} from "../delux/index.ts";
-import {
   ASUS_GLADIUS_II_USAGE,
   ASUS_GLADIUS_II_USAGE_PAGE,
   ASUS_VENDOR_ID,
@@ -130,9 +125,6 @@ export const VENDOR_ID = {
   moddo: 0x2fe3,
   attackShark: 0x25a7,
   attackSharkX: 0x1d57, // R1 / X11 family OEM VID (PIDs vary per firmware)
-  delux: DELUX_VENDOR_ID,
-  deluxOem: DELUX_OEM_VENDOR_ID,
-  deluxCompx: DELUX_COMPX_VENDOR_ID,
   ninjutsoLegacy: NINJUTSO_LEGACY_VENDOR_ID,
   ninjutso: NINJUTSO_VENDOR_ID,
   zaunkoenig: ZAUNKOENIG_VENDOR_ID,
@@ -742,9 +734,6 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ATK_COMPX_PRODUCT_IDS.map((productId) => (
     { vendorId: VENDOR_ID.vgn, productId, usagePage: 0xff02, usage: 2 }
   )),
-  { vendorId: VENDOR_ID.delux },
-  { vendorId: VENDOR_ID.deluxOem },
-  { vendorId: VENDOR_ID.deluxCompx },
   { vendorId: VENDOR_ID.attackShark },
   { vendorId: VENDOR_ID.attackSharkX },
   ...RAZER_VIPER_V4_CONTROL_FILTERS,

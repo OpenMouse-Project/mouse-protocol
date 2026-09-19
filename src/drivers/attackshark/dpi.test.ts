@@ -10,7 +10,7 @@ import {
   X11_DPI_DEFAULT_STAGES,
   X11_DPI_MAX,
   X11_DPI_MIN,
-} from "./dpi.ts";
+} from "../../compx/x11-dpi.ts";
 
 test("nearestX11Dpi clamps to the sensor range and rounds up to a real step", () => {
   assert.equal(nearestX11Dpi(10), X11_DPI_MIN);

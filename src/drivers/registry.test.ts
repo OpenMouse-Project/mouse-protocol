@@ -9,6 +9,10 @@ import { SUPPORTED_HID_FILTERS, VENDOR_ID } from "./vendors.ts";
 import { LAMZU_ATLANTIS_PRODUCTS, LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
 import { ORBITAL_DEVICES } from "@openmouse/protocol/orbital";
 import { MCHOSE_V3_PRODUCT_IDS } from "@openmouse/protocol/mchose";
+import {
+  DELUX_M800_MINI_WIRELESS_PID,
+  DELUX_OEM_VENDOR_ID,
+} from "@openmouse/protocol/delux";
 
 const DEVICES_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -103,10 +107,30 @@ const probe = {
   collections: [] as HIDCollectionInfo[],
 } as unknown as HIDDevice;
 
-function claimsFor(vendorId: number, productId: number, collections: HIDCollectionInfo[]): string[] {
-  const mutable = probe as unknown as { vendorId: number; productId: number; collections: HIDCollectionInfo[] };
+const NAMED_PROBES = [
+  {
+    vendorId: DELUX_OEM_VENDOR_ID,
+    productId: DELUX_M800_MINI_WIRELESS_PID,
+    productName: "Delux M800 Mini",
+    collections: [] as HIDCollectionInfo[],
+  },
+] as const;
+
+function claimsFor(
+  vendorId: number,
+  productId: number,
+  collections: HIDCollectionInfo[],
+  productName = "probe",
+): string[] {
+  const mutable = probe as unknown as {
+    vendorId: number;
+    productId: number;
+    productName: string;
+    collections: HIDCollectionInfo[];
+  };
   mutable.vendorId = vendorId;
   mutable.productId = productId;
+  mutable.productName = productName;
   mutable.collections = collections;
   const claims: string[] = [];
   for (const driver of DEVICE_DRIVERS) {
@@ -120,15 +144,33 @@ test("the probe matrix can trigger every driver", () => {
   for (const vendorId of VENDOR_IDS) {
     for (const productId of PRODUCT_IDS) {
       for (const collections of SHAPES) {
-        const mutable = probe as unknown as { vendorId: number; productId: number; collections: HIDCollectionInfo[] };
+        const mutable = probe as unknown as {
+          vendorId: number;
+          productId: number;
+          productName: string;
+          collections: HIDCollectionInfo[];
+        };
         mutable.vendorId = vendorId;
         mutable.productId = productId;
+        mutable.productName = "probe";
         mutable.collections = collections;
         DEVICE_DRIVERS.forEach((driver, index) => {
           if (driver.supports(probe)) fired.add(index);
         });
       }
     }
+  }
+  for (const named of NAMED_PROBES) {
+    const mutable = probe as unknown as {
+      vendorId: number;
+      productId: number;
+      productName: string;
+      collections: HIDCollectionInfo[];
+    };
+    Object.assign(mutable, named);
+    DEVICE_DRIVERS.forEach((driver, index) => {
+      if (driver.supports(probe)) fired.add(index);
+    });
   }
   const never = DEVICE_DRIVERS
     .map((driver, index) => ({ driver, index }))
@@ -151,6 +193,15 @@ test("no device can be claimed by more than one driver", () => {
           clashes.push(`vid 0x${vendorId.toString(16)} pid 0x${productId.toString(16)}: ${claims.join(" + ")}`);
         }
       }
+    }
+  }
+  for (const named of NAMED_PROBES) {
+    const claims = claimsFor(named.vendorId, named.productId, named.collections, named.productName);
+    if (claims.length > 1) {
+      clashes.push(
+        `vid 0x${named.vendorId.toString(16)} pid 0x${named.productId.toString(16)} `
+        + `name "${named.productName}": ${claims.join(" + ")}`,
+      );
     }
   }
   assert.deepEqual(

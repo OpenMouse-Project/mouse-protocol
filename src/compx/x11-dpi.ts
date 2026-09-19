@@ -1,5 +1,5 @@
-// Transport-independent DPI codec for the Attack Shark X11 family
-// (0x1d57 PIDs 0xfa55 wired / 0xfa60 wireless).
+// Transport-independent DPI codec for the 0x1d57 X11-style protocol used by
+// the Attack Shark X11 and branded Delux M800 Mini firmware.
 //
 // Layout verified against akawazak/attack-shark-x11-community-driver's
 // `DpiBuilder` and docs/dpi-protocol.md: a 56-byte FEATURE report on report

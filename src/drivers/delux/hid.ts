@@ -1,23 +1,21 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import {
+  buildDeluxM800MiniDpiReport as buildX11DpiReport,
+  decodeDeluxM800MiniDpiReport as decodeX11DpiReport,
+  DELUX_DPI_DEFAULT_ACTIVE as X11_DPI_DEFAULT_ACTIVE,
+  DELUX_DPI_DEFAULT_STAGES as X11_DPI_DEFAULT_STAGES,
+  DELUX_DPI_MAX,
+  DELUX_DPI_MIN,
+  DELUX_DPI_REPORT_ID as X11_DPI_REPORT_ID,
+  DELUX_DPI_STAGE_COUNT as X11_DPI_STAGE_COUNT,
+  DELUX_DPI_STEP,
+  DELUX_M800_MINI_WIRELESS_PID,
   DELUX_OEM_VENDOR_ID,
-  DELUX_VENDOR_ID,
   DELUX_POLLING_RATES,
   DELUX_PRODUCT_IDS,
   DELUX_PRODUCT_NAMES,
-  DELUX_DPI_MIN,
-  DELUX_DPI_MAX,
-  DELUX_DPI_STEP,
-  DELUX_M800_MINI_WIRELESS_PID,
+  nearestDeluxM800MiniDpi as nearestX11Dpi,
 } from "../../delux/index.ts";
-import {
-  buildX11DpiReport,
-  nearestX11Dpi,
-  X11_DPI_DEFAULT_ACTIVE,
-  X11_DPI_DEFAULT_STAGES,
-  X11_DPI_REPORT_ID,
-  X11_DPI_STAGE_COUNT,
-} from "../attackshark/dpi.ts";
 
 const POLLING_REPORT_ID = 0x06;
 export const DELUX_POLLING_RATES_1D57: ReadonlyArray<readonly [number, number]> = [
@@ -27,7 +25,7 @@ export const DELUX_POLLING_RATES_1D57: ReadonlyArray<readonly [number, number]> 
   [0x01, 1000],
 ];
 
-const CMD_DELAY_MS = 200;
+const CMD_DELAY_MS = 300;
 
 interface DeluxDpiState {
   stages: number[];
@@ -95,14 +93,14 @@ export class DeluxHidClient {
   }
 
   static isSupported(device: HIDDevice): boolean {
-    if (device.vendorId === DELUX_VENDOR_ID) {
-      return DELUX_PRODUCT_IDS.has(device.productId);
+    if (device.vendorId !== DELUX_OEM_VENDOR_ID
+      || !DELUX_PRODUCT_IDS.has(device.productId)
+      || !/\bdelux\b/i.test(device.productName || "")) {
+      return false;
     }
-    if (device.vendorId === DELUX_OEM_VENDOR_ID) {
-      if (!DELUX_PRODUCT_IDS.has(device.productId)) return false;
-      return /delux/i.test(device.productName || "") || device.productName === "2.4G Wireless Device";
-    }
-    return false;
+    if (device.collections.length === 0) return true;
+    return device.productId === DELUX_M800_MINI_WIRELESS_PID
+      && device.collections.some((collection) => collection.usagePage === 0x0c);
   }
 
   private get nativeConfig(): boolean {
@@ -133,7 +131,7 @@ export class DeluxHidClient {
   }
 
   getDpiOptions(): number[] {
-    return [400, 800, 1200, 1600, 2400, 3200, 6400, 12000, 26000];
+    return [400, 800, 1200, 1600, 2400, 3200, 6400, 12000, DELUX_DPI_MAX];
   }
 
   async open(): Promise<void> {
@@ -153,7 +151,7 @@ export class DeluxHidClient {
 
   async startNotifications(_onChange?: () => void): Promise<boolean> {
     this.startListening();
-    return true;
+    return false;
   }
 
   private readonly onInputReport = (event: HIDInputReportEvent): void => {
@@ -199,6 +197,9 @@ export class DeluxHidClient {
   async readStatus(): Promise<MouseStatus> {
     await this.open();
     const dpiState = dpiStateFor(this.device.productId);
+    if (this.nativeConfig && this.isWireless()) {
+      await this.readDpiState();
+    }
     const runtime = runtimeFor(this.device.productId);
     const dpi = dpiState.stages[dpiState.activeStage - 1] ?? 1600;
 
@@ -210,7 +211,10 @@ export class DeluxHidClient {
         settingsReady: this.nativeConfig,
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
-        forceShowBattery: true,
+        forceShowBattery: this.isWireless(),
+        statusNote: this.nativeConfig
+          ? undefined
+          : "Status only: this mouse's settings channel is not reachable from a browser and needs a native driver.",
         dpiStageEditor: {
           maxStages: X11_DPI_STAGE_COUNT,
           countEditable: false,
@@ -320,6 +324,22 @@ export class DeluxHidClient {
       this.lastStatus = { ...this.lastStatus, rippleControl: enabled };
     }
     return enabled;
+  }
+
+  private async readDpiState(): Promise<void> {
+    const state = dpiStateFor(this.device.productId);
+    try {
+      const view = await this.run(() => this.device.receiveFeatureReport(X11_DPI_REPORT_ID));
+      const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+      const decoded = decodeX11DpiReport(bytes);
+      if (!decoded) return;
+      state.stages = [...decoded.stages];
+      state.activeStage = decoded.activeStage;
+      state.angleSnap = decoded.angleSnap;
+      state.rippleControl = decoded.rippleControl;
+    } catch {
+      // Some transports cannot read this feature report; preserve cached state.
+    }
   }
 
   private async writeDpiTable(): Promise<void> {

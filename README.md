@@ -42,6 +42,7 @@ checklist.
 | ATK | `@openmouse/protocol/atk` |
 | Corsair | `@openmouse/protocol/corsair` |
 | Dareu | `@openmouse/protocol/dareu` |
+| Delux M800 Mini | `@openmouse/protocol/delux` |
 | Endgame Gear OP1/XM2 8K | `@openmouse/protocol/endgame-gear-op1` |
 | Endgame Gear wireless | `@openmouse/protocol/endgame-gear-we` |
 | Fantech | `@openmouse/protocol/fantech` |

@@ -12,7 +12,7 @@ import {
   X11_DPI_REPORT_ID,
   X11_DPI_STAGE_COUNT,
   X11_DPI_STEP,
-} from "./dpi.ts";
+} from "../../compx/x11-dpi.ts";
 
 // Attack Shark mice ship from multiple OEMs with different VIDs and protocols:
 //
