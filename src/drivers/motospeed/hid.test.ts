@@ -53,7 +53,7 @@ test("reads settings with listener attached before send, ignoring unrelated inpu
   assert.equal(status.batteryPercent, 46);
   assert.equal(status.dpi, 1200);
   assert.equal(status.pollingRateHz, 1000);
-  assert.equal(status.liftOffDistance, "High");
+  assert.equal(status.liftOffDistance, "Low");
   assert.equal(status.sleepTimeout, 60);
   assert.equal(status.lighting?.mode, null);
   assert.equal(status.lighting?.writeOnly, true);
@@ -126,11 +126,23 @@ test("general setting writes preserve the other controls", async () => {
   await client.setInvertScroll(true);
   await client.setPerformanceMode(true);
   const settings = await client.readSettings();
-  assert.equal(settings.settingsByte, 0xd2);
+  assert.equal(settings.settingsByte, 0xd1);
   assert.equal(settings.liftOffDistance, "Low");
   assert.equal(settings.rippleControl, true);
   assert.equal(settings.motionSync, false);
   assert.equal(settings.esportsMode, true);
+});
+
+test("LOD write follows the field order observed in the diagnostic capture", async () => {
+  const device = new X6Device();
+  device.settings[15] = 0x99;
+  const client = new MotospeedHidClient(device);
+
+  assert.equal(await client.setLiftOffDistance("Low"), "Low");
+  assert.deepEqual(device.sent[1]?.data.slice(0, 8), [
+    0x42, 0x01, 0x02, 0x01, 0x01, 0x00, 0x01, 0x02,
+  ]);
+  assert.equal((await client.readSettings()).settingsByte, 0x99);
 });
 
 test("unknown general bits are preserved by refusing a destructive full-settings write", async () => {

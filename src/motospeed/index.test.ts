@@ -25,7 +25,7 @@ test("decodes a captured wireless settings reply", () => {
   assert.equal(settings.activeDpiStage, 2);
   assert.equal(settings.dpiStageCount, 5);
   assert.equal(settings.pollingRateHz, 1000);
-  assert.equal(settings.liftOffDistance, "High");
+  assert.equal(settings.liftOffDistance, "Low");
   assert.equal(settings.motionSync, true);
   assert.equal(settings.angleSnapping, true);
   assert.equal(settings.rippleControl, false);
@@ -68,7 +68,7 @@ test("scalar commands encode polling, debounce, and sleep", () => {
   );
 });
 
-test("general settings use the vendor write order", () => {
+test("general settings use the hardware-confirmed write order", () => {
   const command = motospeedBuildGeneralCommand({
     liftOffDistance: "Low",
     rippleControl: false,
@@ -80,7 +80,7 @@ test("general settings use the vendor write order", () => {
 
   assert.deepEqual(
     [...command.data.slice(0, 8)],
-    [0x42, 1, 2, 1, 1, 0, 1, 1],
+    [0x42, 1, 1, 1, 2, 0, 1, 1],
   );
 });
 

@@ -41,7 +41,7 @@ export interface MotospeedSettings {
   dpiStageCount: number;
   pollingRateHz: number;
   settingsByte: number;
-  /** Readback uses 1 = High, 2 = Low. Write command uses the opposite values. */
+  /** The low two bits use 1 = Low and 2 = High. */
   liftOffDistanceCode: number;
   liftOffDistance: "Low" | "High" | null;
   motionSync: boolean;
@@ -71,10 +71,24 @@ function report(reportId: number, values: readonly number[]): MotospeedReport {
   return { reportId, data };
 }
 
+/**
+ * b3 06 00 00 00 00 ... 00
+ * │  │  └──── padding ─────┘
+ * │  └ Settings request
+ * └ 0xb3 report ID, supplied separately to WebHID sendReport
+ */
 export function motospeedBuildSettingsRequest(): MotospeedReport {
   return report(MOTOSPEED_SETTINGS_REPORT_ID, [0x06]);
 }
 
+/**
+ * b4 06 00 22 22 02 90 01 20 03 b0 04 80 0c c0 12 0d 05 05 01 2e ... 00
+ * │        └┬─┘  │  └─┬─┘ └─┬─┘ └─┬─┘ └─┬─┘ └─┬─┘ │  │  │  │  └ Battery
+ * │         │    │    └──── DPI slots 1 through 5 ──┘  │  │  └ Sleep time
+ * │         │    └ Current DPI slot          Settings ┘  └ Debounce time
+ * │         └ Polling-rate index repeated in both nibbles
+ * └ 0xb4 report ID, omitted from the DataView passed to this function
+ */
 export function motospeedDecodeSettings(
   data: DataView | Uint8Array,
   wireless: boolean,
@@ -99,6 +113,7 @@ export function motospeedDecodeSettings(
   integer(dpiStageCount, 1, 5, "DPI stage count in reply");
   integer(activeDpiStage, 0, dpiStageCount - 1, "Active DPI stage in reply");
 
+  // Bytes 2 and 3 repeat the polling-rate index in both nibbles: 0x00..0x55.
   const pollingRateHz = MOTOSPEED_POLLING_RATES[bytes[2] >> 4];
   if (pollingRateHz === undefined)
     throw new Error("Unknown Motospeed polling rate in reply.");
@@ -117,9 +132,9 @@ export function motospeedDecodeSettings(
     liftOffDistanceCode: settingsByte & 3,
     liftOffDistance:
       (settingsByte & 3) === 1
-        ? "High"
+        ? "Low"
         : (settingsByte & 3) === 2
-          ? "Low"
+          ? "High"
           : null,
     motionSync: (settingsByte & 0x04) !== 0,
     angleSnapping: (settingsByte & 0x08) !== 0,
@@ -145,6 +160,14 @@ export function motospeedBuildDpiCommand(options: {
   const count = options.dpiStageCount ?? 0;
   integer(count, 0, 5, "DPI stage count");
   integer(options.activeDpiStage, 0, (count || 5) - 1, "Active DPI stage");
+  /*
+   * b5 40 ff 04 ff 90 01 20 03 b0 04 80 0c 90 65 05 00 ... 00
+   * │  │     │     └─┬─┘ └─┬─┘ └─┬─┘ └─┬─┘ └─┬─┘ │  └ padding
+   * │  │     │       └──── five little-endian DPI slots ───┘
+   * │  │     └ Active DPI slot                         └ DPI count
+   * │  └ 0x40 DPI command
+   * └ 0xb5 report ID
+   */
   const packet = report(MOTOSPEED_COMMAND_REPORT_ID, [
     0x40,
     0xff,
@@ -167,6 +190,14 @@ export function motospeedBuildPollingCommand(hz: number): MotospeedReport {
     throw new RangeError(
       "Motospeed polling rate must be 125, 500, 1000, 2000, 4000, or 8000 Hz.",
     );
+  /*
+   * b5 41 ff 03 ff 7d 00 f4 01 e8 03 d0 07 a0 0f 40 1f 00 ... 00
+   * │  │     │     └─┬─┘ └─┬─┘ └─┬─┘ └─┬─┘ └─┬─┘ └─┬─┘ └ padding
+   * │  │     │       └ 125, 500, 1000, 2000, 4000 and 8000 Hz
+   * │  │     └ Selected rate index
+   * │  └ 0x41 polling-rate command
+   * └ 0xb5 report ID
+   */
   const packet = report(MOTOSPEED_COMMAND_REPORT_ID, [0x41, 0xff, index, 0xff]);
   const view = new DataView(packet.data.buffer);
   MOTOSPEED_POLLING_RATES.forEach((rate, slot) =>
@@ -176,16 +207,43 @@ export function motospeedBuildPollingCommand(hz: number): MotospeedReport {
 }
 
 export function motospeedBuildDebounceCommand(ms: number): MotospeedReport {
+  /*
+   * b5 43 07 00 00 ... 00
+   * │  │  │  └ padding
+   * │  │  └ Debounce time in milliseconds
+   * │  └ 0x43 debounce command
+   * └ 0xb5 report ID
+   */
   integer(ms, 0, 20, "Debounce time");
   return report(MOTOSPEED_COMMAND_REPORT_ID, [0x43, ms]);
 }
 
 export function motospeedBuildSleepCommand(minutes: number): MotospeedReport {
+  /*
+   * b5 0a 01 01 00 ... 00
+   * │  │  │  │  └ padding
+   * │  │  │  └ Sleep time in minutes
+   * │  │  └ Unknown, possibly the time unit
+   * │  └ 0x0a sleep command
+   * └ 0xb5 report ID
+   */
   integer(minutes, 1, 60, "Sleep time in minutes");
   return report(MOTOSPEED_COMMAND_REPORT_ID, [0x0a, 1, minutes]);
 }
 
-/** Part 2's write layout differs from the bit order in part 3's readback. */
+/**
+ * b5 42 02 01 02 01 00 01 01 00 ... 00
+ * │  │  │  │  │  │  │  │  │  └ padding
+ * │  │  │  │  │  │  │  │  └ Esports mode, 01 off and 02 on
+ * │  │  │  │  │  │  │  └ Scroll direction, 01 forward and 02 backward
+ * │  │  │  │  │  │  └ Unknown
+ * │  │  │  │  │  └ Ripple control, 01 on and 02 off
+ * │  │  │  │  └ Angle snapping, 01 on and 02 off
+ * │  │  │  └ Motion sync, 01 on and 02 off
+ * │  │  └ Lift-off distance, 01 low and 02 high
+ * │  └ 0x42 general-settings command
+ * └ 0xb5 report ID
+ */
 export function motospeedBuildGeneralCommand(
   settings: MotospeedGeneralSettings,
 ): MotospeedReport {
@@ -198,8 +256,6 @@ export function motospeedBuildGeneralCommand(
   return report(MOTOSPEED_COMMAND_REPORT_ID, [
     0x42,
     settings.liftOffDistance === "Low" ? 1 : 2,
-    settings.rippleControl ? 1 : 2,
-    settings.angleSnapping ? 1 : 2,
     settings.motionSync ? 1 : 2,
     settings.angleSnapping ? 1 : 2,
     settings.rippleControl ? 1 : 2,
@@ -222,6 +278,15 @@ export type MotospeedLighting =
 export function motospeedBuildLightingCommand(
   lighting: MotospeedLighting,
 ): MotospeedReport {
+  /*
+   * b5 24 02 ff cc 00 ff 06 00 ... 00
+   * │  │  │  │  │  └R └G └B  └ padding
+   * │  │  │  │  └ Speed, unused by static mode
+   * │  │  │  └ Brightness
+   * │  │  └ Mode, 00 off, 01 static, 02 breathing, 03 rainbow
+   * │  └ 0x24 lighting command
+   * └ 0xb5 report ID
+   */
   if (lighting.mode === "off")
     return report(MOTOSPEED_COMMAND_REPORT_ID, [0x24]);
   integer(lighting.brightness, 0, 255, "Brightness");
@@ -246,7 +311,17 @@ export type MotospeedButtonMapping =
     }
   | { kind: "disabled" };
 
-/** Simple mappings only. The partially documented macro upload commands are excluded. */
+/**
+ * b3 52 03 00 01 02 00 00 00 ... 00
+ * │  │  │     │  └──┬───┘  └ padding
+ * │  │  │     │     └ Three-byte feature code, most significant byte first
+ * │  │  │     └ Feature type
+ * │  │  └ Button index
+ * │  └ 0x52 remapping command
+ * └ 0xb3 report ID
+ *
+ * Simple mappings only. The partially documented macro uploads are excluded.
+ */
 export function motospeedBuildButtonCommand(
   button: number,
   mapping: MotospeedButtonMapping,

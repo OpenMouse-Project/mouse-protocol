@@ -108,10 +108,10 @@ export class X6Device implements HIDDevice {
         break;
       case 0x42:
         this.settings[15] =
-          (bytes[1] === 1 ? 2 : 1) |
-          (bytes[2] === 1 ? 0x10 : 0) |
+          (bytes[1] === 1 ? 1 : 2) |
+          (bytes[2] === 1 ? 0x04 : 0) |
           (bytes[3] === 1 ? 0x08 : 0) |
-          (bytes[4] === 1 ? 0x04 : 0) |
+          (bytes[4] === 1 ? 0x10 : 0) |
           (bytes[6] === 2 ? 0x40 : 0) |
           (bytes[7] === 2 ? 0x80 : 0);
         break;
