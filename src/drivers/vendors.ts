@@ -104,11 +104,13 @@ import {
   REDRAGON_PRODUCT_IDS,
   REDRAGON_VENDOR_ID,
 } from "@openmouse/protocol/redragon";
+import { MOTOSPEED_PRODUCTS, MOTOSPEED_USAGE_PAGE, MOTOSPEED_VENDOR_ID } from "@openmouse/protocol/motospeed";
 
 export const VENDOR_ID = {
   vaxee: VAXEE_VENDOR_ID,
   asus: ASUS_VENDOR_ID,
   ryunix: RYUNIX_VENDOR_ID,
+  motospeed: MOTOSPEED_VENDOR_ID,
   pulsar: 0x3710,
   endgameGear: 0x3367,
   wlmouse: 0x36a7,
@@ -674,6 +676,11 @@ export const RYUNIX_HID_FILTERS: HIDDeviceFilter[] = [...RYUNIX_PRODUCT_IDS].map
   usage: RYUNIX_USAGE,
 }));
 
+export const MOTOSPEED_HID_FILTERS: HIDDeviceFilter[] = MOTOSPEED_PRODUCTS.map(({ productId }) => ({
+  vendorId: MOTOSPEED_VENDOR_ID,
+  productId,
+  usagePage: MOTOSPEED_USAGE_PAGE,
+}));
 
 export const VAXEE_HID_FILTERS: HIDDeviceFilter[] = VAXEE_PRODUCT_IDS.map((productId) => ({
   vendorId: VAXEE_VENDOR_ID, productId, usagePage: VAXEE_USAGE_PAGE, usage: VAXEE_USAGE,
@@ -684,6 +691,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ASUS_GLADIUS_II_HID_FILTERS,
   ...DAREU_HID_FILTERS,
   ...REDRAGON_HID_FILTERS,
+  ...MOTOSPEED_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
     productId,
