@@ -201,6 +201,8 @@ export function motospeedBuildGeneralCommand(
     settings.rippleControl ? 1 : 2,
     settings.angleSnapping ? 1 : 2,
     settings.motionSync ? 1 : 2,
+    settings.angleSnapping ? 1 : 2,
+    settings.rippleControl ? 1 : 2,
     0,
     settings.invertScroll ? 2 : 1,
     settings.esportsMode ? 2 : 1,
