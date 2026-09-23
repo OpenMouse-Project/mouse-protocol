@@ -111,12 +111,15 @@ export const RAZER_READ = {
  * Write commands confirmed against Viper V3 Pro firmware 1.12.
  *
  * Razer pairs each read with a write that clears the high bit of the command
- * id. Only commands verified on hardware belong here — in particular the DPI
- * stage table (`0x04`/`0x06`) is absent on purpose, because a wrong length
- * there is the one realistic way to corrupt stored settings.
+ * id. The DPI stage table write (`0x04`/`0x06`) mirrors the read's fixed
+ * 38-byte payload (`0x26`) byte for byte, exactly as OpenRazer's kernel
+ * driver sends it — a wrong length there is the one realistic way to corrupt
+ * stored settings, so the length is pinned to the read-back rather than
+ * computed from the stage count.
  */
 export const RAZER_WRITE = {
   dpi: { commandClass: 0x04, commandId: 0x05, dataSize: 0x07 },
+  dpiStages: { commandClass: 0x04, commandId: 0x06, dataSize: 0x26 },
   pollingRate: { commandClass: 0x00, commandId: 0x05, dataSize: 0x01 },
   pollingRateExtended: { commandClass: 0x00, commandId: 0x40, dataSize: 0x02 },
   liftOff: { commandClass: 0x0b, commandId: 0x05, dataSize: 0x0a },
@@ -165,6 +168,55 @@ export function razerSetDpiCommand(x: number, y: number, storageByte: number = R
  */
 export function razerReadDpiCommand(storageByte: number = RAZER_STORAGE): RazerCommand {
   return { ...RAZER_READ.dpi, args: [storageByte] };
+}
+
+/** The stored stage-table read, parameterized like `razerReadDpiCommand`. */
+export function razerReadDpiStagesCommand(storageByte: number = RAZER_STORAGE): RazerCommand {
+  return { ...RAZER_READ.dpiStages, args: [storageByte] };
+}
+
+/** The fixed number of stage slots a Razer stage table carries. */
+export const RAZER_MAX_DPI_STAGES = 5;
+
+/**
+ * Rewrites the whole stored DPI stage table (`0x04`/`0x06`), mirroring the
+ * matching read's fixed `0x26` payload: `[storage, active, count, stage
+ * records...]` where each record is `[index, xHi, xLo, yHi, yLo, 0, 0]`, with
+ * unused slots left zero and the count byte telling the firmware to ignore
+ * them. `active` is one-based, matching how the mouse numbers its stages in
+ * both the DPI-stages read and `razerSetDpiCommand`.
+ */
+export function razerSetDpiStagesCommand(
+  active: number,
+  stages: readonly RazerDpi[],
+  storageByte: number = RAZER_STORAGE,
+): RazerCommand {
+  if (stages.length < 1 || stages.length > RAZER_MAX_DPI_STAGES) {
+    throw new RazerProtocolError(`A Razer mouse holds between 1 and ${RAZER_MAX_DPI_STAGES} DPI stages.`);
+  }
+  if (!Number.isInteger(active) || active < 1 || active > stages.length) {
+    throw new RazerProtocolError(`Active DPI stage must be between 1 and ${stages.length}.`);
+  }
+  for (const stage of stages) {
+    for (const axis of [stage.x, stage.y]) {
+      if (!Number.isInteger(axis) || axis < 0 || axis > 0xffff) {
+        throw new RazerProtocolError("DPI stage values must be whole numbers between 0 and 65535.");
+      }
+    }
+  }
+  const args = new Array(RAZER_READ.dpiStages.dataSize).fill(0);
+  args[0] = storageByte;
+  args[1] = active;
+  args[2] = stages.length;
+  stages.forEach((stage, index) => {
+    const offset = STAGE_OFFSET + index * STAGE_LENGTH;
+    args[offset] = index;
+    args[offset + 1] = (stage.x >> 8) & 0xff;
+    args[offset + 2] = stage.x & 0xff;
+    args[offset + 3] = (stage.y >> 8) & 0xff;
+    args[offset + 4] = stage.y & 0xff;
+  });
+  return { ...RAZER_WRITE.dpiStages, args };
 }
 
 /** Seconds, big-endian, in the same encoding the matching read returns. */

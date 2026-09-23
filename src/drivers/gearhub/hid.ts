@@ -511,6 +511,16 @@ export class GearHubHidClient {
   }
 
   /**
+   * The app's shared-name entry point for the stage editor, which checks for
+   * this exact method to decide a stage table is writable. A gear has one
+   * DPI value per stage, so both axes take it. Active-stage selection and
+   * per-stage colour already have their shared-name methods here.
+   */
+  async setDpiStageValue(stage: number, dpi: number): Promise<number> {
+    return this.setDpiForStage(dpi, dpi, stage);
+  }
+
+  /**
    * Recolour one DPI stage's indicator LED. Same whole-table write as
    * `setDpiForStage`, changing `rgb` instead of the resolution. `color` is
    * `#rrggbb`; returns it normalised.
