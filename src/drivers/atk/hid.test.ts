@@ -693,6 +693,135 @@ test("the F1 Ultimate 2.0 identity names the mouse, not its receiver", async () 
   });
 });
 
+test("X1 Pro Max identity selects PAW3950 decoding on wired and 8K receiver transports", async () => {
+  // Synthetic replies using the CID/MID and sensor mapping in ATK HUB 3.2.27.
+  // This is protocol regression coverage, not evidence of hardware verification.
+  for (const [pid, name, connection] of [
+    [0x1017, "ATK X1 PRO MAX", "Wired"],
+    [0x101b, "ATK Mouse 8K Dongle", "Wireless"],
+  ] as const) {
+    const fake = device(pid, name);
+    (fake as unknown as FakeAtkDevice).replies = [
+      reply(0x10, 0x0000, [2, 39]),
+      reply(0x04, 0x0000, [80, 0]),
+      reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+      // PAW3950's 50-DPI encoding: 1600 / 50 - 1 = 31 on both axes.
+      // The unknown-product Ultra fallback would decode this as 320 DPI.
+      reply(0x08, 0x000c, [0x1f, 0x1f, 0x00, 0x17]),
+      reply(0x12, 0x0000, [0x01, 0x22]),
+      reply(0x08, 0x000a, [0x04, 0x51]),
+      reply(0x08, 0x00a9, [0x08, 0x4d, 0x00, 0x55, 0x1e, 0x37, 0x00, 0x55, 0x00, 0x55]),
+      reply(0x08, 0x00bd, [0x00, 0x55, 0x00, 0x55]),
+    ];
+    assert.ok(SUPPORTED_HID_FILTERS.some((filter) =>
+      filter.vendorId === fake.vendorId && (filter.productId === undefined || filter.productId === pid)
+      && (filter.usagePage === undefined || filter.usagePage === 0xff02)
+      && (filter.usage === undefined || filter.usage === 2)));
+    assert.ok(createSupportedClient(fake) instanceof AtkHidClient);
+    const client = new AtkHidClient(fake);
+    const status = await client.readStatus();
+    assert.equal(status.name, "ATK X1 Pro Max");
+    assert.equal(status.brand, "ATK");
+    assert.equal(status.connectionType, connection);
+    assert.equal(status.dpi, 1600);
+    assert.equal(status.dpiY, 1600);
+    assert.equal(client.maxDpi(), 36000);
+    assert.equal(client.isR1(), false);
+    assert.ok(!client.getDpiOptions().includes(42000));
+    await assert.rejects(client.setDpi(42000), /not a supported DPI/);
+    assert.equal((fake as unknown as FakeAtkDevice).sent.some(({ data }) => data[0] === 0x07), false);
+  }
+});
+
+test("X1 Pro Max DPI writes use the PAW3950 encoding and confirm readback", async () => {
+  const fake = device(0x101b, "ATK Mouse 8K Dongle");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [2, 39]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x000c, [0x1f, 0x1f, 0x00, 0x17]),
+  ];
+  assert.equal(await new AtkHidClient(fake).setDpi(1600), 1600);
+  const frame = wrote(fake);
+  assert.deepEqual(Array.from(frame.subarray(2, 9)), [0, 12, 4, 0x1f, 0x1f, 0x00, 0x17]);
+  assert.equal(sumFrame(8, frame), 0x55);
+});
+
+for (const pid of [0x101a, 0x101b]) {
+test(`X1 Pro Max captured settings respect receiver ${pid.toString(16)} capabilities`, async () => {
+  const fake = device(pid, pid === 0x101a ? "ATK Mouse 1K Dongle" : "ATK Mouse 8K Dongle");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0, [2, 39, 44]),
+    reply(0x04, 0, [25, 0]),
+    reply(0x08, 0, [0x40, 0x15, 2, 0x53, 1, 0x54]),
+    reply(0x08, 12, [0x0f, 0x0f, 0, 0x37]),
+    reply(0x08, 16, [0x17, 0x17, 0, 0x27]),
+    reply(0x12, 0, [2, 0x18]),
+    reply(0x08, 10, [2, 0x53]),
+    reply(0x08, 0xa9, [0, 0x55, 1, 0x54, 6, 0x4f, 1, 0x54, 1, 0x54]),
+    reply(0x08, 0xbd, [0xff, 0xff, 0xff, 0xff]),
+  ];
+  const client = new AtkHidClient(fake);
+  const status = await client.readStatus();
+  assert.equal(status.dpi, 1200);
+  assert.deepEqual(status.dpiStages, [800, 1200]);
+  assert.equal(status.pollingRateHz, pid === 0x101a ? 1000 : 8000);
+  assert.deepEqual(status.supportedPollingRates, pid === 0x101a
+    ? [125, 250, 500, 1000] : [125, 250, 500, 1000, 2000, 4000, 8000]);
+  assert.equal(status.liftOffDistance, "High");
+  assert.equal(status.liftOffScale, undefined);
+  assert.equal(status.angleSnapping, true);
+  assert.equal(status.motionSync, true);
+  assert.equal(status.rippleControl, true);
+  assert.equal(status.debounceMs, 0);
+  assert.equal(status.sleepTimeout, 60);
+  assert.deepEqual(status.firmware, ["Mouse 2.18"]);
+  assert.deepEqual(client.getSleepOptions(), [30, 60, 120, 180, 300, 1200, 1500, 1800]);
+  assert.deepEqual(client.getDebounceOptions(), [0, 1, 2, 4, 8, 15, 20]);
+  assert.equal(client.getDebounceMaxMs(), 20);
+  await assert.rejects(client.setSleepTimeout(600), /does not support/);
+  await assert.rejects(client.setDebounceTime(3), /does not support/);
+  await assert.rejects(client.setLiftOffScale(4), /does not support/);
+});
+}
+
+test("ATK 1K receiver rejects high polling rates before any HID command", async () => {
+  const fake = device(0x101a, "ATK Mouse 1K Dongle");
+  const client = new AtkHidClient(fake);
+  for (const rate of [2000, 4000, 8000]) await assert.rejects(client.setPollingRate(rate), /receiver does not support/);
+  assert.equal((fake as unknown as FakeAtkDevice).sent.length, 0);
+});
+
+test("ATK 1K receiver writes and confirms a supported polling rate", async () => {
+  const fake = device(0x101a, "ATK Mouse 1K Dongle");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0, [2, 39]), reply(0x08, 0, [2, 0x53, 2, 0x53, 1, 0x54]),
+  ];
+  assert.equal(await new AtkHidClient(fake).setPollingRate(500), 500);
+  assert.deepEqual(Array.from(wrote(fake).subarray(2, 7)), [0, 0, 2, 2, 0x53]);
+});
+
+test("X1 Pro Max lift-off uses discrete 0.7, 1 and 2 mm codes", async () => {
+  for (const [level, code] of [["Low", 3], ["Medium", 1], ["High", 2]] as const) {
+    const fake = device(0x101b, "ATK Mouse 8K Dongle");
+    (fake as unknown as FakeAtkDevice).replies = [
+      reply(0x10, 0, [2, 39]), reply(0x08, 10, [code, 0x55 - code]),
+    ];
+    assert.equal(await new AtkHidClient(fake).setLiftOffDistance(level), level);
+    assert.deepEqual(Array.from(wrote(fake).subarray(2, 7)), [0, 10, 2, code, 0x55 - code]);
+  }
+});
+
+test("X1 Pro Max straight-line correction preserves the other advanced pairs", async () => {
+  const fake = device(0x101b, "ATK Mouse 8K Dongle");
+  const before = [0, 0x55, 1, 0x54, 6, 0x4f, 1, 0x54, 1, 0x54];
+  const after = [0, 0x55, 1, 0x54, 6, 0x4f, 0, 0x55, 1, 0x54];
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0, [2, 39]), reply(0x08, 0xa9, before), reply(0x08, 0xa9, after),
+  ];
+  assert.equal(await new AtkHidClient(fake).setAngleSnapping(false), false);
+  assert.deepEqual(Array.from(wrote(fake).subarray(2, 15)), [0, 0xa9, 10, ...after]);
+});
+
 test("an unrecognised identity on the same receiver keeps the dongle name", async () => {
   const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
   (fake as unknown as FakeAtkDevice).replies = [
