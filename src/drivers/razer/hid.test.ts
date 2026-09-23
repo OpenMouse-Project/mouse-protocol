@@ -33,6 +33,13 @@ interface FakeOptions {
   /** DPI pair the fake reports, defaulting to 1600 × 1600. */
   dpi?: [number, number];
   /**
+   * The `0x04`/`0x86` DPI stage table the fake answers, when it answers one at
+   * all. `active` is 1-based, matching what the mouse reports. When omitted,
+   * the read is refused as unsupported, so the driver degrades to no stage
+   * editor.
+   */
+  dpiStages?: { values: number[]; active: number };
+  /**
    * The `0x0b`/`0x0b` value that actually arms the pair write. Defaults to
    * 0x01; a unit that refuses that form but accepts the canonical 0x00 models
    * the reporter's hardware.
@@ -88,6 +95,25 @@ function fakeMouse(state: FakeLiftOff, options: FakeOptions = {}) {
       if (dpiWrite && !options.ignoreWrites) dpi = [(data[9] << 8) | data[10], (data[11] << 8) | data[12]];
       if (dpiWrite || dpiRead) {
         pending = replyPacket(commandClass, commandId, data[5], [data[8], (dpi[0] >> 8) & 0xff, dpi[0] & 0xff, (dpi[1] >> 8) & 0xff, dpi[1] & 0xff, 0, 0], RAZER_STATUS.ok);
+        return;
+      }
+      // The stage table read, mirrored the way the real reply lays it out:
+      // active (1-based) at arg 1, count at arg 2, then seven-byte records
+      // (flags, X big-endian, Y big-endian, padding). Refused unless a table
+      // was supplied, exercising the degradation path for models that do not
+      // answer class `0x04`/`0x86`.
+      const stagesRead = commandClass === 0x04 && commandId === 0x86;
+      if (stagesRead) {
+        const stages = options.dpiStages;
+        if (!stages) {
+          pending = replyPacket(commandClass, commandId, data[5], [], RAZER_STATUS.unsupported);
+          return;
+        }
+        const args: number[] = [0x00, stages.active, stages.values.length];
+        for (const value of stages.values) {
+          args.push(0x00, (value >> 8) & 0xff, value & 0xff, (value >> 8) & 0xff, value & 0xff, 0x00, 0x00);
+        }
+        pending = replyPacket(commandClass, commandId, 0x26, args, RAZER_STATUS.ok);
         return;
       }
       const pollingWrite = commandClass === 0x00 && commandId === 0x40;
@@ -181,6 +207,49 @@ test("an untested model that refuses the battery read still reports the rest", a
   assert.equal(status.pollingRateHz, 1000);
   // The panel should not present a transcribed model as a tested one.
   assert.match(status.connectionDetail ?? "", /untested model/);
+});
+
+test("the Viper V3 Pro publishes its stored DPI stages read-only", async () => {
+  // The class `0x04`/`0x86` read is verified on hardware but the matching
+  // write never is, so the table must reach the app marked as fixed and
+  // unwritable — `countEditable: false` is all the driver can say; the app
+  // stays read-only by having no stage-write method to call.
+  // Arrange: the factory ladder with the third stage active (1-based 3).
+  const fake = fakeMouse(
+    { tracking: 1, liftOff: 10, landing: 5, asymmetric: true },
+    { dpiStages: { values: [400, 800, 1600, 3200, 6400], active: 3 } },
+  );
+
+  // Act
+  const status = await fake.client.readStatus();
+
+  // Assert
+  assert.deepEqual(status.dpiStages, [400, 800, 1600, 3200, 6400]);
+  assert.equal(status.activeDpiStage, 2, "the 1-based report becomes a 0-based index");
+  assert.deepEqual(status.ui?.dpiStageEditor, {
+    maxStages: 5,
+    countEditable: false,
+    minDpi: 100,
+    maxDpi: 35000,
+    stepDpi: 50,
+  });
+});
+
+test("a mouse that refuses the stage read still reports the rest", async () => {
+  // A transport that does not answer class `0x04`/`0x86` must cost no more
+  // than the absence of the stage editor — the same degradation `readLiftOff`
+  // gets — rather than throwing the status read.
+  // Arrange: the default fake turns the stage read into an unsupported reply.
+  const fake = fakeMouse({ tracking: 1, liftOff: 10, landing: 5, asymmetric: true });
+
+  // Act
+  const status = await fake.client.readStatus();
+
+  // Assert: DPI itself still reads, and no stage table or editor is offered.
+  assert.equal(status.dpi, 1600);
+  assert.equal(status.ui?.dpiStageEditor, undefined);
+  assert.equal(status.dpiStages, undefined);
+  assert.equal(status.activeDpiStage, undefined);
 });
 
 test("a reply left over from the previous command is re-read, not reported", async () => {

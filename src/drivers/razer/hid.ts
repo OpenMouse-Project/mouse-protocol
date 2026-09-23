@@ -21,6 +21,7 @@ import {
   decodeBatteryPercent,
   decodeCharging,
   decodeDpi,
+  decodeDpiStages,
   decodeExtendedPollingRate,
   decodeFirmwareVersion,
   decodeLegacyPollingRate,
@@ -59,6 +60,10 @@ import {
 
 // The sensor takes any whole DPI from here up to the model's ceiling, per axis.
 const DPI_MIN = 100;
+// The vendor software steps DPI stage values by 50, so the stage editor's
+// slider does too. Individual values off that grid are still accepted by the
+// single-DPI path, which validates against the whole list.
+const DPI_STEP = 50;
 const RESPONSE_DELAY_MS = 100;
 const RESPONSE_ATTEMPTS = 6;
 // How long a polling-rate change takes to re-establish the wireless link. The
@@ -294,6 +299,7 @@ export class RazerHidClient {
     const sleep = hasBattery ? await this.request(RAZER_READ.sleepTimeout).catch(() => null) : null;
     const lowPower = hasBattery ? await this.request(RAZER_READ.lowPowerThreshold).catch(() => null) : null;
     const dpi = decodeDpi(await this.request(razerReadDpiCommand(this.dpiStorageByte())));
+    const stages = await this.readDpiStages();
     const pollingRateHz = await this.readPollingRateHz();
     const buttonMappings = await this.currentButtonMappings();
     // Asked of the product, not of the mouse. A model without lift-off can
@@ -325,6 +331,21 @@ export class RazerHidClient {
         showAdvancedSection: sleep !== null || buttonMappings !== null,
         forceShowBattery: battery ? true : undefined,
         defaultDisplayName: this.profile()?.model,
+        // The stage read answered on this connection, so the shared stage
+        // editor is offered below. `countEditable: false` pins it to the
+        // table's own row count, and the app disables every stage write on
+        // drivers without the (unverified) `0x04`/`0x06` write.
+        ...(stages
+          ? {
+            dpiStageEditor: {
+              maxStages: stages.stages.length,
+              countEditable: false,
+              minDpi: DPI_MIN,
+              maxDpi: this.maxDpi(),
+              stepDpi: DPI_STEP,
+            },
+          }
+          : {}),
       },
       batteryPercent: battery?.percent ?? null,
       batteryState: battery?.state ?? "Unknown",
@@ -353,6 +374,10 @@ export class RazerHidClient {
         }
         : null,
       razerButtonMappings: buttonMappings ?? undefined,
+      // Read-only: the matching write (`0x04`/`0x06`) is deliberately never
+      // sent — a wrong length there is the one realistic way to corrupt stored
+      // settings — so the app renders the table without offering to change it.
+      ...(stages ? { dpiStages: stages.stages, activeDpiStage: stages.active } : {}),
       firmware: [`Mouse ${decodeFirmwareVersion(firmware)}`],
     };
   }
@@ -554,6 +579,36 @@ export class RazerHidClient {
   async readLiftOff(): Promise<RazerLiftOff | null> {
     const reply = await this.request(RAZER_READ.liftOff).catch(() => null);
     return reply ? decodeLiftOff(reply) : null;
+  }
+
+  /**
+   * Reads the stored DPI stage table (`0x04`/`0x86`) and which stage is
+   * active, for the app's shared multi-stage editor.
+   *
+   * The read is verified on hardware, but the matching write (`0x04`/`0x06`)
+   * is deliberately unverified — a wrong length there is the one realistic way
+   * to corrupt stored settings — so the table is published read-only and no
+   * stage write is ever offered.
+   *
+   * Returns null when the mouse does not answer or the reply decoded to no
+   * usable values, mirroring `readLiftOff`'s degradation: a status read that
+   * throws takes the whole panel down rather than one control. Values outside
+   * the sensor's range are filtered rather than clamped, since a stage the
+   * mouse cannot hold must not be offered.
+   */
+  private async readDpiStages(): Promise<{ stages: number[]; active: number } | null> {
+    const reply = await this.request(RAZER_READ.dpiStages).catch(() => null);
+    if (!reply) return null;
+    const decoded = decodeDpiStages(reply);
+    const ceiling = this.maxDpi();
+    const stages = decoded.stages
+      .map(({ x }) => x)
+      .filter((value) => value >= DPI_MIN && value <= ceiling);
+    if (stages.length === 0) return null;
+    // The reply numbers stages from one; the panel indexes from zero. Clamped
+    // so a corrupt index still lands on a row the panel can highlight.
+    const active = Math.min(Math.max(decoded.active - 1, 0), stages.length - 1);
+    return { stages, active };
   }
 
   /**
