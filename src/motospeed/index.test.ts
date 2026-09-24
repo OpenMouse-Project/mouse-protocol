@@ -46,11 +46,13 @@ test("settings requests and DPI writes use their documented report layouts", () 
     dpiStageCount: 5,
   });
   assert.equal(command.reportId, MOTOSPEED_COMMAND_REPORT_ID);
-  assert.deepEqual([...command.data.slice(0, 15)], [
-    0x40, 0xff, 2, 0xff,
-    0x90, 0x01, 0x20, 0x03, 0x40, 0x06, 0x80, 0x0c, 0xc0, 0x12,
-    5,
-  ]);
+  assert.deepEqual(
+    [...command.data.slice(0, 15)],
+    [
+      0x40, 0xff, 2, 0xff, 0x90, 0x01, 0x20, 0x03, 0x40, 0x06, 0x80, 0x0c, 0xc0,
+      0x12, 5,
+    ],
+  );
 });
 
 test("scalar commands encode polling, debounce, and sleep", () => {
@@ -78,10 +80,7 @@ test("general settings use the hardware-confirmed write order", () => {
     esportsMode: false,
   });
 
-  assert.deepEqual(
-    [...command.data.slice(0, 8)],
-    [0x42, 1, 1, 1, 2, 0, 1, 1],
-  );
+  assert.deepEqual([...command.data.slice(0, 8)], [0x42, 1, 1, 1, 2, 0, 1, 1]);
 });
 
 test("lighting and button commands encode their write-only payloads", () => {
@@ -101,10 +100,7 @@ test("lighting and button commands encode their write-only payloads", () => {
     code: 0x070106,
   });
   assert.equal(mapping.reportId, MOTOSPEED_SETTINGS_REPORT_ID);
-  assert.deepEqual(
-    [...mapping.data.slice(0, 7)],
-    [0x52, 3, 0, 8, 7, 1, 6],
-  );
+  assert.deepEqual([...mapping.data.slice(0, 7)], [0x52, 3, 0, 8, 7, 1, 6]);
 });
 
 test("invalid values are rejected before a packet is returned", () => {
@@ -117,9 +113,7 @@ test("invalid values are rejected before a packet is returned", () => {
       activeDpiStage: 2,
     }),
   );
-  assert.throws(() =>
-    motospeedBuildButtonCommand(7, { kind: "disabled" }),
-  );
+  assert.throws(() => motospeedBuildButtonCommand(7, { kind: "disabled" }));
   assert.throws(() =>
     motospeedBuildLightingCommand({
       mode: "rainbow",

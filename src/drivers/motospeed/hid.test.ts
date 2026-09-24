@@ -1,11 +1,130 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { describe, it } from "node:test";
 import { MotospeedHidClient } from "./hid.js";
-import { X6Device } from "./test-device.test-helper.js";
 import { createSupportedClient, deviceBrand } from "../registry.js";
 import { MOTOSPEED_HID_FILTERS, SUPPORTED_HID_FILTERS } from "../vendors.js";
 
-test("registry and picker include both X6 connection paths", () => {
+class InputReport extends Event implements HIDInputReportEvent {
+  constructor(
+    readonly device: HIDDevice,
+    readonly reportId: number,
+    readonly data: DataView,
+  ) {
+    super("inputreport");
+  }
+}
+
+export class X6Device implements HIDDevice {
+  vendorId = 0x0bda;
+  productId = 0xffe0;
+  productName = "Dongle 8K";
+  opened = false;
+  collections: HIDCollectionInfo[] = [
+    {
+      usagePage: 0xffc1,
+      usage: 1,
+      children: [],
+      featureReports: [],
+      inputReports: [
+        { reportId: 0xb4, items: [{ reportSize: 8, reportCount: 63 }] },
+      ],
+      outputReports: [0xb3, 0xb5].map((reportId) => ({ reportId, items: [] })),
+    },
+  ];
+  listeners = new Set<(event: HIDInputReportEvent) => void>();
+  sent: Array<{ reportId: number; data: number[] }> = [];
+  settings = Uint8Array.from(
+    Buffer.from("060022220290012003b004800cc0120d0505012e", "hex"),
+  );
+  silent = false;
+  retainWrites = true;
+  failSend = false;
+  beforeReply: (() => void) | null = null;
+
+  async open() {
+    this.opened = true;
+  }
+
+  async close() {
+    this.opened = false;
+  }
+
+  addEventListener(
+    _type: "inputreport",
+    listener: (event: HIDInputReportEvent) => void,
+  ) {
+    this.listeners.add(listener);
+  }
+
+  removeEventListener(
+    _type: "inputreport",
+    listener: (event: HIDInputReportEvent) => void,
+  ) {
+    this.listeners.delete(listener);
+  }
+
+  async sendFeatureReport(): Promise<void> {
+    throw new Error("X6 uses output reports");
+  }
+
+  async receiveFeatureReport(): Promise<DataView> {
+    throw new Error("X6 uses input reports");
+  }
+
+  emit(reportId: number, bytes: Uint8Array) {
+    const event = new InputReport(
+      this,
+      reportId,
+      new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+    );
+    for (const listener of this.listeners) listener(event);
+  }
+
+  async sendReport(reportId: number, data: BufferSource): Promise<void> {
+    assert.ok(this.opened);
+    const bytes = ArrayBuffer.isView(data)
+      ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      : new Uint8Array(data);
+    this.sent.push({ reportId, data: [...bytes] });
+    if (this.failSend) throw new Error("USB send failed");
+
+    if (reportId === 0xb3 && bytes[0] === 6) {
+      this.beforeReply?.();
+      if (!this.silent) this.emit(0xb4, this.settings);
+      return;
+    }
+    if (reportId !== 0xb5 || !this.retainWrites) return;
+
+    switch (bytes[0]) {
+      case 0x40:
+        this.settings[4] = bytes[2];
+        this.settings.set(bytes.subarray(4, 14), 5);
+        if (bytes[14]) this.settings[16] = bytes[14];
+        break;
+      case 0x41:
+        this.settings[2] = this.settings[3] = bytes[2] * 17;
+        break;
+      case 0x43:
+        this.settings[17] = bytes[1];
+        break;
+      case 0x0a:
+        this.settings[18] = bytes[2];
+        break;
+      case 0x42:
+        this.settings[15] =
+          (bytes[1] === 1 ? 1 : 2) |
+          (bytes[2] === 1 ? 0x04 : 0) |
+          (bytes[3] === 1 ? 0x08 : 0) |
+          (bytes[4] === 1 ? 0x10 : 0) |
+          (bytes[6] === 2 ? 0x40 : 0) |
+          (bytes[7] === 2 ? 0x80 : 0);
+        break;
+    }
+  }
+}
+
+describe("Motospeed X6 HID", () => {
+it("registry and picker include both X6 connection paths", () => {
   const device = new X6Device();
   for (const productId of [0xffe0, 0xfff1]) {
     device.productId = productId;
@@ -25,7 +144,7 @@ test("registry and picker include both X6 connection paths", () => {
     assert.ok(SUPPORTED_HID_FILTERS.includes(filter));
 });
 
-test("support requires the Motospeed control collection", () => {
+it("support requires the Motospeed control collection", () => {
   const device = new X6Device();
   device.productId = 0xffff;
   assert.equal(MotospeedHidClient.isSupported(device), false);
@@ -42,7 +161,7 @@ test("support requires the Motospeed control collection", () => {
   assert.equal(MotospeedHidClient.isSupported(device), true);
 });
 
-test("reads settings with listener attached before send, ignoring unrelated input", async () => {
+it("reads settings with listener attached before send, ignoring unrelated input", async () => {
   const device = new X6Device();
   device.beforeReply = () => {
     device.emit(1, device.settings);
@@ -64,8 +183,8 @@ test("reads settings with listener attached before send, ignoring unrelated inpu
   assert.equal(device.opened, false);
 });
 
-test("B3 output framing follows the descriptor for both documented lengths", async () => {
-  for (const length of [60, 63, 61]) {
+it("accepts 60-byte B3 reports and rejects unsupported lengths", async () => {
+  for (const length of [60, 61, 63]) {
     const device = new X6Device();
     device.collections = [
       {
@@ -77,7 +196,7 @@ test("B3 output framing follows the descriptor for both documented lengths", asy
       },
     ];
     const client = new MotospeedHidClient(device);
-    if (length === 61) {
+    if (length !== 60) {
       await assert.rejects(client.readStatus(), /payload length/);
       assert.equal(device.listeners.size, 0);
       continue;
@@ -91,7 +210,7 @@ test("B3 output framing follows the descriptor for both documented lengths", asy
   }
 });
 
-test("concurrent DPI edits run as separate read-write-read transactions", async () => {
+it("concurrent DPI edits run as separate read-write-read transactions", async () => {
   const device = new X6Device();
   const client = new MotospeedHidClient(device);
   assert.deepEqual(
@@ -108,7 +227,7 @@ test("concurrent DPI edits run as separate read-write-read transactions", async 
   );
 });
 
-test("DPI stage count keeps the active stage in range", async () => {
+it("DPI stage count keeps the active stage in range", async () => {
   const client = new MotospeedHidClient(new X6Device());
   assert.equal(await client.setDpiStageCount(2), 2);
   assert.equal((await client.readStatus()).activeDpiStage, 1);
@@ -116,7 +235,7 @@ test("DPI stage count keeps the active stage in range", async () => {
   await assert.rejects(client.setActiveDpiStage(2), /Active DPI stage/);
 });
 
-test("general setting writes preserve the other controls", async () => {
+it("general setting writes preserve the other controls", async () => {
   const device = new X6Device();
   const client = new MotospeedHidClient(device);
   await client.setLiftOffDistance("Low");
@@ -133,19 +252,20 @@ test("general setting writes preserve the other controls", async () => {
   assert.equal(settings.esportsMode, true);
 });
 
-test("LOD write follows the field order observed in the diagnostic capture", async () => {
+it("LOD write follows the field order observed in the diagnostic capture", async () => {
   const device = new X6Device();
   device.settings[15] = 0x99;
   const client = new MotospeedHidClient(device);
 
   assert.equal(await client.setLiftOffDistance("Low"), "Low");
-  assert.deepEqual(device.sent[1]?.data.slice(0, 8), [
-    0x42, 0x01, 0x02, 0x01, 0x01, 0x00, 0x01, 0x02,
-  ]);
+  assert.deepEqual(
+    device.sent[1]?.data.slice(0, 8),
+    [0x42, 0x01, 0x02, 0x01, 0x01, 0x00, 0x01, 0x02],
+  );
   assert.equal((await client.readSettings()).settingsByte, 0x99);
 });
 
-test("unknown general bits are preserved by refusing a destructive full-settings write", async () => {
+it("unknown general bits are preserved by refusing a destructive full-settings write", async () => {
   const device = new X6Device();
   device.settings[15] |= 0x20;
   const client = new MotospeedHidClient(device);
@@ -161,7 +281,7 @@ test("unknown general bits are preserved by refusing a destructive full-settings
   await assert.rejects(client.setMotionSync(false), /Unknown Motospeed LOD/);
 });
 
-test("scalar writes confirm readback and expose sleep in seconds", async () => {
+it("scalar writes confirm readback and expose sleep in seconds", async () => {
   const client = new MotospeedHidClient(new X6Device());
   assert.equal(await client.setPollingRate(8000), 8000);
   assert.equal(await client.setDebounceTime(7), 7);
@@ -171,7 +291,7 @@ test("scalar writes confirm readback and expose sleep in seconds", async () => {
   assert.equal(status.debounceMs, 7);
 });
 
-test("failed verification rejects instead of returning the requested value", async () => {
+it("failed verification rejects instead of returning the requested value", async () => {
   const device = new X6Device();
   device.retainWrites = false;
   const client = new MotospeedHidClient(device);
@@ -180,14 +300,14 @@ test("failed verification rejects instead of returning the requested value", asy
   await assert.rejects(client.setMotionSync(false), /did not retain/);
 });
 
-test("invalid settings do not reach the HID transport", async () => {
+it("invalid settings do not reach the HID transport", async () => {
   const device = new X6Device();
   const client = new MotospeedHidClient(device);
   await assert.rejects(client.setPollingRate(250));
   assert.equal(device.sent.length, 0);
 });
 
-test("write-only lighting state updates only after a successful write", async () => {
+it("write-only lighting state updates only after a successful write", async () => {
   const device = new X6Device();
   const client = new MotospeedHidClient(device);
   const initial = (await client.readStatus()).lighting;
@@ -210,7 +330,7 @@ test("write-only lighting state updates only after a successful write", async ()
   assert.equal((await client.readStatus()).lighting?.mode, "Static");
 });
 
-test("a settings timeout removes its input listener", async () => {
+it("a settings timeout removes its input listener", async () => {
   const device = new X6Device();
   const client = new MotospeedHidClient(device, 20);
   device.silent = true;
@@ -218,7 +338,7 @@ test("a settings timeout removes its input listener", async () => {
   assert.equal(device.listeners.size, 0);
 });
 
-test("a malformed settings reply removes its listener", async () => {
+it("a malformed settings reply removes its listener", async () => {
   const device = new X6Device();
   const client = new MotospeedHidClient(device);
   device.settings = new Uint8Array([6]);
@@ -226,7 +346,7 @@ test("a malformed settings reply removes its listener", async () => {
   assert.equal(device.listeners.size, 0);
 });
 
-test("the queue recovers after a send failure", async () => {
+it("the queue recovers after a send failure", async () => {
   const device = new X6Device();
   const client = new MotospeedHidClient(device);
   device.failSend = true;
@@ -234,4 +354,5 @@ test("the queue recovers after a send failure", async () => {
   assert.equal(device.listeners.size, 0);
   device.failSend = false;
   assert.equal((await client.readStatus()).dpi, 1200);
+});
 });

@@ -55,8 +55,9 @@ export class MotospeedHidClient {
     readonly device: HIDDevice,
     private readonly timeoutMs = 2000,
   ) {
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       throw new RangeError("Timeout must be positive.");
+    }
   }
 
   static isSupported(device: HIDDevice): boolean {
@@ -86,9 +87,12 @@ export class MotospeedHidClient {
   }
 
   async open(): Promise<void> {
-    if (!MotospeedHidClient.isSupported(this.device))
+    if (!MotospeedHidClient.isSupported(this.device)) {
       throw new Error("Unsupported Motospeed X6 control interface.");
-    if (!this.device.opened) await this.device.open();
+    }
+    if (!this.device.opened) {
+      await this.device.open();
+    }
   }
 
   async close(): Promise<void> {
@@ -111,6 +115,7 @@ export class MotospeedHidClient {
   }
 
   async readStatus(): Promise<MouseStatus> {
+    // Mostly Motospeed X6-specific values, as other motospeed mice have not been reversed engineered.
     const settings = await this.readSettings();
     const wireless = this.device.productId === 0xffe0;
     return {
@@ -176,10 +181,10 @@ export class MotospeedHidClient {
     return confirmed.dpiStages[stage];
   }
 
-  async setActiveDpiStage(stage: number): Promise<number> {
+  async setActiveDpiStage(slot: number): Promise<number> {
     return (
       await this.updateDpi((current) => {
-        current.activeDpiStage = stage;
+        current.activeDpiStage = slot;
       })
     ).activeDpiStage;
   }
@@ -253,7 +258,6 @@ export class MotospeedHidClient {
     return value;
   }
 
-  /** No readback command is known for simple button mappings. */
   async setButtonMapping(
     button: number,
     mapping: MotospeedButtonMapping,
@@ -265,7 +269,11 @@ export class MotospeedHidClient {
     });
   }
 
-  /** Lighting is write-only; returned state records the successful write. */
+  /**
+   * Lighting is write-only,
+   * there is no way to query the mouse's current lighting state,
+   * Hence it returns its own state to record the successful write.
+   */
   async setLighting(lighting: MouseLighting): Promise<MouseLighting> {
     const brightness = lighting.brightness ?? 100;
     if (!Number.isFinite(brightness) || brightness < 0 || brightness > 100)
@@ -342,13 +350,17 @@ export class MotospeedHidClient {
       await this.open();
       const current = await this.readSettingsDirect();
       const liftOffDistance = change.liftOffDistance ?? current.liftOffDistance;
-      if (liftOffDistance === null)
+
+      if (liftOffDistance === null) {
         throw new Error(
           "Unknown Motospeed LOD value; refusing to overwrite it.",
         );
-      // Bit 5 has no documented write representation. Do not clear an unknown setting.
-      if (current.settingsByte & 0x20)
+      }
+      if (current.settingsByte & 0x20) {
+        // Bit 5 purpose is unknown, but is always consistently 0x20.
         throw new Error("Unknown Motospeed general setting bit is enabled.");
+      }
+
       const wanted = { ...current, ...change, liftOffDistance };
       await this.send(motospeedBuildGeneralCommand(wanted));
       await this.confirm(
@@ -378,8 +390,9 @@ export class MotospeedHidClient {
     matches: (settings: MotospeedSettings) => boolean,
   ): Promise<MotospeedSettings> {
     const settings = await this.readSettingsDirect();
-    if (!matches(settings))
+    if (!matches(settings)) {
       throw new Error("Motospeed X6 did not retain the requested setting.");
+    }
     return settings;
   }
 
@@ -390,11 +403,13 @@ export class MotospeedHidClient {
         this.device.collections,
         packet.reportId,
       );
-      // The blogs describe 63 payload bytes; the WebHID app uses 60. Both
-      // carry the same commands followed by zero padding. Trust the descriptor.
-      if (length === 60) data = data.slice(0, 60);
-      else if (length !== 0 && length !== 63)
-        throw new Error(`Unsupported Motospeed B3 payload length: ${length}.`);
+      if (length === 60) {
+        data = data.slice(0, 60);
+      } else if (length !== 0) {
+        throw new Error(
+          `Unsupported Motospeed settings report payload length ${length}.`,
+        );
+      }
     }
     await this.device.sendReport(packet.reportId, new Uint8Array(data).buffer);
   }
@@ -427,8 +442,9 @@ export class MotospeedHidClient {
           event.reportId !== MOTOSPEED_INPUT_REPORT_ID ||
           event.data.byteLength === 0 ||
           event.data.getUint8(0) !== 0x06
-        )
+        ) {
           return;
+        }
         try {
           settings = motospeedDecodeSettings(
             event.data,

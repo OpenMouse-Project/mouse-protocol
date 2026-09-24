@@ -50,5 +50,5 @@
     }
   },
   "include": ["src/**/*"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test-helper.ts"]
+  "exclude": ["src/**/*.test.ts"]
 }
