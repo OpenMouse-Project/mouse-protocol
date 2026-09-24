@@ -1,4 +1,5 @@
 export * from "../compx/codec.js";
+export * from "./beast-x-4k.js";
 export const WLMOUSE_VENDOR_ID = 0x36a7;
 export const WLMOUSE_POLLING_RATES = [
   [0x08, 125], [0x04, 250], [0x02, 500], [0x01, 1000],
