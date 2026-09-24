@@ -678,6 +678,8 @@ test("the F1 Ultimate 2.0 identity names the mouse, not its receiver", async () 
     reply(0x12, 0x0000, [0x03, 0x00]),
     reply(0x08, 0x000a, [0x04, 0x51]),
     reply(0x08, 0x00a9, [0x08, 0x4d, 0x00, 0x55, 0x1e, 0x37, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00b5, [0x00, 0x55, 0x06, 0x4f, 0x01, 0x54]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55, 0x00, 0x55, 0x00, 0x55]),
     reply(0x08, 0x00bd, [0x00, 0x55, 0x00, 0x55]),
   ];
 
@@ -688,9 +690,114 @@ test("the F1 Ultimate 2.0 identity names the mouse, not its receiver", async () 
   assert.equal(client.displayName(), "ATK F1 Ultimate 2.0");
   assert.equal(status.connectionType, "Wireless");
   assert.equal(client.maxDpi(), 42000);
+  assert.equal(status.atkSensorMode, 1);
+  assert.equal(status.atkAntiMistouchMs, 0);
+  assert.equal(status.atkDongleLight, null);
   assert.deepEqual(status.liftOffScale, {
     value: 4, min: 1, max: 11, millimetres: 1, minMillimetres: 0.7, maxMillimetres: 1.7,
   });
+});
+
+test("F1 Ultimate setSensorMode writes the 0x00b5 row and reads it back", async () => {
+  const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x01, 0x08]),
+    reply(0x08, 0x00b5, [0x00, 0x55, 0x06, 0x4f, 0x02, 0x53]),
+  ];
+
+  assert.equal(await new AtkHidClient(fake).setAtkSensorMode(2), 2);
+  assert.deepEqual(Array.from(wrote(fake).subarray(5, 11)), [0x00, 0x55, 0x06, 0x4f, 0x02, 0x53]);
+});
+
+test("F1 Ultimate setSensorMode rejects out-of-range modes", async () => {
+  const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [reply(0x10, 0x0000, [0x01, 0x08])];
+  const client = new AtkHidClient(fake);
+  await assert.rejects(client.setAtkSensorMode(2.5), /must be 0, 1, or 2/);
+  await assert.rejects(client.setAtkSensorMode(3), /must be 0, 1, or 2/);
+});
+
+test("F1 Ultimate setAntiMistouchMs patches the system row pair", async () => {
+  const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x01, 0x08]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55, 0x0a, 0x4b, 0x00, 0x55]),
+  ];
+
+  assert.equal(await new AtkHidClient(fake).setAntiMistouchMs(100), 100);
+  const written = Array.from(wrote(fake).subarray(5, 15));
+  assert.deepEqual(written.slice(6, 8), [10, 75]);
+});
+
+test("F1 Ultimate setAntiMistouchMs rejects non-step values", async () => {
+  const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [reply(0x10, 0x0000, [0x01, 0x08])];
+  const client = new AtkHidClient(fake);
+  await assert.rejects(client.setAntiMistouchMs(15), /multiple of 10/);
+});
+
+test("F1 Ultimate setDongleLight sends the 0x14 frame without a readback", async () => {
+  const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [reply(0x10, 0x0000, [0x01, 0x08])];
+
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setDongleLight(2), 2);
+  const sent = (fake as unknown as FakeAtkDevice).sent.at(-1)!;
+  assert.deepEqual([...sent.data.subarray(0, 6)], [0x14, 0, 0, 0, 10, 2]);
+  await assert.rejects(client.setDongleLight(4), /between 0 and 3/);
+});
+
+test("non-F1 ATK mice reject the F1-only setters", async () => {
+  const fake = device(0x11d5, "ATK dongle");
+  (fake as unknown as FakeAtkDevice).replies = [reply(0x10, 0x0000, [0xfe, 0xed])];
+  const client = new AtkHidClient(fake);
+  await assert.rejects(client.setAtkSensorMode(1), /not available on this connection/);
+  await assert.rejects(client.setAntiMistouchMs(100), /not available on this connection/);
+  await assert.rejects(client.setDongleLight(2), /not available on this connection/);
+});
+
+test("F1 Ultimate angle snapping follows the straight-line flag, not the angle group", async () => {
+  const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x01, 0x08]),
+    reply(0x04, 0x0000, [0x5f, 0x01]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x000c, atkPackDpiStage(1600, 1600)),
+    reply(0x12, 0x0000, [0x03, 0x03]),
+    reply(0x08, 0x000a, [0x04, 0x51]),
+    reply(0x08, 0x00a9, [0x01, 0x54, 0x01, 0x54, 0xb4, 0xa1, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x00b5, [0x00, 0x55, 0x06, 0x4f, 0x01, 0x54]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00bd, [0x00, 0x55, 0x00, 0x55]),
+  ];
+
+  const status = await new AtkHidClient(fake).readStatus();
+  assert.equal(status.angleSnapping, true);
+});
+
+test("F1 Ultimate setAngleSnapping writes the advanced straight-line flag", async () => {
+  const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x01, 0x08]),
+    reply(0x08, 0x00a9, [0x01, 0x54, 0x01, 0x54, 0xb4, 0xa1, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00a9, [0x01, 0x54, 0x01, 0x54, 0xb4, 0xa1, 0x01, 0x54, 0x00, 0x55]),
+  ];
+
+  assert.equal(await new AtkHidClient(fake).setAngleSnapping(true), true);
+  assert.deepEqual(Array.from(wrote(fake).subarray(5, 15)).slice(6, 8), [1, 84]);
+});
+
+test("F1 Ultimate debounce accepts the HUB-listed 20 ms ceiling", async () => {
+  const fake = device(0x11d9, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x01, 0x08]),
+    reply(0x08, 0x00a9, [0x01, 0x54, 0x01, 0x54, 0xb4, 0xa1, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00a9, [0x14, 0x41, 0x01, 0x54, 0xb4, 0xa1, 0x00, 0x55, 0x00, 0x55]),
+  ];
+  const client = new AtkHidClient(fake);
+  assert.equal(await client.setDebounceTime(20), 20);
+  assert.equal(client.getDebounceMaxMs(), 20);
 });
 
 test("an unrecognised identity on the same receiver keeps the dongle name", async () => {

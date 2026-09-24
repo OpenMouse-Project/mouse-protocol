@@ -175,6 +175,22 @@ export interface MouseStatus {
   /** Receiver and pairing telemetry. Pairing controls are intentionally separate. */
   atkReceiver?: AtkReceiverInfo;
   /**
+   * F1 Ultimate sensor sampling-rate mode: 0 Basic, 1 Shard, 2 Shard MAX.
+   * Null until read; drivers without the 0x00b5 row leave it undefined.
+   */
+  atkSensorMode?: number | null;
+  /**
+   * Scroll-wheel anti-mistouch window in milliseconds (0 = off). Null until
+   * read; undefined on drivers without the system-row field.
+   */
+  atkAntiMistouchMs?: number | null;
+  /**
+   * Dongle LED effect last written (0 off, 1 polling, 2 battery, 3 low
+   * battery). Write-only: no read command is known, so this mirrors the
+   * driver's last write rather than the hardware.
+   */
+  atkDongleLight?: number | null;
+  /**
    * How many onboard profiles the device exposes, when it has a simple
    * numbered set the user can switch between (distinct from Logitech's
    * onboard-profile editor). Set together with a 1-based `activeProfile` and a

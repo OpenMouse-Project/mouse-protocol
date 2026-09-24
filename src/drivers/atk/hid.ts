@@ -13,6 +13,8 @@ import {
   ATK_COMPX_COMMAND,
   ATK_R1_BUTTONS,
   ATK_R1_PROFILE_COUNT,
+  ATK_SENSOR_PERFORMANCE_REGISTER,
+  ATK_ANTI_MISTOUCH_OFFSET,
   ATK_VXE_R1_ANGLE_SELECTOR,
   ATK_VXE_R1_DEBOUNCE_SELECTOR,
   ATK_VXE_R1_LOD_SELECTOR,
@@ -23,7 +25,10 @@ import {
   ATK_LIFT_OFF_MAX_CODE,
   atkBuildReceiverPairRequest,
   atkBuildSetCurrentProfile,
+  atkBuildDongleLight,
+  atkDecodeAntiMistouch,
   atkDecodeLiftOff,
+  atkDecodeSensorMode,
   atkDecodeButtonAssignment,
   atkDecodeCurrentProfile,
   atkDecodePairingStatus,
@@ -33,6 +38,8 @@ import {
   atkDpiStageLength,
   atkPackDpiStage,
   atkPackDpiStageForSensor,
+  atkPackSensorMode,
+  atkPackAntiMistouch,
   atkPackVxeR1LiveSetting,
   atkPackVxeR1PollingSetting,
   atkUnpackDpiStage,
@@ -143,6 +150,8 @@ export class AtkHidClient {
   private product: AtkProduct | null = null;
   private identified = false;
   private identifyAttempts = 0;
+  /** Last dongle-light mode written; no read command is known. */
+  private dongleLightCache: number | null = null;
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -164,6 +173,7 @@ export class AtkHidClient {
   async close(): Promise<void> {
     this.lastStatus = null;
     this.product = null;
+    this.dongleLightCache = null;
     this.identified = false;
     this.identifyAttempts = 0;
     if (this.device.opened) await this.device.close();
@@ -213,7 +223,7 @@ export class AtkHidClient {
   }
 
   getDebounceMaxMs(): number {
-    return this.isR1() ? R1_DEBOUNCE_MAX_MS : DEBOUNCE_MAX_MS;
+    return this.isR1() || this.isF1Ultimate() ? R1_DEBOUNCE_MAX_MS : DEBOUNCE_MAX_MS;
   }
 
   getDebounceOptions(): readonly number[] {
@@ -272,6 +282,9 @@ export class AtkHidClient {
     const firmware = await this.readFirmware();
     const liftOffDistance = await this.read(REGISTER.liftOffDistance, 2);
     const advanced = await this.read(REGISTER.advanced, ADVANCED_LENGTH);
+    const f1Extras = this.isF1Ultimate()
+      ? await this.readF1Extras().catch(() => null)
+      : null;
     const angle = await this.read(REGISTER.angle, ANGLE_LENGTH).catch(() => null);
     const r1Extras = this.usesR1ProMaxUiTransport()
       ? await this.readR1Extras(stageCount)
@@ -328,10 +341,13 @@ export class AtkHidClient {
       rippleControl: advanced[8] === 1,
       performanceMode: r1Extras?.performanceMode,
       longRangeMode: r1Extras?.longRangeMode,
+      atkSensorMode: f1Extras?.sensorMode ?? null,
+      atkAntiMistouchMs: f1Extras?.antiMistouchMs ?? null,
+      atkDongleLight: this.dongleLightCache,
       dpiLedMode: r1Extras?.dpiLedMode,
       dpiLedBrightness: r1Extras?.dpiLedBrightness,
       dpiLedSpeed: r1Extras?.dpiLedSpeed,
-      angleSnapping: this.isR1()
+      angleSnapping: this.isR1() || this.isF1Ultimate()
         ? advanced[6] === 1
         : angleSnapping === null ? null : angleSnapping === 1,
       angleTuning: angleTuning === null ? null : this.decodeAngle(angleTuning),
@@ -744,6 +760,96 @@ export class AtkHidClient {
     return confirmed;
   }
 
+  /** F1 Ultimate 2.0 (CID 1, MID 8): the verified PAW3950Ultra transport. */
+  private isF1Ultimate(): boolean {
+    return this.product === ATK_PRODUCTS["1,8"];
+  }
+
+  /**
+   * Sensor mode (@0x00b5) and anti-mistouch (system row bytes 6-7), read
+   * independently so one unreadable row never hides the other.
+   */
+  private async readF1Extras(): Promise<{
+    sensorMode: number | null;
+    antiMistouchMs: number | null;
+  }> {
+    const performance = await this.read(ATK_SENSOR_PERFORMANCE_REGISTER, 6).catch(() => null);
+    const system = await this.read(REGISTER.system, 10).catch(() => null);
+    return {
+      sensorMode: performance ? atkDecodeSensorMode(performance) : null,
+      antiMistouchMs: system
+        ? atkDecodeAntiMistouch(
+          system[ATK_ANTI_MISTOUCH_OFFSET]!,
+          system[ATK_ANTI_MISTOUCH_OFFSET + 1]!,
+        )
+        : null,
+    };
+  }
+
+  /** Write one sensor mode and require readback; F1 Ultimate only. */
+  async setAtkSensorMode(mode: number): Promise<number> {
+    await this.identify();
+    if (!this.isF1Ultimate()) {
+      throw new Error("Sensor modes are not available on this connection.");
+    }
+    const row = atkPackSensorMode(mode);
+    if (!row) throw new Error("Sensor mode must be 0, 1, or 2.");
+    await this.write(ATK_SENSOR_PERFORMANCE_REGISTER, row);
+    const confirmed = atkDecodeSensorMode(
+      await this.read(ATK_SENSOR_PERFORMANCE_REGISTER, 6),
+    );
+    if (confirmed !== mode) {
+      throw new Error(`The mouse kept sensor mode ${confirmed} instead of ${mode}.`);
+    }
+    this.patch({ atkSensorMode: confirmed });
+    return confirmed;
+  }
+
+  /**
+   * Write the anti-mistouch window (0 = off) as one scalar pair inside the
+   * complete 10-byte system row; F1 Ultimate only.
+   */
+  async setAntiMistouchMs(milliseconds: number): Promise<number> {
+    await this.identify();
+    if (!this.isF1Ultimate()) {
+      throw new Error("Anti-mistouch is not available on this connection.");
+    }
+    const pair = atkPackAntiMistouch(milliseconds);
+    if (!pair) throw new Error("Anti-mistouch must be 0 or a multiple of 10 ms up to 2550 ms.");
+    const system = Array.from(await this.read(REGISTER.system, 10));
+    system.splice(ATK_ANTI_MISTOUCH_OFFSET, 2, ...pair);
+    await this.write(REGISTER.system, system);
+    const reread = await this.read(REGISTER.system, 10);
+    const confirmed = atkDecodeAntiMistouch(
+      reread[ATK_ANTI_MISTOUCH_OFFSET]!,
+      reread[ATK_ANTI_MISTOUCH_OFFSET + 1]!,
+    );
+    if (confirmed !== milliseconds) {
+      throw new Error(`The mouse kept a ${confirmed} ms anti-mistouch window instead of ${milliseconds} ms.`);
+    }
+    this.patch({ atkAntiMistouchMs: confirmed });
+    return confirmed;
+  }
+
+  /**
+   * Dongle LED effect (0 off, 1 polling, 2 battery, 3 low battery). No read
+   * command is known, so confirmation stays optimistic and the last write is
+   * mirrored for the UI; F1 Ultimate receiver only.
+   */
+  async setDongleLight(mode: number): Promise<number> {
+    await this.identify();
+    if (!this.isF1Ultimate()) {
+      throw new Error("Dongle lighting is not available on this connection.");
+    }
+    const frame = atkBuildDongleLight(mode);
+    if (!frame) throw new Error("Dongle light mode must be between 0 and 3.");
+    await this.send(frame);
+    await delay(WRITE_SETTLE_MS);
+    this.dongleLightCache = mode;
+    this.patch({ atkDongleLight: mode });
+    return mode;
+  }
+
   async setDpiLighting(mode: number, brightness: number, speed: number): Promise<void> {
     await this.identify();
     if (
@@ -901,7 +1007,7 @@ export class AtkHidClient {
       return confirmed;
     }
 
-    if (this.isR1()) {
+    if (this.isR1() || this.isF1Ultimate()) {
       return await this.setAdvancedFlag(
         6,
         enabled,
