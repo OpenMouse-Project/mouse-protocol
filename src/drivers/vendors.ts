@@ -496,11 +496,13 @@ export const RAZER_DEATHADDER_V2_FILTERS: HIDDeviceFilter[] = [0x0084].map(
 export const TEEVOLUTION_PRODUCT_IDS = [0xf520, 0xf523, 0xf5bb, 0xf522] as const;
 
 // Logitech HID++ control interfaces addressed through a receiver slot.
-// 0xc54d and 0xc547 are newer Lightspeed receivers, 0xc539 is HERO-era
-// Lightspeed, 0xc0a8 is the PRO X 2 Superstrike USB interface, and Bolt
-// product ids live in ./logitech/protocol with the direct-connect list.
+// 0xc54d is the GPX2/DEX receiver, 0xc543 the G PRO 2 receiver, 0xc547 the
+// Superlight 1 / old-Generic receiver, 0xc539 is HERO-era Lightspeed, 0xc0a8
+// is the PRO X 2 Superstrike USB interface, and Bolt product ids live in
+// ./logitech/protocol with the direct-connect list.
 export const LOGITECH_RECEIVER_PRODUCT_IDS = [
   0xc54d,
+  0xc543,
   0xc539,
   0xc0a8,
   0xc547,
