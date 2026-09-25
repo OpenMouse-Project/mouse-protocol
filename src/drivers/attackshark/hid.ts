@@ -1,6 +1,7 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
 import { LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
+import { DELUX_M600_PRO_MODEL_ID, DELUX_UNBRANDED_PRODUCT_IDS } from "@openmouse/protocol/delux";
 import {
   buildX11DpiReport,
   decodeX11DpiReport,
@@ -12,6 +13,7 @@ import {
   X11_DPI_REPORT_ID,
   X11_DPI_STAGE_COUNT,
   X11_DPI_STEP,
+  X11_DPI_VALUES,
 } from "../../compx/x11-dpi.ts";
 
 // Attack Shark mice ship from multiple OEMs with different VIDs and protocols:
@@ -35,6 +37,11 @@ import {
 // browser-side collection gate below therefore refuses these units, and the
 // X11-family helper turns that refusal into a real explanation; the
 // collections-less native branch writes the same packets over such an adapter.
+//
+// Linux is the exception: hidraw hands the browser interface 2's whole report
+// descriptor, so WebHID sees the 0x0b collection with 0x04/0x06 and the same
+// packets are written from the browser (verified on a Delux M600 Pro on the
+// 0xfa60 receiver; see docs/delux-m600-pro-testing.md).
 //
 // Protocol source: xb-bx/attack-shark-r1-driver (Odin)
 //                  HarukaYamamoto0/attack-shark-x11-driver (TypeScript)
@@ -66,10 +73,21 @@ const POLLING_RATES_1D57: ReadonlyArray<readonly [number, number]> = [
 
 const DPI_READ_REPORT_ID = 0xa0;
 
-// Battery arrives as input report with this 4-byte signature; byte 4 = %.
-// The leading 0x03 is the HID report id of the battery packet.
-const BATTERY_SIGNATURE = [0x03, 0x55, 0x40, 0x01];
-const BATTERY_REPORT_ID = BATTERY_SIGNATURE[0];
+// Receiver messages arrive as input report 0x03: [0x03, model, event, p1, p2].
+// Byte 1 is the paired mouse's model id (HarukaYamamoto0/attack-shark-x11-driver
+// docs/messages/README.md); battery is event 0x40 with p1 = 0x01, p2 = percent.
+// Only models whose battery percentage was checked are listed; other models
+// in the family use other scales (the X6 reports 1-10).
+const BATTERY_REPORT_ID = 0x03;
+
+const X11_MODEL_ID = 0x55;
+
+/** Models identified by the model id their receiver messages carry. */
+const X11_RECEIVER_MODELS: ReadonlyMap<number, { brand: "Attack Shark" | "Delux"; name: string }> = new Map([
+  [X11_MODEL_ID, { brand: "Attack Shark", name: "Attack Shark X11" }],
+  // docs/delux-m600-pro-testing.md
+  [DELUX_M600_PRO_MODEL_ID, { brand: "Delux", name: "Delux M600 Pro (Wireless)" }],
+]);
 
 // ── 0x25a7 protocol (GearHub / MU class) ─────────────────────────────────
 // Reverse-engineered from the qmk.top GearHub web driver JS bundle.
@@ -107,6 +125,37 @@ function hasFeatureReports(collection: HIDCollectionInfo): boolean {
 function hasVendorControl(collection: HIDCollectionInfo): boolean {
   if (collection.usagePage === 0xffff && collection.featureReports.length > 0) return true;
   return collection.children.some(hasVendorControl);
+}
+
+function featureReportBytes(collection: HIDCollectionInfo, reportId: number): number | null {
+  const report = collection.featureReports.find((entry) => entry.reportId === reportId);
+  if (report) {
+    const bits = (report.items ?? []).reduce(
+      (sum, item) => sum + (item.reportSize ?? 0) * (item.reportCount ?? 0),
+      0,
+    );
+    return Math.ceil(bits / 8);
+  }
+  for (const child of collection.children) {
+    const bytes = featureReportBytes(child, reportId);
+    if (bytes !== null) return bytes;
+  }
+  return null;
+}
+
+/**
+ * Declared payload length of the X11 DPI report 0x04 when the browser exposes
+ * the config channel (0x04 beside the 0x06 polling report), else null. Linux
+ * hidraw hands WebHID interface 2's whole descriptor, so the channel is
+ * visible there; Windows keeps it on a sub-collection the browser cannot open.
+ * A length of 0 means the descriptor sizes were not available.
+ */
+function x11ConfigReportBytes(device: HIDDevice): number | null {
+  for (const collection of device.collections) {
+    const dpiBytes = featureReportBytes(collection, X11_DPI_REPORT_ID);
+    if (dpiBytes !== null && featureReportBytes(collection, POLLING_REPORT_ID) !== null) return dpiBytes;
+  }
+  return null;
 }
 
 function declaresInputReport(collection: HIDCollectionInfo, reportId: number): boolean {
@@ -190,6 +239,8 @@ interface X11RuntimeState {
   pollingRateHz: number;
   batteryPercent: number | null;
   batteryAt: number;
+  /** Model id from the last receiver message, when it names a known model. */
+  modelId: number | null;
 }
 
 const x11RuntimeStates = new Map<number, X11RuntimeState>();
@@ -197,15 +248,25 @@ const x11RuntimeStates = new Map<number, X11RuntimeState>();
 function x11RuntimeFor(productId: number): X11RuntimeState {
   let state = x11RuntimeStates.get(productId);
   if (!state) {
-    state = { pollingRateHz: X11_DEFAULT_POLLING_HZ, batteryPercent: null, batteryAt: 0 };
+    state = { pollingRateHz: X11_DEFAULT_POLLING_HZ, batteryPercent: null, batteryAt: 0, modelId: null };
     x11RuntimeStates.set(productId, state);
   }
   return state;
 }
 
+// Two config writes through the 2.4 GHz receiver about 0.4-0.5 s apart froze
+// the link until the receiver was replugged; pairs 1, 2 and 3 s apart did not
+// (Delux M600 Pro, docs/delux-m600-pro-testing.md). The receiver answers each
+// write within ~10 ms, so the gap is enforced from the last write rather than
+// waiting on that answer. Module-level for the same short-lived-client reason
+// as the state above.
+const X11_RECEIVER_WRITE_GAP_MS = 1000;
+const x11LastReceiverWriteAt = new Map<number, number>();
+
 /** Test/diagnostic hook: forget cached X11 battery/polling state. */
 export function resetAttackSharkX11RuntimeState(): void {
   x11RuntimeStates.clear();
+  x11LastReceiverWriteAt.clear();
 }
 
 /**
@@ -235,7 +296,8 @@ type ProtocolFamily = "1d57" | "1d57-x11" | "25a7" | "373e" | null;
 
 function detectFamily(device: HIDDevice): ProtocolFamily {
   if (device.vendorId === VID_1D57) {
-    if (/delux/i.test(device.productName || "")) return null;
+    if (/delux/i.test(device.productName || "")
+      || DELUX_UNBRANDED_PRODUCT_IDS.has(device.productId)) return null;
     // Native HID adapters (Tauri's TauriHidDevice, the Node/Bridge adapter)
     // cannot parse the report descriptor and report no collections at all,
     // so every collection-based gate below would refuse these units. On that
@@ -250,6 +312,13 @@ function detectFamily(device: HIDDevice): ProtocolFamily {
     // sharing the R1 VID. Distinguish by checking for a vendor-specific
     // collection (usagePage 0xffff) which the GearHub interface exposes.
     if (device.collections.some(hasVendorControl)) return "25a7";
+
+    // An X11-family unit whose config channel the browser can see (Linux) is
+    // still X11 firmware, not R1: the R1 read-back (0xa0 request, then 0x06)
+    // returns no polling code on it, and a 0x04 request stalls the channel.
+    if (X11_DPI_PIDS.has(device.productId) && x11ConfigReportBytes(device) !== null) {
+      return "1d57-x11";
+    }
 
     if (device.collections.some(hasFeatureReports)) return "1d57";
 
@@ -316,15 +385,17 @@ export class AttackSharkHidClient {
 
   private readonly family: ProtocolFamily;
   private readonly batteryWaitMs: number;
+  private readonly receiverWriteGapMs: number;
   private lastStatus: MouseStatus | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private batteryPercent: number | null = null;
   private listening = false;
 
-  constructor(device: HIDDevice, options: { batteryWaitMs?: number } = {}) {
+  constructor(device: HIDDevice, options: { batteryWaitMs?: number; receiverWriteGapMs?: number } = {}) {
     this.device = device;
     this.family = detectFamily(device);
     this.batteryWaitMs = options.batteryWaitMs ?? X11_BATTERY_WAIT_MS;
+    this.receiverWriteGapMs = options.receiverWriteGapMs ?? X11_RECEIVER_WRITE_GAP_MS;
   }
 
   /**
@@ -338,10 +409,18 @@ export class AttackSharkHidClient {
     return this.device.collections.length === 0;
   }
 
-  /** True when this unit's DPI report 0x04 can be driven over the native channel. */
+  /**
+   * True when the X11 config channel is writable: always over a native
+   * adapter, and over WebHID when the browser exposes it (Linux hidraw).
+   */
+  private get x11ConfigReachable(): boolean {
+    return this.nativeConfig || x11ConfigReportBytes(this.device) !== null;
+  }
+
+  /** True when this unit's DPI report 0x04 can be driven. */
   private get x11DpiSupported(): boolean {
     return this.family === "1d57-x11"
-      && this.nativeConfig
+      && this.x11ConfigReachable
       && X11_DPI_PIDS.has(this.device.productId);
   }
 
@@ -357,6 +436,9 @@ export class AttackSharkHidClient {
     const packet = new Uint8Array(data.length + 1);
     packet[0] = event.reportId;
     packet.set(data, 1);
+    if (packet[0] === BATTERY_REPORT_ID && X11_RECEIVER_MODELS.has(packet[1])) {
+      x11RuntimeFor(this.device.productId).modelId = packet[1];
+    }
     const percent = AttackSharkHidClient.parseBatteryReport(packet);
     if (percent !== null) {
       this.batteryPercent = percent;
@@ -390,7 +472,18 @@ export class AttackSharkHidClient {
     return false;
   }
 
+  /** The model a receiver message identified, if any. */
+  private get receiverModel(): { brand: "Attack Shark" | "Delux"; name: string } | undefined {
+    if (this.family !== "1d57-x11") return undefined;
+    const modelId = x11RuntimeFor(this.device.productId).modelId;
+    return modelId === null ? undefined : X11_RECEIVER_MODELS.get(modelId);
+  }
+
   displayName(): string {
+    // The shared 0xfa60 receiver names its paired mouse only through the
+    // model id in its messages; prefer that once one has arrived.
+    const identified = this.receiverModel;
+    if (identified) return identified.name;
     // X11-family product strings are generic OEM labels ("2.4G Wireless
     // Device", "USB Gaming Mouse"), so name those models by PID instead.
     const model = this.device.vendorId === VID_1D57
@@ -402,8 +495,8 @@ export class AttackSharkHidClient {
     return /^attack\s*shark/i.test(name) ? name : `Attack Shark ${name}`;
   }
 
-  deviceBrand(): string {
-    return "Attack Shark";
+  deviceBrand(): "Attack Shark" | "Delux" {
+    return this.receiverModel?.brand ?? "Attack Shark";
   }
 
   isWireless(): boolean {
@@ -418,7 +511,7 @@ export class AttackSharkHidClient {
     if (this.family === "25a7") return [...POLLING_CODES_25A7.keys()];
     // Native transport: the X11 exposes the same 0x06 polling command the
     // browser cannot reach, so advertise the rates it accepts.
-    if (this.family === "1d57-x11" && this.nativeConfig) return POLLING_RATES_1D57.map(([, hz]) => hz);
+    if (this.family === "1d57-x11" && this.x11ConfigReachable) return POLLING_RATES_1D57.map(([, hz]) => hz);
     return [];
   }
 
@@ -429,6 +522,9 @@ export class AttackSharkHidClient {
     if (this.family === "25a7") {
       return [400, 800, 1200, 1600, 2400, 3200, 6400, 12000, 26000];
     }
+    // The app only accepts stage edits that appear in this list; without it
+    // the X11 stage editor could switch stages but never change a value.
+    if (this.x11DpiSupported) return [...X11_DPI_VALUES];
     return [];
   }
 
@@ -452,15 +548,19 @@ export class AttackSharkHidClient {
     }
 
     const dpiState = this.x11DpiSupported ? x11DpiStateFor(this.device.productId) : null;
-    if (dpiState) {
+    // Only native adapters try the read: over WebHID every GET_FEATURE on
+    // this firmware timed out (about 5 s each) on the measured hardware.
+    if (dpiState && this.nativeConfig) {
       await this.readX11DpiState();
+    }
+    if (dpiState) {
       dpi = dpiState.stages[dpiState.activeStage - 1] ?? 0;
     }
 
     // Native X11: polling rate has no read-back (report the last value this
     // process applied, defaulting to 1,000 Hz), and the wireless receiver
     // pushes battery on its own — give it a bounded moment to arrive.
-    const x11Runtime = this.family === "1d57-x11" && this.nativeConfig
+    const x11Runtime = this.family === "1d57-x11" && this.x11ConfigReachable
       ? x11RuntimeFor(this.device.productId)
       : null;
     if (x11Runtime) {
@@ -470,13 +570,13 @@ export class AttackSharkHidClient {
     const batteryPercent = x11Runtime ? x11Runtime.batteryPercent : this.batteryPercent;
 
     return this.lastStatus = {
-      brand: "Attack Shark",
+      brand: this.deviceBrand(),
       name: this.displayName(),
       ui: {
         family: "attackshark",
         settingsReady: this.family === "1d57"
           || this.family === "25a7"
-          || (this.family === "1d57-x11" && this.nativeConfig),
+          || (this.family === "1d57-x11" && this.x11ConfigReachable),
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
         // Wireless X11-family units push battery on their own. WebHID only
@@ -488,7 +588,7 @@ export class AttackSharkHidClient {
           && this.isWireless()
           && (this.nativeConfig
             || this.device.collections.some((collection) => declaresInputReport(collection, BATTERY_REPORT_ID))),
-        statusNote: this.family === "1d57-x11" && !this.nativeConfig
+        statusNote: this.family === "1d57-x11" && !this.x11ConfigReachable
           ? "Status only: this mouse's settings channel is not reachable from a browser and needs a native driver."
           : undefined,
         ...(dpiState
@@ -525,7 +625,7 @@ export class AttackSharkHidClient {
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
     if (this.family === "1d57-x11") {
-      if (!this.nativeConfig) {
+      if (!this.x11ConfigReachable) {
         throw new Error(
           "This mouse's settings channel is not reachable from a browser; "
           + "changing settings needs the native Attack Shark X11 driver.",
@@ -588,14 +688,26 @@ export class AttackSharkHidClient {
       activeStage: state.activeStage,
       angleSnap: state.angleSnap,
       rippleControl: state.rippleControl,
-      wired: this.device.productId === 0xfa55,
+      wired: this.x11UsesShortDpiReport(),
     });
     // The buffer's leading byte is the report id; WebHID/Tauri take it
     // separately. Copy so the payload is a plain ArrayBuffer-backed view.
     const payload = new Uint8Array(report.length - 1);
     payload.set(report.subarray(1));
-    await this.run(() => this.device.sendFeatureReport(X11_DPI_REPORT_ID, payload));
+    await this.sendConfigReport(X11_DPI_REPORT_ID, payload);
     await this.delay(CMD_DELAY_MS);
+  }
+
+  /**
+   * The DPI report is 52 bytes on the wired X11 and 56 over its receiver. A
+   * descriptor the browser exposes decides (the M600 Pro receiver declares
+   * the 52-byte form); without one, fall back to the product id.
+   */
+  private x11UsesShortDpiReport(): boolean {
+    const declared = x11ConfigReportBytes(this.device);
+    if (declared === 51) return true;
+    if (declared === 55) return false;
+    return this.device.productId === 0xfa55;
   }
 
   /**
@@ -778,7 +890,7 @@ export class AttackSharkHidClient {
     // 8 data bytes — browser prepends report ID 0x06.
     // Structure: [0x09, 0x01, rate, checksum, 0, 0, 0, 0]
     const data = new Uint8Array([0x09, 0x01, rateByte, (0xff - rateByte) & 0xff, 0, 0, 0, 0]);
-    await this.run(() => this.device.sendFeatureReport(POLLING_REPORT_ID, data));
+    await this.sendConfigReport(POLLING_REPORT_ID, data);
     await this.delay(CMD_DELAY_MS);
   }
 
@@ -797,6 +909,26 @@ export class AttackSharkHidClient {
 
   // ── shared helpers ────────────────────────────────────────────────────
 
+  /**
+   * Send one config report, holding it back until the receiver gap since the
+   * previous write has passed. Runs inside the command queue so overlapping
+   * callers are spaced too.
+   */
+  private sendConfigReport(reportId: number, data: Uint8Array<ArrayBuffer>): Promise<void> {
+    return this.run(async () => {
+      const paced = this.family === "1d57-x11" && this.isWireless();
+      if (paced) {
+        const wait = (x11LastReceiverWriteAt.get(this.device.productId) ?? 0) + this.receiverWriteGapMs - Date.now();
+        if (wait > 0) await this.delay(wait);
+      }
+      try {
+        await this.device.sendFeatureReport(reportId, data);
+      } finally {
+        if (paced) x11LastReceiverWriteAt.set(this.device.productId, Date.now());
+      }
+    });
+  }
+
   private run<T>(task: () => Promise<T>): Promise<T> {
     const next = this.queue.then(task, task);
     this.queue = next.catch(() => undefined);
@@ -813,7 +945,10 @@ export class AttackSharkHidClient {
 
   /** Check if an input report matches the battery signature. */
   static isBatteryReport(data: Uint8Array): boolean {
-    return BATTERY_SIGNATURE.every((byte, i) => data[i] === byte);
+    return data[0] === BATTERY_REPORT_ID
+      && X11_RECEIVER_MODELS.has(data[1])
+      && data[2] === 0x40
+      && data[3] === 0x01;
   }
 
   /** Extract battery percentage from a battery input report. */

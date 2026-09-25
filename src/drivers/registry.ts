@@ -164,5 +164,6 @@ export function deviceBrand(client: SupportedClient): string {
   if (client instanceof LamzuHidClient) return client.deviceBrand();
   if (client instanceof AtkHidClient) return client.deviceBrand();
   if (client instanceof DeluxHidClient) return client.deviceBrand();
+  if (client instanceof AttackSharkHidClient) return client.deviceBrand();
   return driverFor(client.device)?.brand ?? "Unknown";
 }
