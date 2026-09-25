@@ -498,14 +498,21 @@ export const TEEVOLUTION_PRODUCT_IDS = [0xf520, 0xf523, 0xf5bb, 0xf522] as const
 // Logitech HID++ control interfaces addressed through a receiver slot.
 // 0xc54d is the GPX2/DEX receiver, 0xc543 the G PRO 2 receiver, 0xc547 the
 // Superlight 1 / old-Generic receiver, 0xc539 is HERO-era Lightspeed, 0xc0a8
-// is the PRO X 2 Superstrike USB interface, and Bolt product ids live in
-// ./logitech/protocol with the direct-connect list.
+// is the PRO X 2 Superstrike USB interface, 0x40bd is its own dedicated
+// Lightspeed receiver (confirmed from a user diagnostic - transportIds
+// {Wireless: "40BD", USB: "C0A8"}), 0xc54f is the PRO X 3 Superstrike's own
+// Lightspeed receiver (a mouse + keyboard + vendor-interface composite that
+// answers HID++ and was rejected as "not a mouse" while unknown; confirmed on
+// hardware - the mouse connects as PRO X3 SUPERSTRIKE on 0x046d:0xc54f), and
+// Bolt product ids live in ./logitech/protocol with the direct-connect list.
 export const LOGITECH_RECEIVER_PRODUCT_IDS = [
   0xc54d,
   0xc543,
   0xc539,
   0xc0a8,
   0xc547,
+  0x40bd,
+  0xc54f,
   ...LOGITECH_BOLT_PRODUCT_IDS,
 ] as const;
 
