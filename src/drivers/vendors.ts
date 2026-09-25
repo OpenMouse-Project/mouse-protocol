@@ -113,6 +113,7 @@ export const VENDOR_ID = {
   endgameGear: 0x3367,
   wlmouse: 0x36a7,
   lamzu: 0x373e,
+  bytech: 0x372e,
   lamzuInca: LAMZU_INCA_VENDOR_ID,
   attackshark: 0x373e,
   logitech: 0x046d,
@@ -706,6 +707,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // interfaces that lack the feature-report-0 control channel.
   { vendorId: VENDOR_ID.lamzu },
   ...LAMZU_INCA_HID_FILTERS,
+  { vendorId: VENDOR_ID.bytech, usagePage: 0xff00, usage: 0x0001 },
   { vendorId: VENDOR_ID.orbital, usagePage: 0xff0a, usage: 1 },
   ...[...RAWM_PRODUCT_IDS].map((productId) => ({
     vendorId: VENDOR_ID.rawm,
