@@ -41,6 +41,17 @@ test("support is driven by the product catalog, not hardcoded product ids", () =
   assert.equal(GWolvesHidClient.isSupported(wrongReport), false);
 });
 
+test("models the web driver drives over its 64-byte feature-report path are not claimed", () => {
+  // Arrange: "XVI": "1" models in mouse.fit's env-models.json, including
+  // "IsNewProtocol": "1" ones (HTM Plus, HSK Pro 2.0, HTXU 0x5608, Fenrir Pro).
+  const featureReportModels = [0x3808, 0x3817, 0x6808, 0x6817, 0x5608, 0x5617, 0x3608, 0x3617, 0x3908, 0x2708, 0x5708, 0x5804];
+
+  // Act / Assert: rejected even when the descriptor looks like report 8.
+  for (const productId of featureReportModels) {
+    assert.equal(GWolvesHidClient.isSupported(device(productId)), false, `0x${productId.toString(16)}`);
+  }
+});
+
 test("transport metadata distinguishes receiver from cable via the catalog", () => {
   // Arrange / Act
   const wired = new GWolvesHidClient(device(0x5618));
