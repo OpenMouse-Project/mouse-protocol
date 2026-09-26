@@ -15,6 +15,11 @@ import {
   pulsarVgnDpiOptions,
   pulsarVgnEncodeDpi,
 } from "@openmouse/protocol/pulsar";
+import {
+  TEEVOLUTION_SHARED_BUTTON_OPTIONS,
+  teevolutionDecodeButtonMappings,
+  teevolutionRemapButton,
+} from "@openmouse/protocol/teevolution";
 import { ATK_COMPX_PRODUCT_IDS } from "../atk/products.ts";
 import { LAMZU_ATLANTIS_PRODUCTS } from "@openmouse/protocol/lamzu";
 
@@ -159,6 +164,8 @@ export class PulsarHidClient {
         rippleControl: flash[FLASH.rippleControl] === 1,
         performanceMode: flash[FLASH.performanceState] === 1,
         liftOffDistance: lodValue === 3 ? "Low" : lodValue === 1 ? "Medium" : lodValue === 2 ? "High" : null,
+        buttonMappings: teevolutionDecodeButtonMappings(flash),
+        buttonOptions: TEEVOLUTION_SHARED_BUTTON_OPTIONS,
         firmware: [
           this.decodeVersionOptional("Mouse", deviceVersion) ?? "Mouse firmware unavailable",
           this.decodeVersionOptional("Dongle", dongleVersion) ?? "Dongle firmware unavailable",
@@ -280,6 +287,24 @@ export class PulsarHidClient {
       }
       return sleepConfirmed;
     });
+  }
+
+  /**
+   * The key table sits where Teevolution's does (six 4-byte records from 96),
+   * inside the flash range readStatus already reads, so buttonMappings costs
+   * no extra reads.
+   *
+   * ponytail: G-Wolves' web driver writes this exact table on the same
+   * reference firmware, but nobody has captured Pulsar Fusion doing it yet.
+   */
+  async setButtonMapping(button: string, action: string): Promise<void> {
+    await this.withDeviceControl(() => teevolutionRemapButton(
+      (address, length) => this.readFlash(address, length),
+      (address, data) => this.writeFlash(address, data),
+      button,
+      action,
+      { actions: TEEVOLUTION_SHARED_BUTTON_OPTIONS },
+    ));
   }
 
   async close(): Promise<void> {

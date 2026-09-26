@@ -159,6 +159,15 @@ export const TEEVOLUTION_BUTTON_ACTIONS: readonly TeevolutionButtonAction[] = [
 
 export const TEEVOLUTION_BUTTON_OPTIONS = TEEVOLUTION_BUTTON_ACTIONS.map((action) => action.label);
 
+/**
+ * What the reference firmware's own configurators offer (G-Wolves' web
+ * driver, Dareu's panel). Tilt is Teevolution's addition, so the other brands
+ * on this key table leave it out.
+ */
+export const TEEVOLUTION_SHARED_BUTTON_OPTIONS = TEEVOLUTION_BUTTON_ACTIONS
+  .filter((action) => action.cls !== TEEVOLUTION_KEY_CLASS.tilt)
+  .map((action) => action.label);
+
 export const TEEVOLUTION_KEY_RECORD_LENGTH = 4;
 export const TEEVOLUTION_KEY_TABLE_LENGTH = TEEVOLUTION_BUTTONS.length * TEEVOLUTION_KEY_RECORD_LENGTH;
 /** TeevoLink ProfileOptions: four firmware-managed flash banks. */
@@ -221,15 +230,71 @@ export function teevolutionKeyTableHasLeftClick(table: Uint8Array | readonly num
   return false;
 }
 
-export function teevolutionDecodeButtonMappings(flash: Uint8Array | readonly number[]): Record<string, string> {
+/**
+ * `base` is where the key table starts inside `flash`: the default suits a
+ * whole flash image read from address 0, and 0 suits a buffer holding just
+ * the table. `buttons` trims the list for a mouse without a DPI slot.
+ */
+export function teevolutionDecodeButtonMappings(
+  flash: Uint8Array | readonly number[],
+  base: number = TEEVOLUTION_FLASH.keyFunction,
+  buttons: number = TEEVOLUTION_BUTTONS.length,
+): Record<string, string> {
   const mappings: Record<string, string> = {};
-  for (const { name, index } of TEEVOLUTION_BUTTONS) {
-    const offset = teevolutionKeyFunctionAddress(index);
+  for (const { name, index } of TEEVOLUTION_BUTTONS.slice(0, buttons)) {
+    const offset = base + index * TEEVOLUTION_KEY_RECORD_LENGTH;
     mappings[name] = flash.length >= offset + TEEVOLUTION_KEY_RECORD_LENGTH
       ? teevolutionKeyFunctionLabel(flash.slice(offset, offset + TEEVOLUTION_KEY_RECORD_LENGTH))
       : "Custom";
   }
   return mappings;
+}
+
+/** Reads a flash range; each driver passes its own transport. */
+export type TeevolutionFlashRead = (address: number, length: number) => Promise<Uint8Array>;
+
+/**
+ * The six key records on their own. Two records per read keeps every request
+ * under the 10-byte payload cap these transports share.
+ */
+export async function teevolutionReadKeyTable(read: TeevolutionFlashRead): Promise<Uint8Array> {
+  const table = new Uint8Array(TEEVOLUTION_KEY_TABLE_LENGTH);
+  for (let offset = 0; offset < table.length; offset += 2 * TEEVOLUTION_KEY_RECORD_LENGTH) {
+    table.set(await read(TEEVOLUTION_FLASH.keyFunction + offset, 2 * TEEVOLUTION_KEY_RECORD_LENGTH), offset);
+  }
+  return table;
+}
+
+/**
+ * One remap, for any firmware that keeps this key table at this address
+ * (Teevolution, Pulsar, Lamzu Atlantis, VGN F2, G-Wolves). Writes only the
+ * record that changes and reads it back. Returns the confirmed action, or
+ * null when the button already had it and nothing was written. `buttons`
+ * and `actions` hold a driver to what its mouse actually offers.
+ */
+export async function teevolutionRemapButton(
+  read: TeevolutionFlashRead,
+  write: (address: number, data: Uint8Array) => Promise<void>,
+  button: string,
+  action: string,
+  { buttons = TEEVOLUTION_BUTTONS.length, actions = TEEVOLUTION_BUTTON_OPTIONS }:
+    { buttons?: number; actions?: readonly string[] } = {},
+): Promise<string | null> {
+  const slot = teevolutionFindButton(button);
+  if (!slot || slot.index >= buttons) throw new Error(`This mouse has no "${button}" button.`);
+  const table = await teevolutionReadKeyTable(read);
+  const offset = slot.index * TEEVOLUTION_KEY_RECORD_LENGTH;
+  if (teevolutionKeyFunctionLabel(table.slice(offset, offset + TEEVOLUTION_KEY_RECORD_LENGTH)) === action) return null;
+  const assigned = actions.includes(action) ? teevolutionFindButtonAction(action) : null;
+  if (!assigned) throw new Error(`Unknown button action "${action}".`);
+  const payload = teevolutionEncodeKeyFunction(assigned.cls, assigned.param);
+  table.set(payload, offset);
+  if (!teevolutionKeyTableHasLeftClick(table)) throw new Error("Keep at least one button as Left Click.");
+  const address = teevolutionKeyFunctionAddress(slot.index);
+  await write(address, payload);
+  const confirmed = teevolutionKeyFunctionLabel(await read(address, payload.length));
+  if (confirmed !== assigned.label) throw new Error(`The mouse kept ${confirmed} on ${button} instead of ${assigned.label}.`);
+  return confirmed;
 }
 
 export const TEEVOLUTION_TYPE_MAX_POLL: Record<number, number> = {
