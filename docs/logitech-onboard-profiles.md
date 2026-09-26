@@ -409,8 +409,8 @@ diagnostic (PRO X 2 identical) decodes its profile sector 1 to five stages
 (800/1200/1600/2400/3200, lift-off byte 2) at the v6 stage table, and the full
 255-byte sector matches its own stored CRC (0x2a38). The storage grid is the
 widest seen, 100-48000 (the X3's 0x2202 list), narrowed at runtime to the
-connected sensor. Format 8 is verified and, as a testing-phase step, writable for DPI x/y only;
-its per-stage lift-off byte is left as read until a write to it is confirmed.
+connected sensor. Format 8 is verified and, as a testing-phase step, writable, including the
+per-stage lift-off byte.
 
 Format 8 is taken to be the Superstrike format because it is the only one
 carrying the analog-button block, which is that mouse's distinguishing feature.

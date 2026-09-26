@@ -63,10 +63,11 @@ const VERIFIED_FORMATS = new Set([2, 3, 4, 7, 8]);
 /**
  * Format 8 is a testing-phase addition: the same base-v6 stage table and write
  * sequence format 7 already proved on hardware, and its layout is verified, but
- * no write to format 8 itself has been captured yet. Only the DPI x/y fields are
- * written (see isLodWritableForProduct), and openActiveProfile() still re-reads
- * the live sector and refuses on a bad CRC. Pull it back out if the first
- * write-then-reconnect check does not come back clean.
+ * a DPI write to it has been confirmed on hardware (a PRO X 3 Superstrike), and
+ * the per-stage lift-off byte sits in the same 5-byte stage entries. Both are
+ * written; openActiveProfile() still re-reads the live sector and refuses on a
+ * bad CRC. Pull it back out if a write-then-reconnect check does not come back
+ * clean.
  */
 const WRITABLE_FORMATS = new Set([2, 3, 4, 7, 8]);
 const PROFILE_WRITE_PROBE_FORMATS = new Set([2, 3, 4]);
@@ -98,9 +99,6 @@ export function isLodWritableForProduct(
   productId: number | null | undefined,
 ): boolean {
   if (!isProfileWritable(profileFormatId)) return false;
-  // Format 8: the stored lift-off byte decodes (Medium on every stage) but has
-  // never been written; leave it exactly as read until that is confirmed.
-  if (profileFormatId === 8) return false;
   if (productId !== null && productId !== undefined && UNVERIFIED_LOD_PRODUCT_IDS.has(productId)) return false;
   return true;
 }
@@ -299,8 +297,8 @@ const FORMAT_CAPABILITIES: Record<number, ProfileFormatCapabilities> = {
   // the widest grid seen: the PRO X 3's 0x2202 list runs 100-48000 (steps of
   // 1/2/5/10/20/50/100/125/200 across its ranges), stored as plain 16-bit
   // values; callers narrow it to the connected sensor's own list, so an older
-  // sensor is never offered the X3's ceiling. Writable as a testing-phase step,
-  // for DPI x/y only - see WRITABLE_FORMATS.
+  // sensor is never offered the X3's ceiling. Writable as a testing-phase step -
+  // see WRITABLE_FORMATS.
   8: {
     supportedLods: ["Low", "Medium", "High"],
     lodEncoding: LOD_ENCODING,
