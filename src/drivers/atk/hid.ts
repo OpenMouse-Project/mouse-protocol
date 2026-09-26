@@ -139,6 +139,11 @@ const R1_LIFT_OFF_CODES: ReadonlyArray<readonly [number, LiftOffDistance]> = [
   [2, "High"],
 ];
 
+/** X1 Pro Max / PAW3950: 3 = 0.7 mm, 1 = 1 mm, 2 = 2 mm (ATK HUB). */
+const X1_LIFT_OFF_CODES: ReadonlyArray<readonly [number, LiftOffDistance]> = [
+  [3, "Low"], [1, "Medium"], [2, "High"],
+];
+
 export class AtkHidClient {
   // Sleep is stored in 10-second units with no "never" value.
   readonly canDisableSleep = false;
@@ -218,16 +223,20 @@ export class AtkHidClient {
     return this.product ? ATK_SENSORS[this.product.sensor].maxDpi : DPI_MAX;
   }
 
+  private isX1ProMax(): boolean {
+    return this.product === ATK_PRODUCTS["2,39"];
+  }
+
   getSleepOptions(): readonly number[] {
-    return this.isR1() && !this.usesR1LiveSettings() ? R1_SLEEP_SECONDS : SLEEP_SECONDS;
+    return (this.isR1() && !this.usesR1LiveSettings()) || this.isX1ProMax() ? R1_SLEEP_SECONDS : SLEEP_SECONDS;
   }
 
   getDebounceMaxMs(): number {
-    return this.isR1() || this.isF1Ultimate() ? R1_DEBOUNCE_MAX_MS : DEBOUNCE_MAX_MS;
+    return this.isR1() || this.isX1ProMax() || this.isF1Ultimate() ? R1_DEBOUNCE_MAX_MS : DEBOUNCE_MAX_MS;
   }
 
   getDebounceOptions(): readonly number[] {
-    return this.isR1() && !this.usesR1LiveSettings()
+    return (this.isR1() && !this.usesR1LiveSettings()) || this.isX1ProMax()
       ? R1_DEBOUNCE_MILLISECONDS
       : Array.from(
         { length: this.getDebounceMaxMs() + (this.usesR1LiveSettings() ? 0 : 1) },
@@ -236,6 +245,7 @@ export class AtkHidClient {
   }
 
   getSupportedPollingRates(): number[] {
+    if (this.usesAtk1kReceiver()) return POLLING_RATES.map(([, hertz]) => hertz).filter((hertz) => hertz <= 1000);
     return this.usesR1LiveSettings()
       ? [...ATK_VXE_R1_POLLING_RATES]
       : this.isR1()
@@ -347,7 +357,7 @@ export class AtkHidClient {
       dpiLedMode: r1Extras?.dpiLedMode,
       dpiLedBrightness: r1Extras?.dpiLedBrightness,
       dpiLedSpeed: r1Extras?.dpiLedSpeed,
-      angleSnapping: this.isR1() || this.isF1Ultimate()
+      angleSnapping: this.isR1() || this.isX1ProMax() || this.isF1Ultimate()
         ? advanced[6] === 1
         : angleSnapping === null ? null : angleSnapping === 1,
       angleTuning: angleTuning === null ? null : this.decodeAngle(angleTuning),
@@ -470,6 +480,9 @@ export class AtkHidClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
+    if (this.usesAtk1kReceiver() && !this.getSupportedPollingRates().includes(pollingRateHz)) {
+      throw new Error(`This receiver does not support ${pollingRateHz} Hz.`);
+    }
     if (!this.usesR1LiveSettings()) await this.identify();
     if (this.usesR1LiveSettings()) return await this.setR1PollingRate(pollingRateHz);
     const encoded = POLLING_RATES.find(([, hertz]) => hertz === pollingRateHz);
@@ -908,7 +921,8 @@ export class AtkHidClient {
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
     if (!this.usesR1LiveSettings()) await this.identify();
     if (this.usesR1LiveSettings()) return await this.setR1LiftOffDistance(value);
-    const encoded = (this.isR1() ? R1_LIFT_OFF_CODES : LIFT_OFF_CODES).find(([, name]) => name === value);
+    const codes = this.isX1ProMax() ? X1_LIFT_OFF_CODES : this.isR1() ? R1_LIFT_OFF_CODES : LIFT_OFF_CODES;
+    const encoded = codes.find(([, name]) => name === value);
     if (!encoded) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
     if (this.usesVerifiedR1ProMaxReceiverTransport()) {
       await this.writeR1ProMaxReceiverLiftOffDistance(encoded[0]);
@@ -1007,7 +1021,7 @@ export class AtkHidClient {
       return confirmed;
     }
 
-    if (this.isR1() || this.isF1Ultimate()) {
+    if (this.isR1() || this.isX1ProMax() || this.isF1Ultimate()) {
       return await this.setAdvancedFlag(
         6,
         enabled,
@@ -1043,7 +1057,7 @@ export class AtkHidClient {
 
   async setSleepTimeout(seconds: number): Promise<number> {
     if (!this.usesR1LiveSettings()) await this.identify();
-    const valid = this.isR1()
+    const valid = this.isR1() || this.isX1ProMax()
       ? this.getSleepOptions().includes(seconds)
       : Number.isInteger(seconds) && seconds >= SLEEP_STEP_SECONDS
         && seconds <= 0xff * SLEEP_STEP_SECONDS && seconds % SLEEP_STEP_SECONDS === 0;
@@ -1336,6 +1350,7 @@ export class AtkHidClient {
   }
 
   private decodeLiftOffDistance(code: number): LiftOffDistance | null {
+    if (this.isX1ProMax()) return X1_LIFT_OFF_CODES.find(([value]) => value === code)?.[1] ?? null;
     if (this.isR1()) return R1_LIFT_OFF_CODES.find(([value]) => value === code)?.[1] ?? null;
     const millimetres = atkDecodeLiftOff(code);
     if (millimetres === null) return null;
@@ -1375,7 +1390,14 @@ export class AtkHidClient {
       const decoded = settings ? atkDecodeVxeR1PollingCode(settings[1]) : null;
       return decoded ?? 1000;
     }
-    return this.decodePollingRate((system ?? await this.read(REGISTER.system, SYSTEM_LENGTH))[0]!);
+    const rate = this.decodePollingRate((system ?? await this.read(REGISTER.system, SYSTEM_LENGTH))[0]!);
+    // The mouse can retain its 8K setting when moved to the 1K receiver.
+    // Report the transport ceiling, not an impossible rate from stored settings.
+    return this.usesAtk1kReceiver() ? Math.min(rate, 1000) : rate;
+  }
+
+  private usesAtk1kReceiver(): boolean {
+    return this.device.vendorId === VENDOR_ID.atk && this.device.productId === 0x101a;
   }
 
   /**

@@ -1,0 +1,418 @@
+{
+  "results": {
+    "before": {
+      "brand": "ATK",
+      "name": "ATK X1 Pro Max",
+      "ui": {
+        "family": "atk",
+        "hideUnsupportedPollingRates": true,
+        "forceShowBattery": true
+      },
+      "batteryPercent": 45,
+      "batteryState": "Charging",
+      "batteryVoltageMv": null,
+      "dpi": 1200,
+      "dpiY": 1200,
+      "dpiStages": [
+        800,
+        1200
+      ],
+      "activeDpiStage": 1,
+      "supportsSeparateDpiAxes": false,
+      "pollingRateHz": 8000,
+      "supportedPollingRates": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        4000,
+        8000
+      ],
+      "activeProfile": null,
+      "connectionType": "Wired",
+      "connectionDetail": "Wired USB",
+      "debounceMs": 0,
+      "motionSync": true,
+      "sleepTimeout": 60,
+      "rippleControl": true,
+      "angleSnapping": true,
+      "angleTuning": null,
+      "liftOffDistance": "High",
+      "firmware": [
+        "Mouse 2.18"
+      ]
+    },
+    "tests": [
+      {
+        "method": "setDpi",
+        "value": 1250,
+        "original": 1200,
+        "confirmed": 1250,
+        "restored": 1200
+      },
+      {
+        "method": "setPollingRate",
+        "value": 4000,
+        "original": 8000,
+        "confirmed": 4000,
+        "restored": 8000
+      },
+      {
+        "method": "setLiftOffDistance",
+        "value": "Medium",
+        "original": "High",
+        "confirmed": "Medium",
+        "restored": "High"
+      },
+      {
+        "method": "setLiftOffDistance",
+        "value": "Low",
+        "original": "High",
+        "confirmed": "Low",
+        "restored": "High"
+      },
+      {
+        "method": "setDebounceTime",
+        "value": 1,
+        "original": 0,
+        "confirmed": 1,
+        "restored": 0
+      },
+      {
+        "method": "setSleepTimeout",
+        "value": 120,
+        "original": 60,
+        "confirmed": 120,
+        "restored": 60
+      },
+      {
+        "method": "setMotionSync",
+        "value": false,
+        "original": true,
+        "confirmed": false,
+        "restored": true
+      },
+      {
+        "method": "setRippleControl",
+        "value": false,
+        "original": true,
+        "confirmed": false,
+        "restored": true
+      },
+      {
+        "method": "setAngleSnapping",
+        "value": false,
+        "original": true,
+        "confirmed": false,
+        "restored": true
+      }
+    ],
+    "after": {
+      "brand": "ATK",
+      "name": "ATK X1 Pro Max",
+      "ui": {
+        "family": "atk",
+        "hideUnsupportedPollingRates": true,
+        "forceShowBattery": true
+      },
+      "batteryPercent": 45,
+      "batteryState": "Charging",
+      "batteryVoltageMv": null,
+      "dpi": 1200,
+      "dpiY": 1200,
+      "dpiStages": [
+        800,
+        1200
+      ],
+      "activeDpiStage": 1,
+      "supportsSeparateDpiAxes": false,
+      "pollingRateHz": 8000,
+      "supportedPollingRates": [
+        125,
+        250,
+        500,
+        1000,
+        2000,
+        4000,
+        8000
+      ],
+      "activeProfile": null,
+      "connectionType": "Wired",
+      "connectionDetail": "Wired USB",
+      "debounceMs": 0,
+      "motionSync": true,
+      "sleepTimeout": 60,
+      "rippleControl": true,
+      "angleSnapping": true,
+      "angleTuning": null,
+      "liftOffDistance": "High",
+      "firmware": [
+        "Mouse 2.18"
+      ]
+    },
+    "restored": true
+  },
+  "trace": [
+    {
+      "request": "08 10 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3d",
+      "reply": "08 10 00 00 00 03 02 27 2c 00 00 00 00 00 00 00 e5"
+    },
+    {
+      "request": "08 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 49",
+      "reply": "08 04 00 00 00 02 2d 01 0f 06 00 00 00 00 00 00 04"
+    },
+    {
+      "request": "08 08 00 00 00 06 00 00 00 00 00 00 00 00 00 00 3f",
+      "reply": "08 08 00 00 00 06 40 15 02 53 01 54 00 00 00 00 40"
+    },
+    {
+      "request": "08 08 00 00 0c 04 00 00 00 00 00 00 00 00 00 00 35",
+      "reply": "08 08 00 00 0c 04 0f 0f 00 37 00 00 00 00 00 00 e0"
+    },
+    {
+      "request": "08 08 00 00 10 04 00 00 00 00 00 00 00 00 00 00 31",
+      "reply": "08 08 00 00 10 04 17 17 00 27 00 00 00 00 00 00 dc"
+    },
+    {
+      "request": "08 12 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3b",
+      "reply": "08 12 00 00 00 02 02 18 00 00 00 00 00 00 00 00 1f"
+    },
+    {
+      "request": "08 08 00 00 0a 02 00 00 00 00 00 00 00 00 00 00 39",
+      "reply": "08 08 00 00 0a 02 02 53 00 00 00 00 00 00 00 00 e4"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 08 00 00 bd 04 00 00 00 00 00 00 00 00 00 00 84",
+      "reply": "08 08 00 00 bd 04 ff ff ff ff 00 00 00 00 00 00 88"
+    },
+    {
+      "request": "08 08 00 00 00 06 00 00 00 00 00 00 00 00 00 00 3f",
+      "reply": "08 08 00 00 00 06 40 15 02 53 01 54 00 00 00 00 40"
+    },
+    {
+      "request": "08 07 00 00 10 04 18 18 00 25 00 00 00 00 00 00 dd",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 10 04 00 00 00 00 00 00 00 00 00 00 31",
+      "reply": "08 08 00 00 10 04 18 18 00 25 00 00 00 00 00 00 dc"
+    },
+    {
+      "request": "08 08 00 00 00 06 00 00 00 00 00 00 00 00 00 00 3f",
+      "reply": "08 08 00 00 00 06 40 15 02 53 01 54 00 00 00 00 40"
+    },
+    {
+      "request": "08 07 00 00 10 04 17 17 00 27 00 00 00 00 00 00 dd",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 10 04 00 00 00 00 00 00 00 00 00 00 31",
+      "reply": "08 08 00 00 10 04 17 17 00 27 00 00 00 00 00 00 dc"
+    },
+    {
+      "request": "08 07 00 00 00 02 20 35 00 00 00 00 00 00 00 00 ef",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 00 06 00 00 00 00 00 00 00 00 00 00 3f",
+      "reply": "08 08 00 00 00 06 20 35 02 53 01 54 00 00 00 00 40"
+    },
+    {
+      "request": "08 07 00 00 00 02 40 15 00 00 00 00 00 00 00 00 ef",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 00 06 00 00 00 00 00 00 00 00 00 00 3f",
+      "reply": "08 08 00 00 00 06 40 15 02 53 01 54 00 00 00 00 40"
+    },
+    {
+      "request": "08 07 00 00 0a 02 01 54 00 00 00 00 00 00 00 00 e5",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 0a 02 00 00 00 00 00 00 00 00 00 00 39",
+      "reply": "08 08 00 00 0a 02 01 54 00 00 00 00 00 00 00 00 e4"
+    },
+    {
+      "request": "08 07 00 00 0a 02 02 53 00 00 00 00 00 00 00 00 e5",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 0a 02 00 00 00 00 00 00 00 00 00 00 39",
+      "reply": "08 08 00 00 0a 02 02 53 00 00 00 00 00 00 00 00 e4"
+    },
+    {
+      "request": "08 07 00 00 0a 02 03 52 00 00 00 00 00 00 00 00 e5",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 0a 02 00 00 00 00 00 00 00 00 00 00 39",
+      "reply": "08 08 00 00 0a 02 03 52 00 00 00 00 00 00 00 00 e4"
+    },
+    {
+      "request": "08 07 00 00 0a 02 02 53 00 00 00 00 00 00 00 00 e5",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 0a 02 00 00 00 00 00 00 00 00 00 00 39",
+      "reply": "08 08 00 00 0a 02 02 53 00 00 00 00 00 00 00 00 e4"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 07 00 00 a9 0a 01 54 01 54 06 4f 01 54 01 54 ea",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 01 54 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 01 54 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 07 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 ea",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 07 00 00 a9 0a 00 55 01 54 0c 49 01 54 01 54 ea",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 0c 49 01 54 01 54 e9"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 0c 49 01 54 01 54 e9"
+    },
+    {
+      "request": "08 07 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 ea",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 07 00 00 a9 0a 00 55 00 55 06 4f 01 54 01 54 ea",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 00 55 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 00 55 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 07 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 ea",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 07 00 00 a9 0a 00 55 01 54 06 4f 01 54 00 55 ea",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 00 55 e9"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 00 55 e9"
+    },
+    {
+      "request": "08 07 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 ea",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 07 00 00 a9 0a 00 55 01 54 06 4f 00 55 01 54 ea",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 00 55 01 54 e9"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 00 55 01 54 e9"
+    },
+    {
+      "request": "08 07 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 ea",
+      "reply": null
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 49",
+      "reply": "08 04 00 00 00 02 2d 01 0f 06 00 00 00 00 00 00 04"
+    },
+    {
+      "request": "08 08 00 00 00 06 00 00 00 00 00 00 00 00 00 00 3f",
+      "reply": "08 08 00 00 00 06 40 15 02 53 01 54 00 00 00 00 40"
+    },
+    {
+      "request": "08 08 00 00 0c 04 00 00 00 00 00 00 00 00 00 00 35",
+      "reply": "08 08 00 00 0c 04 0f 0f 00 37 00 00 00 00 00 00 e0"
+    },
+    {
+      "request": "08 08 00 00 10 04 00 00 00 00 00 00 00 00 00 00 31",
+      "reply": "08 08 00 00 10 04 17 17 00 27 00 00 00 00 00 00 dc"
+    },
+    {
+      "request": "08 12 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3b",
+      "reply": "08 12 00 00 00 02 02 18 00 00 00 00 00 00 00 00 1f"
+    },
+    {
+      "request": "08 08 00 00 0a 02 00 00 00 00 00 00 00 00 00 00 39",
+      "reply": "08 08 00 00 0a 02 02 53 00 00 00 00 00 00 00 00 e4"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 00 55 01 54 06 4f 01 54 01 54 e9"
+    },
+    {
+      "request": "08 08 00 00 bd 04 00 00 00 00 00 00 00 00 00 00 84",
+      "reply": "08 08 00 00 bd 04 ff ff ff ff 00 00 00 00 00 00 88"
+    }
+  ]
+}

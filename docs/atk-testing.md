@@ -17,6 +17,87 @@ USB-name behavior. Generic ATK devices that do not answer CID/MID do the same.
 A shared VXE R1 transport that does not answer instead fails before using that
 fallback codec. Known VXE identities report the VXE brand.
 
+## Verified ATK X1 Pro Max
+
+ATK HUB 3.2.27 maps CID/MID `2,39` to the X1 Pro Max with PAW3950.
+Sources: [ATK HUB](https://hub.atk.pro/) and its
+[3.2.27 application bundle](https://bpcdn.atkgear.com/hub-v3/production/3.2.27/static/index-DBE__Npj.js).
+The owner confirmed 1,200 DPI and 8,000 Hz and supplied the HUB settings view.
+
+Hardware verification on 2026-09-21 used the actual `AtkHidClient` through a
+native HID adapter implementing its WebHID-shaped transport. Physical
+polling-frequency measurements were not tested.
+
+On 2026-09-22, the owner additionally tested the locally built OpenMouse web
+UI over the 8K receiver. They reported that all buttons were recognized,
+different DPI and polling-rate settings applied, and settings persisted after
+switching the mouse fully off and on. These are owner-reported observations;
+the exact additional DPI/rate values and button remapping were not verified.
+Browser UI operation over the cable has not yet been tested. Lighting and
+long-range controls are not implemented for this model.
+
+The owner also tested the stock `373b:101a` ATK Mouse 1K Dongle (USB
+`bcdDevice 0211`) and reported normal operation, but found the UI offered
+8,000 Hz despite the 1K transport limit. This receiver now offers only 125,
+250, 500 and 1,000 Hz, rejects higher-rate writes before sending a command,
+and caps the reported rate at 1,000 Hz if the mouse retains an 8K setting.
+The local browser displayed 1,200 DPI and 1,000 Hz after this correction.
+This is a configured rate capped by the receiver's limit, not a measured
+physical polling frequency. The raw read/write traces below cover only the
+cable and 8K receiver; the new 1K rate regression tests use synthetic replies.
+
+| Connection | VID:PID | Product | USB bcdDevice | Mouse firmware |
+| --- | --- | --- | --- | --- |
+| Cable | `373b:1017` | ATK X1 PRO MAX | `0218` | 2.18 |
+| 8K receiver | `373b:101b` | ATK Mouse 8K Dongle | `0216` | 2.18 |
+
+Both use interface 1, usage page `ff02`, usage `2`, and report `08` with a
+16-byte input/output payload. Both returned CID/MID `2,39`. The receiver PID
+is shared: model selection must continue to use CID/MID. Initial receiver
+probes timed out; after the owner woke the mouse and closed ATK HUB, reads
+succeeded. No transport or discovery-filter change was necessary.
+
+The captured stages `0f 0f 00 37` and `17 17 00 27` decode as 800 and 1,200
+DPI using PAW3950's 50-DPI encoding. Stage 2 was active. The generic Ultra
+fallback would decode them as 160 and 240 DPI. The model uses the existing
+36,000-DPI codec ceiling; that ceiling comes from the vendor catalog and was
+not exercised on hardware.
+
+The screenshot and register reads confirm these model-specific settings:
+
+- Lift-off uses discrete codes `3 = 0.7 mm`, `1 = 1 mm`, `2 = 2 mm`, exposed
+  as Low/Medium/High. It must not use the Ultra continuous lift-off scale.
+- Straight-line correction is the pair at offset 6 of the `00a9` advanced
+  row. The `00bd` angle row read `ff ff ff ff` and is unsupported.
+- Debounce choices are 0, 1, 2, 4, 8, 15, 20 ms.
+- Sleep choices are 30, 60, 120, 180, 300, 1200, 1500, 1800 seconds.
+
+On **each connection**, the following writes were confirmed by driver
+readback and immediately restored:
+
+| Setting | Baseline | Test | Restored |
+| --- | --- | --- | --- |
+| Active-stage DPI | 1,200 | 1,250 | 1,200 |
+| Polling setting | 8,000 Hz | 4,000 Hz | 8,000 Hz |
+| Lift-off | 2 mm | 1 mm, then 0.7 mm | 2 mm after each |
+| Debounce | 0 ms | 1 ms | 0 ms |
+| Sleep | 60 seconds | 120 seconds | 60 seconds |
+| Motion Sync | On | Off | On |
+| Ripple correction | On | Off | On |
+| Straight-line correction | On | Off | On |
+
+The complete final status matched the original configuration for all tested
+fields. Unplugging the receiver and connecting the cable also retained the
+restored configuration. The battery reply reported discharging on receiver
+and charging on cable. Its declared length was two bytes, so padding was not
+interpreted as voltage. Firmware readback was 2.18 on both paths.
+
+The catalog verification covers these settings and these exact connections.
+Other firmware/receivers, lighting, long-range mode, button remapping, profile
+selection, stage-count editing, and the full DPI/rate ranges are not claimed
+as tested. Sanitized driver traces and restoration results are in
+`captures/atk-x1-pro-max/`.
+
 ## Verified VXE R1 SE+
 
 The raw EEPROM and identity values below were captured directly from one VXE R1
