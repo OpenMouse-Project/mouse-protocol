@@ -171,6 +171,8 @@ export class GloriousHidClient {
   getUiHints(): MouseUiHints {
     return {
       family: "glorious",
+      // Write-only config: status values come from local storage, not the mouse.
+      valuesVerified: false,
       hideLodLow: true,
       hideUnsupportedPollingRates: true,
       hideProcessingCard: true,
