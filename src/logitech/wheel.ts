@@ -17,6 +17,13 @@ export const LOGITECH_SMART_SHIFT = {
 } as const;
 
 /**
+ * 0x2110 SmartShift, the predecessor on the MX Master 2S and MX Anywhere 2.
+ * It has no getCapabilities, so the same [mode, threshold, defaultThreshold]
+ * trio sits one function lower. Taken from the spec, not yet from hardware.
+ */
+export const LOGITECH_SMART_SHIFT_LEGACY = { get: 0x00, set: 0x10 } as const;
+
+/**
  * 0x2111 byte 0 is the wheel's ratchet mode — the same thing the button behind
  * the wheel toggles, and NOT SmartShift on/off. It was first shipped labelled
  * "SmartShift / Always ratchet", which was naming a control after inferred

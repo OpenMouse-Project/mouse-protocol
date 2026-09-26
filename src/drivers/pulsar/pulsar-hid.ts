@@ -15,6 +15,11 @@ import {
   pulsarVgnDpiOptions,
   pulsarVgnEncodeDpi,
 } from "@openmouse/protocol/pulsar";
+import {
+  TEEVOLUTION_SHARED_BUTTON_OPTIONS,
+  teevolutionDecodeButtonMappings,
+  teevolutionRemapButton,
+} from "@openmouse/protocol/teevolution";
 import { ATK_COMPX_PRODUCT_IDS } from "../atk/products.ts";
 import { LAMZU_ATLANTIS_PRODUCTS } from "@openmouse/protocol/lamzu";
 
@@ -61,7 +66,7 @@ export class PulsarHidClient {
       event.data.buffer.slice(event.data.byteOffset, event.data.byteOffset + event.data.byteLength),
     );
     this.reportListener?.({ timestamp: Date.now(), reportId: event.reportId, bytes: [...bytes] });
-    if (event.reportId === CONFIG_REPORT_ID && bytes[0] === this.responseWaiter?.command) {
+    if (event.reportId === this.responseReportId && bytes[0] === this.responseWaiter?.command) {
       const waiter = this.responseWaiter;
       this.responseWaiter = null;
       waiter.resolve(bytes);
@@ -69,6 +74,8 @@ export class PulsarHidClient {
   };
 
   readonly device: HIDDevice;
+  /** Input report the mouse answers on; the Areson-USB X2 answers on 9. */
+  protected readonly responseReportId: number = CONFIG_REPORT_ID;
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -129,7 +136,7 @@ export class PulsarHidClient {
     return await this.withDeviceControl(async () => {
       const flash = await this.readFlash(FLASH.reportRate, FLASH.performanceTime + 2);
       const battery = await this.query(COMMAND.batteryLevel);
-      const deviceVersion = await this.query(COMMAND.readVersionId);
+      const deviceVersion = await this.query(COMMAND.readVersionId).catch(() => null);
       const dongleVersion = await this.query(COMMAND.getDongleVersion).catch(() => null);
       const profile = await this.query(COMMAND.getCurrentConfig).catch(() => null);
       const dongleLed = [0, 3].includes(info.dongleType)
@@ -159,6 +166,8 @@ export class PulsarHidClient {
         rippleControl: flash[FLASH.rippleControl] === 1,
         performanceMode: flash[FLASH.performanceState] === 1,
         liftOffDistance: lodValue === 3 ? "Low" : lodValue === 1 ? "Medium" : lodValue === 2 ? "High" : null,
+        buttonMappings: teevolutionDecodeButtonMappings(flash),
+        buttonOptions: TEEVOLUTION_SHARED_BUTTON_OPTIONS,
         firmware: [
           this.decodeVersionOptional("Mouse", deviceVersion) ?? "Mouse firmware unavailable",
           this.decodeVersionOptional("Dongle", dongleVersion) ?? "Dongle firmware unavailable",
@@ -177,7 +186,7 @@ export class PulsarHidClient {
    * mice (including the X2 CrazyLight). Branch on vendor id, not CID/MID —
    * those are Pulsar-internal identifiers this receiver family reuses.
    */
-  private isVgnReceiver(): boolean {
+  protected isVgnReceiver(): boolean {
     return this.device.vendorId === VGN_VENDOR_ID;
   }
 
@@ -280,6 +289,24 @@ export class PulsarHidClient {
       }
       return sleepConfirmed;
     });
+  }
+
+  /**
+   * The key table sits where Teevolution's does (six 4-byte records from 96),
+   * inside the flash range readStatus already reads, so buttonMappings costs
+   * no extra reads.
+   *
+   * ponytail: G-Wolves' web driver writes this exact table on the same
+   * reference firmware, but nobody has captured Pulsar Fusion doing it yet.
+   */
+  async setButtonMapping(button: string, action: string): Promise<void> {
+    await this.withDeviceControl(() => teevolutionRemapButton(
+      (address, length) => this.readFlash(address, length),
+      (address, data) => this.writeFlash(address, data),
+      button,
+      action,
+      { actions: TEEVOLUTION_SHARED_BUTTON_OPTIONS },
+    ));
   }
 
   async close(): Promise<void> {
@@ -409,13 +436,17 @@ export class PulsarHidClient {
     });
     void response.catch(() => undefined);
     try {
-      await this.device.sendReport(CONFIG_REPORT_ID, packet);
+      await this.sendPacket(packet);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       (rejectResponse as ((reason: Error) => void) | null)?.(new Error(`Chrome could not write Pulsar report 8. ${detail}`));
       this.responseWaiter = null;
     }
     return await response;
+  }
+
+  protected async sendPacket(packet: Uint8Array<ArrayBuffer>): Promise<void> {
+    await this.device.sendReport(CONFIG_REPORT_ID, packet);
   }
 
   private createPacket(command: number): Uint8Array<ArrayBuffer> {

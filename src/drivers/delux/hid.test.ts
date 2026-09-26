@@ -5,6 +5,7 @@ import {
   decodeDeluxM800MiniDpiReport,
   DELUX_DPI_MAX,
   DELUX_DPI_REPORT_ID,
+  DELUX_M600_PRO_WIRED_PID,
   DELUX_M800_MINI_WIRED_PID,
   DELUX_M800_MINI_WIRELESS_PID,
   DELUX_OEM_VENDOR_ID,
@@ -16,28 +17,30 @@ import { DeluxHidClient, resetDeluxDpiState, resetDeluxRuntimeState } from "./hi
 type SentReport = { reportId: number; data: Uint8Array };
 type FakeDevice = HIDDevice & {
   sentFeatureReports: SentReport[];
+  featureReads: number[];
   emitInputReport(reportId: number, data: Uint8Array): void;
 };
 
 function fakeDevice(
   productId: number,
   productName = "Delux M800 Mini",
-  collections: Array<{ usagePage: number; usage: number }> = [],
+  collections: Array<{ usagePage: number; usage: number; feature?: number[] }> = [],
 ): FakeDevice {
   const listeners = new Set<(event: HIDInputReportEvent) => void>();
   const sentFeatureReports: SentReport[] = [];
+  const featureReads: number[] = [];
   return {
     vendorId: DELUX_OEM_VENDOR_ID,
     productId,
     productName,
     opened: false,
-    collections: collections.map((collection) => ({
+    collections: collections.map(({ feature = [], ...collection }) => ({
       ...collection,
       type: 0,
       children: [],
       inputReports: [],
       outputReports: [],
-      featureReports: [],
+      featureReports: feature.map((reportId) => ({ reportId, items: [] })),
     })),
     async open() {
       (this as FakeDevice).opened = true;
@@ -61,6 +64,10 @@ function fakeDevice(
         : new Uint8Array(data.slice(0));
       sentFeatureReports.push({ reportId, data: bytes });
     },
+    async receiveFeatureReport(reportId: number) {
+      featureReads.push(reportId);
+      throw new DOMException("The device did not answer.", "NotAllowedError");
+    },
     emitInputReport(reportId: number, data: Uint8Array) {
       const view = new DataView(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
       for (const listener of listeners) {
@@ -68,6 +75,7 @@ function fakeDevice(
       }
     },
     sentFeatureReports,
+    featureReads,
   } as unknown as FakeDevice;
 }
 
@@ -146,4 +154,82 @@ test("wireless battery input updates subsequent status reads", async () => {
   const status = await client.readStatus();
   assert.equal(status.batteryPercent, 73);
   assert.equal(status.batteryState, "Discharging");
+});
+
+// Linux hidraw shape of the M600 Pro's interface 2 as WebHID sees it: the
+// config channel lives in a 0x0b collection beside system control/consumer.
+const M600_PRO_CONFIG_COLLECTIONS = [
+  { usagePage: 0x01, usage: 0x80 },
+  { usagePage: 0x0c, usage: 0x01 },
+  { usagePage: 0x0a, usage: 0x00 },
+  { usagePage: 0x0b, usage: 0x00, feature: [0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0xa0] },
+];
+
+function hexBytes(hex: string): Uint8Array {
+  return new Uint8Array(hex.split(" ").map((byte) => Number.parseInt(byte, 16)));
+}
+
+test("M600 Pro wired is claimed by product id alone on its config channel", () => {
+  const generic = "USB Gaming Mouse";
+  assert.equal(DeluxHidClient.isSupported(fakeDevice(DELUX_M600_PRO_WIRED_PID, generic)), true);
+  assert.equal(
+    DeluxHidClient.isSupported(fakeDevice(DELUX_M600_PRO_WIRED_PID, generic, M600_PRO_CONFIG_COLLECTIONS)),
+    true,
+  );
+  // Boot keyboard/mouse entries of the same unit carry no config channel.
+  assert.equal(
+    DeluxHidClient.isSupported(fakeDevice(DELUX_M600_PRO_WIRED_PID, generic, [{ usagePage: 0x01, usage: 2 }])),
+    false,
+  );
+
+  const client = createSupportedClient(
+    fakeDevice(DELUX_M600_PRO_WIRED_PID, generic, M600_PRO_CONFIG_COLLECTIONS),
+  );
+  assert.ok(client instanceof DeluxHidClient);
+  assert.equal(deviceBrand(client), "Delux");
+  assert.equal(
+    AttackSharkHidClient.isSupported(fakeDevice(DELUX_M600_PRO_WIRED_PID, generic, M600_PRO_CONFIG_COLLECTIONS)),
+    false,
+  );
+});
+
+test("M600 Pro wired status is configurable over WebHID and never reads back", async () => {
+  resetDeluxDpiState();
+  resetDeluxRuntimeState();
+  const device = fakeDevice(DELUX_M600_PRO_WIRED_PID, "USB Gaming Mouse", M600_PRO_CONFIG_COLLECTIONS);
+  const status = await new DeluxHidClient(device).readStatus();
+
+  assert.equal(status.name, "Delux M600 Pro (Wired)");
+  assert.equal(status.connectionType, "Wired");
+  assert.equal(status.ui?.settingsReady, true);
+  assert.equal(status.ui?.statusNote, undefined);
+  assert.equal(status.ui?.forceShowBattery, false);
+  // Every GET_FEATURE times out on this firmware (about 5 s each over USB).
+  assert.deepEqual(device.featureReads, []);
+});
+
+test("M600 Pro wired writes match the packets verified on hardware", async () => {
+  resetDeluxDpiState();
+  resetDeluxRuntimeState();
+  const device = fakeDevice(DELUX_M600_PRO_WIRED_PID, "USB Gaming Mouse", M600_PRO_CONFIG_COLLECTIONS);
+  const client = new DeluxHidClient(device);
+
+  // Measured 126 Hz after this write (docs/delux-m600-pro-testing.md).
+  assert.equal(await client.setPollingRate(125), 125);
+  assert.deepEqual(device.sentFeatureReports.at(-1), {
+    reportId: 0x06,
+    data: hexBytes("09 01 08 f7 00 00 00 00"),
+  });
+
+  await client.setRippleControl(false);
+  for (let stage = 0; stage < 6; stage++) await client.setDpiStageValue(stage, 400);
+  await client.setActiveDpiStage(0);
+  // The 52-byte report (51 on the wire after the id) measured at 400 DPI.
+  assert.deepEqual(device.sentFeatureReports.at(-1), {
+    reportId: DELUX_DPI_REPORT_ID,
+    data: hexBytes(
+      "38 01 00 00 3f 00 00 09 09 09 09 09 09 00 00 00 00 00 00 00 00 00 00 01 ff 00 00 00 ff 00 00 00 "
+      + "ff ff ff 00 00 ff ff ff 00 ff ff 40 00 ff ff ff 02 0d ab",
+    ),
+  });
 });

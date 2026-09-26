@@ -11,6 +11,7 @@ import {
   lamzuAtlantisSealField,
 } from "@openmouse/protocol/lamzu";
 import { pulsarVgnEncodeDpi } from "@openmouse/protocol/pulsar";
+import { TEEVOLUTION_KEY_CLASS as KEY, teevolutionEncodeKeyFunction } from "@openmouse/protocol/teevolution";
 import { LamzuAtlantisHidClient } from "./hid.ts";
 
 const REPORT_ID = 8;
@@ -358,5 +359,37 @@ test("open is not attempted twice by concurrent reads", async () => {
   const client = clientFor(device);
   await Promise.all([client.readStatus(), client.readStatus()]);
   assert.equal(device.opens, 1, "a second open() would reject in Chrome");
+  await client.close();
+});
+
+test("buttons read from the key table and remap one record at a time", async () => {
+  const device = new FakeAtlantis();
+  const defaults = [[KEY.mouse, 0x0100], [KEY.mouse, 0x0200], [KEY.mouse, 0x0400],
+    [KEY.mouse, 0x0800], [KEY.mouse, 0x1000], [KEY.dpi, 0x0100]] as const;
+  defaults.forEach(([cls, param], index) => {
+    device.flash.set(teevolutionEncodeKeyFunction(cls, param), FLASH.buttonActions + index * 4);
+  });
+  const client = clientFor(device);
+  const status = await client.readStatus();
+  assert.deepEqual(status.buttonMappings, {
+    Left: "Left Click", Right: "Right Click", Middle: "Middle Click",
+    Back: "Backward", Forward: "Forward", DPI: "DPI Loop",
+  });
+  assert.ok(status.buttonOptions?.includes("DPI+"));
+
+  const before = Uint8Array.from(device.flash);
+  await client.setButtonMapping("Forward", "DPI+");
+  const address = FLASH.buttonActions + 4 * 4;
+  assert.deepEqual([...device.flash.subarray(address, address + 4)], [...teevolutionEncodeKeyFunction(KEY.dpi, 0x0200)]);
+  device.flash.forEach((byte, index) => {
+    if (index < address || index >= address + 4) assert.equal(byte, before[index], `byte ${index} untouched`);
+  });
+  assert.equal((await client.readStatus(true)).buttonMappings?.Forward, "DPI+");
+
+  const writes = () => device.sent.filter((body) => body[0] === COMMAND.writeFlashData).length;
+  const count = writes();
+  await client.setButtonMapping("Forward", "DPI+");
+  assert.equal(writes(), count, "an unchanged button is not rewritten");
+  await assert.rejects(() => client.setButtonMapping("Left", "Right Click"), /Left Click/);
   await client.close();
 });

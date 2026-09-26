@@ -1,0 +1,29 @@
+# Receiver 0x1d57:0xfa60, interface 2, Linux hidraw. t = seconds since start.
+# Non-battery input messages only (battery 03 20 40 .. is filtered out).
+#
+# 1. Polling write, then the documented read unlock (a0 <id> <len> 00 01 ..).
+  6.390 SET 06 09 01 01 fe 00 00 00 00 -> ok
+  6.400 IN  03 20 50 00 06
+  7.906 SET a0 06 09 00 01 00 00 00 -> ok
+  8.157 GET 0xa0 -> a0 01 00 00 00 00 00 00
+  8.158 GET 0x06 -> 06 0b 01 01 fe 00 00 00 00
+  9.664 SET a0 04 34 00 01 00 00 00 -> [Errno 32] Broken pipe
+#
+# 2. Write pairs 500 Hz -> 1000 Hz at 3, 2 and 1 s gaps, mouse moving throughout.
+#    motion = boot-mouse reports counted in the window; none of the gaps froze.
+# baseline 2 s: motion 1958
+  5.414 SET 06 09 01 02 fd 00 00 00 00 -> ok
+  5.422 IN  03 20 50 00 06
+  8.416 SET 06 09 01 01 fe 00 00 00 00 -> ok
+  8.434 IN  03 20 f0 ff 04
+# gap 3.0 s: motion between 1361, motion in 3 s after 2510
+ 11.417 SET 06 09 01 02 fd 00 00 00 00 -> ok
+ 11.437 IN  03 20 f0 ff 05
+ 13.419 SET 06 09 01 01 fe 00 00 00 00 -> ok
+ 13.473 IN  03 20 01 00 ff
+# gap 2.0 s: motion between 815, motion in 3 s after 2438
+ 16.433 SET 06 09 01 02 fd 00 00 00 00 -> ok
+ 16.454 IN  03 20 09 00 fc
+ 17.433 SET 06 09 01 01 fe 00 00 00 00 -> ok
+ 17.440 IN  03 20 50 00 06
+# gap 1.0 s: motion between 420, motion in 3 s after 2482

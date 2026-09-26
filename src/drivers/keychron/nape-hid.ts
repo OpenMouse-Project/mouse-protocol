@@ -169,7 +169,8 @@ export class KeychronNapeHidClient {
     const orientation = await this.getOrientation().catch(() => null);
     const sleepTimeout = await this.getSleepTimeout().catch(() => null);
     const layers = await this.readLayers().catch(() => null);
-    const active = stages.find((entry) => entry.index === stage) ?? stages[0];
+    const activeRead = stages.find((entry) => entry.index === stage);
+    const active = activeRead ?? stages[0];
     const dpi = active?.value ?? 800;
     const product = PRODUCTS.get(this.device.productId);
     const viaReceiver = product?.receiver === true;
@@ -189,6 +190,8 @@ export class KeychronNapeHidClient {
       ui: {
         family: "keychron-nape",
         defaultDisplayName: NAPE_DISPLAY_NAME,
+        // Polling falls back to 1000 Hz and DPI to another stage when their reads fail.
+        valuesVerified: polling !== null && activeRead !== undefined,
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
         forceShowBattery: true,

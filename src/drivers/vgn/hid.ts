@@ -14,6 +14,12 @@ import {
   vgnParseReadResponse,
   vgnReportChecksumIsValid,
 } from "@openmouse/protocol/vgn";
+import {
+  TEEVOLUTION_SHARED_BUTTON_OPTIONS,
+  teevolutionDecodeButtonMappings,
+  teevolutionReadKeyTable,
+  teevolutionRemapButton,
+} from "@openmouse/protocol/teevolution";
 
 const VGN_VENDOR_ID = 0x3554;
 const VGN_RECEIVER_PID = 0xfb56;
@@ -80,6 +86,8 @@ export class VgnF2HidClient {
     const batteryResponse = await this.transact(vgnBuildSimplePayload(VGN_COMMAND.battery));
     const firmwareResponse = await this.transact(vgnBuildSimplePayload(VGN_COMMAND.firmware));
     const profile = await this.readProfile();
+    // Optional: a mouse that will not read its key table keeps the rest of its status.
+    const keys = await teevolutionReadKeyTable((address, length) => this.readPaced(address, length)).catch(() => null);
     const battery = vgnParseBattery(batteryResponse);
     const settings = vgnDecodeProfile(profile);
     const firmware = this.version(firmwareResponse);
@@ -106,6 +114,7 @@ export class VgnF2HidClient {
       rippleControl: settings.rippleControl,
       performanceMode: settings.performanceMode,
       liftOffDistance: settings.liftOffDistance,
+      ...(keys ? { buttonMappings: teevolutionDecodeButtonMappings(keys, 0), buttonOptions: TEEVOLUTION_SHARED_BUTTON_OPTIONS } : {}),
       firmware: firmware ? [`Mouse ${firmware}`] : [],
       ui: {
         family: "vgn-f2",
@@ -158,6 +167,22 @@ export class VgnF2HidClient {
     return value;
   }
 
+  /**
+   * Same key table as Teevolution and G-Wolves: six 4-byte records at 0x60.
+   *
+   * ponytail: G-Wolves' web driver writes this exact table on the same
+   * reference design, but nobody has captured VGN's own software doing it.
+   */
+  async setButtonMapping(button: string, action: string): Promise<void> {
+    await teevolutionRemapButton(
+      (address, length) => this.readPaced(address, length),
+      (address, data) => this.write(address, [...data]),
+      button,
+      action,
+      { actions: TEEVOLUTION_SHARED_BUTTON_OPTIONS },
+    );
+  }
+
   async close(): Promise<void> {
     this.failWaiter(new Error("The VGN device was closed."));
     this.device.removeEventListener("inputreport", this.onInputReport);
@@ -174,11 +199,17 @@ export class VgnF2HidClient {
     for (const [start, end] of [[0, 0x2c], [0xa8, 0xb7]] as const) {
       for (let address = start; address < end; address += 10) {
         const length = Math.min(10, end - address);
-        profile.set(await this.read(address, length), address);
-        if (this.isWirelessPath()) await new Promise((resolve) => window.setTimeout(resolve, 10));
+        profile.set(await this.readPaced(address, length), address);
       }
     }
     return profile;
+  }
+
+  /** Spaces back-to-back reads on the receiver, as readProfile always has. */
+  private async readPaced(address: number, length: number): Promise<Uint8Array> {
+    const data = await this.read(address, length);
+    if (this.isWirelessPath()) await new Promise((resolve) => window.setTimeout(resolve, 10));
+    return data;
   }
 
   private async read(address: number, length: number): Promise<Uint8Array> {
