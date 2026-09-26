@@ -30,6 +30,7 @@ import {
   LOGITECH_HIRES_WHEEL_BIT,
   LOGITECH_HOSTS,
   LOGITECH_SMART_SHIFT,
+  LOGITECH_SMART_SHIFT_LEGACY,
   LOGITECH_SMART_SHIFT_OFF,
   LOGITECH_THUMB_WHEEL,
   buildFriendlyNameWrite,
@@ -316,6 +317,7 @@ const FEATURE = {
   analogButtons: 0x1b0c,
   haptic: 0x19b0,
   smartShift: 0x2111,
+  smartShiftLegacy: 0x2110,
   hiresWheel: 0x2121,
   thumbWheel: 0x2150,
   friendlyName: 0x0007,
@@ -2127,9 +2129,9 @@ export class LogitechHidppClient {
   }
 
   /**
-   * Scroll-wheel state across 0x2111, 0x2121 and 0x2150. Every field stays
-   * absent rather than guessed when its feature is missing, so a mouse
-   * without a thumb wheel does not get a control that can only fail.
+   * Scroll-wheel state across 0x2111 (or 0x2110), 0x2121 and 0x2150. Every
+   * field stays absent rather than guessed when its feature is missing, so a
+   * mouse without a thumb wheel does not get a control that can only fail.
    */
   private async readWheelState(): Promise<{
     wheelMode: LogitechWheelMode | null;
@@ -2141,9 +2143,9 @@ export class LogitechHidppClient {
     thumbWheelInverted: boolean | null;
     supportsThumbWheelInvert: boolean;
   }> {
-    const smartShift = await this.getFeature(FEATURE.smartShift);
+    const smartShift = await this.getSmartShift();
     const ratchetReply = smartShift.index
-      ? await this.request(smartShift.index, LOGITECH_SMART_SHIFT.get).catch(() => null)
+      ? await this.request(smartShift.index, smartShift.get).catch(() => null)
       : null;
     const ratchet = ratchetReply ? decodeRatchetControl(ratchetReply.slice(3)) : null;
 
@@ -2207,23 +2209,29 @@ export class LogitechHidppClient {
     return { thumbWheelInverted: decoded?.inverted ?? null, supportsThumbWheelInvert: supports };
   }
 
-  /** 0x2111 carries all three bytes, so each setter changes only its field. */
+  /** 0x2111, else the older 0x2110: same trio, different function numbers. */
+  private async getSmartShift(): Promise<{ index: number; get: number; set: number }> {
+    const enhanced = await this.getFeature(FEATURE.smartShift);
+    if (enhanced.index) return { index: enhanced.index, ...LOGITECH_SMART_SHIFT };
+    const legacy = await this.getFeature(FEATURE.smartShiftLegacy);
+    return { index: legacy.index, ...LOGITECH_SMART_SHIFT_LEGACY };
+  }
+
+  /** The write carries all three bytes, so each setter changes only its field. */
   private async writeRatchetControl(
     change: { mode?: LogitechWheelMode; threshold?: number },
   ): Promise<LogitechRatchetControl> {
-    const feature = await this.getFeature(FEATURE.smartShift);
+    const feature = await this.getSmartShift();
     if (!feature.index) throw new Error("This mouse has no SmartShift feature.");
 
-    const current = decodeRatchetControl((await this.request(feature.index, LOGITECH_SMART_SHIFT.get)).slice(3));
+    const current = decodeRatchetControl((await this.request(feature.index, feature.get)).slice(3));
     if (!current) throw new Error("The mouse gave no answer when its wheel settings were read.");
 
-    const reply = await this.request(
-      feature.index,
-      LOGITECH_SMART_SHIFT.set,
-      ...buildRatchetControlWrite(current, change),
-    );
-    const confirmed = decodeRatchetControl(reply.slice(3));
-    if (!confirmed) throw new Error("The mouse gave no answer to the wheel write.");
+    await this.request(feature.index, feature.set, ...buildRatchetControlWrite(current, change));
+    // Confirmed by reading back: 0x2110 is not proven to echo the write, and a
+    // zero-padded reply would decode as a real (wrong) state, as 0x2150 did.
+    const confirmed = decodeRatchetControl((await this.request(feature.index, feature.get)).slice(3));
+    if (!confirmed) throw new Error("The mouse gave no answer when its wheel settings were read back.");
     return confirmed;
   }
 
