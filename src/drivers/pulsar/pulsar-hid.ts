@@ -16,6 +16,7 @@ import {
   pulsarVgnEncodeDpi,
 } from "@openmouse/protocol/pulsar";
 import { ATK_COMPX_PRODUCT_IDS } from "../atk/products.ts";
+import { GRAVASTAR_PRODUCT_IDS } from "../gravastar/products.ts";
 import { LAMZU_ATLANTIS_PRODUCTS } from "@openmouse/protocol/lamzu";
 
 // The Pulsar 4K Wireless Receiver is sold as a Pulsar product but enumerates
@@ -29,6 +30,7 @@ const CLAIMED_VGN_PRODUCT_IDS: ReadonlySet<number> = new Set([
   0xfb56, 0xfb57, // VGN Dragonfly F2 Master+
   ...ATK_COMPX_PRODUCT_IDS, // VXE wired units
   ...LAMZU_ATLANTIS_PRODUCTS.keys(), // Lamzu Atlantis generation
+  ...GRAVASTAR_PRODUCT_IDS, // GravaStarHidClient, a subclass of this client
 ]);
 const PULSAR_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
 
@@ -48,7 +50,7 @@ export interface PulsarDeviceInfo {
 }
 
 export class PulsarHidClient {
-  private deviceInfo: PulsarDeviceInfo | null = null;
+  protected deviceInfo: PulsarDeviceInfo | null = null;
   private reportListener: ((report: PulsarReport) => void) | null = null;
   private responseWaiter: {
     command: number;
@@ -77,12 +79,15 @@ export class PulsarHidClient {
   static isSupported(device: HIDDevice): boolean {
     const vendorSupported = device.vendorId === PULSAR_VENDOR_ID
       || (device.vendorId === VGN_VENDOR_ID && !CLAIMED_VGN_PRODUCT_IDS.has(device.productId));
-    return vendorSupported
-      && device.collections.some((collection) =>
-        collection.inputReports.length === 1
-        && collection.outputReports.length === 1
-        && collection.inputReports[0].reportId === CONFIG_REPORT_ID
-        && collection.outputReports[0].reportId === CONFIG_REPORT_ID);
+    return vendorSupported && PulsarHidClient.hasConfigCollection(device);
+  }
+
+  protected static hasConfigCollection(device: HIDDevice): boolean {
+    return device.collections.some((collection) =>
+      collection.inputReports.length === 1
+      && collection.outputReports.length === 1
+      && collection.inputReports[0].reportId === CONFIG_REPORT_ID
+      && collection.outputReports[0].reportId === CONFIG_REPORT_ID);
   }
 
   async open(onReport?: (report: PulsarReport) => void): Promise<void> {
@@ -181,11 +186,11 @@ export class PulsarHidClient {
     return this.device.vendorId === VGN_VENDOR_ID;
   }
 
-  private encodeDpi(dpi: number): Uint8Array {
+  protected encodeDpi(dpi: number): Uint8Array {
     return this.isVgnReceiver() ? pulsarVgnEncodeDpi(dpi) : pulsarEncodeDpi(dpi);
   }
 
-  private decodeDpi(data: Uint8Array): number | null {
+  protected decodeDpi(data: Uint8Array): number | null {
     return this.isVgnReceiver() ? pulsarVgnDecodeDpi(data) : pulsarDecodeDpi(data);
   }
 
@@ -257,6 +262,10 @@ export class PulsarHidClient {
 
   async setPerformanceMode(enabled: boolean): Promise<boolean> {
     return await this.setVerifiedBoolean(FLASH.performanceState, enabled, "performance mode");
+  }
+
+  getDebounceOptions(): number[] {
+    return Array.from({ length: 16 }, (_, ms) => ms);
   }
 
   async setDebounceTime(debounceMs: number): Promise<number> {
@@ -348,7 +357,7 @@ export class PulsarHidClient {
     await this.writeFlash(address, new Uint8Array([value, (0x55 - value) & 0xff]));
   }
 
-  private async setVerifiedByte(address: number, value: number, label: string): Promise<number> {
+  protected async setVerifiedByte(address: number, value: number, label: string): Promise<number> {
     return await this.withDeviceControl(async () => {
       await this.writeCheckedByte(address, value);
       const confirmed = (await this.readFlash(address, 2))[0];

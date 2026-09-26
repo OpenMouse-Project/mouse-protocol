@@ -63,7 +63,7 @@ checklist.
 | Ninjutso | `@openmouse/protocol/ninjutso` |
 | Orbital | `@openmouse/protocol/orbital` |
 | RAWM | `@openmouse/protocol/rawm` |
-| Pulsar | `@openmouse/protocol/pulsar` |
+| Pulsar / GravaStar | `@openmouse/protocol/pulsar` |
 | Razer legacy/current | `@openmouse/protocol/razer` |
 | Razer V4 | `@openmouse/protocol/razer-v4` |
 | Ryunix | `@openmouse/protocol/ryunix` |
