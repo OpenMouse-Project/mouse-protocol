@@ -10,13 +10,14 @@ import { LAMZU_ATLANTIS_PRODUCTS, LAMZU_PRODUCTS } from "@openmouse/protocol/lam
 import { ORBITAL_DEVICES } from "@openmouse/protocol/orbital";
 import { MCHOSE_V3_PRODUCT_IDS } from "@openmouse/protocol/mchose";
 import {
+  DELUX_M600_PRO_WIRED_PID,
   DELUX_M800_MINI_WIRELESS_PID,
   DELUX_OEM_VENDOR_ID,
 } from "@openmouse/protocol/delux";
 
 const DEVICES_DIR = dirname(fileURLToPath(import.meta.url));
 
-const REPORT_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 0x09, 0x0e, 0x0f, 0x10, 0x11, 0x20, 0xa1, 0xb3, 0xb4];
+const REPORT_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 0x09, 0x0e, 0x0f, 0x10, 0x11, 0x20, 0xa1, 0xb3, 0xb4, 0xb5];
 const USAGE_PAGES = [0x01, 0x0a, 0x0c, 0xFF07, 0xff, 0xff00, 0xff01, 0xff02, 0xff05, 0xff0a, 0xff1c, 0xff43, 0xff55, 0xff60, 0xffa0, 0xffc1, 0xffc2, 0xffff];
 // Usage 4 is the Corsair config collection; 0x61 is VIA raw HID; 0xc7 is Ryunix telemetry.
 const USAGES = [0, 1, 0x0212, 2, 4, 0x10, 0x61, 0xc7];
@@ -85,6 +86,9 @@ function candidateProductIds(): number[] {
     // The MCHOSE V3 driver matches on an id allowlist and shares its usage
     // page with the V2, so the probe needs a real one to reach it at all.
     ...MCHOSE_V3_PRODUCT_IDS,
+    // Claimed by id alone and defined outside src/drivers, so the source
+    // scan below would not find it.
+    DELUX_M600_PRO_WIRED_PID,
   ]);
   for (const filter of SUPPORTED_HID_FILTERS) {
     if (filter.productId !== undefined) ids.add(filter.productId);
@@ -115,6 +119,12 @@ const NAMED_PROBES = [
     productId: DELUX_M800_MINI_WIRELESS_PID,
     productName: "Delux M800 Mini",
     collections: [] as HIDCollectionInfo[],
+  },
+  {
+    vendorId: DELUX_OEM_VENDOR_ID,
+    productId: DELUX_M600_PRO_WIRED_PID,
+    productName: "USB Gaming Mouse",
+    collections: [collection(0x0b, 0, { feature: [4, 6] })],
   },
 ] as const;
 

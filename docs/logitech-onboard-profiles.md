@@ -404,9 +404,13 @@ Slot count and DPI range are properties of the mouse, not of the app: an older
 format can hold fewer slots over a much narrower range, and base v1 has no
 stage table at all. `dpiStages` is therefore `null` for every format whose
 numbers were never captured, and the UI hides the slot editor rather than
-borrowing format 7's limits. Format 8 almost certainly holds five slots, since
-it shares the v6 stage table, but its sensor range is unknown — so it is left
-null rather than half-guessed.
+borrowing format 7's limits. Format 8 holds five slots: a PRO X 3 Superstrike
+diagnostic (PRO X 2 identical) decodes its profile sector 1 to five stages
+(800/1200/1600/2400/3200, lift-off byte 2) at the v6 stage table, and the full
+255-byte sector matches its own stored CRC (0x2a38). The storage grid is the
+widest seen, 100-48000 (the X3's 0x2202 list), narrowed at runtime to the
+connected sensor. Format 8 is verified and, as a testing-phase step, writable, including the
+per-stage lift-off byte.
 
 Format 8 is taken to be the Superstrike format because it is the only one
 carrying the analog-button block, which is that mouse's distinguishing feature.

@@ -9,11 +9,13 @@ import {
   DELUX_DPI_REPORT_ID as X11_DPI_REPORT_ID,
   DELUX_DPI_STAGE_COUNT as X11_DPI_STAGE_COUNT,
   DELUX_DPI_STEP,
+  DELUX_DPI_VALUES,
   DELUX_M800_MINI_WIRELESS_PID,
   DELUX_OEM_VENDOR_ID,
   DELUX_POLLING_RATES,
   DELUX_PRODUCT_IDS,
   DELUX_PRODUCT_NAMES,
+  DELUX_UNBRANDED_PRODUCT_IDS,
   nearestDeluxM800MiniDpi as nearestX11Dpi,
 } from "../../delux/index.ts";
 
@@ -26,6 +28,22 @@ export const DELUX_POLLING_RATES_1D57: ReadonlyArray<readonly [number, number]> 
 ];
 
 const CMD_DELAY_MS = 300;
+
+function declaresFeatureReport(collection: HIDCollectionInfo, reportId: number): boolean {
+  if (collection.featureReports.some((report) => report.reportId === reportId)) return true;
+  return collection.children.some((child) => declaresFeatureReport(child, reportId));
+}
+
+/**
+ * True for the WebHID entry that carries the X11 config channel (feature
+ * reports 0x04 DPI and 0x06 polling). Linux hidraw exposes it to the browser;
+ * Windows splits it into a sub-collection the browser cannot open.
+ */
+function exposesConfigChannel(device: HIDDevice): boolean {
+  return device.collections.some((collection) =>
+    declaresFeatureReport(collection, X11_DPI_REPORT_ID)
+    && declaresFeatureReport(collection, POLLING_REPORT_ID));
+}
 
 interface DeluxDpiState {
   stages: number[];
@@ -93,8 +111,11 @@ export class DeluxHidClient {
   }
 
   static isSupported(device: HIDDevice): boolean {
-    if (device.vendorId !== DELUX_OEM_VENDOR_ID
-      || !DELUX_PRODUCT_IDS.has(device.productId)
+    if (device.vendorId !== DELUX_OEM_VENDOR_ID) return false;
+    if (DELUX_UNBRANDED_PRODUCT_IDS.has(device.productId)) {
+      return device.collections.length === 0 || exposesConfigChannel(device);
+    }
+    if (!DELUX_PRODUCT_IDS.has(device.productId)
       || !/\bdelux\b/i.test(device.productName || "")) {
       return false;
     }
@@ -105,6 +126,16 @@ export class DeluxHidClient {
 
   private get nativeConfig(): boolean {
     return this.device.collections.length === 0;
+  }
+
+  /**
+   * Native adapters always reach the config channel. Through WebHID it is
+   * enabled only for the unbranded models whose writes were verified on
+   * hardware over that path (docs/delux-m600-pro-testing.md).
+   */
+  private get settingsReachable(): boolean {
+    return this.nativeConfig
+      || (DELUX_UNBRANDED_PRODUCT_IDS.has(this.device.productId) && exposesConfigChannel(this.device));
   }
 
   displayName(): string {
@@ -131,7 +162,9 @@ export class DeluxHidClient {
   }
 
   getDpiOptions(): number[] {
-    return [400, 800, 1200, 1600, 2400, 3200, 6400, 12000, DELUX_DPI_MAX];
+    // Every value the stage editor can encode: the app snaps stage edits to
+    // this list, so a preset subset would silently round them.
+    return [...DELUX_DPI_VALUES];
   }
 
   async open(): Promise<void> {
@@ -208,11 +241,11 @@ export class DeluxHidClient {
       name: this.displayName(),
       ui: {
         family: "delux",
-        settingsReady: this.nativeConfig,
+        settingsReady: this.settingsReachable,
         hideUnsupportedPollingRates: true,
         hideProcessingCard: true,
         forceShowBattery: this.isWireless(),
-        statusNote: this.nativeConfig
+        statusNote: this.settingsReachable
           ? undefined
           : "Status only: this mouse's settings channel is not reachable from a browser and needs a native driver.",
         dpiStageEditor: {

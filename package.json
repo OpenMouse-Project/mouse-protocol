@@ -69,6 +69,10 @@
       "types": "./dist/microsoft/index.d.ts",
       "import": "./dist/microsoft/index.js"
     },
+    "./motospeed": {
+      "types": "./dist/motospeed/index.d.ts",
+      "import": "./dist/motospeed/index.js"
+    },
     "./moddo": {
       "types": "./dist/moddo/index.d.ts",
       "import": "./dist/moddo/index.js"
