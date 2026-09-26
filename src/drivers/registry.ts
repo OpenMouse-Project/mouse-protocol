@@ -17,6 +17,7 @@ import { ModdoHidClient } from "./moddo/hid.ts";
 import { NinjutsoHidClient } from "./ninjutso/hid.ts";
 import { OrbitalHidClient } from "./orbital/hid.ts";
 import { RawmHidClient } from "./rawm/hid.ts";
+import { GravaStarHidClient } from "./gravastar/hid.ts";
 import { PulsarHidClient } from "./pulsar/pulsar-hid.ts";
 import { PulsarAresonHidClient } from "./pulsar/pulsar-areson-hid.ts";
 import { PulsarProHidClient } from "./pulsar/pulsar-pro-hid.ts";
@@ -37,6 +38,7 @@ import { WootingHidClient } from "./wooting/hid.ts";
 import { ZaunkoenigHidClient } from "./zaunkoenig/hid.ts";
 import { CorsairHidClient } from "./corsair/hid.ts";
 import { GWolvesHidClient } from "./gwolves/hid.ts";
+import { GWolvesXviHidClient } from "./gwolves/xvi-hid.ts";
 import { SteelSeriesRival3HidClient } from "./steelseries/hid.ts";
 import { SteelSeriesAerox3HidClient } from "./steelseries/aerox3-hid.ts";
 import { SteelSeriesRival3WirelessHidClient } from "./steelseries/rival3-wireless-hid.ts";
@@ -65,7 +67,7 @@ import { KyuProMx1Client } from "./ryunix/kyu-pro-mx1-hid.ts";
 import { BytechHidClient } from "./bytech/hid.ts";
 
 export type PulsarClient = PulsarHidClient | PulsarProHidClient | PulsarXs1HidClient;
-export type SupportedClient = RawmHidClient | MotospeedHidClient | LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | WLMouseBeastX4kHidClient | LamzuHidClient | LamzuAtlantisHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | AtkBitmouseHidClient | VgnF2HidClient | VaxeeHidClient | KeychronM6HidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | CorsairHidClient | AttackSharkHidClient | FantechHidClient | GearHubHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | SteelSeriesRival3HidClient | SteelSeriesAerox3HidClient | SteelSeriesRival3WirelessHidClient | SteelSeriesAerox5HidClient | SteelSeriesAerox5WirelessHidClient | SteelSeriesRival650HidClient | SteelSeriesAerox9WirelessHidClient | SteelSeriesRival310HidClient | SteelSeriesPrimePlusHidClient | SteelSeriesPrimeMiniWirelessHidClient | SteelSeriesSenseiTenHidClient | GloriousHidClient | GloriousClassicHidClient | MchoseHidClient | MchoseDockHidClient | MchoseA5ProMaxHidClient | KsnakeHidClient | MicrosoftHidClient | DareuHidClient | RedragonHidClient | IncottHidClient | HyperXHidClient | MchoseV3HidClient | AsusGladiusIIHidClient | KyuProMx1Client | DeluxHidClient | BytechHidClient;
+export type SupportedClient = RawmHidClient | MotospeedHidClient | LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | WLMouseBeastX4kHidClient | LamzuHidClient | LamzuAtlantisHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | AtkBitmouseHidClient | VgnF2HidClient | VaxeeHidClient | KeychronM6HidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | CorsairHidClient | AttackSharkHidClient | FantechHidClient | GearHubHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | GWolvesXviHidClient | SteelSeriesRival3HidClient | SteelSeriesAerox3HidClient | SteelSeriesRival3WirelessHidClient | SteelSeriesAerox5HidClient | SteelSeriesAerox5WirelessHidClient | SteelSeriesRival650HidClient | SteelSeriesAerox9WirelessHidClient | SteelSeriesRival310HidClient | SteelSeriesPrimePlusHidClient | SteelSeriesPrimeMiniWirelessHidClient | SteelSeriesSenseiTenHidClient | GloriousHidClient | GloriousClassicHidClient | MchoseHidClient | MchoseDockHidClient | MchoseA5ProMaxHidClient | KsnakeHidClient | MicrosoftHidClient | DareuHidClient | RedragonHidClient | IncottHidClient | HyperXHidClient | MchoseV3HidClient | AsusGladiusIIHidClient | KyuProMx1Client | DeluxHidClient | BytechHidClient;
 
 export interface DeviceDriver {
   brand: string;
@@ -90,6 +92,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Pulsar", supports: (device) => PulsarXs1HidClient.isSupported(device), create: (device) => new PulsarXs1HidClient(device), score: () => 8 },
   { brand: "Pulsar", supports: (device) => PulsarProHidClient.isSupported(device), create: (device) => new PulsarProHidClient(device), score: () => 8 },
   { brand: "Pulsar", supports: (device) => PulsarAresonHidClient.isSupported(device), create: (device) => new PulsarAresonHidClient(device), score: () => 8 },
+  { brand: "GravaStar", supports: (device) => GravaStarHidClient.isSupported(device), create: (device) => new GravaStarHidClient(device), score: () => 7 },
   { brand: "Pulsar", supports: (device) => PulsarHidClient.isSupported(device), create: (device) => new PulsarHidClient(device), score: () => 7 },
   { brand: "Teevolution", supports: (device) => TeevolutionHidClient.isSupported(device), create: (device) => new TeevolutionHidClient(device), score: () => 7 },
   { brand: "VGN", supports: (device) => VgnF2HidClient.isSupported(device), create: (device) => new VgnF2HidClient(device), score: () => 7 },
@@ -127,6 +130,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "WALLHACK", supports: (device) => WallhackMouseHidClient.isSupported(device), create: (device) => new WallhackMouseHidClient(device), score: () => 8 },
   { brand: "WALLHACK", supports: (device) => WallhackKeyboardHidClient.isSupported(device), create: (device) => new WallhackKeyboardHidClient(device), score: () => 8 },
   { brand: "G-Wolves", supports: (device) => GWolvesHidClient.isSupported(device), create: (device) => new GWolvesHidClient(device), score: () => 7 },
+  { brand: "G-Wolves", supports: (device) => GWolvesXviHidClient.isSupported(device), create: (device) => new GWolvesXviHidClient(device), score: () => 7 },
   { brand: "SteelSeries", supports: (device) => SteelSeriesRival3HidClient.isSupported(device), create: (device) => new SteelSeriesRival3HidClient(device), score: () => 6 },
   { brand: "SteelSeries", supports: (device) => SteelSeriesAerox3HidClient.isSupported(device), create: (device) => new SteelSeriesAerox3HidClient(device), score: () => 6 },
   { brand: "SteelSeries", supports: (device) => SteelSeriesRival3WirelessHidClient.isSupported(device), create: (device) => new SteelSeriesRival3WirelessHidClient(device), score: () => 6 },
