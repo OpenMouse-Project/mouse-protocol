@@ -46,7 +46,8 @@
       "@openmouse/protocol/wooting": ["./src/wooting/index.ts"],
       "@openmouse/protocol/zaunkoenig": ["./src/zaunkoenig/index.ts"],
       "@openmouse/protocol/corsair": ["./src/corsair/index.ts"],
-      "@openmouse/protocol/delux": ["./src/delux/index.ts"]
+      "@openmouse/protocol/delux": ["./src/delux/index.ts"],
+      "@openmouse/protocol/bytech": ["./src/bytech/index.ts"]
     }
   },
   "include": ["src/**/*"],

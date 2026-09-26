@@ -21,6 +21,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./bytech": {
+      "types": "./dist/bytech/index.d.ts",
+      "import": "./dist/bytech/index.js"
+    },
     "./atk": {
       "types": "./dist/atk/index.d.ts",
       "import": "./dist/atk/index.js"
