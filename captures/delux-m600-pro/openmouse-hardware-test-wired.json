@@ -1,0 +1,138 @@
+{
+  "device": {
+    "present": true,
+    "brand": "Delux",
+    "name": "Delux M600 Pro (Wired)",
+    "vendorId": 7511,
+    "productId": 64113,
+    "productName": "Delux M600 Pro (Wired)",
+    "transport": "webhid",
+    "connectionType": "Wired",
+    "pollingRateHz": 1000,
+    "supportedPollingRates": [
+      125,
+      250,
+      500,
+      1000
+    ],
+    "dpi": 800,
+    "dpiStages": [
+      800,
+      1600,
+      2400,
+      3200,
+      5000,
+      22000
+    ],
+    "activeDpiStage": 0,
+    "batteryPercent": null,
+    "batteryState": "Unknown",
+    "firmware": null,
+    "liftOffDistance": null,
+    "driverFamily": "delux",
+    "deviceMode": null,
+    "collectionsSummary": "interfaces 0x000C:0x0001, 0x000A:0x0000, 0x000B:0x0000, 0x0001:0x0002",
+    "signalStrength": null,
+    "receiverOnline": null,
+    "receiverRfId": null,
+    "pairingInProgress": false
+  },
+  "results": [
+    {
+      "key": "connection",
+      "label": "Device connected",
+      "status": "pass",
+      "detail": "Connected through WebHID"
+    },
+    {
+      "key": "interface",
+      "label": "Control interface",
+      "status": "pass",
+      "detail": "interfaces 0x000C:0x0001, 0x000A:0x0000, 0x000B:0x0000, 0x0001:0x0002"
+    },
+    {
+      "key": "identity",
+      "label": "Device identity",
+      "status": "pass",
+      "detail": "Delux Delux M600 Pro (Wired)"
+    },
+    {
+      "key": "driver",
+      "label": "Driver identification",
+      "status": "pass",
+      "detail": "Delux delux"
+    },
+    {
+      "key": "dpi",
+      "label": "DPI read-back",
+      "status": "pass",
+      "detail": "800 DPI"
+    },
+    {
+      "key": "pollingRead",
+      "label": "Polling rate read-back",
+      "status": "pass",
+      "detail": "1000 Hz"
+    },
+    {
+      "key": "battery",
+      "label": "Battery read-back",
+      "status": "skip",
+      "detail": "Not reported by this device."
+    },
+    {
+      "key": "firmware",
+      "label": "Firmware read-back",
+      "status": "skip",
+      "detail": "Not reported by this device."
+    },
+    {
+      "key": "liftOff",
+      "label": "Lift-off read-back",
+      "status": "skip",
+      "detail": "Not reported by this device."
+    },
+    {
+      "key": "dpiStages",
+      "label": "DPI stages read-back",
+      "status": "pass",
+      "detail": "800, 1.600, 2.400, 3.200, 5.000, 22.000 DPI"
+    },
+    {
+      "key": "link",
+      "label": "Wireless link (receiver)",
+      "status": "skip",
+      "detail": null
+    },
+    {
+      "key": "flashRead",
+      "label": "Flash / EEPROM read-back",
+      "status": "pass",
+      "detail": "decoded fields are in range (dpi, polling, dpi stages)"
+    },
+    {
+      "key": "sampling",
+      "label": "Polling rate sampling",
+      "status": "skip",
+      "detail": "avg 697 Hz vs reported 1000 Hz — dropout or rate mismatch detected, so the sample is not counted as a failure."
+    },
+    {
+      "key": "flashWrite",
+      "label": "Flash write round-trip",
+      "status": "pass",
+      "detail": "wrote 1.600 DPI → read back → restored 800 DPI · wrote 500 Hz → read back → restored 1.000 Hz · Lift-off skipped"
+    }
+  ],
+  "verdict": "pass",
+  "durationMs": 16619.300000000745,
+  "runAt": "2026-09-25T14:02:05.610Z",
+  "build": "BETA · v2.0.965",
+  "supportedPage": {
+    "listed": false,
+    "status": null,
+    "label": null,
+    "matchedBy": null,
+    "pageModel": null,
+    "detail": "not listed on the supported-devices page"
+  }
+}

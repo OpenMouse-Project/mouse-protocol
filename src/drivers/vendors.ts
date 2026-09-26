@@ -104,11 +104,13 @@ import {
   REDRAGON_PRODUCT_IDS,
   REDRAGON_VENDOR_ID,
 } from "@openmouse/protocol/redragon";
+import { MOTOSPEED_PRODUCTS, MOTOSPEED_USAGE_PAGE, MOTOSPEED_VENDOR_ID } from "@openmouse/protocol/motospeed";
 
 export const VENDOR_ID = {
   vaxee: VAXEE_VENDOR_ID,
   asus: ASUS_VENDOR_ID,
   ryunix: RYUNIX_VENDOR_ID,
+  motospeed: MOTOSPEED_VENDOR_ID,
   pulsar: 0x3710,
   endgameGear: 0x3367,
   wlmouse: 0x36a7,
@@ -503,8 +505,11 @@ export const TEEVOLUTION_PRODUCT_IDS = [0xf520, 0xf523, 0xf5bb, 0xf522] as const
 // {Wireless: "40BD", USB: "C0A8"}), 0xc54f is the PRO X 3 Superstrike's own
 // Lightspeed receiver (a mouse + keyboard + vendor-interface composite that
 // answers HID++ and was rejected as "not a mouse" while unknown; confirmed on
-// hardware - the mouse connects as PRO X3 SUPERSTRIKE on 0x046d:0xc54f), and
-// Bolt product ids live in ./logitech/protocol with the direct-connect list.
+// hardware - the mouse connects as PRO X3 SUPERSTRIKE on 0x046d:0xc54f),
+// 0xc52b and 0xc532 are Unifying receivers (the receiver speaks HID++ 1.0, but
+// MX Vertical / MX Master 2S / MX Anywhere 2 behind it are HID++ 2.0 on slots
+// 1..6, often past a keyboard paired first), and Bolt product ids live in
+// ./logitech/protocol with the direct-connect list.
 export const LOGITECH_RECEIVER_PRODUCT_IDS = [
   0xc54d,
   0xc543,
@@ -513,6 +518,8 @@ export const LOGITECH_RECEIVER_PRODUCT_IDS = [
   0xc547,
   0x40bd,
   0xc54f,
+  0xc52b,
+  0xc532,
   ...LOGITECH_BOLT_PRODUCT_IDS,
 ] as const;
 
@@ -681,6 +688,11 @@ export const RYUNIX_HID_FILTERS: HIDDeviceFilter[] = [...RYUNIX_PRODUCT_IDS].map
   usage: RYUNIX_USAGE,
 }));
 
+export const MOTOSPEED_HID_FILTERS: HIDDeviceFilter[] = MOTOSPEED_PRODUCTS.map(({ productId }) => ({
+  vendorId: MOTOSPEED_VENDOR_ID,
+  productId,
+  usagePage: MOTOSPEED_USAGE_PAGE,
+}));
 
 export const VAXEE_HID_FILTERS: HIDDeviceFilter[] = VAXEE_PRODUCT_IDS.map((productId) => ({
   vendorId: VAXEE_VENDOR_ID, productId, usagePage: VAXEE_USAGE_PAGE, usage: VAXEE_USAGE,
@@ -691,6 +703,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ASUS_GLADIUS_II_HID_FILTERS,
   ...DAREU_HID_FILTERS,
   ...REDRAGON_HID_FILTERS,
+  ...MOTOSPEED_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
     productId,

@@ -31,6 +31,12 @@ import {
   type LamzuAtlantisProduct,
 } from "@openmouse/protocol/lamzu";
 import { pulsarVgnEncodeDpi } from "@openmouse/protocol/pulsar";
+import {
+  TEEVOLUTION_SHARED_BUTTON_OPTIONS,
+  teevolutionDecodeButtonMappings,
+  teevolutionReadKeyTable,
+  teevolutionRemapButton,
+} from "@openmouse/protocol/teevolution";
 
 const RESPONSE_TIMEOUT_MS = 600;
 const RESPONSE_ATTEMPTS = 3;
@@ -252,6 +258,8 @@ export class LamzuAtlantisHidClient {
       const rippleControl = (await this.readField(FLASH.rippleControl, 1))[0] === 1;
       const performanceMode = (await this.readField(FLASH.performanceState, 1))[0] === 1;
       const hyperMode = (await this.readField(FLASH.highPerformance, 1))[0] === 1;
+      const keys = await teevolutionReadKeyTable((address, length) => this.readRaw(address, length));
+      const buttonMappings = teevolutionDecodeButtonMappings(keys, 0);
 
       const wireless = this.isWireless();
       this.stagesY = stagesY;
@@ -295,6 +303,8 @@ export class LamzuAtlantisHidClient {
         rippleControl,
         performanceMode,
         hyperMode,
+        buttonMappings,
+        buttonOptions: TEEVOLUTION_SHARED_BUTTON_OPTIONS,
         firmware: [this.firmware],
       };
     });
@@ -498,6 +508,23 @@ export class LamzuAtlantisHidClient {
       if (colors && stage < colors.length) colors[stage] = confirmed;
       if (colors) this.patch({ dpiStageColors: colors });
       return confirmed;
+    });
+  }
+
+  /** Same key-function records as Teevolution, at the same address. */
+  async setButtonMapping(button: string, action: string): Promise<void> {
+    await this.transaction(async () => {
+      // Each record carries its own checksum, so like a DPI stage it is
+      // written as-is rather than sealed.
+      const confirmed = await teevolutionRemapButton(
+        (address, length) => this.readRaw(address, length),
+        (address, data) => this.write(address, [...data]),
+        button,
+        action,
+        { actions: TEEVOLUTION_SHARED_BUTTON_OPTIONS },
+      );
+      const mappings = this.lastStatus?.buttonMappings;
+      if (confirmed && mappings) this.patch({ buttonMappings: { ...mappings, [button]: confirmed } });
     });
   }
 

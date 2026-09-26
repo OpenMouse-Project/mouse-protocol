@@ -141,7 +141,14 @@ export class EggWeHidClient {
   }
 
   static pickDevices(devices: readonly HIDDevice[]): HIDDevice[] {
-    const we = devices.filter((device) => this.isSupported(device));
+    // The OP1-8K command report sits on one interface of the 4K v2 dongle
+    // only; its sibling interfaces pass isSupported on their own. Decide per
+    // product: if any interface of this VID/PID speaks OP1-8K, none is WE.
+    const op1Products = new Set(devices
+      .filter((device) => this.hasOp1EightKCommandReport(device))
+      .map((device) => `${device.vendorId}:${device.productId}`));
+    const we = devices.filter((device) =>
+      this.isSupported(device) && !op1Products.has(`${device.vendorId}:${device.productId}`));
     if (we.length === 0) return [];
     const ranked = [...we].sort((left, right) => {
       const receiverDelta = Number(this.isReceiverDevice(left)) - Number(this.isReceiverDevice(right));

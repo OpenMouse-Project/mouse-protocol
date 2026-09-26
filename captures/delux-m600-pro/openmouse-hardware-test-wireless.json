@@ -1,0 +1,138 @@
+{
+  "device": {
+    "present": true,
+    "brand": "Delux",
+    "name": "Delux M600 Pro (Wireless)",
+    "vendorId": 7511,
+    "productId": 64096,
+    "productName": "Delux M600 Pro (Wireless)",
+    "transport": "webhid",
+    "connectionType": "Wireless",
+    "pollingRateHz": 1000,
+    "supportedPollingRates": [
+      125,
+      250,
+      500,
+      1000
+    ],
+    "dpi": 1600,
+    "dpiStages": [
+      800,
+      1600,
+      2400,
+      3200,
+      5000,
+      22000
+    ],
+    "activeDpiStage": 1,
+    "batteryPercent": 100,
+    "batteryState": "Discharging",
+    "firmware": null,
+    "liftOffDistance": null,
+    "driverFamily": "attackshark",
+    "deviceMode": null,
+    "collectionsSummary": "interfaces 0x0001:0x0002, 0x000C:0x0001, 0x000A:0x0000, 0x000B:0x0000",
+    "signalStrength": null,
+    "receiverOnline": null,
+    "receiverRfId": null,
+    "pairingInProgress": false
+  },
+  "results": [
+    {
+      "key": "connection",
+      "label": "Device connected",
+      "status": "pass",
+      "detail": "Connected through WebHID"
+    },
+    {
+      "key": "interface",
+      "label": "Control interface",
+      "status": "pass",
+      "detail": "interfaces 0x0001:0x0002, 0x000C:0x0001, 0x000A:0x0000, 0x000B:0x0000"
+    },
+    {
+      "key": "identity",
+      "label": "Device identity",
+      "status": "pass",
+      "detail": "Delux Delux M600 Pro (Wireless)"
+    },
+    {
+      "key": "driver",
+      "label": "Driver identification",
+      "status": "pass",
+      "detail": "Delux attackshark"
+    },
+    {
+      "key": "dpi",
+      "label": "DPI read-back",
+      "status": "pass",
+      "detail": "1.600 DPI"
+    },
+    {
+      "key": "pollingRead",
+      "label": "Polling rate read-back",
+      "status": "pass",
+      "detail": "1000 Hz"
+    },
+    {
+      "key": "battery",
+      "label": "Battery read-back",
+      "status": "pass",
+      "detail": "100%"
+    },
+    {
+      "key": "firmware",
+      "label": "Firmware read-back",
+      "status": "skip",
+      "detail": "Not reported by this device."
+    },
+    {
+      "key": "liftOff",
+      "label": "Lift-off read-back",
+      "status": "skip",
+      "detail": "Not reported by this device."
+    },
+    {
+      "key": "dpiStages",
+      "label": "DPI stages read-back",
+      "status": "pass",
+      "detail": "800, 1.600, 2.400, 3.200, 5.000, 22.000 DPI"
+    },
+    {
+      "key": "link",
+      "label": "Wireless link (receiver)",
+      "status": "pass",
+      "detail": "driver read the wireless connection over the RF link"
+    },
+    {
+      "key": "flashRead",
+      "label": "Flash / EEPROM read-back",
+      "status": "pass",
+      "detail": "decoded fields are in range (dpi, polling, battery, dpi stages)"
+    },
+    {
+      "key": "sampling",
+      "label": "Polling rate sampling",
+      "status": "pass",
+      "detail": "avg 887 Hz · peak 1000 Hz · stability 92% · 2921 samples"
+    },
+    {
+      "key": "flashWrite",
+      "label": "Flash write round-trip",
+      "status": "pass",
+      "detail": "wrote 800 DPI → read back → restored 1.600 DPI · wrote 500 Hz → read back → restored 1.000 Hz · Lift-off skipped"
+    }
+  ],
+  "verdict": "pass",
+  "durationMs": 16598.69999999972,
+  "runAt": "2026-09-25T11:52:32.875Z",
+  "build": "BETA · v2.0.965",
+  "supportedPage": {
+    "listed": true,
+    "status": "supported",
+    "label": "Supported",
+    "matchedBy": "pid",
+    "pageModel": "M800 Mini",
+    "detail": "already listed as Supported on the supported-devices page — no update needed."
+  }
+}

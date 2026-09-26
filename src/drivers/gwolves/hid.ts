@@ -14,6 +14,12 @@ import {
   gwolvesParseReadResponse,
   gwolvesReportChecksumIsValid,
 } from "@openmouse/protocol/gwolves";
+import {
+  TEEVOLUTION_SHARED_BUTTON_OPTIONS,
+  teevolutionDecodeButtonMappings,
+  teevolutionReadKeyTable,
+  teevolutionRemapButton,
+} from "@openmouse/protocol/teevolution";
 import { GWOLVES_PRODUCTS, GWOLVES_VENDOR_ID, type GWolvesProduct } from "./products.ts";
 
 // G-Wolves mice enumerate under their own vendor id (0x33e4) but speak the
@@ -37,6 +43,10 @@ import { GWOLVES_PRODUCTS, GWOLVES_VENDOR_ID, type GWolvesProduct } from "./prod
 // here. Adding support for another G-Wolves model that turns out to share
 // this same protocol should just mean a new entry in that catalog.
 const RESPONSE_TIMEOUT_MS = 700;
+// G-Wolves' web driver (mouse.fit) gives every model in this catalog five
+// remappable buttons (BtnMaxNum and KeyBindingSeq in its env-models.json), so
+// the key table's sixth, DPI, slot stays hidden.
+const BUTTON_LIMITS = { buttons: 5, actions: TEEVOLUTION_SHARED_BUTTON_OPTIONS };
 const SUPPORTED_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
 
 export class GWolvesHidClient {
@@ -111,6 +121,8 @@ export class GWolvesHidClient {
     const batteryResponse = await this.transact(gwolvesBuildSimplePayload(GWOLVES_COMMAND.battery));
     const firmwareResponse = await this.transact(gwolvesBuildSimplePayload(GWOLVES_COMMAND.firmware));
     const profile = await this.readProfile();
+    // Optional: a mouse that will not read its key table keeps the rest of its status.
+    const keys = await teevolutionReadKeyTable((address, length) => this.read(address, length)).catch(() => null);
     const battery = gwolvesParseBattery(batteryResponse);
     const settings = gwolvesDecodeProfile(profile);
     const firmware = this.version(firmwareResponse);
@@ -136,6 +148,7 @@ export class GWolvesHidClient {
       rippleControl: settings.rippleControl,
       performanceMode: settings.performanceMode,
       liftOffDistance: settings.liftOffDistance,
+      ...(keys ? { buttonMappings: teevolutionDecodeButtonMappings(keys, 0, BUTTON_LIMITS.buttons), buttonOptions: BUTTON_LIMITS.actions } : {}),
       firmware: firmware ? [`Mouse ${firmware}`] : [],
       ui: {
         family: "vgn-f2",
@@ -174,6 +187,21 @@ export class GWolvesHidClient {
     const confirmed = gwolvesDecodeProfile(await this.readProfile()).liftOffDistance;
     if (confirmed !== value) throw new Error(`The ${this.product.model} kept ${confirmed ?? "unknown"} LOD instead of ${value}.`);
     return confirmed;
+  }
+
+  /**
+   * Matches G-Wolves' web driver: its Set_MS_KeyFunction writes
+   * [type, param hi, param lo, 0x55 checksum] at 96 + 4 * button, with the
+   * same type and param values as Teevolution's table.
+   */
+  async setButtonMapping(button: string, action: string): Promise<void> {
+    await teevolutionRemapButton(
+      (address, length) => this.read(address, length),
+      (address, data) => this.write(address, [...data]),
+      button,
+      action,
+      BUTTON_LIMITS,
+    );
   }
 
   async close(): Promise<void> {

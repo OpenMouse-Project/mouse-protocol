@@ -1,0 +1,152 @@
+{
+  "method": "SET_FEATURE via HIDIOCSFEATURE on interface 2; effect measured on interface 1 (boot mouse). Polling = peak motion reports per second while moving. DPI = summed X counts over one physical left-to-right swipe of the same length.",
+  "dpiReports": {
+    "all400": "04 38 01 00 00 3f 00 00 09 09 09 09 09 09 00 00 00 00 00 00 00 00 00 00 01 ff 00 00 00 ff 00 00 00 ff ff ff 00 00 ff ff ff 00 ff ff 40 00 ff ff ff 02 0d ab",
+    "all1600": "04 38 01 00 00 3f 00 00 25 25 25 25 25 25 00 00 00 00 00 00 00 00 00 00 01 ff 00 00 00 ff 00 00 00 ff ff ff 00 00 ff ff ff 00 ff ff 40 00 ff ff ff 02 0e 53",
+    "restore": "04 38 01 00 00 3f 20 20 12 25 38 4b 75 81 00 00 00 00 00 00 00 01 00 00 02 ff 00 00 00 ff 00 00 00 ff ff ff 00 00 ff ff ff 00 ff ff 40 00 ff ff ff 02 0f 67"
+  },
+  "polling-wired": {
+    "steps": [
+      {
+        "step": "baseline",
+        "reports": 2417,
+        "peakHz": 849
+      },
+      {
+        "step": "set 125",
+        "sent": "06 09 01 08 f7 00 00 00 00",
+        "reports": 434,
+        "peakHz": 126
+      },
+      {
+        "step": "set 500",
+        "sent": "06 09 01 02 fd 00 00 00 00",
+        "reports": 1841,
+        "peakHz": 502
+      },
+      {
+        "step": "set 1000",
+        "sent": "06 09 01 01 fe 00 00 00 00",
+        "reports": 2814,
+        "peakHz": 978
+      }
+    ]
+  },
+  "polling-wireless": {
+    "steps": [
+      {
+        "step": "baseline",
+        "reports": 3329,
+        "peakHz": 1000
+      },
+      {
+        "step": "set 125",
+        "sent": "06 09 01 08 f7 00 00 00 00",
+        "reports": 478,
+        "peakHz": 126
+      },
+      {
+        "step": "set 500",
+        "sent": "06 09 01 02 fd 00 00 00 00",
+        "reports": 1991,
+        "peakHz": 500
+      },
+      {
+        "step": "set 1000",
+        "sent": "06 09 01 01 fe 00 00 00 00",
+        "reports": 4001,
+        "peakHz": 1002
+      }
+    ]
+  },
+  "dpi-wired": {
+    "pid": "fa71",
+    "steps": [
+      {
+        "step": "all400",
+        "trial": 1,
+        "sumDx": 2635,
+        "sumAbsDx": 2731,
+        "reports": 2698
+      },
+      {
+        "step": "all1600",
+        "trial": 1,
+        "sumDx": 9515,
+        "sumAbsDx": 9515,
+        "reports": 2498
+      },
+      {
+        "step": "all400",
+        "trial": 2,
+        "sumDx": 2774,
+        "sumAbsDx": 2774,
+        "reports": 1727
+      },
+      {
+        "step": "all1600",
+        "trial": 2,
+        "sumDx": 9809,
+        "sumAbsDx": 9809,
+        "reports": 1986
+      }
+    ],
+    "restored": true
+  },
+  "dpi-wireless": {
+    "pid": "fa60",
+    "steps": [
+      {
+        "step": "all400",
+        "trial": 1,
+        "sumDx": 9229,
+        "sumAbsDx": 9231,
+        "reports": 2129
+      },
+      {
+        "step": "all1600",
+        "trial": 1,
+        "sumDx": 9791,
+        "sumAbsDx": 9791,
+        "reports": 2589
+      },
+      {
+        "step": "all400",
+        "trial": 2,
+        "sumDx": 2553,
+        "sumAbsDx": 2553,
+        "reports": 1798
+      },
+      {
+        "step": "all1600",
+        "trial": 2,
+        "sumDx": 9687,
+        "sumAbsDx": 9687,
+        "reports": 2290
+      }
+    ],
+    "restored": true
+  },
+  "idle-wireless": {
+    "note": "idle_test.py log (the run was interrupted, so no JSON was written). Mouse left untouched 15 s before each write.",
+    "rounds": [
+      {
+        "mode": "single",
+        "sent": "all400",
+        "sumDx": 2595,
+        "result": "applied"
+      },
+      {
+        "mode": "single",
+        "sent": "all1600",
+        "sumDx": 9929,
+        "result": "applied"
+      },
+      {
+        "mode": "double (two identical 0x04 writes 500 ms apart)",
+        "sent": "all400",
+        "result": "cursor froze; receiver had to be replugged"
+      }
+    ]
+  }
+}
