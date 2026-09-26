@@ -59,6 +59,7 @@ checklist.
 | Logitech | `@openmouse/protocol/logitech` |
 | MCHOSE | `@openmouse/protocol/mchose` |
 | Microsoft | `@openmouse/protocol/microsoft` |
+| Motospeed | `@openmouse/protocol/motospeed` |
 | moddoMOUSE | `@openmouse/protocol/moddo` |
 | Ninjutso | `@openmouse/protocol/ninjutso` |
 | Orbital | `@openmouse/protocol/orbital` |
