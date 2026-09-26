@@ -61,7 +61,7 @@ export class PulsarHidClient {
       event.data.buffer.slice(event.data.byteOffset, event.data.byteOffset + event.data.byteLength),
     );
     this.reportListener?.({ timestamp: Date.now(), reportId: event.reportId, bytes: [...bytes] });
-    if (event.reportId === CONFIG_REPORT_ID && bytes[0] === this.responseWaiter?.command) {
+    if (event.reportId === this.responseReportId && bytes[0] === this.responseWaiter?.command) {
       const waiter = this.responseWaiter;
       this.responseWaiter = null;
       waiter.resolve(bytes);
@@ -69,6 +69,8 @@ export class PulsarHidClient {
   };
 
   readonly device: HIDDevice;
+  /** Input report the mouse answers on; the Areson-USB X2 answers on 9. */
+  protected readonly responseReportId: number = CONFIG_REPORT_ID;
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -129,7 +131,7 @@ export class PulsarHidClient {
     return await this.withDeviceControl(async () => {
       const flash = await this.readFlash(FLASH.reportRate, FLASH.performanceTime + 2);
       const battery = await this.query(COMMAND.batteryLevel);
-      const deviceVersion = await this.query(COMMAND.readVersionId);
+      const deviceVersion = await this.query(COMMAND.readVersionId).catch(() => null);
       const dongleVersion = await this.query(COMMAND.getDongleVersion).catch(() => null);
       const profile = await this.query(COMMAND.getCurrentConfig).catch(() => null);
       const dongleLed = [0, 3].includes(info.dongleType)
@@ -177,7 +179,7 @@ export class PulsarHidClient {
    * mice (including the X2 CrazyLight). Branch on vendor id, not CID/MID —
    * those are Pulsar-internal identifiers this receiver family reuses.
    */
-  private isVgnReceiver(): boolean {
+  protected isVgnReceiver(): boolean {
     return this.device.vendorId === VGN_VENDOR_ID;
   }
 
@@ -409,13 +411,17 @@ export class PulsarHidClient {
     });
     void response.catch(() => undefined);
     try {
-      await this.device.sendReport(CONFIG_REPORT_ID, packet);
+      await this.sendPacket(packet);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       (rejectResponse as ((reason: Error) => void) | null)?.(new Error(`Chrome could not write Pulsar report 8. ${detail}`));
       this.responseWaiter = null;
     }
     return await response;
+  }
+
+  protected async sendPacket(packet: Uint8Array<ArrayBuffer>): Promise<void> {
+    await this.device.sendReport(CONFIG_REPORT_ID, packet);
   }
 
   private createPacket(command: number): Uint8Array<ArrayBuffer> {
