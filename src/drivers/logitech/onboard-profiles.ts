@@ -53,7 +53,15 @@ const PROFILE_FORMAT_NAMES: Record<number, string> = {
  * hardware sanity check on a G502/G403-family device is still required before
  * release — see docs/logitech-onboard-profiles.md.
  */
-const VERIFIED_FORMATS = new Set([2, 3, 4, 7]);
+/**
+ * Format 8 (PRO X 2 / PRO X 3 Superstrike) joins this set on a CRC-matching
+ * full dump: profile sector 1 from a PRO X 3 diagnostic, all 255 bytes, checks
+ * out against its own stored CRC (0x2a38, identical on the PRO X 2). That
+ * confirms the layout, so profiles can be opened, switched and enabled. It is
+ * deliberately not in WRITABLE_FORMATS: profile contents stay locked until a
+ * write to this format has been captured.
+ */
+const VERIFIED_FORMATS = new Set([2, 3, 4, 7, 8]);
 const WRITABLE_FORMATS = new Set([2, 3, 4, 7]);
 const PROFILE_WRITE_PROBE_FORMATS = new Set([2, 3, 4]);
 const FACTORY_RESET_FORMATS = new Set([7]);

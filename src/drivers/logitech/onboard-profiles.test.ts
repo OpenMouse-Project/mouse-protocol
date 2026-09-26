@@ -78,13 +78,14 @@ const SECTOR_3 = bytes(`
  * from a user diagnostic's raw 0x0E/0x55 memory reads. Five DPI stages -
  * 800/1200/1600/2400/3200, all X=Y linked, lift-off byte 2 ("Medium") on
  * every stage. First hardware confirmation of format 8's DPI table layout
- * and lift-off range; see the capabilitiesForFormat(8) comment. Trailing
- * unread bytes (0x1d-0x1f, 0xdc-0xdf) are filled ff like an unwritten region -
- * outside the fields this fixture exercises.
+ * and lift-off range; see the capabilitiesForFormat(8) comment. Seven bytes
+ * (0x1d-0x1f, 0xdc-0xdf) are missing from the diagnostic log, which drops
+ * trailing zero bytes from a reply; they are zeros, and the sector's stored
+ * CRC only matches with them filled that way (see the CRC test below).
  */
 const SECTOR_1_SUPERSTRIKE = bytes(`
   03 03 00 00 20 03 20 03 02 b0 04 b0 04 02 40 06
-  40 06 02 60 09 60 09 02 80 0c 80 0c 02 ff ff ff
+  40 06 02 60 09 60 09 02 80 0c 80 0c 02 00 00 00
   00 ff 00 ff ff ff 14 08 0c 14 08 0c 3c 00 2c 01
   80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08
   80 01 00 10 ff ff ff ff ff ff ff ff ff ff ff ff
@@ -96,7 +97,7 @@ const SECTOR_1_SUPERSTRIKE = bytes(`
   ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
   ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
   ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
-  03 00 00 00 00 00 1f 40 00 00 00 03 ff ff ff ff
+  03 00 00 00 00 00 1f 40 00 00 00 03 00 00 00 00
   00 1f 40 00 00 00 03 00 00 00 00 00 1f 40 32 00
   00 03 00 00 00 00 00 1f 40 32 00 00 03 2a 38
 `);
@@ -1052,6 +1053,14 @@ test("lift-off limits come from the profile format, not the model", () => {
   assert.deepEqual(capabilitiesForFormat(null).supportedLods, ["Medium", "High"]);
   assert.deepEqual(capabilitiesForFormat(undefined).supportedLods, ["Medium", "High"]);
   assert.deepEqual(capabilitiesForFormat(99).supportedLods, ["Medium", "High"]);
+});
+
+test("the captured format 8 profile matches its own stored CRC", () => {
+  // Full 255-byte sector, checksum included: this is what lets format 8 count
+  // as verified. A CRC-16 match over that many bytes is not a coincidence.
+  assert.equal(profileCrc(SECTOR_1_SUPERSTRIKE), storedCrc(SECTOR_1_SUPERSTRIKE));
+  assert.equal(storedCrc(SECTOR_1_SUPERSTRIKE), 0x2a38);
+  assert.equal(describeProfileFormat(8).verified, true);
 });
 
 test("format 8's DPI stages decode from a real PRO X 2 and PRO X 3 Superstrike capture", () => {
