@@ -505,8 +505,11 @@ export const TEEVOLUTION_PRODUCT_IDS = [0xf520, 0xf523, 0xf5bb, 0xf522] as const
 // {Wireless: "40BD", USB: "C0A8"}), 0xc54f is the PRO X 3 Superstrike's own
 // Lightspeed receiver (a mouse + keyboard + vendor-interface composite that
 // answers HID++ and was rejected as "not a mouse" while unknown; confirmed on
-// hardware - the mouse connects as PRO X3 SUPERSTRIKE on 0x046d:0xc54f), and
-// Bolt product ids live in ./logitech/protocol with the direct-connect list.
+// hardware - the mouse connects as PRO X3 SUPERSTRIKE on 0x046d:0xc54f),
+// 0xc52b and 0xc532 are Unifying receivers (the receiver speaks HID++ 1.0, but
+// MX Vertical / MX Master 2S / MX Anywhere 2 behind it are HID++ 2.0 on slots
+// 1..6, often past a keyboard paired first), and Bolt product ids live in
+// ./logitech/protocol with the direct-connect list.
 export const LOGITECH_RECEIVER_PRODUCT_IDS = [
   0xc54d,
   0xc543,
@@ -515,6 +518,8 @@ export const LOGITECH_RECEIVER_PRODUCT_IDS = [
   0xc547,
   0x40bd,
   0xc54f,
+  0xc52b,
+  0xc532,
   ...LOGITECH_BOLT_PRODUCT_IDS,
 ] as const;
 

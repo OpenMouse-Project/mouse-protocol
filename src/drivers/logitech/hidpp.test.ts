@@ -342,6 +342,12 @@ async function resolveIndexExcluding(
   return driver.resolvedDeviceIndex;
 }
 
+test("a Unifying receiver's mouse is found past a keyboard paired first", async () => {
+  // Unknown receivers only try 0xFF then 0x01, which latched onto the keyboard.
+  const { client } = harness(0xc52b, { 0x01: "keyboard", 0x03: "mouse" });
+  assert.equal(await resolveIndex(client), 0x03);
+});
+
 test("a merged receiver's mouse is found past the empty first slot", async () => {
   // The G502 X PLUS moves off slot 0x01 once G HUB merges the keyboard in.
   const { client, device } = harness(0xc547, { 0x02: "mouse" });
