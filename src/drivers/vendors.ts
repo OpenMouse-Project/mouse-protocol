@@ -772,7 +772,10 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // Fantech mice use vendor usage page 0xFFFF, usage 0x02 for configuration.
   { vendorId: VENDOR_ID.fantech, usagePage: 0xffff, usage: 0x02 },
   ...WALLHACK_HID_FILTERS,
-  ...[...GWOLVES_PRODUCTS.keys()].map((productId) => ({ vendorId: VENDOR_ID.gwolves, productId, usagePage: 0xff02 })),
+  // The XVI generation's 64-byte feature report is found by shape, not usage
+  // page (see gwolves/xvi-hid.ts), so those models match on product id alone.
+  ...[...GWOLVES_PRODUCTS].filter(([, product]) => product.protocol !== "xvi-new").map(([productId, product]) => (
+    product.protocol === "vgn" ? { vendorId: VENDOR_ID.gwolves, productId, usagePage: 0xff02 } : { vendorId: VENDOR_ID.gwolves, productId })),
   ...STEELSERIES_RIVAL3_FILTERS,
   { vendorId: VENDOR_ID.glorious },
   ...GLORIOUS_CLASSIC_HID_FILTERS,

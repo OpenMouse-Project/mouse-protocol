@@ -69,7 +69,7 @@ export class GWolvesHidClient {
   // device recognition, so adding a model is purely a data change there.
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== GWOLVES_VENDOR_ID) return false;
-    if (!GWOLVES_PRODUCTS.has(device.productId)) return false;
+    if (GWOLVES_PRODUCTS.get(device.productId)?.protocol !== "vgn") return false;
     return device.collections.some((collection) =>
       collection.usagePage === 0xff02
       && collection.inputReports.some((report) => report.reportId === GWOLVES_REPORT_ID && this.reportLength(report) === 16)

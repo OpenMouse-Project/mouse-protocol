@@ -49,6 +49,8 @@ function collectionShapes(): HIDCollectionInfo[][] {
     collection(0xff05, 0),
     collection(0xff02, 2, { input: [8], output: [8] }),
   ]);
+  // G-Wolves XVI: a single unnumbered 64-byte feature report, found by shape.
+  shapes.push([{ ...collection(0xff00, 1), featureReports: [report(0, 64)] } as HIDCollectionInfo]);
   shapes.push(USAGE_PAGES.map((page) =>
     collection(page, 1, { feature: REPORT_IDS, input: REPORT_IDS, output: REPORT_IDS })));
   for (const page of USAGE_PAGES) {
