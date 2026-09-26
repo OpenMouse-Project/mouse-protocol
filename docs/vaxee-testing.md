@@ -1,0 +1,9 @@
+# VAXEE Control Center protocol
+
+Source: the public [VAXEE Control Center](https://vcc.vaxee.cn/index.php), version 3.6, specifically its `api/api_core.js`, `api/api.js`, and `api/paramter.js` modules. The global site has the same page but currently serves a browser challenge to automated requests. The code in this repository is an independent implementation of the commands exposed by those modules.
+
+The site advertises USB VID `3057`, the `FF05:0001` control collection, feature report `0E`, and the product IDs in `src/vaxee/index.ts`. Requests are 63 data bytes after the report ID. The panel sends a request, waits 100 ms, then reads feature report `0E`. Reply data begins at byte 5. The battery value is in 5% steps, which the panel multiplies by five.
+
+OpenMouse currently exposes the active DPI stage, polling rate, battery, and lift-off distance. DPI, polling, and LOD writes are followed by a read-back. The driver limits DPI writes to the common 100–26,000 range in steps of 50 and limits the polling choices to rates the current wired or receiver path can safely use. VAXEE's newer 3954 models expose additional DPI and 8 kHz options, while the Control Center also supports tracking modes, trajectory, click latency, profiles, and key remapping. Those need model-specific verification before they are exposed here.
+
+No model or connection path has been exercised on physical hardware yet. To validate one, record the mouse and receiver USB IDs, firmware versions, control-collection descriptor, and sanitized replies for commands `01`, `02`, `04`, `07`, `09`, `0A`, `0B`, and `10`. Test read-back after each setting change and note which writes persist after reconnection. The receiver may report a mouse PID distinct from its own USB PID. Avoid sharing device serial numbers or raw captures with personal data.

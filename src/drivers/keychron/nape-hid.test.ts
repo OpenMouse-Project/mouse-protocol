@@ -479,3 +479,20 @@ test("saves per-layer orientation as [57, layer, index] and applies live angle o
   const status = await client.readStatus();
   assert.match(status.connectionDetail ?? "", /90° orientation/);
 });
+
+test("status is flagged unverified when the polling read fails", async () => {
+  const fake = new FakeHidDevice();
+  const client = new KeychronNapeHidClient(fake as unknown as HIDDevice);
+  assert.equal((await client.readStatus()).ui?.valuesVerified, true);
+
+  const send = fake.sendReport.bind(fake);
+  fake.sendReport = async (reportId, data) => {
+    const bytes = data as Uint8Array;
+    if (bytes[0] === CMD.miscGroup && bytes[1] === MISC.getPolling) throw new Error("stalled");
+    return send(reportId, data);
+  };
+  const status = await client.readStatus();
+  assert.equal(status.pollingRateHz, 1000);
+  assert.equal(status.ui?.valuesVerified, false);
+  assert.notEqual(status.ui?.settingsReady, false);
+});

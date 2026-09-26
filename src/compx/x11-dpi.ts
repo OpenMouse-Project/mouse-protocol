@@ -90,6 +90,9 @@ const STEP_ENTRIES: ReadonlyArray<readonly [number, number]> = Object.entries(X1
   .map(([dpi, byte]) => [Number(dpi), byte] as const)
   .sort((a, b) => a[0] - b[0]);
 
+/** Every encodable DPI value, ascending (50-step to 10,000, 100-step above). */
+export const X11_DPI_VALUES: readonly number[] = STEP_ENTRIES.map(([dpi]) => dpi);
+
 /** Nearest supported DPI at or above `dpi`, clamped to the sensor's range. */
 export function nearestX11Dpi(dpi: number): number {
   const target = Math.min(X11_DPI_MAX, Math.max(X11_DPI_MIN, Math.round(dpi)));

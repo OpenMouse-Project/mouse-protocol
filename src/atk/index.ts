@@ -577,3 +577,78 @@ export function atkParseCompxFirmware(data: Uint8Array): AtkCompxFirmwareInfo {
     payloadCrcValid: atkCompxPayloadCrc(payload) === payloadCrc,
   };
 }
+
+// ── F1 Ultimate 2.0 (CID 1, MID 8) verified additions ──────────────────────
+//
+// Captured 2026-09-22 from ATK HUB web (hub.atk.pro) against VID 0x373b PID
+// 0x11d9 ("Wireless mouse 8k dongle-L"), mouse FW V3.03, receiver V3.01, via a
+// WebHID sendReport hook. Every frame below was observed on the wire and the
+// matching user-visible behavior confirmed by hand; see
+// captures/atk-f1-ultimate/ in the integration workspace (not committed).
+
+/** Sensor sampling-rate modes: 0 Basic, 1 Shard, 2 Shard MAX. */
+
+/** EEPROM address of the 6-byte sensor-performance row. */
+export const ATK_SENSOR_PERFORMANCE_REGISTER = 0x00b5;
+
+/**
+ * Stable marker bytes of the sensor-performance row on the F1 Ultimate 2.0.
+ * Bytes 0-1 vary (`[0, 0x55]` in HUB-written rows, `[1, 0x54]` live) and carry
+ * an unknown field, so decoding only trusts bytes 2-3 plus the mode pair.
+ */
+export const ATK_SENSOR_PERFORMANCE_MARKER: readonly number[] = [6, 0x4f];
+
+/** Build the 6-byte sensor-performance row for a mode, or null when invalid. */
+export function atkPackSensorMode(mode: number): number[] | null {
+  if (!Number.isInteger(mode) || mode < 0 || mode > 2) return null;
+  return [0, CHECKSUM_TOTAL, ...ATK_SENSOR_PERFORMANCE_MARKER, mode, (CHECKSUM_TOTAL - mode) & 0xff];
+}
+
+/** Decode the mode of a 6-byte sensor-performance row, or null when invalid. */
+export function atkDecodeSensorMode(data: Uint8Array | readonly number[]): number | null {
+  if (data.length < 6) return null;
+  if (data[2] !== ATK_SENSOR_PERFORMANCE_MARKER[0] || data[3] !== ATK_SENSOR_PERFORMANCE_MARKER[1]) return null;
+  const mode = data[4]!;
+  if (!Number.isInteger(mode) || mode < 0 || mode > 2) return null;
+  if (((mode + data[5]!) & 0xff) !== CHECKSUM_TOTAL) return null;
+  return mode;
+}
+
+/**
+ * Scroll-wheel anti-mistouch lives in the system row at 0x0000, bytes 6-7.
+ * Stored in 10 ms units; `[0, 0x55]` disables. HUB default on the F1 Ultimate
+ * 2.0 is off; 100 ms and 500 ms were exercised on hardware.
+ */
+export const ATK_ANTI_MISTOUCH_OFFSET = 6;
+export const ATK_ANTI_MISTOUCH_STEP_MS = 10;
+export const ATK_ANTI_MISTOUCH_MAX_MS = 255 * ATK_ANTI_MISTOUCH_STEP_MS;
+
+/** Build the value/checksum pair for an anti-mistouch time, or null. */
+export function atkPackAntiMistouch(milliseconds: number): number[] | null {
+  if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > ATK_ANTI_MISTOUCH_MAX_MS) return null;
+  if (milliseconds !== 0 && milliseconds % ATK_ANTI_MISTOUCH_STEP_MS !== 0) return null;
+  const units = milliseconds / ATK_ANTI_MISTOUCH_STEP_MS;
+  return [units, (CHECKSUM_TOTAL - units) & 0xff];
+}
+
+/** Decode an anti-mistouch pair to milliseconds, or null when invalid. */
+export function atkDecodeAntiMistouch(value: number, checksum: number): number | null {
+  if (((value + checksum) & 0xff) !== CHECKSUM_TOTAL) return null;
+  if (!Number.isInteger(value) || value < 0 || value > 0xff) return null;
+  return value * ATK_ANTI_MISTOUCH_STEP_MS;
+}
+
+/** Dongle LED effect command; modes are 0 off, 1 polling, 2 battery, 3 low battery. */
+export const ATK_DONGLE_LIGHT_COMMAND = 0x14;
+
+/** Build the 16-byte SetDongleLight frame for a mode, or null when invalid. */
+export function atkBuildDongleLight(mode: number): Uint8Array | null {
+  if (!Number.isInteger(mode) || mode < 0 || mode > 3) return null;
+  const payload = new Uint8Array(16);
+  payload[0] = ATK_DONGLE_LIGHT_COMMAND;
+  payload[4] = 10;
+  payload[5] = mode;
+  const sum = 0x08 + payload.subarray(0, 15).reduce((total, byte) => total + byte, 0);
+  payload[15] = (CHECKSUM_TOTAL - (sum & 0xff)) & 0xff;
+  return payload;
+}

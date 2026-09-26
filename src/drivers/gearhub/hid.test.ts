@@ -591,6 +591,27 @@ describe("GearHubHidClient", () => {
     assert.equal(write![46], 0x12);
   });
 
+  it("setDpiStageValue writes the stage editor's shared name into the table", async () => {
+    // The app gates stage-table writability on this exact method name, so it
+    // must land on the same whole-table write `setDpiForStage` uses: one DPI
+    // value on both axes, siblings and colours untouched, active stage kept.
+    const { device, sent } = fakeReceiver({
+      replies: { [CMD.GET_DPI]: dpiReply([800, 1600, 3200], 0, [0x100000, 0x110000, 0x120000]) },
+    });
+    const confirmed = await new GearHubHidClient(device).setDpiStageValue(1, 6400);
+
+    assert.equal(confirmed, 6400);
+    const write = sent.filter((buf) => buf[0] === CMD.SET_DPI).at(-1);
+    assert.ok(write, "a SET_DPI report should have been sent");
+    const u16 = (buf: Uint8Array, i: number) => buf[i] | (buf[i + 1] << 8);
+    assert.equal(u16(write!, 8), 800);    // stage 0 untouched
+    assert.equal(u16(write!, 10), 6400);  // stage 1 X updated
+    assert.equal(u16(write!, 12), 3200);  // stage 2 untouched
+    assert.equal(u16(write!, 26), 6400);  // stage 1 Y updated with X
+    assert.deepEqual([write![40], write![43], write![46]], [0x10, 0x11, 0x12], "colours carried over");
+    assert.equal(write![2], 0, "active stage kept");
+  });
+
   it("setDpiStageColor recolours one stage and keeps the other stages", async () => {
     const { device, sent } = fakeReceiver({
       replies: { [CMD.GET_DPI]: dpiReply([800, 1600, 3200], 0, [0x111111, 0x222222, 0x333333]) },

@@ -125,6 +125,8 @@ test("core1 device exposes full DPI/polling/LOD support", async () => {
   assert.equal(await client.setLiftOffDistance("High"), "High");
   assert.ok(sent.length >= 3, "expected DPI/stage, polling, and LOD writes");
   const status = await client.readStatus();
+  assert.equal(status.ui?.valuesVerified, false);
+  assert.notEqual(status.ui?.settingsReady, false);
   assert.notEqual(status.liftOffDistance, null);
   assert.ok(status.supportedPollingRates && status.supportedPollingRates.length > 0);
 });

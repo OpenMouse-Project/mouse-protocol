@@ -258,6 +258,39 @@ export class AtkBitmouseHidClient {
     return await this.writeStage(stage, dpi);
   }
 
+  /**
+   * Moves the DPI cycle onto another stage. The vendor applies, rather than
+   * merely stores, exactly the stage it enables in a write, so switching the
+   * active stage re-sends the target stage's own record with `enable` set; the
+   * read-back's `currentIndex` confirms the mouse moved.
+   */
+  async setActiveDpiStage(index: number): Promise<number> {
+    if (!this.dpiBlock) this.dpiBlock = await this.readDpiBlock();
+    const stage = this.dpiBlock?.stages[index];
+    if (!stage) throw new Error("The mouse did not report its DPI stages.");
+    await this.write(bitmouseSetDpiRequest({
+      index,
+      x: stage.x,
+      y: stage.y,
+      red: stage.red,
+      green: stage.green,
+      blue: stage.blue,
+      enable: true,
+    }));
+    this.dpiBlock = await this.readDpiBlock();
+    const confirmed = this.dpiBlock?.currentIndex;
+    if (confirmed !== index) {
+      throw new Error(`The mouse stayed on stage ${(confirmed ?? 0) + 1} instead of ${index + 1}.`);
+    }
+    const stages = this.dpiBlock ? bitmouseEnabledStages(this.dpiBlock).map((entry) => entry.x) : undefined;
+    this.patch({
+      dpiStages: stages?.length ? stages : undefined,
+      activeDpiStage: confirmed,
+      dpi: this.dpiBlock?.stages[index]?.x ?? this.lastStatus?.dpi ?? 0,
+    });
+    return index;
+  }
+
   private async writeStage(index: number, dpi: number): Promise<number> {
     const range = BITMOUSE_DPI_RANGES[this.product?.sensor ?? "PAW3950Ultra"];
     if (!Number.isInteger(dpi) || dpi < range.min || dpi > range.max) {

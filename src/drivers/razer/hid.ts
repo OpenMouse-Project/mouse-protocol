@@ -21,6 +21,7 @@ import {
   decodeBatteryPercent,
   decodeCharging,
   decodeDpi,
+  decodeDpiStages,
   decodeExtendedPollingRate,
   decodeFirmwareVersion,
   decodeLegacyPollingRate,
@@ -38,7 +39,9 @@ import {
   razerSetButtonMappingCommand,
   razerSetToggleControlCommand,
   razerReadDpiCommand,
+  razerReadDpiStagesCommand,
   razerSetDpiCommand,
+  razerSetDpiStagesCommand,
   razerSetExtendedPollingCommand,
   razerSetLegacyPollingCommand,
   razerMaxLanding,
@@ -52,6 +55,7 @@ import {
   type RazerButtonControl,
   type RazerButtonMapping,
   type RazerCommand,
+  type RazerDpi,
   type RazerLiftOff,
   type RazerToggleControl,
   type RazerTrackingDistance,
@@ -59,6 +63,10 @@ import {
 
 // The sensor takes any whole DPI from here up to the model's ceiling, per axis.
 const DPI_MIN = 100;
+// The vendor software steps DPI stage values by 50, so the stage editor's
+// slider does too. Individual values off that grid are still accepted by the
+// single-DPI path, which validates against the whole list.
+const DPI_STEP = 50;
 const RESPONSE_DELAY_MS = 100;
 const RESPONSE_ATTEMPTS = 6;
 // How long a polling-rate change takes to re-establish the wireless link. The
@@ -294,6 +302,7 @@ export class RazerHidClient {
     const sleep = hasBattery ? await this.request(RAZER_READ.sleepTimeout).catch(() => null) : null;
     const lowPower = hasBattery ? await this.request(RAZER_READ.lowPowerThreshold).catch(() => null) : null;
     const dpi = decodeDpi(await this.request(razerReadDpiCommand(this.dpiStorageByte())));
+    const stages = await this.readDpiStages();
     const pollingRateHz = await this.readPollingRateHz();
     const buttonMappings = await this.currentButtonMappings();
     // Asked of the product, not of the mouse. A model without lift-off can
@@ -325,6 +334,22 @@ export class RazerHidClient {
         showAdvancedSection: sleep !== null || buttonMappings !== null,
         forceShowBattery: battery ? true : undefined,
         defaultDisplayName: this.profile()?.model,
+        // The stage read answered on this connection, so the shared stage
+        // editor is offered below. `countEditable: false` pins it to the
+        // table's own row count; the write (`0x04`/`0x06`) is modelled on
+        // OpenRazer's kernel driver and made writable via
+        // `setDpiStageValue`/`setActiveDpiStage`.
+        ...(stages
+          ? {
+            dpiStageEditor: {
+              maxStages: stages.stages.length,
+              countEditable: false,
+              minDpi: DPI_MIN,
+              maxDpi: this.maxDpi(),
+              stepDpi: DPI_STEP,
+            },
+          }
+          : {}),
       },
       batteryPercent: battery?.percent ?? null,
       batteryState: battery?.state ?? "Unknown",
@@ -353,6 +378,9 @@ export class RazerHidClient {
         }
         : null,
       razerButtonMappings: buttonMappings ?? undefined,
+      // Writable through `setDpiStageValue`/`setActiveDpiStage`, which rewrite
+      // the whole table and confirm by reading it back.
+      ...(stages ? { dpiStages: stages.stages, activeDpiStage: stages.active } : {}),
       firmware: [`Mouse ${decodeFirmwareVersion(firmware)}`],
     };
   }
@@ -554,6 +582,100 @@ export class RazerHidClient {
   async readLiftOff(): Promise<RazerLiftOff | null> {
     const reply = await this.request(RAZER_READ.liftOff).catch(() => null);
     return reply ? decodeLiftOff(reply) : null;
+  }
+
+  /**
+   * Reads the stored DPI stage table (`0x04`/`0x86`) and which stage is
+   * active, for the app's shared multi-stage editor.
+   *
+   * The read is verified on hardware; the matching write (`0x04`/`0x06`) is
+   * implemented in `setDpiStageValue`/`setActiveDpiStage` below, so the table
+   * is published writable when the mouse answers it.
+   *
+   * Returns null when the mouse does not answer or the reply decoded to no
+   * usable values, mirroring `readLiftOff`'s degradation: a status read that
+   * throws takes the whole panel down rather than one control. Values outside
+   * the sensor's range are filtered rather than clamped, since a stage the
+   * mouse cannot hold must not be offered.
+   */
+  private async readDpiStages(): Promise<{ stages: number[]; active: number } | null> {
+    const reply = await this.request(RAZER_READ.dpiStages).catch(() => null);
+    if (!reply) return null;
+    const decoded = decodeDpiStages(reply);
+    const ceiling = this.maxDpi();
+    const stages = decoded.stages
+      .map(({ x }) => x)
+      .filter((value) => value >= DPI_MIN && value <= ceiling);
+    if (stages.length === 0) return null;
+    // The reply numbers stages from one; the panel indexes from zero. Clamped
+    // so a corrupt index still lands on a row the panel can highlight.
+    const active = Math.min(Math.max(decoded.active - 1, 0), stages.length - 1);
+    return { stages, active };
+  }
+
+  /**
+   * The stored stage table through the same store byte the setters write
+   * through (`dpiStorageByte()`), so a verify-read can never see the other
+   * store's stale copy. Kept apart from `readDpiStages` because that one keeps
+   * the verified `0x00` selector and filters out-of-range stages, while a
+   * rewrite must echo every stored stage unchanged rather than drop one.
+   */
+  private async readDpiTable(): Promise<{ stages: RazerDpi[]; active: number } | null> {
+    const reply = await this.request(razerReadDpiStagesCommand(this.dpiStorageByte())).catch(() => null);
+    if (!reply) return null;
+    return decodeDpiStages(reply);
+  }
+
+  private async writeDpiTable(active: number, stages: RazerDpi[]): Promise<void> {
+    await this.request(razerSetDpiStagesCommand(active, stages, this.dpiStorageByte()));
+  }
+
+  /**
+   * Replaces one DPI stage's resolution. The write carries the whole stage
+   * table, so the sibling stages are read back and echoed unchanged, and the
+   * change is confirmed by reading the table again. `stage` is zero-based, as
+   * the stage editor numbers its rows.
+   */
+  async setDpiStageValue(stage: number, dpi: number): Promise<number> {
+    const ceiling = this.maxDpi();
+    if (!Number.isInteger(dpi) || dpi < DPI_MIN || dpi > ceiling) {
+      throw new Error(`DPI must be a whole number between ${DPI_MIN} and ${ceiling.toLocaleString()}.`);
+    }
+    const table = await this.readDpiTable();
+    if (!table || table.stages.length === 0) {
+      throw new Error("The mouse did not report its DPI stages.");
+    }
+    if (!Number.isInteger(stage) || stage < 0 || stage >= table.stages.length) {
+      throw new Error(`DPI stage ${stage} is out of range 0-${table.stages.length - 1}.`);
+    }
+    const stages = table.stages.map((entry, index) => index === stage ? { x: dpi, y: dpi } : entry);
+    await this.writeDpiTable(table.active, stages);
+    const confirmed = await this.readDpiTable();
+    if (!confirmed || confirmed.stages[stage]?.x !== dpi) {
+      throw new Error(
+        `The mouse kept ${confirmed?.stages[stage]?.x.toLocaleString() ?? "no"} DPI on stage ${stage + 1} instead of ${dpi.toLocaleString()}.`,
+      );
+    }
+    return dpi;
+  }
+
+  /** Moves the mouse onto another DPI stage, confirming with a read-back. */
+  async setActiveDpiStage(stage: number): Promise<number> {
+    const table = await this.readDpiTable();
+    if (!table || table.stages.length === 0) {
+      throw new Error("The mouse did not report its DPI stages.");
+    }
+    if (!Number.isInteger(stage) || stage < 0 || stage >= table.stages.length) {
+      throw new Error(`DPI stage ${stage} is out of range 0-${table.stages.length - 1}.`);
+    }
+    await this.writeDpiTable(stage + 1, table.stages);
+    const confirmed = await this.readDpiTable();
+    if (!confirmed || confirmed.active !== stage + 1) {
+      throw new Error(
+        `The mouse stayed on DPI stage ${confirmed?.active ?? "an unknown one"} instead of ${stage + 1}.`,
+      );
+    }
+    return stage;
   }
 
   /**

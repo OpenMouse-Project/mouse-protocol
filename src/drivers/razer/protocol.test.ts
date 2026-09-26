@@ -28,7 +28,9 @@ import {
   encodeRazerRequest,
   razerChecksum,
   razerReadDpiCommand,
+  razerReadDpiStagesCommand,
   razerSetDpiCommand,
+  razerSetDpiStagesCommand,
   razerSetExtendedPollingCommand,
   razerSetLegacyPollingCommand,
   razerMaxLanding,
@@ -334,6 +336,52 @@ test("a DPI write reads back through the same storage", () => {
   const read = encodeRazerRequest(RAZER_READ.dpi);
 
   assert.equal(written[8], read[8]);
+});
+
+test("a DPI stage-table write mirrors the read's fixed payload", () => {
+  const packet = encodeRazerRequest(razerSetDpiStagesCommand(3, [
+    { x: 400, y: 400 },
+    { x: 800, y: 800 },
+    { x: 1600, y: 1600 },
+    { x: 3200, y: 3200 },
+    { x: 6400, y: 6400 },
+  ]));
+
+  assert.equal(packet[5], RAZER_READ.dpiStages.dataSize, "the write length is pinned to the read-back");
+  assert.equal(packet[6], 0x04);
+  assert.equal(packet[7], 0x06);
+  assert.deepEqual([...packet.slice(8, 11)], [0x01, 0x03, 0x05], "storage, 1-based active, count");
+  assert.deepEqual([...packet.slice(11, 18)], [0x00, 0x01, 0x90, 0x01, 0x90, 0x00, 0x00]);
+  assert.deepEqual([...packet.slice(18, 25)], [0x01, 0x03, 0x20, 0x03, 0x20, 0x00, 0x00]);
+  assert.deepEqual([...packet.slice(25, 32)], [0x02, 0x06, 0x40, 0x06, 0x40, 0x00, 0x00]);
+  assert.deepEqual([...packet.slice(32, 39)], [0x03, 0x0c, 0x80, 0x0c, 0x80, 0x00, 0x00]);
+  assert.deepEqual([...packet.slice(39, 46)], [0x04, 0x19, 0x00, 0x19, 0x00, 0x00, 0x00]);
+  assert.equal(packet[88], razerChecksum(packet));
+});
+
+test("the DPI stage-table write clears the high bit of its read", () => {
+  assert.equal(RAZER_WRITE.dpiStages.commandClass, RAZER_READ.dpiStages.commandClass);
+  assert.equal(RAZER_WRITE.dpiStages.commandId, RAZER_READ.dpiStages.commandId & 0x7f);
+  assert.equal(RAZER_WRITE.dpiStages.dataSize, RAZER_READ.dpiStages.dataSize);
+});
+
+test("a short stage table writes zero-padded slots the count byte keeps inert", () => {
+  // The kernel driver always sends the full 38-byte payload; a two-stage table
+  // still declares the read's fixed length, with the unused records left zero.
+  const packet = encodeRazerRequest(razerSetDpiStagesCommand(2, [{ x: 400, y: 400 }, { x: 800, y: 800 }]));
+
+  assert.equal(packet[5], 0x26);
+  assert.deepEqual([...packet.slice(8, 11)], [0x01, 0x02, 0x02]);
+  assert.deepEqual([...packet.slice(11, 18)], [0x00, 0x01, 0x90, 0x01, 0x90, 0x00, 0x00]);
+  assert.deepEqual([...packet.slice(18, 25)], [0x01, 0x03, 0x20, 0x03, 0x20, 0x00, 0x00]);
+  assert.deepEqual([...packet.slice(25, 46)], new Array(21).fill(0), "unused slots stay zero");
+});
+
+test("a DPI stage-table write validates active and stage values", () => {
+  assert.throws(() => razerSetDpiStagesCommand(0, [{ x: 400, y: 400 }]), /Active DPI stage/);
+  assert.throws(() => razerSetDpiStagesCommand(2, [{ x: 400, y: 400 }]), /Active DPI stage/);
+  assert.throws(() => razerSetDpiStagesCommand(3, []), /between 1 and 5/);
+  assert.throws(() => razerSetDpiStagesCommand(1, [{ x: 0x10000, y: 400 }]), /between 0 and 65535/);
 });
 
 test("the V2 generation writes and reads DPI through the no-store byte", () => {

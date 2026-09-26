@@ -625,7 +625,7 @@ the fix; the app now says exactly that when the open is refused on macOS.
 | Idle sleep | `0x07` / `0x83` | seconds, big-endian |
 | Low power | `0x07` / `0x81` | level out of 255 in the **first** byte, so 77 is 30% |
 | DPI | `0x04` / `0x85` | big-endian X and Y |
-| DPI stages | `0x04` / `0x86` | seven-byte records; decoded but not yet shown |
+| DPI stages | `0x04` / `0x86` | seven-byte records; decoded and shown read-only |
 | Polling, legacy | `0x00` / `0x85` | divisor of 1000; **wired only** |
 | Polling, extended | `0x00` / `0xc0` | divisor of 8000; **receiver only** |
 
@@ -782,8 +782,9 @@ needs a richer type before it can be exposed even once the command is found.
 - DPI step granularity is assumed to be 50. Values off that grid are rejected
   before they reach the mouse, so a finer or coarser real step would only mean
   the control offers the wrong choices.
-- The DPI stage table (`0x04`/`0x06`) is decoded and tested but never written.
-  A wrong length there is the one realistic way to corrupt stored settings.
+- The DPI stage table (`0x04`/`0x06`) is decoded and shown read-only but never
+  written. A wrong length there is the one realistic way to corrupt stored
+  settings.
 
 ## Viper Mini (verified on hardware)
 

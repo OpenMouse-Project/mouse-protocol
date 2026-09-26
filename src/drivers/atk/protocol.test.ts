@@ -16,6 +16,8 @@ import {
   ATK_SENSORS,
   atkBuildReceiverPairRequest,
   atkBuildSetCurrentProfile,
+  atkBuildDongleLight,
+  atkDecodeAntiMistouch,
   atkCompxPayloadCrc,
   atkDecodeButtonAssignment,
   atkDecodeCurrentProfile,
@@ -25,11 +27,14 @@ import {
   ATK_LIFT_OFF_MAX_CODE,
   atkDecodePairingStatus,
   atkDecodeReceiverStatus,
+  atkDecodeSensorMode,
   atkDpiOptionsForSensor,
   atkDpiStageLength,
   atkDecodeVxeR1PollingCode,
   atkPackDpiStage,
   atkPackDpiStageForSensor,
+  atkPackAntiMistouch,
+  atkPackSensorMode,
   atkPackVxeR1LiveSetting,
   atkPackVxeR1PollingSetting,
   atkParseCompxFirmware,
@@ -130,7 +135,7 @@ test("the F1 Ultimate 2.0 identity selects PAW3950Ultra and no R1 family", () =>
     brand: "ATK",
     model: "F1 Ultimate 2.0",
     sensor: "PAW3950Ultra",
-    verified: false,
+    verified: true,
   });
   assert.equal(ATK_PRODUCTS["1,8"]!.family, undefined);
   assert.equal(ATK_SENSORS.PAW3950Ultra.maxDpi, 42000);
@@ -336,4 +341,45 @@ test("COMPX firmware parser checks endpoints, geometry, and raw payload CRC", ()
   assert.equal(atkParseCompxFirmware(file).payloadCrcValid, false);
   view.setUint32(8, payload.length + 1, true);
   assert.throws(() => atkParseCompxFirmware(file), /payload length exceeds/);
+});
+
+test("F1 Ultimate sensor modes pack the captured 0x00b5 rows", () => {
+  assert.deepEqual(atkPackSensorMode(0), [0, 0x55, 6, 0x4f, 0, 0x55]);
+  assert.deepEqual(atkPackSensorMode(1), [0, 0x55, 6, 0x4f, 1, 0x54]);
+  assert.deepEqual(atkPackSensorMode(2), [0, 0x55, 6, 0x4f, 2, 0x53]);
+  assert.equal(atkPackSensorMode(3), null);
+  for (const mode of [0, 1, 2] as const) {
+    assert.equal(atkDecodeSensorMode(atkPackSensorMode(mode)!), mode);
+  }
+  assert.equal(atkDecodeSensorMode([0, 0x55, 6, 0x4f, 9, 0x4c]), null);
+  assert.equal(atkDecodeSensorMode([0, 0x55, 6, 0x4f, 1, 0x00]), null);
+  assert.equal(atkDecodeSensorMode([1, 2, 3]), null);
+});
+
+test("F1 Ultimate sensor decode accepts the live row whose first pair varies", () => {
+  // HUB-written rows carry [0, 0x55] first; a live localhost readStatus
+  // returned [1, 0x54] with mode 1 (Shard) in bytes 4-5.
+  assert.equal(atkDecodeSensorMode([1, 0x54, 6, 0x4f, 1, 0x54]), 1);
+  assert.equal(atkDecodeSensorMode([1, 0x54, 6, 0x4f, 2, 0x53]), 2);
+  assert.equal(atkDecodeSensorMode([0, 0x55, 0, 0x00, 1, 0x54]), null);
+});
+
+test("F1 Ultimate anti-mistouch pairs encode 10 ms units", () => {
+  assert.deepEqual(atkPackAntiMistouch(0), [0, 0x55]);
+  assert.deepEqual(atkPackAntiMistouch(100), [10, 75]);
+  assert.deepEqual(atkPackAntiMistouch(500), [50, 35]);
+  assert.equal(atkPackAntiMistouch(15), null);
+  assert.equal(atkPackAntiMistouch(2560), null);
+  assert.equal(atkDecodeAntiMistouch(10, 75), 100);
+  assert.equal(atkDecodeAntiMistouch(0, 0x55), 0);
+  assert.equal(atkDecodeAntiMistouch(10, 0), null);
+});
+
+test("F1 Ultimate dongle-light frames match the captured 0x14 commands", () => {
+  for (const [mode, checksum] of [[0, 47], [1, 46], [2, 45], [3, 44]] as const) {
+    const frame = atkBuildDongleLight(mode)!;
+    assert.deepEqual([...frame.subarray(0, 6)], [0x14, 0, 0, 0, 10, mode]);
+    assert.equal(frame[15], checksum);
+  }
+  assert.equal(atkBuildDongleLight(4), null);
 });

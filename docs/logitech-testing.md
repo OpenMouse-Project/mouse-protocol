@@ -39,8 +39,13 @@ it holds the same vendor interface.
    it persisted.
 
 **Superstrike polling rate (format 8, direct-connect over USB, PID `0xc0a8`).**
-Format 8's profile layout has never been confirmed on real hardware, so it is
-not in `WRITABLE_FORMATS` and profile-content writes still throw for it.
+Format 8's profile layout is now confirmed from a PRO X 3 diagnostic (the full
+sector matches its stored CRC; the PRO X 2 is byte-identical), so it is in
+`VERIFIED_FORMATS` and its profiles can be opened, switched and enabled. It is
+also in `WRITABLE_FORMATS` as a testing-phase step, including the per-stage
+lift-off byte. After editing a stage, reconnect
+and capture again to confirm it persisted; pull the format back out of
+`WRITABLE_FORMATS` if it does not.
 `setPollingRate` now tries the live `0x8060`/`0x8061` report-rate feature
 first on every direct-connect mouse — the same thing Solaar and libratbag do
 unconditionally — and only falls back to the profile write if that live write

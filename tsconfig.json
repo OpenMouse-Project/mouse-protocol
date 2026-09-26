@@ -30,6 +30,7 @@
       "@openmouse/protocol/lamzu": ["./src/lamzu/index.ts"],
       "@openmouse/protocol/logitech": ["./src/logitech/index.ts"],
       "@openmouse/protocol/microsoft": ["./src/microsoft/index.ts"],
+      "@openmouse/protocol/motospeed": ["./src/motospeed/index.ts"],
       "@openmouse/protocol/mchose": ["./src/mchose/index.ts"],
       "@openmouse/protocol/moddo": ["./src/moddo/index.ts"],
       "@openmouse/protocol/orbital": ["./src/orbital/index.ts"],

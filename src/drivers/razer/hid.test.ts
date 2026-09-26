@@ -33,6 +33,14 @@ interface FakeOptions {
   /** DPI pair the fake reports, defaulting to 1600 × 1600. */
   dpi?: [number, number];
   /**
+   * The `0x04`/`0x86` DPI stage table the fake answers, when it answers one at
+   * all. `active` is 1-based, matching what the mouse reports. When omitted,
+   * the read is refused as unsupported, so the driver degrades to no stage
+   * editor. A `0x04`/`0x06` write updates the fake's stored table, which later
+   * reads report back.
+   */
+  dpiStages?: { values: number[]; active: number };
+  /**
    * The `0x0b`/`0x0b` value that actually arms the pair write. Defaults to
    * 0x01; a unit that refuses that form but accepts the canonical 0x00 models
    * the reporter's hardware.
@@ -54,6 +62,12 @@ function replyPacket(commandClass: number, commandId: number, dataSize: number, 
   return packet;
 }
 
+/** A sent/encoded packet's argument region, indexed from the first arg byte. */
+function sliceArgs(packet: Uint8Array, offset: number, length?: number): Uint8Array {
+  const start = 8 + offset;
+  return length === undefined ? packet.slice(start) : packet.slice(start, start + length);
+}
+
 /**
  * A mouse that answers only the lift-off commands, storing the pair the way the
  * real one does: the write carries `00 04` before the levels, and each level is
@@ -66,6 +80,9 @@ function fakeMouse(state: FakeLiftOff, options: FakeOptions = {}) {
   let calibratedOn = false;
   let dpi = options.dpi ?? [1600, 1600];
   let pollingDivisor = 8;
+  let dpiStages = options.dpiStages
+    ? { active: options.dpiStages.active, values: [...options.dpiStages.values] }
+    : undefined;
   const device = {
     vendorId: 0x1532,
     productId: options.productId ?? 0x00c1,
@@ -88,6 +105,35 @@ function fakeMouse(state: FakeLiftOff, options: FakeOptions = {}) {
       if (dpiWrite && !options.ignoreWrites) dpi = [(data[9] << 8) | data[10], (data[11] << 8) | data[12]];
       if (dpiWrite || dpiRead) {
         pending = replyPacket(commandClass, commandId, data[5], [data[8], (dpi[0] >> 8) & 0xff, dpi[0] & 0xff, (dpi[1] >> 8) & 0xff, dpi[1] & 0xff, 0, 0], RAZER_STATUS.ok);
+        return;
+      }
+      // The stage table read, mirrored the way the real reply lays it out:
+      // active (1-based) at arg 1, count at arg 2, then seven-byte records
+      // (flags, X big-endian, Y big-endian, padding). Refused unless a table
+      // was supplied, exercising the degradation path for models that do not
+      // answer class `0x04`/`0x86`. The matching write (`0x04`/`0x06`) stores
+      // the table it carries — active at arg 1, count at arg 2, then the
+      // seven-byte records' X pair — so read-after-write confirmation works.
+      const stagesRead = commandClass === 0x04 && commandId === 0x86;
+      const stagesWrite = commandClass === 0x04 && commandId === 0x06;
+      if (stagesRead || stagesWrite) {
+        if (!dpiStages) {
+          pending = replyPacket(commandClass, commandId, data[5], [], RAZER_STATUS.unsupported);
+          return;
+        }
+        if (stagesWrite && !options.ignoreWrites) {
+          const count = data[10];
+          const values: number[] = [];
+          for (let index = 0; index < count; index += 1) {
+            values.push((data[12 + index * 7] << 8) | data[13 + index * 7]);
+          }
+          dpiStages = { active: data[9], values };
+        }
+        const args: number[] = [0x00, dpiStages.active, dpiStages.values.length];
+        for (const value of dpiStages.values) {
+          args.push(0x00, (value >> 8) & 0xff, value & 0xff, (value >> 8) & 0xff, value & 0xff, 0x00, 0x00);
+        }
+        pending = replyPacket(commandClass, commandId, 0x26, args, RAZER_STATUS.ok);
         return;
       }
       const pollingWrite = commandClass === 0x00 && commandId === 0x40;
@@ -181,6 +227,105 @@ test("an untested model that refuses the battery read still reports the rest", a
   assert.equal(status.pollingRateHz, 1000);
   // The panel should not present a transcribed model as a tested one.
   assert.match(status.connectionDetail ?? "", /untested model/);
+});
+
+test("the Viper V3 Pro publishes its stored DPI stages writably", async () => {
+  // The class `0x04`/`0x86` read is verified on hardware; the matching
+  // `0x04`/`0x06` write mirrors OpenRazer's kernel driver, so the table is
+  // published as fixed (`countEditable: false`) and editable: the app gates
+  // value and active-stage edits on the driver exposing `setDpiStageValue`
+  // and `setActiveDpiStage`.
+  // Arrange: the factory ladder with the third stage active (1-based 3).
+  const fake = fakeMouse(
+    { tracking: 1, liftOff: 10, landing: 5, asymmetric: true },
+    { dpiStages: { values: [400, 800, 1600, 3200, 6400], active: 3 } },
+  );
+
+  // Act
+  const status = await fake.client.readStatus();
+
+  // Assert
+  assert.deepEqual(status.dpiStages, [400, 800, 1600, 3200, 6400]);
+  assert.equal(status.activeDpiStage, 2, "the 1-based report becomes a 0-based index");
+  assert.deepEqual(status.ui?.dpiStageEditor, {
+    maxStages: 5,
+    countEditable: false,
+    minDpi: 100,
+    maxDpi: 35000,
+    stepDpi: 50,
+  });
+  assert.equal(typeof (fake.client as unknown as Record<string, unknown>).setDpiStageValue, "function");
+  assert.equal(typeof (fake.client as unknown as Record<string, unknown>).setActiveDpiStage, "function");
+});
+
+test("setDpiStageValue rewrites the whole table and confirms the one stage", async () => {
+  // The write carries every stage, so only the target stage may change and the
+  // active stage must survive untouched.
+  const fake = fakeMouse(
+    { tracking: 1, liftOff: 10, landing: 5, asymmetric: true },
+    { dpiStages: { values: [400, 800, 1600, 3200, 6400], active: 3 } },
+  );
+
+  const confirmed = await fake.client.setDpiStageValue(2, 2000);
+
+  assert.equal(confirmed, 2000);
+  const sentWrite = fake.sent.find((data) => data[6] === 0x04 && data[7] === 0x06);
+  assert.ok(sentWrite, "the stage-table write (`0x04`/`0x06`) was sent");
+  assert.equal(sentWrite?.at(5), 0x26, "the write mirrors the read's fixed 38-byte payload");
+  assert.deepEqual([...sliceArgs(sentWrite!, 0, 3)], [0x01, 0x03, 0x05], "storage, 1-based active, count");
+  // Stage 2's record carries the new 2000 in both axes.
+  const record = sliceArgs(sentWrite!, 3 + 2 * 7, 7);
+  assert.deepEqual([...record], [2, (2000 >> 8) & 0xff, 2000 & 0xff, (2000 >> 8) & 0xff, 2000 & 0xff, 0, 0]);
+
+  const status = await fake.client.readStatus();
+  assert.deepEqual(status.dpiStages, [400, 800, 2000, 3200, 6400]);
+  assert.equal(status.activeDpiStage, 2, "the untouched active stage stays put");
+});
+
+test("setActiveDpiStage moves the active stage and confirms it", async () => {
+  const fake = fakeMouse(
+    { tracking: 1, liftOff: 10, landing: 5, asymmetric: true },
+    { dpiStages: { values: [400, 800, 1600, 3200, 6400], active: 3 } },
+  );
+
+  const confirmed = await fake.client.setActiveDpiStage(4);
+
+  assert.equal(confirmed, 4);
+  const sentWrite = fake.sent.find((data) => data[6] === 0x04 && data[7] === 0x06);
+  assert.equal(sentWrite?.at(9), 5, "the write numbers the active stage from one");
+  const status = await fake.client.readStatus();
+  assert.equal(status.activeDpiStage, 4);
+  assert.deepEqual(status.dpiStages, [400, 800, 1600, 3200, 6400], "values are untouched");
+});
+
+test("a stage write the mouse does not store is reported, not trusted", async () => {
+  // The old table must hold if the write is refused, so both setters verify by
+  // reading the table back rather than believing the write's status.
+  const fake = fakeMouse(
+    { tracking: 1, liftOff: 10, landing: 5, asymmetric: true },
+    { dpiStages: { values: [400, 800, 1600, 3200, 6400], active: 3 }, ignoreWrites: true },
+  );
+  const client = fake.client as Record<string, unknown>;
+
+  await assert.rejects(() => (client.setDpiStageValue as (stage: number, dpi: number) => Promise<number>)(2, 2000), /kept/);
+  await assert.rejects(() => (client.setActiveDpiStage as (stage: number) => Promise<number>)(4), /stayed/);
+});
+
+test("a mouse that refuses the stage read still reports the rest", async () => {
+  // A transport that does not answer class `0x04`/`0x86` must cost no more
+  // than the absence of the stage editor — the same degradation `readLiftOff`
+  // gets — rather than throwing the status read.
+  // Arrange: the default fake turns the stage read into an unsupported reply.
+  const fake = fakeMouse({ tracking: 1, liftOff: 10, landing: 5, asymmetric: true });
+
+  // Act
+  const status = await fake.client.readStatus();
+
+  // Assert: DPI itself still reads, and no stage table or editor is offered.
+  assert.equal(status.dpi, 1600);
+  assert.equal(status.ui?.dpiStageEditor, undefined);
+  assert.equal(status.dpiStages, undefined);
+  assert.equal(status.activeDpiStage, undefined);
 });
 
 test("a reply left over from the previous command is re-read, not reported", async () => {

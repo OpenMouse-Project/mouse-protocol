@@ -67,6 +67,11 @@ export const BOLT_PAIRING_SLOTS = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06] as const;
  *
  * G Pro X Superlight generation:
  * - 0xc094 — G Pro X Superlight (wired)
+ * - 0xc09b — PRO X SUPERLIGHT 2 (USB)
+ * - 0xc0a0 — PRO X SUPERLIGHT 2 DEX (USB)
+ *
+ * G PRO 2 / next-gen G Pro family:
+ * - 0xc09a — G PRO 2 LIGHTSPEED (USB)
  *
  * This module deliberately imports nothing, so both the driver and the WebHID
  * filters in ../vendors can read it without a cycle.
@@ -79,7 +84,9 @@ export const LOGITECH_DIRECT_PRODUCT_IDS = [
   // G Pro / G502 / G403 HERO / G703 generation
   0xc085, 0xc087, 0xc08b, 0xc08c, 0xc08e, 0xc08f,
   // G Pro X Superlight generation
-  0xc094,
+  0xc094, 0xc09b, 0xc0a0,
+  // G PRO 2 / next-gen G Pro family
+  0xc09a,
   // G502 X generation
   0xc095, 0xc098, 0xc099,
 ] as const;
@@ -92,6 +99,63 @@ export const LOGITECH_DIRECT_PRODUCT_IDS = [
  * - 0xc548 — Logi Bolt USB receiver (MX Master 3S and other Bolt mice)
  */
 export const LOGITECH_BOLT_PRODUCT_IDS = [0xc548] as const;
+
+/**
+ * Named catalog of the Logitech mice the HID++ driver directly covers, keyed
+ * by product id. This is the named counterpart to the bare-PID registries above
+ * (`LOGITECH_DIRECT_PRODUCT_IDS` etc.) and exists for the same reason every
+ * other vendor registry carries names: the supported-devices page auto-lists
+ * from it, so a covered Logitech model can never go missing because someone
+ * forgot to hand-write a row.
+ *
+ * Only *direct-connect* models get a PID here. Wireless Logitech mice have no
+ * dedicated USB product id of their own — they answer behind a Lightspeed/Bolt
+ * receiver or over HID++, and the driver claims them by protocol on the
+ * receiver's single control interface, not by a per-mouse PID. Listing them in
+ * a PID-keyed map would be a lie; they are receiver-supported and the page
+ * carries them as static receiver rows with an honest note (see the wall of
+ * "receiver" notes in the supported-mice table). That asymmetry is structural
+ * Logitech, not a maintenance gap — the same way WLMouse's wireless rows stay
+ * receiver-curated.
+ *
+ * `status` is per-model and honest: everything in `LOGITECH_DIRECT_PRODUCT_IDS`
+ * is genuinely writable (DPI via 0x2202 where the model has it, report rate
+ * 0x8060, onboard profiles), so every entry here is `supported`. The auto-list
+ * loop must honor `status` rather than hardcoding it, so adding a not-yet-
+ * implemented model here later cannot silently over-claim.
+ *
+ * Names mirror the landing page's static rows exactly ("G502 (all variants)",
+ * "G Pro (2017)", "G703 (wired)"), because the registry loop dedupes against
+ * the table by exact normalized key before falling back to fuzzy matching.
+ */
+export const LOGITECH_PRODUCTS: ReadonlyMap<number, { name: string; wireless: boolean; status: "supported" }> =
+  new Map([
+    // G203 / G102 generation
+    [0xc084, { name: "G203 PRODIGY", wireless: false, status: "supported" }],
+    [0xc089, { name: "G102 LIGHTSYNC", wireless: false, status: "supported" }],
+    [0xc092, { name: "G203 LIGHTSYNC", wireless: false, status: "supported" }],
+    // G303 / G402 generation
+    [0xc07d, { name: "G502 (all variants)", wireless: false, status: "supported" }],
+    [0xc07e, { name: "G402 Hyperion Fury", wireless: false, status: "supported" }],
+    [0xc080, { name: "G303 Daedalus Apex", wireless: false, status: "supported" }],
+    // G Pro / G502 / G403 HERO / G703 generation
+    [0xc085, { name: "G Pro (2017)", wireless: false, status: "supported" }],
+    [0xc087, { name: "G703 (wired)", wireless: false, status: "supported" }],
+    [0xc08b, { name: "G502 HERO", wireless: false, status: "supported" }],
+    [0xc08c, { name: "G Pro Hero", wireless: false, status: "supported" }],
+    [0xc08e, { name: "G903 HERO", wireless: false, status: "supported" }],
+    [0xc08f, { name: "G403 HERO", wireless: false, status: "supported" }],
+    // G Pro X Superlight generation
+    [0xc094, { name: "G Pro X Superlight", wireless: false, status: "supported" }],
+    [0xc09b, { name: "PRO X SUPERLIGHT 2", wireless: false, status: "supported" }],
+    [0xc0a0, { name: "PRO X SUPERLIGHT 2 DEX", wireless: false, status: "supported" }],
+    // G PRO 2 / next-gen G Pro family
+    [0xc09a, { name: "G PRO 2 LIGHTSPEED", wireless: false, status: "supported" }],
+    // G502 X generation
+    [0xc095, { name: "G502 X PLUS", wireless: false, status: "supported" }],
+    [0xc098, { name: "G502 X LIGHTSPEED", wireless: false, status: "supported" }],
+    [0xc099, { name: "G502 X", wireless: false, status: "supported" }],
+  ]);
 
 const DIRECT_PRODUCT_ID_SET: ReadonlySet<number> = new Set(LOGITECH_DIRECT_PRODUCT_IDS);
 const BOLT_PRODUCT_ID_SET: ReadonlySet<number> = new Set(LOGITECH_BOLT_PRODUCT_IDS);
