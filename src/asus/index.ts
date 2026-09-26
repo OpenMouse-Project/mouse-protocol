@@ -1,576 +1,317 @@
+/*
+ * The settings-block layout (field index and offset follow the DPI stage
+ * count) and the per-zone lighting reply are ported from libratbag's ASUS
+ * driver (src/asus.c, src/driver-asus.c):
+ *
+ * Copyright (C) 2021 Kyoken, kyoken@kyoken.ninja
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ */
+
+import type { AsusMouseModel } from "./devices.js";
+
+export * from "./devices.js";
+
 export const ASUS_VENDOR_ID = 0x0b05;
 
-export const ROG_GLADIUS_II_PRODUCT_ID = 0x1845;
-
-export const ASUS_GLADIUS_II_USAGE_PAGE = 0xff01;
-export const ASUS_GLADIUS_II_USAGE = 0x0001;
+export const ASUS_USAGE_PAGE = 0xff01;
+export const ASUS_USAGE = 0x0001;
 
 export const ASUS_REPORT_ID = 0;
 export const ASUS_REPORT_SIZE = 64;
 
-export const GLADIUS_II_MIN_DPI = 100;
-export const GLADIUS_II_MAX_DPI = 12000;
-export const GLADIUS_II_DPI_STEP = 100;
+export const ASUS_POLLING_RATES = [125, 250, 500, 1000] as const;
 
-export const GLADIUS_II_PROFILE_COUNT = 3;
+export const ASUS_DEBOUNCE_MS = [12, 16, 20, 24, 28, 32] as const;
 
-export const GLADIUS_II_POLLING_RATES = [
-  125,
-  250,
-  500,
-  1000,
-] as const;
+export type AsusLiftOffDistance = "Low" | "High";
 
-export const GLADIUS_II_DEBOUNCE_MS = [
-  12,
-  16,
-  20,
-  24,
-  28,
-  32,
-] as const;
-
-export type GladiusIILiftOffDistance =
-  | "Low"
-  | "High";
-
-export interface GladiusIISettings {
-  dpiStages: [number, number];
+export interface AsusSettings {
+  dpiStages: number[];
   pollingRateHz: number;
   debounceMs: number | null;
   angleSnapping: boolean;
 }
 
-export interface GladiusIIProfile {
+export interface AsusProfile {
   onboardProfile: number;
   activeDpiStage: number;
 }
 
-export interface GladiusIIRawLightingZone {
-  zone: number;
+export interface AsusRawLightingZone {
   mode: number;
+  /** Wire scale, 0 to the model's `brightnessMax`. */
   brightness: number;
   red: number;
   green: number;
   blue: number;
-  direction: number;
-  randomColor: boolean;
-  speed: number;
 }
 
-function requirePrefix(
-  data: Uint8Array,
-  expected: readonly number[],
-  name: string,
-): void {
-  if (data.length < expected.length) {
-    throw new Error(
-      `${name} reply is too short.`,
-    );
+export interface AsusBattery {
+  percent: number;
+  charging: boolean;
+}
+
+export type AsusRgb = readonly [number, number, number];
+
+/** Rate, debounce and angle snapping follow the DPI stages in the settings block. */
+const FIELD_RATE = 0;
+const FIELD_DEBOUNCE = 1;
+const FIELD_SNAPPING = 2;
+
+function settingField(model: AsusMouseModel, field: number): number {
+  return model.dpiStages + field;
+}
+
+function settingOffset(model: AsusMouseModel, field: number): number {
+  return 4 + model.dpiStages * 2 + field * 2;
+}
+
+function requirePrefix(data: Uint8Array, expected: readonly number[], name: string, minLength: number): void {
+  if (data.length < minLength) {
+    throw new Error(`${name} reply is too short.`);
   }
 
-  for (
-    let i = 0;
-    i < expected.length;
-    i++
-  ) {
-    if (data[i] !== expected[i]) {
-      throw new Error(
-        `${name} reply has unexpected byte ${i}: ` +
-          `0x${data[i]
-            ?.toString(16)
-            .padStart(2, "0")}`,
-      );
+  expected.forEach((byte, i) => {
+    if (data[i] !== byte) {
+      throw new Error(`${name} reply has unexpected byte ${i}: 0x${data[i].toString(16).padStart(2, "0")}`);
     }
-  }
+  });
 }
 
-function readUint16LE(
-  data: Uint8Array,
-  offset: number,
-): number {
-  return (
-    data[offset] |
-    (data[offset + 1] << 8)
-  );
+function readUint16LE(data: Uint8Array, offset: number): number {
+  return data[offset] | (data[offset + 1] << 8);
 }
 
-function decodeDpiWord(
-  value: number,
-): number {
-  return (
-    (value + 1) *
-    GLADIUS_II_DPI_STEP
-  );
+function decodeDpi(model: AsusMouseModel, value: number): number {
+  return (value + 1) * model.dpiStep;
 }
 
-function request(
-  ...bytes: number[]
-): Uint8Array {
-  const data = new Uint8Array(
-    ASUS_REPORT_SIZE,
-  );
-
+function request(...bytes: number[]): Uint8Array {
+  const data = new Uint8Array(ASUS_REPORT_SIZE);
   data.set(bytes);
-
   return data;
+}
+
+function requireStage(model: AsusMouseModel, stage: number): void {
+  if (!Number.isInteger(stage) || stage < 0 || stage >= model.dpiStages) {
+    throw new Error(`${model.name} DPI stage must be 0-${model.dpiStages - 1}.`);
+  }
 }
 
 /* ---------------------------------
  * READ DECODERS
  * --------------------------------- */
 
-export function decodeGladiusIISettings(
-  data: Uint8Array,
-): GladiusIISettings {
-  requirePrefix(
-    data,
-    [0x12, 0x04, 0x00],
-    "Gladius II settings",
-  );
+export function asusDecodeSettings(model: AsusMouseModel, data: Uint8Array): AsusSettings {
+  const rateOffset = settingOffset(model, FIELD_RATE);
+  requirePrefix(data, [0x12, 0x04, 0x00], "ASUS settings", settingOffset(model, FIELD_SNAPPING) + 1);
 
-  if (data.length < 13) {
-    throw new Error(
-      "Gladius II settings reply is incomplete.",
-    );
+  // Newer firmware keeps a polling-booster value in the high nibble.
+  const pollingRaw = data[rateOffset] & 0x07;
+  const pollingRateHz = ASUS_POLLING_RATES[pollingRaw];
+  if (pollingRateHz === undefined) {
+    throw new Error(`Unknown ASUS polling value 0x${pollingRaw.toString(16).padStart(2, "0")}.`);
   }
 
-  const dpi1 = decodeDpiWord(
-    readUint16LE(data, 4),
-  );
-
-  const dpi2 = decodeDpiWord(
-    readUint16LE(data, 6),
-  );
-
-  const pollingRaw = data[8];
-
-  const pollingRateHz =
-    GLADIUS_II_POLLING_RATES[
-      pollingRaw
-    ];
-
-  if (
-    pollingRateHz === undefined
-  ) {
-    throw new Error(
-      `Unknown Gladius II polling value 0x${pollingRaw
-        .toString(16)
-        .padStart(2, "0")}.`,
-    );
-  }
-
-  const debounceRaw =
-    data[10];
-
-  const debounceMs =
-    debounceRaw >= 0x02 &&
-    debounceRaw <= 0x07
-      ? debounceRaw * 4 + 4
-      : null;
+  const debounceRaw = data[settingOffset(model, FIELD_DEBOUNCE)];
 
   return {
-    dpiStages: [dpi1, dpi2],
+    dpiStages: Array.from({ length: model.dpiStages }, (_, i) => decodeDpi(model, readUint16LE(data, 4 + i * 2))),
     pollingRateHz,
-    debounceMs,
-    angleSnapping:
-      data[12] === 0x01,
+    debounceMs: debounceRaw >= 0x02 && debounceRaw <= 0x07 ? debounceRaw * 4 + 4 : null,
+    angleSnapping: data[settingOffset(model, FIELD_SNAPPING)] === 0x01,
   };
 }
 
-export function decodeGladiusIIProfile(
-  data: Uint8Array,
-): GladiusIIProfile {
-  requirePrefix(
-    data,
-    [0x12, 0x00, 0x00],
-    "Gladius II profile",
-  );
+/** X values from the `12 04 02` block, four bytes (X, Y) per stage. */
+export function asusDecodeDpiXY(model: AsusMouseModel, data: Uint8Array): number[] {
+  requirePrefix(data, [0x12, 0x04, 0x02], "ASUS X/Y DPI", 4 + model.dpiStages * 4);
 
-  if (data.length < 12) {
-    throw new Error(
-      "Gladius II profile reply is incomplete.",
-    );
-  }
+  return Array.from({ length: model.dpiStages }, (_, i) => decodeDpi(model, readUint16LE(data, 4 + i * 4)));
+}
 
-  const onboardProfileRaw =
-    data[10];
+export function asusDecodeDpiColors(model: AsusMouseModel, data: Uint8Array): AsusRgb[] {
+  requirePrefix(data, [0x12, 0x04, 0x03], "ASUS DPI colours", 4 + model.dpiStages * 3);
 
-  const dpiStageRaw =
-    data[11];
+  return Array.from({ length: model.dpiStages }, (_, i) => {
+    const offset = 4 + i * 3;
+    return [data[offset], data[offset + 1], data[offset + 2]] as const;
+  });
+}
 
-  if (
-    dpiStageRaw < 1 ||
-    dpiStageRaw > 2
-  ) {
-    throw new Error(
-      `Invalid Gladius II DPI stage ${dpiStageRaw}.`,
-    );
+export function asusDecodeProfile(model: AsusMouseModel, data: Uint8Array): AsusProfile {
+  requirePrefix(data, [0x12, 0x00, 0x00], "ASUS profile", 12);
+
+  const stageRaw = data[11];
+  if (stageRaw < 1 || stageRaw > model.dpiStages) {
+    throw new Error(`Invalid ${model.name} DPI stage ${stageRaw}.`);
   }
 
   return {
-    onboardProfile:
-      onboardProfileRaw + 1,
-
-    activeDpiStage:
-      dpiStageRaw - 1,
+    onboardProfile: data[10] + 1,
+    activeDpiStage: stageRaw - 1,
   };
 }
 
-export function decodeGladiusIILiftOffDistance(
-  data: Uint8Array,
-): GladiusIILiftOffDistance {
-  requirePrefix(
-    data,
-    [0x12, 0x06],
-    "Gladius II lift-off",
-  );
-
-  if (data.length < 8) {
-    throw new Error(
-      "Gladius II lift-off reply is incomplete.",
-    );
-  }
+export function asusDecodeLiftOffDistance(data: Uint8Array): AsusLiftOffDistance {
+  requirePrefix(data, [0x12, 0x06], "ASUS lift-off", 8);
 
   const raw = data[7];
-
-  if (raw === 0) {
-    return "Low";
-  }
-
-  if (raw === 1) {
-    return "High";
-  }
-
-  throw new Error(
-    `Unknown Gladius II lift-off value ${raw}.`,
-  );
+  if (raw === 0) return "Low";
+  if (raw === 1) return "High";
+  throw new Error(`Unknown ASUS lift-off value ${raw}.`);
 }
 
-export function decodeGladiusIILighting(
-  data: Uint8Array,
-): GladiusIIRawLightingZone[] {
-  requirePrefix(
-    data,
-    [0x12, 0x03, 0x00],
-    "Gladius II lighting",
-  );
+export function asusDecodeLighting(model: AsusMouseModel, data: Uint8Array, zone: number): AsusRawLightingZone {
+  const offset = model.lightingAllZones ? 4 + zone * 5 : 4;
+  requirePrefix(data, [0x12, 0x03], "ASUS lighting", offset + 5);
 
-  if (data.length < 23) {
-    throw new Error(
-      "Gladius II lighting reply is incomplete.",
-    );
-  }
+  return {
+    mode: data[offset],
+    brightness: data[offset + 1],
+    red: data[offset + 2],
+    green: data[offset + 3],
+    blue: data[offset + 4],
+  };
+}
 
-  const direction = data[20];
-  const randomColor =
-    data[21] === 0x01;
-  const speed = data[22];
+export function asusDecodeBattery(data: Uint8Array): AsusBattery {
+  requirePrefix(data, [0x12, 0x07], "ASUS battery", 10);
 
-  const zones: GladiusIIRawLightingZone[] =
-    [];
-
-  for (let zone = 0; zone < 3; zone++) {
-    const offset =
-      4 + zone * 5;
-
-    zones.push({
-      zone,
-      mode: data[offset],
-      brightness:
-        data[offset + 1],
-      red: data[offset + 2],
-      green: data[offset + 3],
-      blue: data[offset + 4],
-      direction,
-      randomColor,
-      speed,
-    });
-  }
-
-  return zones;
+  return {
+    percent: data[4],
+    charging: data[9] > 0,
+  };
 }
 
 /* ---------------------------------
  * READ REQUESTS
  * --------------------------------- */
 
-export function gladiusIIReadSettingsRequest(): Uint8Array {
-  return request(
-    0x12,
-    0x04,
-    0x00,
-  );
+export function asusReadSettingsRequest(): Uint8Array {
+  return request(0x12, 0x04, 0x00);
 }
 
-export function gladiusIIReadProfileRequest(): Uint8Array {
-  return request(
-    0x12,
-    0x00,
-  );
+export function asusReadDpiXYRequest(): Uint8Array {
+  return request(0x12, 0x04, 0x02);
 }
 
-export function gladiusIIReadLiftOffRequest(): Uint8Array {
-  return request(
-    0x12,
-    0x06,
-  );
+export function asusReadDpiColorsRequest(): Uint8Array {
+  return request(0x12, 0x04, 0x03);
 }
 
-export function gladiusIIReadLightingRequest(): Uint8Array {
-  return request(
-    0x12,
-    0x03,
-    0x00,
-  );
+export function asusReadProfileRequest(): Uint8Array {
+  return request(0x12, 0x00);
 }
 
-/* ---------------------------------
- * DPI
- * --------------------------------- */
-
-export function gladiusIISetDpiRequest(
-  stage: number,
-  dpi: number,
-): Uint8Array {
-  if (
-    !Number.isInteger(stage) ||
-    stage < 0 ||
-    stage > 1
-  ) {
-    throw new Error(
-      "Gladius II DPI stage must be 0 or 1.",
-    );
-  }
-
-  if (
-    !Number.isInteger(dpi) ||
-    dpi < GLADIUS_II_MIN_DPI ||
-    dpi > GLADIUS_II_MAX_DPI ||
-    dpi %
-      GLADIUS_II_DPI_STEP !==
-      0
-  ) {
-    throw new Error(
-      `Gladius II DPI must be ${GLADIUS_II_MIN_DPI}-${GLADIUS_II_MAX_DPI} in ${GLADIUS_II_DPI_STEP}-DPI steps.`,
-    );
-  }
-
-  const encoded =
-    (dpi -
-      GLADIUS_II_DPI_STEP) /
-    GLADIUS_II_DPI_STEP;
-
-  return request(
-    0x51,
-    0x31,
-    stage,
-    0x00,
-    encoded & 0xff,
-    (encoded >> 8) & 0xff,
-  );
+export function asusReadLiftOffRequest(): Uint8Array {
+  return request(0x12, 0x06);
 }
 
-export function gladiusIISetActiveDpiStageRequest(
-  stage: number,
-): Uint8Array {
-  if (
-    !Number.isInteger(stage) ||
-    stage < 0 ||
-    stage > 1
-  ) {
-    throw new Error(
-      "Gladius II DPI stage must be 0 or 1.",
-    );
-  }
+export function asusReadLightingRequest(model: AsusMouseModel, zone: number): Uint8Array {
+  return request(0x12, 0x03, model.lightingAllZones ? 0x00 : zone);
+}
 
-  return request(
-    0x51,
-    0x31,
-    0x09,
-    0x00,
-    stage + 1,
-  );
+export function asusReadBatteryRequest(): Uint8Array {
+  return request(0x12, 0x07);
 }
 
 /* ---------------------------------
- * POLLING
+ * WRITES
  * --------------------------------- */
 
-export function gladiusIISetPollingRateRequest(
-  pollingRateHz: number,
-): Uint8Array {
-  const rateIndex =
-    GLADIUS_II_POLLING_RATES.findIndex(
-      (rate) =>
-        rate === pollingRateHz,
-    );
+export function asusSetDpiRequest(model: AsusMouseModel, stage: number, dpi: number, color?: AsusRgb): Uint8Array {
+  requireStage(model, stage);
 
+  if (!Number.isInteger(dpi) || dpi < model.minDpi || dpi > model.maxDpi || dpi % model.dpiStep !== 0) {
+    throw new Error(`${model.name} DPI must be ${model.minDpi}-${model.maxDpi} in ${model.dpiStep}-DPI steps.`);
+  }
+
+  const encoded = dpi / model.dpiStep - 1;
+
+  return request(0x51, 0x31, stage, 0x00, encoded & 0xff, (encoded >> 8) & 0xff, ...(color ?? []));
+}
+
+export function asusSetActiveDpiStageRequest(model: AsusMouseModel, stage: number): Uint8Array {
+  requireStage(model, stage);
+
+  return request(0x51, 0x31, 0x09, 0x00, stage + 1);
+}
+
+export function asusSetPollingRateRequest(model: AsusMouseModel, pollingRateHz: number): Uint8Array {
+  const rateIndex = ASUS_POLLING_RATES.findIndex((rate) => rate === pollingRateHz);
   if (rateIndex === -1) {
-    throw new Error(
-      `Unsupported Gladius II polling rate: ${pollingRateHz} Hz.`,
-    );
+    throw new Error(`Unsupported ${model.name} polling rate: ${pollingRateHz} Hz.`);
   }
 
-  return request(
-    0x51,
-    0x31,
-    0x02,
-    0x00,
-    rateIndex,
-  );
+  return request(0x51, 0x31, settingField(model, FIELD_RATE), 0x00, rateIndex);
 }
 
-/* ---------------------------------
- * ONBOARD PROFILE
- * --------------------------------- */
-
-export function gladiusIISetProfileRequest(
-  profile: number,
-): Uint8Array {
-  if (
-    !Number.isInteger(profile) ||
-    profile < 1 ||
-    profile >
-      GLADIUS_II_PROFILE_COUNT
-  ) {
-    throw new Error(
-      `Gladius II profile must be 1-${GLADIUS_II_PROFILE_COUNT}.`,
-    );
+export function asusSetProfileRequest(model: AsusMouseModel, profile: number): Uint8Array {
+  if (!Number.isInteger(profile) || profile < 1 || profile > model.profiles) {
+    throw new Error(`${model.name} profile must be 1-${model.profiles}.`);
   }
 
-  return request(
-    0x50,
-    0x02,
-    profile - 1,
-  );
+  return request(0x50, 0x02, profile - 1);
 }
 
-/* ---------------------------------
- * ANGLE SNAPPING
- * --------------------------------- */
-
-export function gladiusIISetAngleSnappingRequest(
-  enabled: boolean,
-): Uint8Array {
-  return request(
-    0x51,
-    0x31,
-    0x04,
-    0x00,
-    enabled ? 0x01 : 0x00,
-  );
+export function asusSetAngleSnappingRequest(model: AsusMouseModel, enabled: boolean): Uint8Array {
+  return request(0x51, 0x31, settingField(model, FIELD_SNAPPING), 0x00, enabled ? 0x01 : 0x00);
 }
 
-/* ---------------------------------
- * DEBOUNCE
- * --------------------------------- */
-
-export function gladiusIISetDebounceRequest(
-  milliseconds: number,
-): Uint8Array {
-  if (
-    !GLADIUS_II_DEBOUNCE_MS.some(
-      (value) =>
-        value === milliseconds,
-    )
-  ) {
-    throw new Error(
-      `Gladius II debounce must be one of: ${GLADIUS_II_DEBOUNCE_MS.join(", ")} ms.`,
-    );
+export function asusSetDebounceRequest(model: AsusMouseModel, milliseconds: number): Uint8Array {
+  if (!ASUS_DEBOUNCE_MS.some((value) => value === milliseconds)) {
+    throw new Error(`${model.name} debounce must be one of: ${ASUS_DEBOUNCE_MS.join(", ")} ms.`);
   }
 
-  const raw =
-    milliseconds / 4 - 1;
-
-  return request(
-    0x51,
-    0x31,
-    0x03,
-    0x00,
-    raw,
-  );
+  return request(0x51, 0x31, settingField(model, FIELD_DEBOUNCE), 0x00, milliseconds / 4 - 1);
 }
 
-/* ---------------------------------
- * LIFT-OFF DISTANCE
- * --------------------------------- */
-
-export function gladiusIISetLiftOffRequest(
-  value: GladiusIILiftOffDistance,
-): Uint8Array {
-  const raw =
-    value === "High"
-      ? 1
-      : 0;
-
-  return request(
-    0x51,
-    0x35,
-    0xff,
-    0x00,
-    0xff,
-    raw,
-  );
+/** Also resets the surface calibration; ASUS has no separate lift-off command. */
+export function asusSetLiftOffRequest(value: AsusLiftOffDistance): Uint8Array {
+  return request(0x51, 0x35, 0xff, 0x00, 0xff, value === "High" ? 1 : 0);
 }
 
-/* ---------------------------------
- * RGB
- * --------------------------------- */
-
-export function gladiusIISetLightingRequest(
+export function asusSetLightingRequest(
+  model: AsusMouseModel,
   zone: number,
   mode: number,
   brightness: number,
   red: number,
   green: number,
   blue: number,
-  direction = 0,
-  randomColor = 0,
   speed = 0,
 ): Uint8Array {
-  if (
-    !Number.isInteger(zone) ||
-    zone < 0 ||
-    zone > 2
-  ) {
-    throw new Error(
-      "Gladius II RGB zone must be 0, 1, or 2.",
-    );
+  if (!Number.isInteger(zone) || zone < 0 || zone >= model.zones.length) {
+    throw new Error(`${model.name} RGB zone must be 0-${model.zones.length - 1}.`);
   }
 
-  if (
-    brightness < 0 ||
-    brightness > 4
-  ) {
-    throw new Error(
-      "Gladius II RGB brightness must be 0-4.",
-    );
+  if (brightness < 0 || brightness > model.brightnessMax) {
+    throw new Error(`${model.name} RGB brightness must be 0-${model.brightnessMax}.`);
   }
 
-  return request(
-    0x51,
-    0x28,
-    zone,
-    0x00,
-    mode,
-    brightness,
-    red,
-    green,
-    blue,
-    direction,
-    randomColor,
-    speed,
-  );
+  // Bytes 9 and 10 are the animation direction and random-colour flag, unused here.
+  return request(0x51, 0x28, zone, 0x00, mode, brightness, red, green, blue, 0x00, 0x00, speed);
 }
 
-/* ---------------------------------
- * SAVE
- * --------------------------------- */
-
-export function gladiusIISaveRequest(): Uint8Array {
-  return request(
-    0x50,
-    0x03,
-  );
+export function asusSaveRequest(): Uint8Array {
+  return request(0x50, 0x03);
 }

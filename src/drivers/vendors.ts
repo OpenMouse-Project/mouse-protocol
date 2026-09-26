@@ -1,8 +1,8 @@
 import {
-  ASUS_GLADIUS_II_USAGE,
-  ASUS_GLADIUS_II_USAGE_PAGE,
+  ASUS_PRODUCT_IDS,
+  ASUS_USAGE,
+  ASUS_USAGE_PAGE,
   ASUS_VENDOR_ID,
-  ROG_GLADIUS_II_PRODUCT_ID,
 } from "../asus/index.ts";
 import { ATK_COMPX_PRODUCT_IDS } from "./atk/products.ts";
 import { MICROSOFT_PRODUCT_CLASSIC, MICROSOFT_PRODUCT_PRO, MICROSOFT_VENDOR_ID, MICROSOFT_CLASSIC_USAGE_PAGE, MICROSOFT_CLASSIC_USAGE, MICROSOFT_PRO_USAGE_PAGE, MICROSOFT_PRO_USAGE } from "../microsoft/index.ts";
@@ -162,22 +162,15 @@ export const VENDOR_ID = {
 } as const;
 
 /**
- * ROG Gladius II P502 configuration interface.
- *
- * Hardware verified:
- * VID 0x0B05
- * PID 0x1845
- * Usage Page 0xFF01
- * Usage 0x0001
+ * ASUS ROG / TUF configuration interface (usage page 0xFF01, usage 0x0001),
+ * verified on the Gladius II P502 and assumed for the rest of the table.
  */
-export const ASUS_GLADIUS_II_HID_FILTERS: HIDDeviceFilter[] = [
-  {
-    vendorId: ASUS_VENDOR_ID,
-    productId: ROG_GLADIUS_II_PRODUCT_ID,
-    usagePage: ASUS_GLADIUS_II_USAGE_PAGE,
-    usage: ASUS_GLADIUS_II_USAGE,
-  },
-];
+export const ASUS_HID_FILTERS: HIDDeviceFilter[] = ASUS_PRODUCT_IDS.map((productId) => ({
+  vendorId: ASUS_VENDOR_ID,
+  productId,
+  usagePage: ASUS_USAGE_PAGE,
+  usage: ASUS_USAGE,
+}));
 
 export const MCHOSE_A5_HID_FILTERS: HIDDeviceFilter[] = [
   ...[...MCHOSE_A5_GEN1_PRODUCTS.keys()].map((productId) => ({
@@ -700,7 +693,7 @@ export const VAXEE_HID_FILTERS: HIDDeviceFilter[] = VAXEE_PRODUCT_IDS.map((produ
 
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...VAXEE_HID_FILTERS,
-  ...ASUS_GLADIUS_II_HID_FILTERS,
+  ...ASUS_HID_FILTERS,
   ...DAREU_HID_FILTERS,
   ...REDRAGON_HID_FILTERS,
   ...MOTOSPEED_HID_FILTERS,
