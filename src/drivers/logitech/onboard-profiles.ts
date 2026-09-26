@@ -57,12 +57,18 @@ const PROFILE_FORMAT_NAMES: Record<number, string> = {
  * Format 8 (PRO X 2 / PRO X 3 Superstrike) joins this set on a CRC-matching
  * full dump: profile sector 1 from a PRO X 3 diagnostic, all 255 bytes, checks
  * out against its own stored CRC (0x2a38, identical on the PRO X 2). That
- * confirms the layout, so profiles can be opened, switched and enabled. It is
- * deliberately not in WRITABLE_FORMATS: profile contents stay locked until a
- * write to this format has been captured.
+ * confirms the layout, so profiles can be opened, switched and enabled.
  */
 const VERIFIED_FORMATS = new Set([2, 3, 4, 7, 8]);
-const WRITABLE_FORMATS = new Set([2, 3, 4, 7]);
+/**
+ * Format 8 is a testing-phase addition: the same base-v6 stage table and write
+ * sequence format 7 already proved on hardware, and its layout is verified, but
+ * no write to format 8 itself has been captured yet. Only the DPI x/y fields are
+ * written (see isLodWritableForProduct), and openActiveProfile() still re-reads
+ * the live sector and refuses on a bad CRC. Pull it back out if the first
+ * write-then-reconnect check does not come back clean.
+ */
+const WRITABLE_FORMATS = new Set([2, 3, 4, 7, 8]);
 const PROFILE_WRITE_PROBE_FORMATS = new Set([2, 3, 4]);
 const FACTORY_RESET_FORMATS = new Set([7]);
 
@@ -92,6 +98,9 @@ export function isLodWritableForProduct(
   productId: number | null | undefined,
 ): boolean {
   if (!isProfileWritable(profileFormatId)) return false;
+  // Format 8: the stored lift-off byte decodes (Medium on every stage) but has
+  // never been written; leave it exactly as read until that is confirmed.
+  if (profileFormatId === 8) return false;
   if (productId !== null && productId !== undefined && UNVERIFIED_LOD_PRODUCT_IDS.has(productId)) return false;
   return true;
 }
@@ -290,8 +299,8 @@ const FORMAT_CAPABILITIES: Record<number, ProfileFormatCapabilities> = {
   // the widest grid seen: the PRO X 3's 0x2202 list runs 100-48000 (steps of
   // 1/2/5/10/20/50/100/125/200 across its ranges), stored as plain 16-bit
   // values; callers narrow it to the connected sensor's own list, so an older
-  // sensor is never offered the X3's ceiling. Read-only for now: this format
-  // is deliberately not in WRITABLE_FORMATS until a write is captured.
+  // sensor is never offered the X3's ceiling. Writable as a testing-phase step,
+  // for DPI x/y only - see WRITABLE_FORMATS.
   8: {
     supportedLods: ["Low", "Medium", "High"],
     lodEncoding: LOD_ENCODING,

@@ -1063,6 +1063,24 @@ test("the captured format 8 profile matches its own stored CRC", () => {
   assert.equal(describeProfileFormat(8).verified, true);
 });
 
+test("editing a format 8 DPI stage changes only that stage's DPI and the CRC", () => {
+  const before = decodeOnboardProfile(SECTOR_1_SUPERSTRIKE, 8, { sector: 1, enabled: true }, true);
+  const stages = before.dpiStages.map((stage) => ({ ...stage }));
+  stages[4] = { x: 3000, y: 3000, lod: stages[4].lod };
+  const written = encodeDpiStages(SECTOR_1_SUPERSTRIKE, 8, { stages, defaultIndex: 0 }, undefined, false);
+
+  // A valid checksum, and it round-trips through the decoder.
+  assert.equal(profileCrc(written), storedCrc(written));
+  const after = decodeOnboardProfile(written, 8, { sector: 1, enabled: true }, true);
+  assert.deepEqual(after.dpiStages.map((stage) => stage.x), [800, 1200, 1600, 2400, 3000]);
+  // Lift-off stayed exactly as read on every stage (writeLod is false for format 8).
+  assert.deepEqual(after.dpiStages.map((stage) => stage.lod), [2, 2, 2, 2, 2]);
+
+  // Only stage 5's X and Y (0x18-0x1b) and the trailing CRC bytes differ.
+  const changed = [...written.keys()].filter((index) => written[index] !== SECTOR_1_SUPERSTRIKE[index]);
+  assert.deepEqual(changed, [0x18, 0x19, 0x1a, 0x1b, written.length - 2, written.length - 1]);
+});
+
 test("format 8's DPI stages decode from a real PRO X 2 and PRO X 3 Superstrike capture", () => {
   const decoded = decodeOnboardProfile(SECTOR_1_SUPERSTRIKE, 8, { sector: 1, enabled: true }, true);
   assert.deepEqual(decoded.dpiStages, [
@@ -1191,10 +1209,11 @@ test("only the per-stage lift-off byte is refused on the original G Pro X Superl
   // Unwritable formats stay refused regardless of product id.
   assert.equal(isLodWritableForProduct(6, 0xc099), false);
   assert.equal(isLodWritableForProduct(null, 0xc099), false);
-  // Format 8 (PRO X 2 / PRO X 3 Superstrike) is read-only until a write to it
-  // has been captured on hardware, even though its DPI table now decodes.
-  assert.equal(isProfileWritable(8), false);
+  // Format 8 (PRO X 2 / PRO X 3 Superstrike) writes DPI x/y in the testing
+  // phase, but never the stored lift-off byte, which has not been written yet.
+  assert.equal(isProfileWritable(8), true);
   assert.equal(isLodWritableForProduct(8, 0xc0a9), false);
+  assert.equal(isLodWritableForProduct(8, null), false);
 });
 
 test("encodeDpiStages preserves the existing lift-off byte when writeLod is false", () => {
