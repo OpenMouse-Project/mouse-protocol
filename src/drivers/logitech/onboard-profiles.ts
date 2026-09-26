@@ -272,14 +272,22 @@ const FORMAT_CAPABILITIES: Record<number, ProfileFormatCapabilities> = {
     bunnyHop: true,
   },
   // Format 8 carries the analog-button block, so it is the PRO X 2 Superstrike
-  // format. Its two levels are what the driver has always offered and were
-  // never checked against a real device; its sensor range was never captured
-  // either, so slots stay unavailable rather than being assumed to match
-  // format 7.
+  // format. Confirmed from two user diagnostics, a PRO X 2 and a PRO X 3
+  // Superstrike, whose profile sector 1 (raw memory reads) decode to the same
+  // five factory stages - 800/1200/1600/2400/3200, all X=Y linked - at the
+  // same 2-index + 5x5-byte layout base v6 already uses, matching format 7's
+  // geometry exactly. Every stage's stored lift-off byte was 2, which
+  // LOD_ENCODING reads as "Medium" - a level the old two-entry list never
+  // allowed, so it was simply wrong, not just unconfirmed. The DPI range is
+  // the widest grid seen: the PRO X 3's 0x2202 list runs 100-48000 (steps of
+  // 1/2/5/10/20/50/100/125/200 across its ranges), stored as plain 16-bit
+  // values; callers narrow it to the connected sensor's own list, so an older
+  // sensor is never offered the X3's ceiling. Read-only for now: this format
+  // is deliberately not in WRITABLE_FORMATS until a write is captured.
   8: {
-    supportedLods: ["Low", "High"],
+    supportedLods: ["Low", "Medium", "High"],
     lodEncoding: LOD_ENCODING,
-    dpiStages: null,
+    dpiStages: { maxStages: 5, minDpi: 100, maxDpi: 48000, stepDpi: 50 },
     // Captured behavior: the wireless link reaches 8 kHz while USB is capped
     // at 1 kHz. Transport selection is resolved from HID++ identity data.
     reportRates: { wirelessMaxHz: 8000, wiredMaxHz: 1000 },

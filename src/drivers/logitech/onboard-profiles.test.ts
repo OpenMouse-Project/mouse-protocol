@@ -72,6 +72,35 @@ const SECTOR_3 = bytes(`
   00 03 00 00 00 00 00 1f 40 32 00 00 03 20 c7
 `);
 
+/**
+ * Profile sector 1 from a real PRO X 2 and PRO X 3 Superstrike (format 8; the
+ * two are byte-identical in every captured position), reconstructed
+ * from a user diagnostic's raw 0x0E/0x55 memory reads. Five DPI stages -
+ * 800/1200/1600/2400/3200, all X=Y linked, lift-off byte 2 ("Medium") on
+ * every stage. First hardware confirmation of format 8's DPI table layout
+ * and lift-off range; see the capabilitiesForFormat(8) comment. Trailing
+ * unread bytes (0x1d-0x1f, 0xdc-0xdf) are filled ff like an unwritten region -
+ * outside the fields this fixture exercises.
+ */
+const SECTOR_1_SUPERSTRIKE = bytes(`
+  03 03 00 00 20 03 20 03 02 b0 04 b0 04 02 40 06
+  40 06 02 60 09 60 09 02 80 0c 80 0c 02 ff ff ff
+  00 ff 00 ff ff ff 14 08 0c 14 08 0c 3c 00 2c 01
+  80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08
+  80 01 00 10 ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  03 00 00 00 00 00 1f 40 00 00 00 03 ff ff ff ff
+  00 1f 40 00 00 00 03 00 00 00 00 00 1f 40 32 00
+  00 03 00 00 00 00 00 1f 40 32 00 00 03 2a 38
+`);
+
 /** An untouched factory profile: no name, five default DPI stages. CRC 0x84db. */
 const SECTOR_2 = bytes(`
   03 03 00 00 20 03 20 03 02 b0 04 b0 04 02 40 06
@@ -964,13 +993,18 @@ test("DPI slot limits are per format, not global", () => {
     maxDpi: 4032,
     stepDpi: 84,
   });
-  assert.equal(capabilitiesForFormat(8).dpiStages, null);
+  // Format 8 (Superstrike) is now captured too - see the real-profile decode
+  // test below - and its stages land on format 7's grid, but that is
+  // confirmed, not borrowed.
+  assert.deepEqual(capabilitiesForFormat(8).dpiStages, { maxStages: 5, minDpi: 100, maxDpi: 48000, stepDpi: 50 });
   assert.equal(capabilitiesForFormat(6).dpiStages, null);
   assert.equal(capabilitiesForFormat(null).dpiStages, null);
 
   const stage = { x: 800, y: 800, lod: 1 };
   assert.match(validateDpiStagePlan({ stages: [stage], defaultIndex: 0 }, null) ?? "", /not known/);
-  assert.throws(() => encodeDpiStages(SECTOR_3, 8, { stages: [stage], defaultIndex: 0 }), /not known/);
+  // Format 8's limits are now known (see the real-capture test above);
+  // format 6 (still uncaptured) is the "not known" case here instead.
+  assert.throws(() => encodeDpiStages(SECTOR_3, 6, { stages: [stage], defaultIndex: 0 }), /not known/);
 
   // A hypothetical older format with tighter limits is held to its own.
   const narrow = { maxStages: 2, minDpi: 200, maxDpi: 4000, stepDpi: 100 };
@@ -1007,8 +1041,9 @@ test("lift-off limits come from the profile format, not the model", () => {
   // Format 7 (Pro X Superlight 2) offers all three levels.
   assert.deepEqual(capabilitiesForFormat(7).supportedLods, ["Low", "Medium", "High"]);
 
-  // Format 8 carries the analog-button block, so it is the Superstrike format.
-  assert.deepEqual(capabilitiesForFormat(8).supportedLods, ["Low", "High"]);
+  // Format 8 (Superstrike) - a real captured profile stored lift-off byte 2
+  // ("Medium") on every DPI stage, so it offers all three levels too.
+  assert.deepEqual(capabilitiesForFormat(8).supportedLods, ["Low", "Medium", "High"]);
 
   // The G402 capture did not expose a lift-off setting for format 1.
   assert.deepEqual(capabilitiesForFormat(1).supportedLods, []);
@@ -1017,6 +1052,18 @@ test("lift-off limits come from the profile format, not the model", () => {
   assert.deepEqual(capabilitiesForFormat(null).supportedLods, ["Medium", "High"]);
   assert.deepEqual(capabilitiesForFormat(undefined).supportedLods, ["Medium", "High"]);
   assert.deepEqual(capabilitiesForFormat(99).supportedLods, ["Medium", "High"]);
+});
+
+test("format 8's DPI stages decode from a real PRO X 2 and PRO X 3 Superstrike capture", () => {
+  const decoded = decodeOnboardProfile(SECTOR_1_SUPERSTRIKE, 8, { sector: 1, enabled: true }, true);
+  assert.deepEqual(decoded.dpiStages, [
+    { x: 800, y: 800, lod: 2 },
+    { x: 1200, y: 1200, lod: 2 },
+    { x: 1600, y: 1600, lod: 2 },
+    { x: 2400, y: 2400, lod: 2 },
+    { x: 3200, y: 3200, lod: 2 },
+  ]);
+  assert.equal(decoded.defaultDpiIndex, 0);
 });
 
 test("format 7 counts lift-off levels from one", () => {
@@ -1135,6 +1182,10 @@ test("only the per-stage lift-off byte is refused on the original G Pro X Superl
   // Unwritable formats stay refused regardless of product id.
   assert.equal(isLodWritableForProduct(6, 0xc099), false);
   assert.equal(isLodWritableForProduct(null, 0xc099), false);
+  // Format 8 (PRO X 2 / PRO X 3 Superstrike) is read-only until a write to it
+  // has been captured on hardware, even though its DPI table now decodes.
+  assert.equal(isProfileWritable(8), false);
+  assert.equal(isLodWritableForProduct(8, 0xc0a9), false);
 });
 
 test("encodeDpiStages preserves the existing lift-off byte when writeLod is false", () => {
