@@ -1,0 +1,60 @@
+# HIDIOCGFEATURE on interface 2 for every feature report the descriptor
+# declares, buffer sized to the declared length + report id.
+# wired fa71
+0x04 declared 51: [Errno 110] Connection timed out
+0x05 declared 12: [Errno 110] Connection timed out
+0x06 declared 8: [Errno 110] Connection timed out
+0x07 declared 7: [Errno 110] Connection timed out
+0x08 declared 58: [Errno 110] Connection timed out
+0x09 declared 63: [Errno 110] Connection timed out
+0x0a declared 7: [Errno 110] Connection timed out
+0x0b declared 7: [Errno 110] Connection timed out
+0x0c declared 5: [Errno 110] Connection timed out
+0x10 declared 7: [Errno 110] Connection timed out
+0x22 declared 131: [Errno 110] Connection timed out
+0x23 declared 261: [Errno 110] Connection timed out
+0x24 declared 7: [Errno 110] Connection timed out
+0x25 declared 12: [Errno 110] Connection timed out
+0x26 declared 8: [Errno 110] Connection timed out
+0x27 declared 7: [Errno 110] Connection timed out
+0x28 declared 131: [Errno 110] Connection timed out
+0x29 declared 128: [Errno 110] Connection timed out
+0x2a declared 130: [Errno 110] Connection timed out
+0x2b declared 7: [Errno 110] Connection timed out
+0x2c declared 3: [Errno 110] Connection timed out
+0x2d declared 102: [Errno 110] Connection timed out
+0x2e declared 4: [Errno 110] Connection timed out
+0xa0 declared 7: a0 00 00 00 00 00 00 00
+# receiver fa60
+0x04 declared 51: [Errno 110] Connection timed out
+0x05 declared 12: [Errno 110] Connection timed out
+0x06 declared 8: [Errno 110] Connection timed out
+0x07 declared 7: [Errno 110] Connection timed out
+0x08 declared 58: [Errno 110] Connection timed out
+0x09 declared 63: [Errno 110] Connection timed out
+0x0a declared 7: [Errno 110] Connection timed out
+0x0b declared 7: [Errno 110] Connection timed out
+0x0c declared 5: [Errno 110] Connection timed out
+0x10 declared 7: [Errno 110] Connection timed out
+0x22 declared 131: [Errno 110] Connection timed out
+0x23 declared 261: [Errno 110] Connection timed out
+0x24 declared 7: [Errno 110] Connection timed out
+0x25 declared 12: [Errno 110] Connection timed out
+0x26 declared 8: [Errno 110] Connection timed out
+0x27 declared 7: [Errno 110] Connection timed out
+0x28 declared 131: [Errno 110] Connection timed out
+0x29 declared 128: [Errno 110] Connection timed out
+0x2a declared 131: [Errno 110] Connection timed out
+0x2b declared 7: [Errno 110] Connection timed out
+0x2c declared 3: [Errno 110] Connection timed out
+0x2d declared 131: [Errno 110] Connection timed out
+0x2e declared 4: [Errno 110] Connection timed out
+0xa0 declared 7: a0 00 00 00 00 00 00 00
+# receiver fa60, interface 2 input stream over 8.6 s (mouse on 2.4 GHz, 100 %):
+# 64 reports, all identical
+03 20 40 01 64
+# receiver fa60, R1-style read request (SET_FEATURE 0xa0, 1 s, GET_FEATURE),
+# measured polling rate at the time: 125 Hz (peak ~151 Hz)
+a0 06 00 01 00 00 00 00 00 -> GET 0x06: 06 02 00 00 00 00 00 00 00
+a0 04 00 01 00 00 00 00 00 -> SET: [Errno 32] Broken pipe; GET 0x04: [Errno 110] Connection timed out
+a0 06 00 01 00 00 00 00 00 -> SET: [Errno 32] Broken pipe; GET 0x06: [Errno 110] Connection timed out

@@ -10,6 +10,7 @@ import { LAMZU_ATLANTIS_PRODUCTS, LAMZU_PRODUCTS } from "@openmouse/protocol/lam
 import { ORBITAL_DEVICES } from "@openmouse/protocol/orbital";
 import { MCHOSE_V3_PRODUCT_IDS } from "@openmouse/protocol/mchose";
 import {
+  DELUX_M600_PRO_WIRED_PID,
   DELUX_M800_MINI_WIRELESS_PID,
   DELUX_OEM_VENDOR_ID,
 } from "@openmouse/protocol/delux";
@@ -83,6 +84,9 @@ function candidateProductIds(): number[] {
     // The MCHOSE V3 driver matches on an id allowlist and shares its usage
     // page with the V2, so the probe needs a real one to reach it at all.
     ...MCHOSE_V3_PRODUCT_IDS,
+    // Claimed by id alone and defined outside src/drivers, so the source
+    // scan below would not find it.
+    DELUX_M600_PRO_WIRED_PID,
   ]);
   for (const filter of SUPPORTED_HID_FILTERS) {
     if (filter.productId !== undefined) ids.add(filter.productId);
@@ -113,6 +117,12 @@ const NAMED_PROBES = [
     productId: DELUX_M800_MINI_WIRELESS_PID,
     productName: "Delux M800 Mini",
     collections: [] as HIDCollectionInfo[],
+  },
+  {
+    vendorId: DELUX_OEM_VENDOR_ID,
+    productId: DELUX_M600_PRO_WIRED_PID,
+    productName: "USB Gaming Mouse",
+    collections: [collection(0x0b, 0, { feature: [4, 6] })],
   },
 ] as const;
 
