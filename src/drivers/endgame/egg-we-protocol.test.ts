@@ -52,6 +52,13 @@ test("a 0x1970 receiver exposing the OP1-8K command report is left for EggOp1Hid
   assert.equal(EggWeHidClient.isSupported(op1w4kV2Dongle), false);
 });
 
+test("sibling interfaces of a 4K v2 dongle are not picked as WE (ticket #0126)", () => {
+  const vendorSibling = hidDevice(0x1970, "", [0x05]);
+  assert.deepEqual(EggWeHidClient.pickDevices([hidDevice(0x1970), vendorSibling, hidDevice(0x1970, "", [0xa1])]), []);
+  assert.equal(EggWeHidClient.fromAuthorizedDevices([vendorSibling, hidDevice(0x1970, "", [0xa1])]), null);
+  assert.deepEqual(EggWeHidClient.pickDevices([vendorSibling]), [vendorSibling]);
+});
+
 test("WE model names can fall back to the USB product string", () => {
   assert.equal(
     EggWeHidClient.displayNameForDevice(hidDevice(0x1962, "XM2we")),
