@@ -5,7 +5,6 @@ import {
   TEEVOLUTION_COMMAND,
   TEEVOLUTION_FLASH,
   TEEVOLUTION_PROFILE_COUNT,
-  TEEVOLUTION_KEY_TABLE_LENGTH,
   TEEVOLUTION_LCD_REPORT_ID,
   TEEVOLUTION_LCD_USAGE,
   TEEVOLUTION_LCD_USAGE_PAGE,
@@ -30,18 +29,13 @@ import {
   teevolutionDpiOptions,
   teevolutionEncodeDpiLightBrightness,
   teevolutionEncodeDpi,
-  teevolutionEncodeKeyFunction,
   teevolutionEncodeLiftOff,
   teevolutionEncodePollingRate,
   teevolutionEncodeSensorMode,
-  teevolutionFindButton,
-  teevolutionFindButtonAction,
-  teevolutionKeyFunctionAddress,
-  teevolutionKeyFunctionLabel,
-  teevolutionKeyTableHasLeftClick,
   teevolutionPacketChecksum,
   teevolutionParseBattery,
   teevolutionParseReadResponse,
+  teevolutionRemapButton,
   teevolutionProfileForCid,
   teevolutionSensorModeUi,
   type TeevolutionDeviceProfile,
@@ -267,26 +261,13 @@ export class TeevolutionHidClient {
   }
 
   async setButtonMapping(button: string, action: string): Promise<void> {
-    const slot = teevolutionFindButton(button);
-    if (!slot) throw new Error(`This mouse has no "${button}" button.`);
-    const assigned = teevolutionFindButtonAction(action);
-    if (!assigned) throw new Error(`Unknown button action "${action}".`);
-    const payload = teevolutionEncodeKeyFunction(assigned.cls, assigned.param);
     await this.open();
-    await this.withDeviceControl(async () => {
-      const table = await this.readFlash(TEEVOLUTION_FLASH.keyFunction, TEEVOLUTION_KEY_TABLE_LENGTH);
-      const next = new Uint8Array(table);
-      next.set(payload, slot.index * payload.length);
-      if (!teevolutionKeyTableHasLeftClick(next)) {
-        throw new Error("Keep at least one button as Left Click.");
-      }
-      const address = teevolutionKeyFunctionAddress(slot.index);
-      await this.writeFlash(address, payload);
-      const confirmed = await this.readFlash(address, payload.length);
-      if (teevolutionKeyFunctionLabel(confirmed) !== assigned.label) {
-        throw new Error("The mouse did not accept that button assignment.");
-      }
-    });
+    await this.withDeviceControl(() => teevolutionRemapButton(
+      (address, length) => this.readFlash(address, length),
+      (address, data) => this.writeFlash(address, data),
+      button,
+      action,
+    ));
   }
 
   /**

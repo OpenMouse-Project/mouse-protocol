@@ -53,8 +53,23 @@ const PROFILE_FORMAT_NAMES: Record<number, string> = {
  * hardware sanity check on a G502/G403-family device is still required before
  * release — see docs/logitech-onboard-profiles.md.
  */
-const VERIFIED_FORMATS = new Set([2, 3, 4, 7]);
-const WRITABLE_FORMATS = new Set([2, 3, 4, 7]);
+/**
+ * Format 8 (PRO X 2 / PRO X 3 Superstrike) joins this set on a CRC-matching
+ * full dump: profile sector 1 from a PRO X 3 diagnostic, all 255 bytes, checks
+ * out against its own stored CRC (0x2a38, identical on the PRO X 2). That
+ * confirms the layout, so profiles can be opened, switched and enabled.
+ */
+const VERIFIED_FORMATS = new Set([2, 3, 4, 7, 8]);
+/**
+ * Format 8 is a testing-phase addition: the same base-v6 stage table and write
+ * sequence format 7 already proved on hardware, and its layout is verified, but
+ * a DPI write to it has been confirmed on hardware (a PRO X 3 Superstrike), and
+ * the per-stage lift-off byte sits in the same 5-byte stage entries. Both are
+ * written; openActiveProfile() still re-reads the live sector and refuses on a
+ * bad CRC. Pull it back out if a write-then-reconnect check does not come back
+ * clean.
+ */
+const WRITABLE_FORMATS = new Set([2, 3, 4, 7, 8]);
 const PROFILE_WRITE_PROBE_FORMATS = new Set([2, 3, 4]);
 const FACTORY_RESET_FORMATS = new Set([7]);
 
@@ -272,14 +287,22 @@ const FORMAT_CAPABILITIES: Record<number, ProfileFormatCapabilities> = {
     bunnyHop: true,
   },
   // Format 8 carries the analog-button block, so it is the PRO X 2 Superstrike
-  // format. Its two levels are what the driver has always offered and were
-  // never checked against a real device; its sensor range was never captured
-  // either, so slots stay unavailable rather than being assumed to match
-  // format 7.
+  // format. Confirmed from two user diagnostics, a PRO X 2 and a PRO X 3
+  // Superstrike, whose profile sector 1 (raw memory reads) decode to the same
+  // five factory stages - 800/1200/1600/2400/3200, all X=Y linked - at the
+  // same 2-index + 5x5-byte layout base v6 already uses, matching format 7's
+  // geometry exactly. Every stage's stored lift-off byte was 2, which
+  // LOD_ENCODING reads as "Medium" - a level the old two-entry list never
+  // allowed, so it was simply wrong, not just unconfirmed. The DPI range is
+  // the widest grid seen: the PRO X 3's 0x2202 list runs 100-48000 (steps of
+  // 1/2/5/10/20/50/100/125/200 across its ranges), stored as plain 16-bit
+  // values; callers narrow it to the connected sensor's own list, so an older
+  // sensor is never offered the X3's ceiling. Writable as a testing-phase step -
+  // see WRITABLE_FORMATS.
   8: {
-    supportedLods: ["Low", "High"],
+    supportedLods: ["Low", "Medium", "High"],
     lodEncoding: LOD_ENCODING,
-    dpiStages: null,
+    dpiStages: { maxStages: 5, minDpi: 100, maxDpi: 48000, stepDpi: 50 },
     // Captured behavior: the wireless link reaches 8 kHz while USB is capped
     // at 1 kHz. Transport selection is resolved from HID++ identity data.
     reportRates: { wirelessMaxHz: 8000, wiredMaxHz: 1000 },
