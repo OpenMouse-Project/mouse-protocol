@@ -1,0 +1,25 @@
+# Redragon M690 PRO: Every stage set to 250 (code 01), then each in turn to 3000 (0c) and 8000 (18).
+GET 08 11 00 00 00 00 00 00 64 13 03 35 00 02 00 04 00 08 00 0c 00 18 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 40 00 00 40 00 00 40 00 00 40 00 00 40 ff 46 00 00 ff ff ff ff ff 02 12 01 00 ff 00 00 42 07 00 00 00 00 ff 00 00 00 ff ff ff 00 00 ff ff ff 80 00 ff 00 ff 02 02 00 00 00 00 00 ff 00 00 00 ff 00 00 ff 4c 22 8a ff 80 00 ff 00 ff ff 00 00 ff 00 00 ff 00 00 02 00 ff 00 fa 03 6a 42 42 02 ff 00 00 00 00 01 02 ff 00 00 a5
+SET 08 11 00 92 ..  [0x0d] 02 00 04 00 08 00 0c 00 18 -> 01 00 01 00 01 00 01 00 01
+SET 08 12 00 50 00 00 00 00 11 01 00 00 11 02 00 00 11 04 00 00 11 08 00 00 11 10 00 00 41 01 00 00 41 02 00 00 31 01 32 03 50 04 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 a5
+GET 08 11 ..  identical to the write
+SET 08 11 00 92 ..  [0x0d] 01 -> 0c
+GET 08 11 ..  identical to the write
+SET 08 11 00 92 ..  [0x0d] 0c -> 18
+GET 08 11 ..  identical to the write
+SET 08 11 00 92 ..  [0x0f] 01 -> 0c
+GET 08 11 ..  identical to the write
+SET 08 11 00 92 ..  [0x0f] 0c -> 18
+GET 08 11 ..  identical to the write
+SET 08 11 00 92 ..  [0x11] 01 -> 0c
+GET 08 11 ..  identical to the write
+SET 08 11 00 92 ..  [0x11] 0c -> 18
+GET 08 11 ..  identical to the write
+SET 08 11 00 92 ..  [0x13] 01 -> 0c
+GET 08 11 ..  identical to the write
+SET 08 11 00 92 ..  [0x13] 0c -> 18
+GET 08 11 ..  identical to the write
+SET 08 11 00 92 ..  [0x15] 01 -> 0c
+GET 08 11 ..  identical to the write
+SET 08 11 00 92 ..  [0x15] 0c -> 18
+GET 08 11 ..  identical to the write

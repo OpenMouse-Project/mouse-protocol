@@ -1,0 +1,38 @@
+# Redragon M690 PRO: OpenMouse with this driver through the receiver. Polling is written with the mouse off and the
+# receiver keeps it (read back 03); once the mouse is switched on the receiver bank holds the
+# mouse's own value again (01) with no write in between. DPI button events read
+# 07 11 01 <stage> <code> (11 through the receiver, 10 over the cable). Then polling
+# 500 -> 125 -> 1000 Hz.
+# -- mouse off
+GET 08 21 00 00 00 00 00 00 64 13 01 25 00 02 00 04 00 08 00 0c 00 18 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 40 00 00 40 00 00 40 00 00 40 00 00 40 ff 46 00 00 ff ff ff ff ff 02 44 01 00 ff 00 00 44 07 00 00 00 00 ff 00 00 00 ff ff ff 00 00 ff ff ff 80 00 ff 00 ff 02 02 00 0b eb d7 00 ff 00 00 00 ff ff ff 00 00 ff ff ff 80 00 ff 00 ff ff 00 00 ff 00 00 ff 00 00 02 00 ff 00 fa 03 6a 42 42 02 ff 00 00 00 00 01 02 ff 00 00 a5
+SET 05 80
+GET -  # no data: the read failed (STALL)
+GET 08 22 00 00 00 00 00 00 11 01 00 00 11 02 00 00 11 04 00 00 11 08 00 00 11 10 00 00 41 01 00 00 41 02 00 00 31 01 32 03 50 04 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01
+SET 08 21 00 92 ..  [0x0a] 01 -> 03
+SET 08 22 00 50 ..  unchanged
+GET 08 21 ..  identical to the write
+GET 08 22 ..  identical to the write
+# -- mouse switched on: its DPI buttons send events
+EVT 07 11 01 03 08
+EVT 07 11 01 04 0c
+EVT 07 11 01 05 18
+GET 08 21 00 00 ..  [0x0a] 03 25 -> 01 55
+EVT 07 11 01 04 0c
+EVT 07 11 01 03 08
+EVT 07 11 01 02 04
+EVT 07 11 01 01 02
+GET 08 21 00 00 ..  [0x0b] 55 -> 15
+SET 08 21 00 92 ..  [0x0d] 02 -> 18
+GET 08 21 ..  identical to the write
+SET 08 21 00 92 ..  [0x0d] 18 -> 02
+GET 08 21 ..  identical to the write
+EVT 07 11 01 02 04
+EVT 07 11 01 03 08
+GET 08 21 00 00 ..  [0x0b] 15 -> 35
+# -- later, mouse on: polling 500 -> 125 -> 1000 Hz
+SET 08 21 00 92 ..  [0x0a] 01 -> 03
+GET 08 21 ..  identical to the write
+SET 08 21 00 92 ..  [0x0a] 03 -> 01
+GET 08 21 ..  identical to the write
+SET 08 21 00 92 ..  [0x0a] 01 -> 04
+GET 08 21 ..  identical to the write
