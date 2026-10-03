@@ -54,11 +54,11 @@ matching descriptors (only reports `0x2A`/`0x2D` differ in declared length):
 - IF 3: keyboard bitmap
 
 Linux hidraw hands the whole IF 2 descriptor to the browser, so WebHID lists
-the `0x0B` collection with its feature reports. On Windows the config channel
-is a separate `&col04` sub-collection the browser does not open (see the
-X11 note in `src/drivers/attackshark/hid.ts`). Both drivers enable WebHID
-settings only when a collection declares feature reports `0x04` and
-`0x06`.
+the `0x0B` collection with its feature reports. On Windows the battery and
+config channels are the `&col03` and `&col04` sub-collections, which Chrome
+does not list (see [Windows](#windows)). Both drivers
+enable WebHID settings only when a collection declares feature reports `0x04`
+and `0x06`.
 
 ## Observed facts
 
@@ -165,6 +165,62 @@ change, against a local build (`captures/delux-m600-pro/openmouse-hardware-test-
 The link stayed up after both runs. The test's "read back" compares against
 the driver's cached state, because this firmware answers no reads. The
 effect of the writes is shown by the motion measurements above.
+
+## Windows
+
+Tested on the same unit on Windows 11 (10.0.26200) with Chrome 154 on
+2026-10-03, on the receiver and on the cable. Raw material is in
+`captures/delux-m600-pro/windows-webhid.txt` and `windows-bridge.txt`.
+
+- **Why the browser sees nothing.** Interface 2 splits into four collections
+  (`&col01` to `&col04`). The battery collection (`&col03`, `0x0A/0x00`) and
+  the config collection (`&col04`, `0x0B/0x00`) declare only Constant items,
+  so `HidP_GetCaps` reports no button or value caps for either. Their report
+  lengths are still there: 5 bytes of input on `&col03`, and 262 bytes of
+  feature on `&col04` (report `0x23`, 261 bytes, plus the id).
+- **Natively the data is there.** `ReadFile` on `&col03` with the stock
+  driver returns `03 20 40 01 4d` (model `0x20`, 77 %), and `&col04` opens
+  without WinUSB.
+- **Chrome on Windows** builds `HIDDevice.collections` from the caps. It
+  lists only the consumer collection (`0x0C/0x01`, input `0x02`) and hides
+  the protected system-control one. No input report `0x03` arrives. The
+  receiver therefore stays the read-only "Attack Shark mouse (2.4 GHz
+  receiver)", with no battery. No driver change can reach these
+  collections from the browser.
+- **OpenMouse Bridge on Windows** lists all seven collections, with
+  descriptors hidapi rebuilt from the preparsed data:
+  - `0x0A` appears as an unnumbered 4-byte input, so the receiver message
+    arrives as report `0x00` with data `03 20 40 01 4c`.
+  - `0x0B` appears with no reports.
+
+  The X11 path accepts that shape:
+  - A 5-byte report-0 packet starting with `0x03` is treated as a receiver
+    message. The boot mouse's and keyboards' unnumbered reports are 7 and 8
+    bytes long.
+  - When the `0x0B` collection declares nothing, writes are enabled only
+    after a receiver message names a model checked on this path. Only the
+    M600 Pro (`0x20`) is in that list.
+  - The status read waits for that message, using the same bounded battery
+    wait.
+  - DPI uses the 52-byte form, the length the M600 Pro declares.
+  - Bridge sends a report that no collection declares to every open path.
+    On Windows hidapi pads a feature write to the collection's caps length,
+    and `&col04` is the only collection with a nonzero feature length.
+- **Receiver writes through Bridge:** with this change (local OpenMouse
+  build at `http://localhost:5173`, Bridge running), the receiver showed up
+  as `Delux M600 Pro (Wireless)` with its battery. DPI and polling-rate
+  changes applied, judged by how the cursor behaved. No report rate was
+  measured.
+- **Wired (`fa71`):** Windows splits it the same way. `&col04` has 262 bytes
+  of feature and no caps, and `&col03` sends nothing on the cable.
+  - Chrome does not list the config collection, so the Delux driver still
+    refuses the unit there.
+  - Through Bridge the `0x0B` collection appears with no reports. The Delux
+    driver accepts that shape for the unbranded PID, as it does the declared
+    channel on Linux, and sends the same 52-byte DPI and 8-byte polling
+    packets.
+  - The wired unit sends no receiver messages, so it is named by its PID
+    alone, as before.
 
 ## For maintainers
 

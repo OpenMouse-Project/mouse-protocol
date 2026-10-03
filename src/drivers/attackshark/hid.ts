@@ -44,6 +44,16 @@ import {
 // packets are written from the browser (verified on a Delux M600 Pro on the
 // 0xfa60 receiver; see docs/delux-m600-pro-testing.md).
 //
+// OpenMouse Bridge on Windows sits in between: its hidapi transport lists the
+// 0x0a battery and 0x0b config collections, but Windows rebuilds their
+// descriptors from preparsed data, which has no entry for this firmware's
+// Constant-only items. The 0x0a collection then reads as unnumbered, so
+// receiver messages arrive as report 0 with the 0x03 id still in the data,
+// and the 0x0b collection declares no reports at all. Bridge sends a report no
+// collection declares to every path, and the 0x0b path is the only one with a
+// feature length on Windows (262 bytes), so the write lands there
+// (captures/delux-m600-pro/windows-bridge.txt).
+//
 // Protocol source: xb-bx/attack-shark-r1-driver (Odin)
 //                  HarukaYamamoto0/attack-shark-x11-driver (TypeScript)
 //                  qmk.top GearHub bundle (MU class — 0x25a7 protocol)
@@ -81,6 +91,11 @@ const DPI_READ_REPORT_ID = 0xa0;
 // p1 = 0x01; p2's scale differs per model, so only models whose scale was
 // checked carry `battery` (the others are named but report no battery).
 const BATTERY_REPORT_ID = 0x03;
+/** Receiver messages are always five bytes, report id included. */
+const RECEIVER_MESSAGE_BYTES = 5;
+/** Interface 2's battery (input 0x03) and config (features) collections. */
+const X11_BATTERY_USAGE_PAGE = 0x0a;
+const X11_CONFIG_USAGE_PAGE = 0x0b;
 
 interface ReceiverModel {
   brand: "Attack Shark" | "Delux";
@@ -187,6 +202,25 @@ function x11ConfigReportBytes(device: HIDDevice): number | null {
   return null;
 }
 
+function declaresAnyReport(collection: HIDCollectionInfo): boolean {
+  return collection.inputReports.length > 0
+    || collection.outputReports.length > 0
+    || collection.featureReports.length > 0
+    || collection.children.some(declaresAnyReport);
+}
+
+/**
+ * True when the config collection is listed but declares no reports: the
+ * shape a descriptor rebuilt from Windows preparsed data takes (OpenMouse
+ * Bridge on Windows). Chrome on Windows does not list the collection, and
+ * Linux hidraw lists it with its feature reports.
+ */
+function x11RebuiltConfigCollection(device: HIDDevice): boolean {
+  return device.collections.some(
+    (collection) => collection.usagePage === X11_CONFIG_USAGE_PAGE && !declaresAnyReport(collection),
+  );
+}
+
 function declaresInputReport(collection: HIDCollectionInfo, reportId: number): boolean {
   if (collection.inputReports.some((report) => report.reportId === reportId)) return true;
   return collection.children.some((child) => declaresInputReport(child, reportId));
@@ -215,6 +249,12 @@ const X11_WIRELESS_PID = 0xfa60;
 // wireless 0xfa60). The R1 (0xfa61) uses a different DpiBuilder/step map in
 // the reference driver, so it stays out of this path until ported.
 const X11_DPI_PIDS: ReadonlySet<number> = new Set([0xfa55, 0xfa60]);
+
+// A rebuilt config collection (see x11RebuiltConfigCollection) carries no
+// report sizes and no hint of which firmware is behind it, so writes through
+// it are only enabled once a receiver message names a model checked on that
+// path (docs/delux-m600-pro-testing.md).
+const X11_REBUILT_CONFIG_MODELS: ReadonlySet<number> = new Set([DELUX_M600_PRO_MODEL_ID]);
 
 // The firmware has no cheap "current DPI" command, so — exactly like the
 // reference driver — the last full six-stage table this process wrote (or
@@ -437,10 +477,20 @@ export class AttackSharkHidClient {
 
   /**
    * True when the X11 config channel is writable: always over a native
-   * adapter, and over WebHID when the browser exposes it (Linux hidraw).
+   * adapter, over WebHID when the browser exposes it (Linux hidraw), and
+   * through a rebuilt config collection once a checked model is named.
    */
   private get x11ConfigReachable(): boolean {
-    return this.nativeConfig || x11ConfigReportBytes(this.device) !== null;
+    return this.nativeConfig
+      || x11ConfigReportBytes(this.device) !== null
+      || (this.x11RebuiltConfig && X11_REBUILT_CONFIG_MODELS.has(this.receiverModelId ?? -1));
+  }
+
+  /** True for an X11 DPI unit whose config collection was rebuilt without reports. */
+  private get x11RebuiltConfig(): boolean {
+    return this.family === "1d57-x11"
+      && X11_DPI_PIDS.has(this.device.productId)
+      && x11RebuiltConfigCollection(this.device);
   }
 
   /** True when this unit's DPI report 0x04 can be driven. */
@@ -456,12 +506,20 @@ export class AttackSharkHidClient {
 
   // Battery packets arrive as inputreport events; the raw packet's leading
   // 0x03 is the HID report id, which WebHID strips into event.reportId, so
-  // rebuild the native shape before matching the signature.
+  // rebuild the native shape before matching the signature. A rebuilt
+  // descriptor (Bridge on Windows) reads the battery collection as unnumbered,
+  // so the whole packet arrives as report 0, id byte included; the length
+  // keeps the boot mouse's and keyboards' unnumbered reports out.
   private readonly onInputReport = (event: HIDInputReportEvent): void => {
     const data = new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength);
-    const packet = new Uint8Array(data.length + 1);
-    packet[0] = event.reportId;
-    packet.set(data, 1);
+    let packet: Uint8Array;
+    if (event.reportId === 0 && data.length === RECEIVER_MESSAGE_BYTES && data[0] === BATTERY_REPORT_ID) {
+      packet = data.slice();
+    } else {
+      packet = new Uint8Array(data.length + 1);
+      packet[0] = event.reportId;
+      packet.set(data, 1);
+    }
     if (packet[0] === BATTERY_REPORT_ID && X11_RECEIVER_MODELS.has(packet[1])) {
       x11RuntimeFor(this.device.productId).modelId = packet[1];
     }
@@ -498,10 +556,15 @@ export class AttackSharkHidClient {
     return false;
   }
 
+  /** The known model id the last receiver message carried, if any. */
+  private get receiverModelId(): number | null {
+    if (this.family !== "1d57-x11") return null;
+    return x11RuntimeFor(this.device.productId).modelId;
+  }
+
   /** The model a receiver message identified, if any. */
   private get receiverModel(): ReceiverModel | undefined {
-    if (this.family !== "1d57-x11") return undefined;
-    const modelId = x11RuntimeFor(this.device.productId).modelId;
+    const modelId = this.receiverModelId;
     return modelId === null ? undefined : X11_RECEIVER_MODELS.get(modelId);
   }
 
@@ -574,6 +637,12 @@ export class AttackSharkHidClient {
       }
     }
 
+    // A rebuilt config collection is writable only for a named model, and only
+    // a receiver message names it: wait for one before deciding.
+    if (this.x11RebuiltConfig && this.isWireless()) {
+      await this.waitForX11Battery(x11RuntimeFor(this.device.productId));
+    }
+
     const dpiState = this.x11DpiSupported ? x11DpiStateFor(this.device.productId) : null;
     // Only native adapters try the read: over WebHID every GET_FEATURE on
     // this firmware timed out (about 5 s each) on the measured hardware.
@@ -610,11 +679,14 @@ export class AttackSharkHidClient {
         // shows the column when the browser can see the battery input report
         // (usually hidden under the protected system-control collection); a
         // native adapter delivers the stream directly, so it is always worth
-        // showing there.
+        // showing there. A rebuilt descriptor lists the battery collection
+        // without its report id, and the stream still arrives.
         forceShowBattery: this.family === "1d57-x11"
           && this.isWireless()
           && (this.nativeConfig
-            || this.device.collections.some((collection) => declaresInputReport(collection, BATTERY_REPORT_ID))),
+            || this.device.collections.some((collection) => declaresInputReport(collection, BATTERY_REPORT_ID))
+            || (this.x11RebuiltConfig
+              && this.device.collections.some((collection) => collection.usagePage === X11_BATTERY_USAGE_PAGE))),
         statusNote: this.family === "1d57-x11" && !this.x11ConfigReachable
           ? "Status only: this mouse's settings channel is not reachable from a browser and needs a native driver."
           : undefined,
@@ -728,12 +800,15 @@ export class AttackSharkHidClient {
   /**
    * The DPI report is 52 bytes on the wired X11 and 56 over its receiver. A
    * descriptor the browser exposes decides (the M600 Pro receiver declares
-   * the 52-byte form); without one, fall back to the product id.
+   * the 52-byte form). A rebuilt config collection has no sizes, so there
+   * the named model decides (the M600 Pro declares 51 bytes on both paths);
+   * otherwise fall back to the product id.
    */
   private x11UsesShortDpiReport(): boolean {
     const declared = x11ConfigReportBytes(this.device);
     if (declared === 51) return true;
     if (declared === 55) return false;
+    if (this.x11RebuiltConfig && this.receiverModelId === DELUX_M600_PRO_MODEL_ID) return true;
     return this.device.productId === 0xfa55;
   }
 
