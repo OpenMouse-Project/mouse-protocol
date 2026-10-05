@@ -45,6 +45,29 @@ function exposesConfigChannel(device: HIDDevice): boolean {
     && declaresFeatureReport(collection, POLLING_REPORT_ID));
 }
 
+const CONFIG_USAGE_PAGE = 0x0b;
+
+function declaresAnyReport(collection: HIDCollectionInfo): boolean {
+  return collection.inputReports.length > 0
+    || collection.outputReports.length > 0
+    || collection.featureReports.length > 0
+    || collection.children.some(declaresAnyReport);
+}
+
+/**
+ * True when the 0x0b config collection is listed but declares no reports: a
+ * descriptor rebuilt from Windows preparsed data (OpenMouse Bridge on
+ * Windows), which has no entry for this firmware's Constant-only items.
+ * Bridge sends a report no collection declares to every path, and the config
+ * path is the only one with a feature length. Chrome on Windows does not
+ * list the collection at all (docs/delux-m600-pro-testing.md).
+ */
+function rebuiltConfigChannel(device: HIDDevice): boolean {
+  return device.collections.some(
+    (collection) => collection.usagePage === CONFIG_USAGE_PAGE && !declaresAnyReport(collection),
+  );
+}
+
 interface DeluxDpiState {
   stages: number[];
   activeStage: number;
@@ -113,7 +136,9 @@ export class DeluxHidClient {
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== DELUX_OEM_VENDOR_ID) return false;
     if (DELUX_UNBRANDED_PRODUCT_IDS.has(device.productId)) {
-      return device.collections.length === 0 || exposesConfigChannel(device);
+      return device.collections.length === 0
+        || exposesConfigChannel(device)
+        || rebuiltConfigChannel(device);
     }
     if (!DELUX_PRODUCT_IDS.has(device.productId)
       || !/\bdelux\b/i.test(device.productName || "")) {
@@ -131,11 +156,14 @@ export class DeluxHidClient {
   /**
    * Native adapters always reach the config channel. Through WebHID it is
    * enabled only for the unbranded models whose writes were verified on
-   * hardware over that path (docs/delux-m600-pro-testing.md).
+   * hardware over that path (docs/delux-m600-pro-testing.md), whether the
+   * collection declares its reports (Linux hidraw) or was rebuilt without
+   * them (Bridge on Windows).
    */
   private get settingsReachable(): boolean {
     return this.nativeConfig
-      || (DELUX_UNBRANDED_PRODUCT_IDS.has(this.device.productId) && exposesConfigChannel(this.device));
+      || (DELUX_UNBRANDED_PRODUCT_IDS.has(this.device.productId)
+        && (exposesConfigChannel(this.device) || rebuiltConfigChannel(this.device)));
   }
 
   displayName(): string {
