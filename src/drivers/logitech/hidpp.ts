@@ -1529,6 +1529,11 @@ export class LogitechHidppClient {
       throw new Error("This mouse already has onboard profiles; use reset instead.");
     }
     const sectors = parseDirectory(factoryDirectory).map((entry) => entry.sector);
+    // The directory layout was captured from one model. Only write it to a mouse
+    // that itself reports at least that many profiles.
+    if (info.profileCount < sectors.length) {
+      throw new Error(`This mouse reports ${info.profileCount} profiles but the captured factory layout has ${sectors.length}; refusing to write it.`);
+    }
     const firstSector = sectors[0];
 
     // Host mode keeps the mouse from loading a sector while it is being filled.

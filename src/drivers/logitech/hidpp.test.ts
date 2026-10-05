@@ -608,7 +608,7 @@ test("HITS press stream start replays G HUB's captured arm sequence, stop clears
  * memory read, and the address/data/end write sequence. Starts blank (every
  * sector erased) like a mouse G HUB has never linked.
  */
-function onboardMemoryMouse(options: { ignoreWrites?: boolean; preload?: Record<number, Uint8Array> } = {}) {
+function onboardMemoryMouse(options: { ignoreWrites?: boolean; profileCount?: number; preload?: Record<number, Uint8Array> } = {}) {
   const FEATURE_INDEX = 0x21;
   const memory = new Map<number, Uint8Array>(Object.entries(options.preload ?? {}).map(([sector, bytes]) => [Number(sector), bytes.slice()]));
   const state = { mode: 0x01, current: 0x0001, writes: 0 };
@@ -623,7 +623,7 @@ function onboardMemoryMouse(options: { ignoreWrites?: boolean; preload?: Record<
     if (request[1] !== FEATURE_INDEX) return base(request);
     const fn = request[2] >> 4;
     const params = Array.from(request.slice(3));
-    if (fn === 0) return successReply(deviceIndex, FEATURE_INDEX, 0x00, [0x01, 0x08, 0x00, 0x05, 0x00, 0x06, 0x05, 0x00, 0xff]);
+    if (fn === 0) return successReply(deviceIndex, FEATURE_INDEX, 0x00, [0x01, 0x08, 0x00, options.profileCount ?? 0x05, 0x00, 0x06, 0x05, 0x00, 0xff]);
     if (fn === 1) { state.mode = params[0]; return successReply(deviceIndex, FEATURE_INDEX, 0x10); }
     if (fn === 2) return successReply(deviceIndex, FEATURE_INDEX, 0x20, [state.mode]);
     if (fn === 3) { state.current = (params[0] << 8) | params[1]; return successReply(deviceIndex, FEATURE_INDEX, 0x30); }
@@ -679,4 +679,12 @@ test("initialising leaves the directory blank and the mouse in onboard mode when
   await assert.rejects(client.initializeBlankOnboardProfiles(), /did not confirm/);
   assert.equal(memory.has(0), false, "directory never written");
   assert.equal(state.mode, 0x01, "not stranded in host mode");
+});
+
+test("initialising refuses a mouse that reports fewer profiles than the captured layout and writes nothing", async () => {
+  const { client, state } = onboardMemoryMouse({ profileCount: 3 });
+  await resolveIndex(client);
+  await assert.rejects(client.initializeBlankOnboardProfiles(), /reports 3 profiles/);
+  assert.equal(state.writes, 0);
+  assert.equal(state.mode, 0x01);
 });
