@@ -106,7 +106,9 @@ import {
   encodeMacroSector,
   encodeProfileName,
   encodeReportRate,
+  factoryDirectoryForFormat,
   factoryProfileForFormat,
+  isBlankDirectory,
   validateDpiStagePlan,
   type DpiStagePlan,
   type LogitechButtonAction,
@@ -1487,6 +1489,73 @@ export class LogitechHidppClient {
     } finally {
       // A failed sector write must not strand the mouse in software-controlled
       // host mode. Preserve the original error if recovery also fails.
+      if (!finished) await this.setOnboardMode("Onboard").catch(() => undefined);
+    }
+  }
+
+  /**
+   * Gives a mouse that has no profiles yet (G HUB has never linked it) the
+   * factory set, so OpenMouse does not need G HUB to initialise it: every
+   * factory profile sector, then a directory listing them with the first
+   * enabled, then profile 1 selected.
+   *
+   * WRITES FLASH. Only for a format whose factory sectors and directory were
+   * captured from G HUB, and only when the directory is truly blank. The
+   * directory goes last, so a failure part-way leaves the mouse as blank as it
+   * started instead of pointing at half-written sectors. The sequence was
+   * captured from G HUB's reset on a linked PRO X 3 SUPERSTRIKE; it has not
+   * been run against a never-linked mouse.
+   */
+  async initializeBlankOnboardProfiles(): Promise<void> {
+    await this.open();
+    const feature = await this.getFeature(FEATURE.onboardProfiles);
+    if (!feature.index) {
+      throw new Error("This Logitech mouse does not expose onboard-profile controls.");
+    }
+
+    const info = parseProfilesInfo(await this.request(feature.index, PROFILE_FN.getInfo));
+    const sectorSize = info.sectorSize > 0 && info.sectorSize <= 1024 ? info.sectorSize : 255;
+    const factoryProfile = factoryProfileForFormat(info.profileFormatId, sectorSize);
+    const factoryDirectory = factoryDirectoryForFormat(info.profileFormatId, sectorSize);
+    if (!factoryProfile || !factoryDirectory) {
+      throw new Error(`Factory profiles have not been captured for profile format ${info.profileFormatId}.`);
+    }
+    if (profileCrc(factoryProfile) !== storedCrc(factoryProfile) || profileCrc(factoryDirectory) !== storedCrc(factoryDirectory)) {
+      throw new Error("The built-in factory profiles failed their checksum; refusing to write.");
+    }
+
+    const existing = await this.readProfileSector(feature.index, 0x0000, sectorSize);
+    if (!isBlankDirectory(existing)) {
+      throw new Error("This mouse already has onboard profiles; use reset instead.");
+    }
+    const sectors = parseDirectory(factoryDirectory).map((entry) => entry.sector);
+    const firstSector = sectors[0];
+
+    // Host mode keeps the mouse from loading a sector while it is being filled.
+    await this.setOnboardMode("Host");
+    let finished = false;
+    try {
+      for (const sector of sectors) {
+        await this.writeProfileSector(feature.index, sector, factoryProfile);
+        const confirmed = await this.readProfileSector(feature.index, sector, sectorSize);
+        if (!confirmed.every((byte, index) => byte === factoryProfile[index])) {
+          throw new Error(`Profile ${sector} did not confirm its factory image.`);
+        }
+      }
+      await this.writeProfileSector(feature.index, 0x0000, factoryDirectory);
+      const confirmedDirectory = await this.readProfileSector(feature.index, 0x0000, sectorSize);
+      if (!confirmedDirectory.every((byte, index) => byte === factoryDirectory[index])) {
+        throw new Error("The mouse did not confirm the new profile directory.");
+      }
+
+      await this.request(feature.index, PROFILE_FN.setCurrentProfile, (firstSector >> 8) & 0xff, firstSector & 0xff);
+      await this.setOnboardMode("Onboard");
+      const current = await this.request(feature.index, PROFILE_FN.getCurrentProfile);
+      if ((((current[3] ?? 0) << 8) | (current[4] ?? 0)) !== firstSector) {
+        throw new Error("The profiles were created, but the mouse did not select the first one.");
+      }
+      finished = true;
+    } finally {
       if (!finished) await this.setOnboardMode("Onboard").catch(() => undefined);
     }
   }

@@ -71,7 +71,7 @@ const VERIFIED_FORMATS = new Set([2, 3, 4, 7, 8]);
  */
 const WRITABLE_FORMATS = new Set([2, 3, 4, 7, 8]);
 const PROFILE_WRITE_PROBE_FORMATS = new Set([2, 3, 4]);
-const FACTORY_RESET_FORMATS = new Set([7]);
+const FACTORY_RESET_FORMATS = new Set([7, 8]);
 
 /** Whether profile-content writes for `profileFormatId` are trusted at all. */
 export function isProfileWritable(profileFormatId: number | null | undefined): boolean {
@@ -795,13 +795,69 @@ const FACTORY_PROFILE_FORMAT_7 = `
   00 03 00 00 00 00 00 1f 40 32 00 00 03 84 db
 `;
 
+/**
+ * Complete factory profile for format 8 (PRO X 3 SUPERSTRIKE), captured over USB
+ * while G HUB reset every profile: all five profile sectors received this exact
+ * image, CRC 0x2a38. It includes the HITS defaults (actuation 5, rapid trigger 2
+ * off, haptics 3).
+ */
+const FACTORY_PROFILE_FORMAT_8 = `
+  03 03 00 00 20 03 20 03 02 b0 04 b0 04 02 40 06
+  40 06 02 60 09 60 09 02 80 0c 80 0c 02 00 00 00
+  00 ff 00 ff ff ff 14 08 0c 14 08 0c 3c 00 2c 01
+  80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08
+  80 01 00 10 ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+  03 00 00 00 00 00 1f 40 00 00 00 03 00 00 00 00
+  00 1f 40 00 00 00 03 00 00 00 00 00 1f 40 32 00
+  00 03 00 00 00 00 00 1f 40 32 00 00 03 2a 38
+`;
+
+const FACTORY_PROFILES: Record<number, string> = {
+  7: FACTORY_PROFILE_FORMAT_7,
+  8: FACTORY_PROFILE_FORMAT_8,
+};
+
 /** Returns a fresh, CRC-valid factory sector only for a captured geometry. */
 export function factoryProfileForFormat(profileFormatId: number, sectorSize: number): Uint8Array | null {
   if (!supportsFactoryReset(profileFormatId) || sectorSize !== 255) return null;
   return Uint8Array.from(
-    FACTORY_PROFILE_FORMAT_7.trim().split(/\s+/),
+    FACTORY_PROFILES[profileFormatId].trim().split(/\s+/),
     (byte) => Number.parseInt(byte, 16),
   );
+}
+
+/** Profile sectors a format 8 mouse ships with: 1 to 5, as G HUB's reset left them. */
+const FACTORY_DIRECTORY_SECTORS_FORMAT_8 = [1, 2, 3, 4, 5];
+
+/**
+ * The directory (sector 0) of a factory mouse: every profile listed, only the
+ * first enabled, rest of the sector erased. Captured from G HUB's reset on a
+ * PRO X 3 SUPERSTRIKE (CRC 0x4037); only captured for format 8.
+ */
+export function factoryDirectoryForFormat(profileFormatId: number, sectorSize: number): Uint8Array | null {
+  if (profileFormatId !== 8 || sectorSize !== 255) return null;
+  const directory = new Uint8Array(sectorSize).fill(0xff);
+  FACTORY_DIRECTORY_SECTORS_FORMAT_8.forEach((sector, index) => {
+    directory.set([sector >> 8, sector & 0xff, index === 0 ? 0x01 : 0x00, 0xff], index * 4);
+  });
+  return applyCrc(directory);
+}
+
+/**
+ * True when a directory sector lists no profiles at all, as on a mouse G HUB
+ * has never linked. Erased flash reads 0xffff; a first entry of 0x0000 is the
+ * other terminator parseDirectory stops on.
+ */
+export function isBlankDirectory(sector: Uint8Array): boolean {
+  return sector.length >= 4 && parseDirectory(sector).length === 0;
 }
 
 /**

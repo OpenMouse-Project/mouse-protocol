@@ -719,3 +719,24 @@ time (actuation 5, sensitivity 2 off, haptics 3) while the live values differed
 and while a live-only apply came back to it after a power cycle. A HITS change
 is therefore written both ways: the live feature for immediate effect, and
 `persistAnalogButtonTuning` for the profile, in one sector write.
+
+## Factory reset and blank-mouse setup (format 8)
+
+Captured over USB (USBPcap) while G HUB reset every profile on a linked PRO X 3
+SUPERSTRIKE:
+
+- Each of sectors 1 to 5 received the same 255-byte image, CRC `0x2a38`. It is
+  byte-identical to the format 8 sector in the tests, including the HITS defaults
+  (actuation 5, rapid trigger 2 off, haptics 3).
+- The directory (sector 0) was written once: `00 01 01 ff | 00 02 00 ff | 00 03 00 ff |
+  00 04 00 ff | 00 05 00 ff`, then `ff` to the end, CRC `0x4037`. Sector 1 is
+  enabled, 2 to 5 disabled. It was byte-identical to the directory before the reset,
+  so a reset does not change the directory.
+- G HUB then selected profile 1 (`setCurrentProfile 00 01`).
+
+`resetAllOnboardProfiles` uses this image for format 8, so the X3 can be reset from
+OpenMouse. `initializeBlankOnboardProfiles` writes the same end state to a mouse
+whose directory lists no profiles (a mouse G HUB has never linked): the five
+sectors first, the directory last, then profile 1 selected, each read back. The
+write sequence is the one captured from a reset; it has not been run against a
+never-linked mouse, and G HUB's own first-link sequence was not captured.
