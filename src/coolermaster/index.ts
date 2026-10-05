@@ -62,7 +62,7 @@ export const COOLERMASTER_LIGHTING_MODE_INDICATOR = 0x04;
 export const COOLERMASTER_LIGHTING_MODE_CUSTOM = 0xb0;
 export const COOLERMASTER_LIGHTING_MODE_OFF = 0xfe;
 
-export const COOLERMASTER_LIGHTING_ZONES = ["Scroll wheel", "Logo"] as const;
+export const COOLERMASTER_LIGHTING_ZONES = ["Mouse"] as const;
 export type CoolerMasterLightingZone = (typeof COOLERMASTER_LIGHTING_ZONES)[number];
 
 export interface CoolerMasterRgbColor {
