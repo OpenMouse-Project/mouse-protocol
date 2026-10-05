@@ -61,3 +61,63 @@ Do not test firmware flashing, factory reset, lighting, or button remapping.
 The driver implements none of them, and the lighting/button commands are
 documented in `src/steelseries/rival3.ts` as known-but-withheld until there is
 hardware evidence and a reason to ship them.
+
+## Aerox 3 Wireless
+
+Supported identifiers:
+
+- `1038:183a`: Aerox 3 Wireless over the USB cable, hardware-verified
+- `1038:1838`: Aerox 3 Wireless over the 2.4 GHz dongle, hardware-verified
+- `1038:187a`: CS2 Dragon Lore Edition over the USB cable, unverified
+- `1038:1878`: CS2 Dragon Lore Edition over the 2.4 GHz dongle, unverified
+
+The codec is transcribed from rivalcfg's `aerox3_wireless_wired.py` and
+`aerox3_wireless_wireless.py`. Over the dongle every command byte has `0x40`
+ORed in. Bluetooth mode is not configurable through this protocol.
+
+### Observed on hardware
+
+On macOS, with the bytes produced by `src/steelseries/aerox3-wireless.ts`:
+
+- The config channel is the usage page `0xFFC0` usage `0x01` collection, which
+  is interface 3 over the cable. The dongle exposes the same collection.
+- Every write is acked by a 64-byte input report that echoes the command byte
+  followed by `00`, for example `2b 00` then `11 00`. Over the dongle the third
+  byte is `01`, for example `69 00 01`.
+- The battery query answers `92 95` over the cable (charging, 100%) and
+  `d2 15` over the dongle (discharging, 100%).
+- Polling rate: 125 Hz and 1000 Hz both measured on the mouse input collection,
+  over the cable and over the dongle, with median report gaps of 8.00 ms and
+  1.00 ms.
+- DPI presets: a 400/1600 table cycled exactly those two stages with the DPI
+  button and survived a replug. The 5-stage default table written over the
+  dongle cycled 5 stages.
+- Zone colors land on the top, middle and bottom LEDs in that order, but are
+  not kept across a power cycle. The mouse boots into its default lighting.
+- Default lighting `rainbow` (`27 01 00`) makes the mouse boot into a rainbow
+  cycle.
+- rivalcfg's runtime rainbow `22 FF` is acked but leaves the strip dark, and
+  `22 07` does too. The driver does not offer a runtime rainbow.
+- Reactive color flashes the strip on click. While it is on, the strip stays
+  dark between clicks.
+- Dim timer: 0 keeps the LEDs on, 5 seconds dims them after 5 idle seconds.
+- Sleep timer: with 1 minute set over the dongle, the mouse stopped answering
+  between 60 and 70 idle seconds. While it sleeps the dongle answers every
+  query with an unsolicited `40 ff 01` report. The same report also arrives
+  once right after a polling rate change over the dongle.
+- Button mapping: the DPI button remapped to the `A` key typed `a`, and every
+  other button kept its default action.
+
+### Checklist for the remaining product ids
+
+1. Confirm the battery level and charging state match SteelSeries GG.
+2. Edit each DPI stage, change the active stage, and change the stage count.
+   Confirm with the DPI button that the mouse cycles exactly the written table.
+3. Write each polling rate and verify it with an external rate meter.
+4. Set each strip zone color, Off, a reactive click color, and the default
+   lighting, then power-cycle to check the default lighting.
+5. Set the sleep and dim timers and confirm the mouse sleeps and dims.
+6. Remap the DPI button to a key and back, and confirm scroll still works.
+7. Power-cycle the mouse and confirm DPI, polling, timers and buttons persisted.
+8. Only then set `verified: true` on the exercised product id in
+   `src/steelseries/devices.ts`.
