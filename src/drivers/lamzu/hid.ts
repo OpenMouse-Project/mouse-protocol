@@ -13,6 +13,16 @@ import {
   LAMZU_POLLING_RATES as POLLING_RATES,
   LAMZU_VENDOR_IDS,
   lamzuProduct,
+  LUNAFURY_READ,
+  LUNAFURY_WRITE,
+  lunafuryDecodeAngle,
+  lunafuryDecodeLightning,
+  lunafuryDecodeButtonDebounce,
+  lunafuryDecodeWheelGuard,
+  type LunaFuryButton,
+  type LunaFuryLightningMode,
+  type LunaFurySettings,
+  type LunaFuryWheelGuard,
   type CompaxDpiStage,
   type LamzuProduct,
 } from "@openmouse/protocol/lamzu";
@@ -72,8 +82,8 @@ const PROFILE_READ = {
     ({ target: TARGET.mouse, page: PAGE.device, command: 0x87, length: 0x03, args: [profile] }),
   debounce: (profile: number): LamzuRequest =>
     ({ target: TARGET.mouse, page: PAGE.device, command: 0x88, length: 0x02, args: [profile] }),
-  dpiStages: (profile: number): LamzuRequest =>
-    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x81, length: 0x0a, args: [profile, 0x06] }),
+  dpiStages: (profile: number, maxStages: number): LamzuRequest =>
+    ({ target: TARGET.mouse, page: PAGE.profile, command: 0x81, length: 0x0a, args: [profile, maxStages] }),
   activeStage: (profile: number): LamzuRequest =>
     ({ target: TARGET.mouse, page: PAGE.profile, command: 0x82, length: 0x02, args: [profile] }),
   pollingRate: (profile: number): LamzuRequest =>
@@ -195,7 +205,10 @@ export class LamzuHidClient {
 
   displayName(): string {
     const known = this.profile();
-    return known ? `${this.deviceBrand()} ${known.model}` : this.device.productName || "Lamzu";
+    if (!known) return this.device.productName || "Lamzu";
+    const color = known.brand === "LunaFury"
+      ? this.device.productName?.match(/\b(EL|ES)\b/i)?.[1]?.toUpperCase() : undefined;
+    return `${this.deviceBrand()} ${known.model}${color ? ` ${color}` : ""}`;
   }
 
   deviceBrand(): MouseStatus["brand"] {
@@ -204,6 +217,10 @@ export class LamzuHidClient {
 
   maxDpi(): number {
     return this.profile()?.maxDpi ?? DPI_MAX;
+  }
+
+  maxDpiStages(): number {
+    return this.profile()?.maxDpiStages ?? 6;
   }
 
   getSleepOptions(): readonly number[] {
@@ -249,7 +266,7 @@ export class LamzuHidClient {
     this.activeProfile = profile;
     const sleepTimeout = await this.request(PROFILE_READ.sleepTimeout(profile)).catch(() => null);
     const debounce = await this.request(PROFILE_READ.debounce(profile)).catch(() => null);
-    const stages = this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile)));
+    const stages = this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile, this.maxDpiStages())));
     const activeStage = this.stageIndex((await this.request(PROFILE_READ.activeStage(profile)))[1], stages.length);
     const pollingRate = await this.request(PROFILE_READ.pollingRate(profile));
     const liftOffDistance = await this.request(PROFILE_READ.liftOffDistance(profile));
@@ -262,6 +279,8 @@ export class LamzuHidClient {
     const dongleLed = this.profile()?.dongleLed
       ? await this.request(PROFILE_READ.dongleLed(profile)).catch(() => null)
       : null;
+    const lunafury = this.deviceBrand() === "LunaFury"
+      ? await this.readLunaFurySettings(profile) : undefined;
     const stage = stages[activeStage];
     if (!stage) throw new Error("The mouse did not report any DPI stages.");
     return this.lastStatus = {
@@ -285,6 +304,7 @@ export class LamzuHidClient {
       performanceMode: competitiveMode ? competitiveMode[1] === 1 : null,
       hyperMode: hyperMode ? hyperMode[1] === 1 : null,
       rippleControl: rippleControl ? rippleControl[1] === 1 : null,
+      ...(lunafury ? { lunafury: lunafury.settings, angleTuning: lunafury.angle } : {}),
       dongleLedEnabled: dongleLed ? dongleLed[1] === 1 : null,
       connectionType: wireless ? "Wireless" : "Wired",
       connectionDetail: wireless ? "2.4 GHz receiver" : "Wired USB",
@@ -306,6 +326,67 @@ export class LamzuHidClient {
       batteryState: battery[0] === 1 ? "Charging" : "Discharging",
       pollingRateHz: this.decodePollingRate(pollingRate[1]),
     };
+  }
+
+  private requireLunaFury(): void {
+    if (this.deviceBrand() !== "LunaFury") throw new Error("This control is only available on LunaFury mice.");
+  }
+
+  private async readLunaFurySettings(profile: number): Promise<{ settings: LunaFurySettings; angle: number | null }> {
+    const optional = (spec: LamzuRequest) => this.request({ ...spec, attempts: 2 }).catch(() => null);
+    const lightningMode = lunafuryDecodeLightning(await optional(LUNAFURY_READ.lightning(profile)));
+    const leftDebounceMs = lunafuryDecodeButtonDebounce(await optional(LUNAFURY_READ.buttonDebounce(profile, "left")), "left");
+    const rightDebounceMs = lunafuryDecodeButtonDebounce(await optional(LUNAFURY_READ.buttonDebounce(profile, "right")), "right");
+    const middleDebounceMs = lunafuryDecodeButtonDebounce(await optional(LUNAFURY_READ.buttonDebounce(profile, "middle")), "middle");
+    const wheelGuard = lunafuryDecodeWheelGuard(await optional(LUNAFURY_READ.wheelGuard(profile)));
+    const angle = lunafuryDecodeAngle(await optional(LUNAFURY_READ.angle(profile)));
+    return { settings: { lightningMode, leftDebounceMs, rightDebounceMs, middleDebounceMs, wheelGuard }, angle };
+  }
+
+  private patchLunaFury(changes: Partial<LunaFurySettings>): void {
+    this.patch({ lunafury: { ...this.lastStatus?.lunafury, ...changes } });
+  }
+
+  async setAngleTuning(degrees: number): Promise<number> {
+    this.requireLunaFury();
+    const profile = await this.currentProfile();
+    await this.request(LUNAFURY_WRITE.angle(profile, degrees));
+    const confirmed = lunafuryDecodeAngle(await this.request(LUNAFURY_READ.angle(profile)));
+    if (confirmed !== degrees) throw new Error(`The mouse did not confirm the ${degrees}° sensor angle.`);
+    this.patch({ angleTuning: confirmed });
+    return confirmed;
+  }
+
+  async setLunaFuryLightningMode(mode: LunaFuryLightningMode): Promise<LunaFuryLightningMode> {
+    this.requireLunaFury();
+    const profile = await this.currentProfile();
+    await this.request(LUNAFURY_WRITE.lightning(profile, mode));
+    const confirmed = lunafuryDecodeLightning(await this.request(LUNAFURY_READ.lightning(profile)));
+    if (confirmed !== mode) throw new Error("The mouse did not confirm the Lightning Trigger mode.");
+    this.patchLunaFury({ lightningMode: confirmed });
+    return confirmed;
+  }
+
+  async setLunaFuryButtonDebounce(button: LunaFuryButton, milliseconds: number): Promise<number> {
+    this.requireLunaFury();
+    const profile = await this.currentProfile();
+    await this.request(LUNAFURY_WRITE.buttonDebounce(profile, button, milliseconds));
+    const confirmed = lunafuryDecodeButtonDebounce(await this.request(LUNAFURY_READ.buttonDebounce(profile, button)), button);
+    if (confirmed !== milliseconds) throw new Error(`The mouse did not confirm ${milliseconds} ms latency for the ${button} button.`);
+    this.patchLunaFury({ [`${button}DebounceMs`]: confirmed });
+    return confirmed;
+  }
+
+  async setLunaFuryWheelGuard(guard: LunaFuryWheelGuard): Promise<LunaFuryWheelGuard> {
+    this.requireLunaFury();
+    const profile = await this.currentProfile();
+    await this.request(LUNAFURY_WRITE.wheelGuard(profile, guard));
+    const confirmed = lunafuryDecodeWheelGuard(await this.request(LUNAFURY_READ.wheelGuard(profile)));
+    if (!confirmed || confirmed.enabled !== guard.enabled || confirmed.windowMs !== guard.windowMs) {
+      throw new Error("The mouse did not confirm the wheel guard settings.");
+    }
+    this.patchLunaFury({ wheelGuard: confirmed });
+    return confirmed;
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
@@ -422,7 +503,7 @@ export class LamzuHidClient {
       }
     }
     const profile = await this.currentProfile();
-    const stages = this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile)));
+    const stages = this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile, this.maxDpiStages())));
     const active = this.stageIndex((await this.request(PROFILE_READ.activeStage(profile)))[1], stages.length);
     if (!stages[active]) throw new Error("The mouse did not report any DPI stages.");
     stages[active] = { x: dpi, y: dpiY };
@@ -430,7 +511,9 @@ export class LamzuHidClient {
       stages.length,
       ...stages.flatMap((stage) => [stage.x >> 8 & 0xff, stage.x & 0xff, stage.y >> 8 & 0xff, stage.y & 0xff]),
     ]);
-    const confirmed = this.decodeDpiStages(await this.request(PROFILE_READ.dpiStages(profile)))[active];
+    const confirmed = this.decodeDpiStages(
+      await this.request(PROFILE_READ.dpiStages(profile, this.maxDpiStages())),
+    )[active];
     if (!confirmed || confirmed.x !== dpi || confirmed.y !== dpiY) {
       throw new Error(`The mouse kept ${confirmed ? confirmed.x.toLocaleString() : "an unknown"} DPI instead of ${dpi.toLocaleString()}.`);
     }

@@ -1,13 +1,15 @@
 export * from "../compx/codec.js";
 export * from "./atlantis.js";
+export * from "./lunafury.js";
 export interface LamzuProduct {
   model: string;
   wireless: boolean;
   pollingRates: readonly number[];
-  brand?: "Lamzu" | "CRDRAKO" | "Attack Shark";
+  brand?: "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury";
   uiFamily?: string;
   mouseTarget?: number;
   maxDpi?: number;
+  maxDpiStages?: number;
   sleepOptions?: readonly number[];
   /** The receiver answers the dongle LED on/off command (page 0x02, 0x04/0x84). */
   dongleLed?: boolean;
@@ -17,6 +19,11 @@ const RATES_1K = [125, 250, 500, 1000] as const;
 const RATES_8K = [500, 1000, 2000, 4000, 8000] as const;
 const RATES_8K_FULL = [125, 250, 500, 1000, 2000, 4000, 8000] as const;
 export const CRDRAKO_PRODUCT_IDS = [0x006a, 0x006b] as const;
+// LunaFury's public web configurator (mouse.lunafury.games, inspected
+// 2026-10-05) names these runtime identities and uses the same 64-byte CompX
+// feature-report framing as this driver. Its B032/B033/B054/B084 identities
+// are firmware-update bootloaders and are intentionally not catalogued here.
+export const LUNAFURY_PRODUCT_IDS = [0x0032, 0x0033, 0x0054, 0x0084] as const;
 // Attack Shark Core 2.0.7.9 (Config/xvi_models.xlsx) lists all three on the
 // same CompX platform: wired 125-1000, 8K receiver 125-8000, DPIMax 42000.
 // Only the R5 Ultra has been seen on hardware.
@@ -32,6 +39,24 @@ export const LAMZU_PRODUCTS: ReadonlyMap<number, LamzuProduct> = new Map([
   [0x006b, {
     brand: "CRDRAKO", model: "KO-ONE", wireless: true,
     pollingRates: RATES_8K_FULL, mouseTarget: 0x02, uiFamily: "crdrako",
+  }],
+  [0x0032, {
+    brand: "LunaFury", model: "LUNA33", wireless: false,
+    pollingRates: RATES_1K, mouseTarget: 0x00, maxDpi: 30000, maxDpiStages: 6,
+    uiFamily: "lunafury",
+  }],
+  [0x0033, {
+    brand: "LunaFury", model: "LUNA33", wireless: true,
+    pollingRates: RATES_8K_FULL, maxDpi: 30000, maxDpiStages: 6, uiFamily: "lunafury",
+  }],
+  [0x0054, {
+    brand: "LunaFury", model: "TYPE33", wireless: false,
+    pollingRates: RATES_8K_FULL, mouseTarget: 0x00, maxDpi: 30000, maxDpiStages: 5,
+    uiFamily: "lunafury",
+  }],
+  [0x0084, {
+    brand: "LunaFury", model: "TYPE33", wireless: true,
+    pollingRates: RATES_8K_FULL, maxDpi: 30000, maxDpiStages: 5, uiFamily: "lunafury",
   }],
   [0x0046, {
     brand: "Attack Shark", model: "R5 Ultra", wireless: false,
