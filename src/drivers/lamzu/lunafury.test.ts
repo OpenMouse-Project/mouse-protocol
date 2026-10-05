@@ -6,8 +6,13 @@ const globals = globalThis as { window?: { setTimeout: typeof setTimeout } };
 globals.window ??= { setTimeout };
 const EXTRA_READS = new Set(["1:148", "0:152", "0:146", "0:153"]);
 
-function fakeLunaFury(productId = 0x0033, options: { unsupported?: boolean; ignoreWrites?: boolean } = {}) {
+function fakeLunaFury(productId = 0x0033, options: {
+  unsupported?: boolean;
+  ignoreWrites?: boolean;
+  mutateReply?: (packet: Uint8Array, reply: Uint8Array, attempt: number) => void;
+} = {}) {
   const sent: Uint8Array[] = [];
+  let receiveAttempt = 0;
   const state = { angle: -12, lightning: 1, latency: [0, 3, 7, 10], wheel: true, window: 200 };
   const device = {
     vendorId: 0x373e, productId, productName: "LunaFury", opened: true,
@@ -19,6 +24,7 @@ function fakeLunaFury(productId = 0x0033, options: { unsupported?: boolean; igno
     sendFeatureReport: async (id: number, packet: Uint8Array) => {
       assert.equal(id, 0);
       sent.push(new Uint8Array(packet));
+      receiveAttempt = 0;
       if (options.ignoreWrites) return;
       const page = packet[4], command = packet[5];
       if (page === 1 && command === 0x14) state.angle = packet[7]! > 127 ? packet[7]! - 256 : packet[7]!;
@@ -45,6 +51,7 @@ function fakeLunaFury(productId = 0x0033, options: { unsupported?: boolean; igno
       if (key === "0:146") payload = [profile, 0, packet[8]!, 0, state.latency[packet[8]!]!, ...Array(14).fill(0)];
       if (key === "0:153") payload = [profile, +state.wheel, state.window >> 8, state.window & 255];
       reply[3] = payload.length; reply.set(payload, 6);
+      options.mutateReply?.(packet, reply, receiveAttempt++);
       // Non-zero byteOffset exercises DataView framing without a report ID.
       const buffer = new Uint8Array(70); buffer.set(reply, 3);
       return new DataView(buffer.buffer, 3, 64);
@@ -94,7 +101,122 @@ for (const [pid, target] of [[0x0032, 0], [0x0033, 2], [0x0054, 0], [0x0084, 2]]
       middleDebounceMs: 1, wheelGuard: { enabled: false, windowMs: 100 },
     });
   });
+
+  test(`LunaFury 0x${pid.toString(16)} waits past stale button replies`, async () => {
+    const receives: number[][] = [];
+    const { device, sent, state } = fakeLunaFury(pid, { mutateReply(packet, reply, attempt) {
+      if (packet[4] !== 0 || packet[5] !== 0x92) return;
+      const button = packet[8]!;
+      receives.push([button, attempt]);
+      if (attempt === 0 && button > 1) {
+        reply[8] = button - 1;
+        reply[10] = state.latency[button - 1]!;
+      }
+    } });
+    state.latency[2] = 8;
+    const status = await new LamzuHidClient(device).readStatus();
+    assert.deepEqual(status.lunafury, {
+      lightningMode: 1, leftDebounceMs: 3, rightDebounceMs: 8,
+      middleDebounceMs: 10, wheelGuard: { enabled: true, windowMs: 200 },
+    });
+    assert.deepEqual(receives, [[1, 0], [2, 0], [2, 1], [3, 0], [3, 1]]);
+    assert.equal(sent.filter((packet) => packet[5] === 0x92).length, 3,
+      "ignore stale replies without resending the request");
+  });
+
+  test(`LunaFury 0x${pid.toString(16)} waits past stale profile replies`, async () => {
+    const receives: string[] = [];
+    const { device } = fakeLunaFury(pid, { mutateReply(packet, reply, attempt) {
+      const key = `${packet[4]}:${packet[5]}`;
+      if (!EXTRA_READS.has(key)) return;
+      receives.push(`${key}:${attempt}`);
+      if (attempt !== 0) return;
+      reply[6] = packet[6]! - 1;
+      if (key === "0:146") reply[10] = 1;
+      else reply[7] = 0;
+      if (key === "0:153") { reply[8] = 0; reply[9] = 20; }
+    } });
+    const status = await new LamzuHidClient(device).readStatus();
+    assert.equal(status.angleTuning, -12);
+    assert.deepEqual(status.lunafury, {
+      lightningMode: 1, leftDebounceMs: 3, rightDebounceMs: 7,
+      middleDebounceMs: 10, wheelGuard: { enabled: true, windowMs: 200 },
+    });
+    assert.equal(receives.length, 12);
+    assert.equal(receives.filter((key) => key.endsWith(":1")).length, 6);
+  });
 }
+
+test("LunaFury readback waits past stale profiles and button selectors", async () => {
+  let inject = false;
+  let readbacks = 0;
+  const { device, sent } = fakeLunaFury(0x0033, { mutateReply(packet, reply, attempt) {
+    if (!inject || !EXTRA_READS.has(`${packet[4]}:${packet[5]}`)) return;
+    readbacks += 1;
+    if (attempt === 0) reply[6] = packet[6]! - 1;
+    else if (attempt === 1 && packet[5] === 0x92) reply[8] = packet[8] === 1 ? 2 : 1;
+  } });
+  const client = new LamzuHidClient(device);
+  await client.readStatus();
+  inject = true;
+  const before = sent.length;
+  assert.equal(await client.setAngleTuning(15), 15);
+  assert.equal(await client.setLunaFuryLightningMode(2), 2);
+  assert.equal(await client.setLunaFuryButtonDebounce("left", 4), 4);
+  assert.equal(await client.setLunaFuryButtonDebounce("right", 8), 8);
+  assert.equal(await client.setLunaFuryButtonDebounce("middle", 12), 12);
+  assert.deepEqual(await client.setLunaFuryWheelGuard({ enabled: false, windowMs: 100 }),
+    { enabled: false, windowMs: 100 });
+  assert.equal(readbacks, 15);
+  assert.equal(sent.slice(before).filter((packet) => EXTRA_READS.has(`${packet[4]}:${packet[5]}`)).length, 6);
+  const status = await client.readStatus(true);
+  assert.equal(status.angleTuning, 15);
+  assert.deepEqual(status.lunafury, {
+    lightningMode: 2, leftDebounceMs: 4, rightDebounceMs: 8,
+    middleDebounceMs: 12, wheelGuard: { enabled: false, windowMs: 100 },
+  });
+});
+
+test("LunaFury stale readback cannot confirm an ignored write", async () => {
+  let inject = false;
+  const { device } = fakeLunaFury(0x0033, { ignoreWrites: true, mutateReply(packet, reply, attempt) {
+    if (!inject || packet[4] !== 0 || packet[5] !== 0x92 || attempt !== 0) return;
+    reply[6] = packet[6]! - 1;
+    reply[10] = 5;
+  } });
+  const client = new LamzuHidClient(device);
+  await client.readStatus();
+  inject = true;
+  await assert.rejects(client.setLunaFuryButtonDebounce("left", 5), /did not confirm/);
+  assert.equal((await client.readStatus(true)).lunafury?.leftDebounceMs, 3);
+});
+
+test("LunaFury exhausted stale replies stay absent and bounded", async () => {
+  let receives = 0;
+  const { device } = fakeLunaFury(0x0033, { mutateReply(packet, reply) {
+    if (!EXTRA_READS.has(`${packet[4]}:${packet[5]}`)) return;
+    receives += 1;
+    reply[6] = packet[6]! - 1;
+  } });
+  const status = await new LamzuHidClient(device).readStatus();
+  assert.equal(status.dpi, 800);
+  assert.equal(status.batteryPercent, 80);
+  assert.equal(status.angleTuning, null);
+  assert.ok(Object.values(status.lunafury!).every((value) => value === undefined));
+  assert.equal(receives, 12, "each optional read keeps its two-attempt limit");
+});
+
+test("other CompX profile replies retain their existing matching rules", async () => {
+  const { device } = fakeLunaFury(0x006a, { mutateReply(packet, reply) {
+    if (packet[5] === 0x88 || (packet[4] === 1 && packet[5] === 0x80)) reply[6] = 1;
+  } });
+  const status = await new LamzuHidClient(device).readStatus();
+  assert.equal(status.brand, "CRDRAKO");
+  assert.equal(status.activeProfile, 3);
+  assert.equal(status.debounceMs, 0);
+  assert.equal(status.pollingRateHz, 1000);
+  assert.equal(status.lunafury, undefined);
+});
 
 test("unsupported LunaFury controls do not break the base device status", async () => {
   const { device } = fakeLunaFury(0x0033, { unsupported: true });

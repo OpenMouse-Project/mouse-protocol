@@ -104,6 +104,13 @@ that fail or return invalid values leave their controls absent, while basic
 device settings remain available. Only the LunaFury product profiles issue
 these extra commands; other CompX brands are unchanged.
 
+LunaFury extension reads accept a reply only when its payload echoes the
+requested profile; button-latency reads also match the button ID. A successful
+reply for another profile or button is ignored while the same request waits
+for a matching reply, within its existing attempt limit. This applies to both
+initial reads and write readbacks. Generic CompX requests and write
+acknowledgments retain their existing matching rules.
+
 The UI places Lightning Trigger, independent left/right latency, middle
 debounce, and wheel guard on the Buttons tab. Sensor angle is in Processing
 on the Performance tab. As in the vendor UI, left/right priority disables

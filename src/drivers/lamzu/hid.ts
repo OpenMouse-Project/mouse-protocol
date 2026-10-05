@@ -68,6 +68,7 @@ interface LamzuRequest {
   length: number;
   args: readonly number[];
   attempts?: number;
+  matchesReply?: (payload: Uint8Array) => boolean;
 }
 
 const READ = {
@@ -332,8 +333,20 @@ export class LamzuHidClient {
     if (this.deviceBrand() !== "LunaFury") throw new Error("This control is only available on LunaFury mice.");
   }
 
+  private readLunaFury(spec: LamzuRequest): Promise<Uint8Array> {
+    const profile = spec.args[0];
+    const button = spec.page === PAGE.device && spec.command === 0x92 ? spec.args[2] : undefined;
+    // These reads echo their profile and, for latency, the button selector.
+    // A successful same-command reply can still belong to the previous read.
+    return this.request({
+      ...spec,
+      matchesReply: (payload) => payload[0] === profile
+        && (button === undefined || payload[2] === button),
+    });
+  }
+
   private async readLunaFurySettings(profile: number): Promise<{ settings: LunaFurySettings; angle: number | null }> {
-    const optional = (spec: LamzuRequest) => this.request({ ...spec, attempts: 2 }).catch(() => null);
+    const optional = (spec: LamzuRequest) => this.readLunaFury({ ...spec, attempts: 2 }).catch(() => null);
     const lightningMode = lunafuryDecodeLightning(await optional(LUNAFURY_READ.lightning(profile)));
     const leftDebounceMs = lunafuryDecodeButtonDebounce(await optional(LUNAFURY_READ.buttonDebounce(profile, "left")), "left");
     const rightDebounceMs = lunafuryDecodeButtonDebounce(await optional(LUNAFURY_READ.buttonDebounce(profile, "right")), "right");
@@ -351,7 +364,7 @@ export class LamzuHidClient {
     this.requireLunaFury();
     const profile = await this.currentProfile();
     await this.request(LUNAFURY_WRITE.angle(profile, degrees));
-    const confirmed = lunafuryDecodeAngle(await this.request(LUNAFURY_READ.angle(profile)));
+    const confirmed = lunafuryDecodeAngle(await this.readLunaFury(LUNAFURY_READ.angle(profile)));
     if (confirmed !== degrees) throw new Error(`The mouse did not confirm the ${degrees}° sensor angle.`);
     this.patch({ angleTuning: confirmed });
     return confirmed;
@@ -361,7 +374,7 @@ export class LamzuHidClient {
     this.requireLunaFury();
     const profile = await this.currentProfile();
     await this.request(LUNAFURY_WRITE.lightning(profile, mode));
-    const confirmed = lunafuryDecodeLightning(await this.request(LUNAFURY_READ.lightning(profile)));
+    const confirmed = lunafuryDecodeLightning(await this.readLunaFury(LUNAFURY_READ.lightning(profile)));
     if (confirmed !== mode) throw new Error("The mouse did not confirm the Lightning Trigger mode.");
     this.patchLunaFury({ lightningMode: confirmed });
     return confirmed;
@@ -371,7 +384,7 @@ export class LamzuHidClient {
     this.requireLunaFury();
     const profile = await this.currentProfile();
     await this.request(LUNAFURY_WRITE.buttonDebounce(profile, button, milliseconds));
-    const confirmed = lunafuryDecodeButtonDebounce(await this.request(LUNAFURY_READ.buttonDebounce(profile, button)), button);
+    const confirmed = lunafuryDecodeButtonDebounce(await this.readLunaFury(LUNAFURY_READ.buttonDebounce(profile, button)), button);
     if (confirmed !== milliseconds) throw new Error(`The mouse did not confirm ${milliseconds} ms latency for the ${button} button.`);
     this.patchLunaFury({ [`${button}DebounceMs`]: confirmed });
     return confirmed;
@@ -381,7 +394,7 @@ export class LamzuHidClient {
     this.requireLunaFury();
     const profile = await this.currentProfile();
     await this.request(LUNAFURY_WRITE.wheelGuard(profile, guard));
-    const confirmed = lunafuryDecodeWheelGuard(await this.request(LUNAFURY_READ.wheelGuard(profile)));
+    const confirmed = lunafuryDecodeWheelGuard(await this.readLunaFury(LUNAFURY_READ.wheelGuard(profile)));
     if (!confirmed || confirmed.enabled !== guard.enabled || confirmed.windowMs !== guard.windowMs) {
       throw new Error("The mouse did not confirm the wheel guard settings.");
     }
@@ -560,7 +573,8 @@ export class LamzuHidClient {
       if (reply[0] === STATUS.unsupported) throw new Error(this.describe(spec, "is not supported by this mouse"));
       if (reply[0] === STATUS.ok && reply[4] === spec.page && reply[5] === spec.command) {
         const length = Math.min(reply[3], PACKET_LENGTH - HEADER_LENGTH);
-        return reply.slice(HEADER_LENGTH, HEADER_LENGTH + length);
+        const payload = reply.slice(HEADER_LENGTH, HEADER_LENGTH + length);
+        if (!spec.matchesReply || spec.matchesReply(payload)) return payload;
       }
       if (reply[0] !== STATUS.pending && reply[0] !== STATUS.busy && reply[0] !== STATUS.ok) {
         throw new Error(this.describe(spec, `returned an unexpected status 0x${reply[0].toString(16)}`));
