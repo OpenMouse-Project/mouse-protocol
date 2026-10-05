@@ -23,6 +23,8 @@ export interface GWolvesProduct {
    *   no driver here implements yet.
    */
   protocol: "vgn" | "xvi" | "xvi-new";
+  /** Left and right buttons are magnetic switches with trigger point and rapid trigger (HTS Plus Pro). */
+  magnetic?: boolean;
 }
 
 export const GWOLVES_VENDOR_ID = 0x33e4;
@@ -30,6 +32,8 @@ export const GWOLVES_VENDOR_ID = 0x33e4;
 export const GWOLVES_PRODUCTS: ReadonlyMap<number, GWolvesProduct> = new Map([
   [0x5618, { model: "HTX Ultra", wireless: false, verified: true, protocol: "vgn" }],
   [0x3854, { model: "HTX Ultra", wireless: true, verified: true, protocol: "vgn" }],
+  // Read from mouse.fit (env-models.json, XVI 0, ButtonType 1, MID 11). Not tried on hardware.
+  [0x5219, { model: "HTS Plus Pro", wireless: false, verified: false, protocol: "vgn", magnetic: true }],
   // Everything below is transcribed from G-Wolves' own live web-driver config
   // (https://mouse.xyz/Config/env-models.json), not independently
   // hardware-tested. Re-checked 2026-09-26: only the HTX Ultra generation
