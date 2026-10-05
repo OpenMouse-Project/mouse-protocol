@@ -170,6 +170,16 @@ test("lighting zones map to zone colors, rainbow and reactive color", async () =
   const zones = (await client.readStatus()).lightingZones!;
   assert.deepEqual(zones.map(({ mode }) => mode), ["Off", "Static", "Static", "Reactive"]);
   assert.deepEqual(zones[0]!.modes, ["Static", "Off"]);
+
+  // Turning a zone off must not forget its colour: the zone reports the colour it
+  // was off at, and switching back to Static restores it instead of writing black.
+  assert.equal(zones[0]!.color, "#123456");
+  sent.length = 0;
+  await client.setLighting({ ...zones[0]!, mode: "Static" });
+  assert.deepEqual(sent, [
+    [0x21, 0x01, 0x00, 0x12, 0x34, 0x56],
+    [0x11, 0x00],
+  ]);
 });
 
 test("remapping one button keeps the rest of the default layout", async () => {

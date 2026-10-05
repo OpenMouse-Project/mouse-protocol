@@ -346,10 +346,14 @@ export class SteelSeriesAerox3WirelessHidClient {
       case "Static":
         await this.setZoneColor(zone, fromHex(lighting.color));
         break;
-      case "Off":
+      case "Off": {
+        // setZoneColor caches the colour it writes, so read the previous one first:
+        // the zone must report (and later restore) its colour, not the black it is off at.
+        const previous = this.zones.get(zone)!.color;
         await this.setZoneColor(zone, { r: 0, g: 0, b: 0 });
-        this.zones.set(zone, { mode: "Off", color: this.zones.get(zone)!.color });
+        this.zones.set(zone, { mode: "Off", color: { ...previous } });
         break;
+      }
       default:
         throw new Error(`The Aerox 3 Wireless does not support ${lighting.mode ?? "that"} lighting.`);
     }
