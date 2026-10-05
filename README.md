@@ -48,7 +48,7 @@ checklist.
 | Fantech | `@openmouse/protocol/fantech` |
 | Finalmouse | `@openmouse/protocol/finalmouse` |
 | G-Wolves | `@openmouse/protocol/gwolves` |
-| GearHub (Attack Shark / Lingbao) | `@openmouse/protocol/gearhub` |
+| GearHub (AJAZZ / Attack Shark / Lingbao) | `@openmouse/protocol/gearhub` |
 | Glorious | `@openmouse/protocol/glorious` |
 | Glorious classic (Model O/D/I) | `@openmouse/protocol/glorious-classic` |
 | HyperX | `@openmouse/protocol/hyperx` |
@@ -85,6 +85,12 @@ The Ninjutso catalog and packet layouts are derived from the JavaScript shipped
 by the official NinjaForce WebHID panel. They have automated transport and
 codec coverage, but are not marked as hardware-verified until tested on the
 corresponding Sora V2/V3 and TEN-family devices.
+
+AJAZZ AJ179 PRO is supported by the GearHub driver, identified by device id
+1851 rather than its shared receiver PID. USB, 2.4 GHz and Bluetooth settings
+have been exercised on hardware. See [docs/ajazz-aj179-pro.md](docs/ajazz-aj179-pro.md)
+for transport framing, verified writes and remaining limitations. This does
+not claim support for other AJAZZ models or measured high-rate Bluetooth input.
 
 The SteelSeries Rival 3 Gen 1 codec and driver are derived from the public
 rivalcfg project, corroborated against libratbag and OpenRGB. The device is

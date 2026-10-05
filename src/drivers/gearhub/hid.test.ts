@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   CMD,
   OPT0_DEBOUNCE,
@@ -121,6 +122,10 @@ function fakeReceiver(options: {
         last = out;
       } else {
         pending = replies[data[0]] ?? null;
+        if (device.productId === M5_PRO_WIRED.productId) {
+          last = new Uint8Array(64);
+          if (pending) last.set(pending);
+        }
       }
     },
     receiveFeatureReport: async () => new DataView(last.buffer.slice(0)),
@@ -170,6 +175,110 @@ function dpiReply(xs: number[], activeIndex: number, rgb: number[] = []) {
 }
 
 describe("GearHubHidClient", () => {
+  it("identifies AJ179 PRO and decodes captured settings without disabled DPI slots", async () => {
+    const capture = JSON.parse(readFileSync(new URL("../../../captures/ajazz-aj179-pro.json", import.meta.url), "utf8"));
+    const bytes = (key: string) => [...Buffer.from(capture.replies[key], "hex")];
+    const { device, sent } = fakeReceiver({ deviceId: 1851, mouseBattery: 85, replies: {
+      [CMD.GET_USB_VERSION]: bytes("usbVersion"),
+      [CMD.GET_FIRMWARE]: bytes("firmware"),
+      [CMD.GET_DPI]: bytes("dpi"),
+      [CMD.GET_OPTIONPARAM0]: bytes("option0"),
+      [CMD.GET_KEYMATRIX]: keyMatrixReply({ 3: [1, 0, 0xf4, 0], 4: [1, 0, 0xf3, 0] }),
+    } });
+    const client = new GearHubHidClient(device);
+    const status = await client.readStatus();
+    assert.equal(status.brand, "AJAZZ");
+    assert.equal(status.name, "AJAZZ AJ179 PRO");
+    assert.equal(status.dpi, 1000);
+    assert.deepEqual(status.dpiStages, [600, 800, 1000, 1200, 1500]);
+    assert.equal(status.activeDpiStage, 2);
+    assert.equal(status.pollingRateHz, 1000);
+    assert.equal(status.batteryPercent, 85);
+    assert.equal(status.batteryState, "Unknown", "percentage does not establish charging state");
+    assert.equal(status.debounceMs, 2);
+    assert.equal(status.sleepTimeout, 20);
+    assert.equal(status.liftOffDistance, "High");
+    assert.deepEqual(status.supportedLiftOffDistances, ["Low", "High"]);
+    assert.deepEqual(status.firmware, ["v3.03", "PixArt PAW3395"]);
+    assert.deepEqual(status.buttonMappings, { Left: "Left Click", Right: "Right Click", Middle: "Middle Click", Back: "Back", Forward: "Forward", DPI: "DPI Loop" });
+    assert.equal(sent.some((report) => report[0] === CMD.GET_KEYMATRIX), true);
+    await client.setButtonMapping("Back", "Middle Click");
+    const mapping = sent.filter(report => report[0] === CMD.SET_KEYMATRIX).at(-1)!;
+    assert.equal(mapping[2], 4, "AJ179 Back is slot 4, not slot 3");
+    assert.deepEqual([...mapping.slice(8, 12)], [1, 0, 0xf2, 0]);
+    assert.equal(mapping[7], 255 - CMD.SET_KEYMATRIX - 4);
+    await client.setButtonMapping("Forward", "Back");
+    assert.equal(sent.filter(report => report[0] === CMD.SET_KEYMATRIX).at(-1)![2], 3);
+    assert.equal(client.getDpiOptions().at(-1), 26000);
+    assert.equal(client.getDpiOptions()[0], 50);
+    assert.ok(client.getDpiOptions().includes(1000), "typed 1000 DPI must not snap to 800");
+    assert.ok(client.getDpiOptions().includes(1050), "advertise every supported 50 DPI step");
+    assert.equal(client.getDpiOptions().length, 520);
+    const beforeRejected = sent.length;
+    await assert.rejects(client.setDpiStageValue(2, 0), /DPI must be/);
+    await assert.rejects(client.setDpiStageValue(2, 26050), /DPI must be/);
+    await assert.rejects(client.setDpiStageValue(2, 1051), /DPI must be/);
+    assert.equal(sent.length, beforeRejected, "unsupported writes issue no HID commands");
+    // UI trimming must not change the capacity or disabled slots on writes.
+    await client.setDpiStageValue(2, 1050);
+    const write = sent.find((report) => report[0] === CMD.SET_DPI)!;
+    assert.equal(write[3], 8);
+    assert.equal(write[12] | (write[13] << 8), 1050);
+    assert.deepEqual([...write.subarray(18, 24)], bytes("dpi").slice(18, 24));
+    assert.deepEqual([...write.subarray(40)], bytes("dpi").slice(40));
+  });
+  it("rejects stale identity packets rather than showing fabricated button mappings", async () => {
+    const client = new GearHubHidClient(fakeReceiver({ replies: { [CMD.GET_KEYMATRIX]: usbVersionReply(1851) } }).device);
+    await assert.rejects(client.getKeyMatrix(), /stale command/);
+  });
+
+  it("uses the same AJ179 profile and button layout by USB cable", async () => {
+    const capture = JSON.parse(readFileSync(new URL("../../../captures/ajazz-aj179-pro.json", import.meta.url), "utf8"));
+    const bytes = (key: string) => [...Buffer.from(capture.replies[key], "hex")];
+    const { device, sent } = fakeReceiver({ ids: M5_PRO_WIRED, deviceId: 1851, replies: {
+      [CMD.GET_FIRMWARE]: bytes("firmware"),
+      [CMD.GET_DPI]: bytes("dpi"),
+      [CMD.GET_OPTIONPARAM0]: bytes("option0"),
+      [CMD.GET_KEYMATRIX]: keyMatrixReply({ 3: [1, 0, 0xf4, 0], 4: [1, 0, 0xf3, 0] }),
+    } });
+    const client = new GearHubHidClient(device);
+    const status = await client.readStatus();
+    assert.equal(status.name, "AJAZZ AJ179 PRO");
+    assert.equal(status.connectionDetail, "USB");
+    assert.equal(status.batteryPercent, null);
+    assert.equal(status.batteryState, "Unknown");
+    assert.equal(status.supportedPollingRates.at(-1), 1000);
+    assert.equal(status.dpiStages.length, 5);
+    assert.equal(status.buttonMappings?.Back, "Back");
+    assert.equal(status.buttonMappings?.Forward, "Forward");
+    client.currentProfile = 2;
+    await client.setButtonMapping("Back", "Middle Click");
+    const mapping = sent.find((report) => report[0] === CMD.SET_KEYMATRIX)!;
+    assert.equal(mapping[1], 2);
+    assert.equal(mapping[2], 4);
+    assert.equal(sent.some((report) => [0xf6, 0xf7, 0xfc].includes(report[0])), false);
+    await assert.rejects(client.setPollingRate(2000), /Unsupported rate/);
+  });
+
+  it("derives typed DPI options and validation from sibling model limits", async () => {
+    for (const [deviceId, maxDpi] of [[2285, 26000], [1893, 42000]]) {
+      const { device, sent } = fakeReceiver({ ids: M5_PRO_WIRED, deviceId, replies: {
+        [CMD.GET_DPI]: dpiReply([800, 1000], 1),
+        [CMD.GET_OPTIONPARAM0]: opt0Reply(),
+        [CMD.GET_KEYMATRIX]: keyMatrixReply(),
+      } });
+      const client = new GearHubHidClient(device);
+      await client.readStatus();
+      assert.ok(client.getDpiOptions().includes(1000));
+      assert.equal(client.getDpiOptions().at(-1), maxDpi);
+      const beforeRejected = sent.length;
+      await assert.rejects(client.setDpiForStage(maxDpi + 50, 1000, 1), /DPI must be/);
+      await assert.rejects(client.setDpiForStage(1000, NaN, 1), /DPI must be/);
+      assert.equal(sent.length, beforeRejected);
+      await client.setDpiStageValue(1, 1000);
+      assert.equal(sent.at(-1)![0], CMD.SET_DPI);
+    }
+  });
   it("stamps the Bit7 checksum the hardware echoed back", () => {
     // Checksums observed live in the device's own replies.
     assert.equal(encodeCommand([CMD.GET_FIRMWARE])[7], 0x7f);

@@ -10,7 +10,7 @@
  * makers ship on it. A GearHub-V5 mouse is identified by the GET_USB_VERSION
  * *device id* (the same key GearHub's own bundle looks its model table up by),
  * never by product id — the receiver's VID:PID is shared. The product id only
- * settles transport (2.4 GHz receiver vs. direct cable).
+ * settles transport (2.4 GHz receiver, direct cable, or Bluetooth).
  *
  * Everything here was read out of GearHub-V5's own JS bundle and confirmed
  * byte for byte on hardware: a Lingbao M5 Pro (PAW3395, device id 2285) and an
@@ -22,6 +22,26 @@ export const GEARHUB_VENDOR_ID = 0x3151;
 export const GEARHUB_REPORT_ID = 0x00;
 export const GEARHUB_REPORT_SIZE = 64;
 export const GEARHUB_CMD_SIZE = 9;
+
+/** AJ179 PRO Bluetooth vendor collection and report framing. */
+export const GEARHUB_BLUETOOTH_USAGE_PAGE = 0xff55;
+export const GEARHUB_BLUETOOTH_USAGE = 0x0202;
+export const GEARHUB_BLUETOOTH_REPORT_ID = 6;
+export const GEARHUB_BLUETOOTH_REPORT_SIZE = 65;
+export const GEARHUB_BLUETOOTH_ENVELOPE = 0x55;
+export const GEARHUB_BLUETOOTH_BATTERY = 0x77;
+export const GEARHUB_BLUETOOTH_SLEEPING = 0x88;
+
+/** Wrap an already-checksummed USB block; WebHID supplies report id separately. */
+export function gearHubBluetoothPacket(encoded: Uint8Array): Uint8Array<ArrayBuffer> {
+  if (encoded.length > GEARHUB_REPORT_SIZE) {
+    throw new Error(`GearHub Bluetooth command exceeds ${GEARHUB_REPORT_SIZE} bytes.`);
+  }
+  const packet = new Uint8Array(GEARHUB_BLUETOOTH_REPORT_SIZE);
+  packet[0] = GEARHUB_BLUETOOTH_ENVELOPE;
+  packet.set(encoded, 1);
+  return packet;
+}
 
 /** DPI stages the report layout has room for. */
 export const GEARHUB_MAX_DPI_STAGES = 8;
@@ -210,7 +230,7 @@ export function encodeCommand(bytes: readonly number[]): Uint8Array {
 
 /** What a product id settles on its own: how the mouse is reached. */
 export interface GearHubTransport {
-  transport: "dongle" | "direct";
+  transport: "dongle" | "direct" | "bluetooth";
   /** Polling ceiling this link imposes regardless of the sensor. */
   wiredPollingCeilingHz?: number;
 }
@@ -220,13 +240,14 @@ export interface GearHubTransport {
  * settles: transport. The M5 Pro presents the 2.4 GHz receiver (0x402D) and,
  * by cable, the mouse directly (0x4026).
  *
- * Bluetooth is a third mode not listed here: over BLE the device enumerates on
- * a different usage page entirely (0xFF35/0xFF66) and GearHub drives it through
- * a separate read path this driver does not implement.
+ * AJ179 PRO Bluetooth is PID 0x402C, usage page 0xFF55, usage 0x0202.
+ * Its report-6 output/input transport wraps the same blocks in byte 0x55.
+ * Other Bluetooth product ids are not claimed without hardware evidence.
  */
 export const GEARHUB_PRODUCTS: ReadonlyMap<number, GearHubTransport> = new Map([
   [0x402d, { transport: "dongle" }],
   [0x4026, { transport: "direct", wiredPollingCeilingHz: 1000 }],
+  [0x402c, { transport: "bluetooth" }],
 ]);
 
 // ── Device catalog (by GET_USB_VERSION device id) ──────────────────────────
@@ -238,13 +259,19 @@ export const GEARHUB_PRODUCTS: ReadonlyMap<number, GearHubTransport> = new Map([
  */
 export interface GearHubProfile {
   deviceId: number;
-  brand: "Lingbao" | "Attack Shark" | "GearHub";
+  brand: "Lingbao" | "Attack Shark" | "GearHub" | "AJAZZ";
   model: string;
   sensor: string;
   maxPollingHz: number;
   minDpi: number;
   maxDpi: number;
   dpiStep: number;
+  /** Physical button slots when they differ from the shared R2 layout. */
+  buttons?: readonly GearHubButton[];
+  /** GET_DPI includes trailing disabled slots, not just enabled stages. */
+  dpiStageCountIsCapacity?: boolean;
+  /** Battery percentage is known, but no charging-state field is established. */
+  batteryPercentageOnly?: boolean;
 }
 
 /**
@@ -318,10 +345,31 @@ export const ATTACK_SHARK_R3_3950_PROFILE: GearHubProfile = {
   maxDpi: 42000,
 };
 
+/** AJ179 PRO, device id 1851. Verified on receiver, USB cable and Bluetooth.
+ * Vendor AJAZZ Driver (R) also maps id 1851 to its PAW3395 AJ179 PRO profile.
+ * See docs/ajazz-aj179-pro.md for measured capabilities and limitations. */
+export const AJAZZ_AJ179_PRO_PROFILE: GearHubProfile = {
+  deviceId: 1851,
+  brand: "AJAZZ",
+  model: "AJ179 PRO",
+  sensor: "PixArt PAW3395",
+  maxPollingHz: 8000,
+  minDpi: 50,
+  maxDpi: 26000,
+  dpiStep: 50,
+  buttons: GEARHUB_BUTTONS.map((button) => ({
+    ...button,
+    slot: button.name === "Back" ? 4 : button.name === "Forward" ? 3 : button.slot,
+  })),
+  dpiStageCountIsCapacity: true,
+  batteryPercentageOnly: true,
+};
+
 export const GEARHUB_DEVICE_PROFILES: ReadonlyMap<number, GearHubProfile> = new Map<
   number,
   GearHubProfile
 >([
+  [AJAZZ_AJ179_PRO_PROFILE.deviceId, AJAZZ_AJ179_PRO_PROFILE],
   [LINGBAO_M5_PRO_PROFILE.deviceId, LINGBAO_M5_PRO_PROFILE],
   [ATTACK_SHARK_R2_PROFILE.deviceId, ATTACK_SHARK_R2_PROFILE],
   // A later R2 firmware batch on the same 0x40xx silicon, PID and PAW3950

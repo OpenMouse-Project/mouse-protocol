@@ -8,6 +8,14 @@ import {
   DPI_Y_OFFSET,
   encodeButtonAction,
   encodeCommand,
+  gearHubBluetoothPacket,
+  GEARHUB_BLUETOOTH_BATTERY,
+  GEARHUB_BLUETOOTH_ENVELOPE,
+  GEARHUB_BLUETOOTH_REPORT_ID,
+  GEARHUB_BLUETOOTH_REPORT_SIZE,
+  GEARHUB_BLUETOOTH_SLEEPING,
+  GEARHUB_BLUETOOTH_USAGE,
+  GEARHUB_BLUETOOTH_USAGE_PAGE,
   GEARHUB_BUTTON_ACTIONS,
   GEARHUB_BUTTONS,
   GEARHUB_DEBOUNCE_MAX_MS,
@@ -39,13 +47,13 @@ import {
 
 /**
  * GearHub-V5 WebHID driver (VID 0x3151). Owns the 2.4 GHz relay handshake and
- * the feature-report I/O; packet shapes and the device catalog live in the
- * `@openmouse/protocol/gearhub` codec.
+ * feature-report and Bluetooth input/output I/O. Packet shapes and the device
+ * catalog live in the `@openmouse/protocol/gearhub` codec.
  *
  * One driver claims the shared receiver VID:PID and then identifies the model
- * from the GET_USB_VERSION device id: 2285 = Lingbao M5 Pro, 1893 = Attack
- * Shark R2, anything else = the M5 Pro fallback. The product id only settles
- * transport.
+ * from the GET_USB_VERSION device id and the codec's profile catalog.
+ * Unrecognized ids use a generic GearHub-V5 fallback. The product id only
+ * settles transport.
  *
  * ── Transport ────────────────────────────────────────────────────────────
  * USB interface 2, vendor usage page 0xFFFF, usage 0x02, one unnumbered
@@ -75,6 +83,7 @@ import {
  *
  * Plugged in by cable the mouse enumerates as PID 0x4026 and skips the relay
  * entirely: send the checksummed command, read the reply straight back.
+ * Bluetooth uses report-6 input/output framing instead of feature reports.
  */
 
 export interface GearHubDongleStatus {
@@ -127,17 +136,19 @@ export class GearHubHidClient {
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== GEARHUB_VENDOR_ID) return false;
     if (!GEARHUB_PRODUCTS.has(device.productId)) return false;
+    const bluetooth = GEARHUB_PRODUCTS.get(device.productId)?.transport === "bluetooth";
     const hasControl = (collections: readonly HIDCollectionInfo[]): boolean =>
       collections.some(
         (collection) =>
-          (collection.usagePage === 0xffff && collection.usage === 0x02) ||
+          (collection.usagePage === (bluetooth ? GEARHUB_BLUETOOTH_USAGE_PAGE : 0xffff) &&
+            collection.usage === (bluetooth ? GEARHUB_BLUETOOTH_USAGE : 0x02)) ||
           hasControl(collection.children ?? []),
       );
     return hasControl(device.collections);
   }
 
-  /** Whether reads go through the 2.4 GHz relay or straight to the device. */
-  get transport(): "dongle" | "direct" {
+  /** Product-specific link: receiver relay, direct USB, or Bluetooth reports. */
+  get transport(): "dongle" | "direct" | "bluetooth" {
     return this.transportEntry?.transport ?? "direct";
   }
 
@@ -148,18 +159,14 @@ export class GearHubHidClient {
     return GEARHUB_RATES.filter((hz) => hz <= ceiling);
   }
 
-  /**
-   * DPI stops worth offering, capped at the resolved model's sensor ceiling.
-   * These sensors step in 50 DPI increments; the UI offers the round values.
-   * Before the first readStatus() this uses the fallback (M5 Pro) ceiling.
-   */
+  /** Every writable DPI step, not just a shortlist of presets. The app uses
+   * this list to validate and round typed stage values as well as sliders. */
   getDpiOptions(): number[] {
-    const { maxDpi } = this.resolvedProfile ?? GEARHUB_FALLBACK_PROFILE;
-    return [
-      400, 800, 1200, 1600, 2000, 2400, 3200, 4000, 4800, 5600, 6400, 8000,
-      10000, 12000, 16000, 20000, 26000,
-      28000, 30000, 32000, 36000, 40000, 42000,
-    ].filter((dpi) => dpi <= maxDpi);
+    const { minDpi, maxDpi, dpiStep } = this.resolvedProfile ?? GEARHUB_FALLBACK_PROFILE;
+    return Array.from(
+      { length: Math.floor((maxDpi - minDpi) / dpiStep) + 1 },
+      (_, index) => minDpi + index * dpiStep,
+    );
   }
 
   async open(): Promise<void> {
@@ -253,6 +260,10 @@ export class GearHubHidClient {
     await this.open();
     const encoded = encodeCommand(bytes);
 
+    if (this.transport === "bluetooth") {
+      return this.exchangeBluetooth(encoded, bytes[0], echoes);
+    }
+
     if (this.transport === "direct") {
       await this.rawSend(encoded);
       await delay(10);
@@ -270,6 +281,78 @@ export class GearHubHidClient {
     await this.rawSend([DONGLE_CMD.NOTICE_READ]);
     await delay(10);
     return this.verifyReply(await this.rawRead(), bytes[0], echoes);
+  }
+
+  /** Bluetooth replies are input reports. Attach before sending and release
+   * the listener on success, invalid response, timeout, or send failure.
+   * Callers own the command queue; null means an unrelated input report. */
+  private requestBluetooth<T>(
+    request: Uint8Array<ArrayBuffer>,
+    decode: (packet: Uint8Array) => T | null,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.device.removeEventListener("inputreport", onReport);
+      };
+      const onReport = (event: HIDInputReportEvent) => {
+        if (event.reportId !== GEARHUB_BLUETOOTH_REPORT_ID) return;
+        const packet = new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength);
+        if (packet.length !== GEARHUB_BLUETOOTH_REPORT_SIZE) return;
+        try {
+          const result = decode(packet);
+          if (result === null) return;
+          cleanup();
+          resolve(result);
+        } catch (error) {
+          cleanup();
+          reject(error);
+        }
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("GearHub Bluetooth did not answer. Move the mouse and retry."));
+      }, 2000);
+      this.device.addEventListener("inputreport", onReport);
+      this.device.sendReport(GEARHUB_BLUETOOTH_REPORT_ID, request).catch((error) => {
+        cleanup();
+        reject(error);
+      });
+    });
+  }
+
+  private exchangeBluetooth(encoded: Uint8Array, command: number, echoes: boolean): Promise<Uint8Array> {
+    return this.requestBluetooth(gearHubBluetoothPacket(encoded), (packet) => {
+      if (packet[0] !== GEARHUB_BLUETOOTH_ENVELOPE) return null;
+      const reply = packet.slice(1);
+      if (echoes && reply[0] !== command) return null;
+      if (reply.every((value, i) => value === (encoded[i] ?? 0))) {
+        throw new Error("Bluetooth command was echoed without device data.");
+      }
+      return this.verifyReply(reply, command, echoes);
+    });
+  }
+
+  /** BLE link status is a separate envelope, not a USB command: [0x77].
+   * The vendor BLE reader reads raw byte 2 as battery; WebHID
+   * strips report id 6, so it is payload byte 1. 0x88 means sleeping.
+   * No charging-state field has been established in this report. */
+  async getBluetoothBattery(): Promise<number> {
+    return this.enqueue(async () => {
+      if (this.transport !== "bluetooth") throw new Error("Bluetooth battery requires a Bluetooth connection.");
+      await this.open();
+      const request = new Uint8Array(GEARHUB_BLUETOOTH_REPORT_SIZE);
+      request[0] = GEARHUB_BLUETOOTH_BATTERY;
+      return this.requestBluetooth(request, (packet) => {
+        if (packet[0] !== GEARHUB_BLUETOOTH_BATTERY && packet[0] !== GEARHUB_BLUETOOTH_SLEEPING) return null;
+        if (packet[0] === GEARHUB_BLUETOOTH_SLEEPING) throw new Error("GearHub Bluetooth is sleeping.");
+        if (packet.every((value, i) => value === request[i])) {
+          throw new Error("Bluetooth battery request was echoed without data.");
+        }
+        if (packet[1] > 100) throw new Error("GearHub Bluetooth returned an invalid battery percentage.");
+        return packet[1];
+      });
+    });
   }
 
   private verifyReply(resp: Uint8Array, cmd: number, echoes: boolean): Uint8Array {
@@ -459,20 +542,31 @@ export class GearHubHidClient {
    * once — the relay is more likely to miss its ready window under load.
    */
   async getKeyMatrix(profile = 0): Promise<Uint8Array> {
+    const read = async () => {
+      const reply = await this.command([CMD.GET_KEYMATRIX, profile], { echoes: false });
+      // A lost relay response may leave an earlier echoed GET packet buffered.
+      // Matrix action types are small values, never a command id (>= 0x80).
+      if (reply[0] >= 0x80) throw new Error("GearHub returned a stale command instead of button mappings.");
+      return reply;
+    };
     try {
-      return await this.command([CMD.GET_KEYMATRIX, profile], { echoes: false });
+      return await read();
     } catch {
-      return this.command([CMD.GET_KEYMATRIX, profile], { echoes: false });
+      return read();
     }
   }
 
   private buttonMappingsFrom(reply: Uint8Array): Record<string, string> {
     const out: Record<string, string> = {};
-    for (const { name, slot } of GEARHUB_BUTTONS) {
+    for (const { name, slot } of this.buttons()) {
       const o = slot * 4;
       out[name] = decodeButtonAction([reply[o], reply[o + 1], reply[o + 2], reply[o + 3]]);
     }
     return out;
+  }
+
+  private buttons() {
+    return this.resolvedProfile?.buttons ?? GEARHUB_BUTTONS;
   }
 
   /** Every action `setButtonMapping` accepts, in display order. */
@@ -482,13 +576,13 @@ export class GearHubHidClient {
 
   /** Reassign one physical button. `button` is a `GEARHUB_BUTTONS` name. */
   async setButtonMapping(button: string, action: string): Promise<void> {
-    const target = GEARHUB_BUTTONS.find((b) => b.name === button);
+    const target = this.buttons().find((b) => b.name === button);
     if (!target) throw new Error(`Unknown button "${button}".`);
     const value = encodeButtonAction(action);
     if (!value) throw new Error(`Unsupported button action "${action}".`);
     const cmd = new Uint8Array(GEARHUB_REPORT_SIZE);
     cmd[0] = CMD.SET_KEYMATRIX;
-    cmd[1] = 0; // profile
+    cmd[1] = this.currentProfile;
     cmd[2] = target.slot;
     cmd[8] = value[0];
     cmd[9] = value[1];
@@ -503,6 +597,12 @@ export class GearHubHidClient {
    * and echoed unchanged rather than zeroed.
    */
   async setDpiForStage(x: number, y: number, index: number): Promise<number> {
+    if (this.resolvedProfile) {
+      const { minDpi, maxDpi, dpiStep } = this.resolvedProfile;
+      if (![x, y].every((value) => Number.isInteger(value) && value >= minDpi && value <= maxDpi && (value - minDpi) % dpiStep === 0)) {
+        throw new Error(`GearHub DPI must be ${minDpi}..${maxDpi} in ${dpiStep} DPI steps.`);
+      }
+    }
     const { stages, activeIndex } = await this.getDpi();
     const target = index >= 0 && index < stages.length ? index : activeIndex;
     stages[target] = { ...stages[target], x, y };
@@ -573,7 +673,13 @@ export class GearHubHidClient {
   }
 
   private async writeThrough(cmd: Uint8Array): Promise<void> {
+    await this.open();
     const encoded = encodeCommand([...cmd]);
+    if (this.transport === "bluetooth") {
+      await this.device.sendReport(GEARHUB_BLUETOOTH_REPORT_ID, gearHubBluetoothPacket(encoded));
+      await delay(60);
+      return;
+    }
     if (this.transport === "direct") {
       await this.rawSend(encoded);
       await delay(10);
@@ -598,6 +704,12 @@ export class GearHubHidClient {
     let connectionType: "Wired" | "Wireless" = "Wired";
     let connectionDetail = "USB";
 
+    if (this.transport === "bluetooth") {
+      connectionType = "Wireless";
+      connectionDetail = "Bluetooth";
+      try { battery = await this.getBluetoothBattery(); } catch { /* Optional: settings remain usable without battery. */ }
+    }
+
     if (this.transport === "dongle") {
       connectionType = "Wireless";
       connectionDetail = "2.4 GHz";
@@ -613,7 +725,7 @@ export class GearHubHidClient {
     // Identify the model before the first data read. GearHub keys its model
     // table off this id; the receiver's shared VID:PID cannot. A failure here
     // (older firmware, a sibling that does not answer 0x8F) is non-fatal — we
-    // fall back to the M5 Pro profile, which is what this driver always was.
+    // fall back to the generic GearHub-V5 profile.
     let deviceId: number | null = null;
     try {
       deviceId = await this.getDeviceId();
@@ -627,6 +739,13 @@ export class GearHubHidClient {
     // The DPI read has to work: it carries the values the UI exists to show,
     // and it is the cheapest proof the whole relay + checksum path is right.
     const dpi = await this.getDpi();
+    // AJ179 PRO reports capacity (8), including trailing disabled zero slots.
+    // Trim only the UI view; getDpi()/writes retain the complete wire table.
+    if (profile.dpiStageCountIsCapacity) {
+      while (dpi.stages.length > 1 && dpi.stages.at(-1)?.x === 0 && dpi.stages.at(-1)?.y === 0) {
+        dpi.stages.pop();
+      }
+    }
     const active = dpi.stages[dpi.activeIndex] ?? dpi.stages[0];
 
     // Report rate and lift-off both live in the OPTIONPARAM0 block — one read
@@ -634,7 +753,7 @@ export class GearHubHidClient {
     // unreported rather than sinking the whole status.
     const [opt0Result, keyMatrixResult, firmwareResult] = await Promise.allSettled([
       this.getOptionParam0(),
-      this.getKeyMatrix(0),
+      this.getKeyMatrix(this.currentProfile),
       this.getFirmwareVersion(),
     ]);
     let pollingRateHz = 1000;
@@ -650,7 +769,8 @@ export class GearHubHidClient {
       debounceMs = opt0[OPT0_DEBOUNCE];
       angleSnapping = opt0[OPT0_STRAIGHT_CORRECTION] !== 0;
       rippleControl = (opt0[OPT0_FLAGS] & OPT0_FLAG_RIPPLE) !== 0;
-      sleepTimeout = opt0[OPT0_SLEEP_24G] | (opt0[OPT0_SLEEP_24G + 1] << 8);
+      const sleepOffset = this.transport === "bluetooth" ? OPT0_SLEEP_BT : OPT0_SLEEP_24G;
+      sleepTimeout = opt0[sleepOffset] | (opt0[sleepOffset + 1] << 8);
       const levels = this.liftOffLevels();
       if (levels.length > 0) {
         liftOffDistance = levels[opt0[OPT0_SILENT_HEIGHT]] ?? levels[0];
@@ -686,7 +806,7 @@ export class GearHubHidClient {
         },
       },
       batteryPercent: battery,
-      batteryState: battery === null ? "Unknown" : "Discharging",
+      batteryState: battery === null || profile.batteryPercentageOnly ? "Unknown" : "Discharging",
       dpi: active.x,
       dpiY: active.y,
       supportsSeparateDpiAxes: true,

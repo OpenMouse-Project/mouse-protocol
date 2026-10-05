@@ -9,7 +9,12 @@ import { MICROSOFT_PRODUCT_CLASSIC, MICROSOFT_PRODUCT_PRO, MICROSOFT_VENDOR_ID, 
 import { INCOTT_PRODUCT_IDS, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../incott/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { VAXEE_PRODUCT_IDS, VAXEE_USAGE, VAXEE_USAGE_PAGE, VAXEE_VENDOR_ID } from "@openmouse/protocol/vaxee";
-import { GEARHUB_PRODUCTS, GEARHUB_VENDOR_ID } from "@openmouse/protocol/gearhub";
+import {
+  GEARHUB_BLUETOOTH_USAGE,
+  GEARHUB_BLUETOOTH_USAGE_PAGE,
+  GEARHUB_PRODUCTS,
+  GEARHUB_VENDOR_ID,
+} from "@openmouse/protocol/gearhub";
 import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
 import { LAMZU_INCA_PRODUCTS, LAMZU_INCA_VENDOR_ID } from "@openmouse/protocol/lamzu";
 import {
@@ -661,8 +666,13 @@ export const LAMZU_INCA_HID_FILTERS: HIDDeviceFilter[] = [...LAMZU_INCA_PRODUCTS
  * keyboards and mice, so these are requested per product id rather than
  * vendor-wide.
  */
-export const GEARHUB_HID_FILTERS: HIDDeviceFilter[] = [...GEARHUB_PRODUCTS.keys()].map(
-  (productId) => ({ vendorId: GEARHUB_VENDOR_ID, productId, usagePage: 0xffff, usage: 0x02 }),
+export const GEARHUB_HID_FILTERS: HIDDeviceFilter[] = [...GEARHUB_PRODUCTS.entries()].map(
+  ([productId, profile]) => ({
+    vendorId: GEARHUB_VENDOR_ID,
+    productId,
+    usagePage: profile.transport === "bluetooth" ? GEARHUB_BLUETOOTH_USAGE_PAGE : 0xffff,
+    usage: profile.transport === "bluetooth" ? GEARHUB_BLUETOOTH_USAGE : 0x02,
+  }),
 );
 
 // Corsair NXP-family mice answer on the interface whose collection is usage
