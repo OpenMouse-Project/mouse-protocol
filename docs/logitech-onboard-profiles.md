@@ -583,24 +583,20 @@ layout, so it is the Superstrike; a Superlight 2 is most likely 7, but that is a
 guess until read from hardware.
 
 **The original G Pro X Superlight (PID `0xc094`, wpid `4093` — "PRO X Wireless"
-in Logitech's/Solaar's naming) reports format 7 but is not the Superlight 2 this
-layout was verified on.** Live reports show it returning HID++ error `0x05`
-("Logitech internal error") specifically when the format-7 per-stage lift-off
-byte is written — the device rejects a lift-off offset that is valid on the
-Superlight 2, most likely because this older board predates per-stage
-lift-off entirely rather than storing it at a different offset. This matches
-the unresolved DPI-stage-offset report below. Neither Solaar nor libratbag
-implements per-stage lift-off or debounce for any Logitech mouse, onboard or
-otherwise, so there is no reference layout to check this against.
-
-OpenMouse's model is to support what a device can actually do rather than
-gate features off by device, so `onboard-profiles.ts` does not refuse the
-whole profile write for this PID: `isLodWritableForProduct` scopes the guard
-to the one unverified field, and `encodeDpiStages`'s `writeLod` flag leaves
-each stage's existing lift-off byte untouched while still writing its DPI
-x/y — report rate, angle-snap, name and buttons are all unaffected and stay
-writable. Lift the guard once a profile dump from a real `0xc094` device
-confirms it has per-stage lift-off storage (and at what offset).
+in Logitech's/Solaar's naming) reports format 4, not the format 7 this layout
+was verified on.** A sector-1 dump from a real unit (main app
+`MPM25.01_B0018`) answered `getOnboardProfilesInfo` with format 4, five
+profiles, 16 sectors of 255 bytes, and a CRC-valid base-v1 sector 1: the
+scalar table at `0x03`, 800 DPI in the first slot, report interval `0x01` at
+`0x00`. Base v1 stores one scalar DPI per slot and has no per-stage lift-off
+byte at all, so the format-7 `0x05` ("Logitech internal error") report that
+originally motivated a product guard does not describe this layout. The
+captured geometry is pinned by the "PRO X Wireless dump" test in
+`onboard-profiles.test.ts`. `isLodWritableForProduct` keeps the product guard
+only for a unit that ever reports a v6 format, where a per-stage lift-off byte
+exists and was reported to be rejected; on the actual base-v1 device there is
+nothing to refuse. Everything else a profile carries — DPI, report rate,
+angle-snap, name and buttons — is writable.
 
 **Names for format ids 7 and 8**, and the meaning of the extra
 component-specific prototype fields (for example `dpi_v6` carries

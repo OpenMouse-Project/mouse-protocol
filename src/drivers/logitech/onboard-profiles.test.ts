@@ -1212,13 +1212,56 @@ test("G502 keyboard shortcuts and consumer keys use direct four-byte HID binding
   assert.equal(profileCrc(media), storedCrc(media));
 });
 
+/** Issue #159: a PRO X Wireless (PID 0xc094, main app MPM25.01_B0018). */
+const SUPERLIGHT_C094_INFO_REPLY = bytes("01 0d 00 01 04 01 05 01 05 10 00 ff 0a 04 00 00");
+/** Its sector 1, untouched from the factory, CRC `dd 75` intact. */
+const SUPERLIGHT_C094_SECTOR_1 = (() => {
+  const sector = new Uint8Array(255).fill(0xff);
+  sector.set(bytes("01 00 00 20 03 00 00 00 00 00 00 00 00 ff ff ff"), 0x00);
+  sector.set(bytes("ff 00 ff ff ff ff ff ff ff ff ff ff ff ff ff ff"), 0x10);
+  sector.set(bytes("80 01 00 01 80 01 00 02 80 01 00 04 80 01 00 08"), 0x20);
+  sector.set(bytes("80 01 00 10 ff ff ff ff ff ff ff ff ff ff ff ff"), 0x30);
+  sector.set(bytes("00 00 00 00 00 00 1f 40 00 00 00 00 00 00 00 00"), 0xd0);
+  sector.set(bytes("00 1f 40 00 00 00 ff ff ff ff ff ff ff ff ff ff"), 0xe0);
+  sector.set(bytes("ff ff ff ff ff ff ff ff ff ff ff ff ff dd 75"), 0xf0);
+  return sector;
+})();
+
+test("the PRO X Wireless (0xc094) reports format 4, a base-v1 scalar table", () => {
+  // Issue #159: this exact PID was assumed to be format 7 like the Superlight
+  // 2, but a real dump reports format 4 — v1 storage, no per-stage lift-off.
+  assert.deepEqual(parseProfilesInfo(SUPERLIGHT_C094_INFO_REPLY), {
+    memoryModelId: 1,
+    profileFormatId: 4,
+    macroFormatId: 1,
+    profileCount: 5,
+    buttonCount: 5,
+    sectorCount: 16,
+    sectorSize: 255,
+  });
+  const profile = decodeOnboardProfile(
+    SUPERLIGHT_C094_SECTOR_1,
+    4,
+    { sector: 1, enabled: true },
+    true,
+  );
+  assert.equal(profile.crcValid, true);
+  assert.equal(profile.reportRateWireless, 1000);
+  assert.deepEqual(profile.dpiStages, [{ x: 800, y: 800, lod: 0 }]);
+  assert.equal(profile.defaultDpiIndex, 0);
+  // There is no lift-off byte in a base-v1 layout, so the format-7 product
+  // guard has nothing to refuse on this device.
+  assert.equal(isLodWritableForProduct(4, 0xc094), true);
+});
+
 test("only the per-stage lift-off byte is refused on the original G Pro X Superlight (PID 0xc094)", () => {
   // Format 7's DPI-stage triplet layout (x/y/lift-off) was only confirmed
-  // against a Pro X Superlight 2 dump; the original Superlight reports the
-  // same format id on an older board that likely predates per-stage
-  // lift-off, and rejects the write on hardware (HID++ error 0x05) when that
-  // byte is touched. Everything else format 7 carries stays writable — the
-  // guard is scoped to the one unverified field, not the whole profile.
+  // against a Pro X Superlight 2 dump. A 0xc094 was reported to reject the
+  // lift-off byte on hardware (HID++ error 0x05) as if it were that older
+  // board; the dump above shows a 0xc094 actually reports format 4, so the
+  // guard only stays for the case where one ever reports a v6 format.
+  // Everything else format 7 carries stays writable — the guard is scoped to
+  // the one unverified field, not the whole profile.
   assert.equal(describeProfileFormat(7).writable, true);
   assert.equal(isProfileWritable(7), true);
   assert.equal(isLodWritableForProduct(7, 0xc094), false);
