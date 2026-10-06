@@ -80,16 +80,21 @@ export function isProfileWritable(profileFormatId: number | null | undefined): b
 
 /**
  * Format 7's per-stage lift-off byte (and the rest of its DPI-stage triplet
- * layout) was recovered from a Pro X Superlight 2 dump. The original G Pro X
- * Superlight (PID 0xc094, wpid 4093 — Logitech's "PRO X Wireless" in its own
- * tooling) reports the same format id but is an older board that predates
- * per-stage lift-off entirely; live reports show it returning HID++ error
- * 0x05 ("Logitech internal error") specifically when a stage's lift-off byte
- * is written, matching an unresolved report of a differently-shifted DPI
- * stage layout on what is likely this device. Until a dump from this
- * specific PID confirms it has lift-off storage to write to, everything else
- * format 7 carries — DPI x/y, report rate, angle-snap, name, buttons — stays
- * writable, and only the lift-off byte for each stage is left untouched.
+ * layout) was recovered from a Pro X Superlight 2 dump. A PID 0xc094 (the
+ * original G Pro X Superlight, wpid 4093 — Logitech's "PRO X Wireless" in its
+ * own tooling) was then reported to return HID++ error 0x05 ("Logitech
+ * internal error") when a stage's lift-off byte is written, matching an
+ * unresolved report of a differently-shifted DPI stage layout.
+ *
+ * That report was later pinned to format 7: a sector-1 dump from a real
+ * 0xc094 (main app MPM25.01_B0018) reports profile format 4, i.e. the base v1
+ * scalar table, which has no per-stage lift-off field at all — see the "PRO X
+ * Wireless dump" test. The guard therefore cannot fire against a base-v1
+ * layout and only matters if a unit ever reports a v6 format; it is kept for
+ * that case, because lifting it on a real format-7 board would bring the 0x05
+ * back. Everything else a format-7 profile carries — DPI x/y, report rate,
+ * angle-snap, name, buttons — stays writable, and only the lift-off byte for
+ * each stage is left untouched.
  */
 const UNVERIFIED_LOD_PRODUCT_IDS = new Set([0xc094]);
 
@@ -99,6 +104,9 @@ export function isLodWritableForProduct(
   productId: number | null | undefined,
 ): boolean {
   if (!isProfileWritable(profileFormatId)) return false;
+  // Base v1 (formats 1-5) stores one scalar DPI per slot and has no lift-off
+  // byte, so there is nothing for the product guard to refuse.
+  if ((profileFormatId ?? 0) < 6) return true;
   if (productId !== null && productId !== undefined && UNVERIFIED_LOD_PRODUCT_IDS.has(productId)) return false;
   return true;
 }
