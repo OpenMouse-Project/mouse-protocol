@@ -477,16 +477,45 @@ test("Bridge on Windows: the M600 Pro is named by its unnumbered receiver messag
   assert.deepEqual(reads, []);
 });
 
-test("Bridge on Windows: other models are named but stay read-only", async () => {
+test("Bridge on Windows: the X11 is named by its receiver message and becomes writable", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { unit, sent, reads, push } = windowsBridgeX11Receiver();
+  const client = new AttackSharkHidClient(unit, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+
+  // Issue #161: a genuine X11 (model id 0x55) over the same rebuilt collection.
+  push([0x03, 0x55, 0x40, 0x01, 0x50]);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Attack Shark X11");
+  assert.equal(status.batteryPercent, 80);
+  assert.equal(status.ui?.settingsReady, true);
+  assert.equal(status.ui?.statusNote, undefined);
+  assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
+  assert.deepEqual(reads, []);
+
+  // Same 0x06 packet as the verified M600 Pro write.
+  assert.equal(await client.setPollingRate(500), 500);
+  assert.deepEqual(sent, [{ reportId: 0x06, data: [0x09, 0x01, 0x02, 0xfd, 0, 0, 0, 0] }]);
+  sent.length = 0;
+  assert.equal(await client.setDpi(800), 800);
+  assert.equal(sent[0].reportId, 0x04);
+  // The receiver's 56-byte DPI frame the reference driver documents, minus the
+  // report id — not the M600 Pro's 52-byte one.
+  assert.equal(sent[0].data.length, 55);
+  assert.deepEqual(reads, []);
+});
+
+test("Bridge on Windows: models with no established frame shape still stay read-only", async () => {
   resetAttackSharkX11DpiState();
   resetAttackSharkX11RuntimeState();
   const { unit, sent, push } = windowsBridgeX11Receiver();
   const client = new AttackSharkHidClient(unit, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
   await client.open();
-  push([0x03, 0x55, 0x40, 0x01, 0x50]);
+  // The R1 (0x10) uses a different DPI map per the reference driver.
+  push([0x03, 0x10, 0x40, 0x01, 0x05]);
   const status = await client.readStatus();
-  assert.equal(status.name, "Attack Shark X11");
-  assert.equal(status.batteryPercent, 80);
+  assert.equal(status.name, "Attack Shark R1");
   assert.equal(status.ui?.settingsReady, false);
   await assert.rejects(() => client.setDpi(800), /not reachable from a browser/);
   assert.deepEqual(sent, []);
