@@ -2,6 +2,7 @@
   "name": "@openmouse/protocol",
   "version": "0.1.0",
   "description": "Gaming mouse protocol codecs and WebHID drivers used by OpenMouse.",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "publishConfig": {
     "access": "public"
