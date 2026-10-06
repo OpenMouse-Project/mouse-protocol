@@ -152,6 +152,44 @@ export interface AtkReceiverInfo {
   pairingSecondsRemaining: number | null;
 }
 
+export interface MagneticButtonStatus {
+  /** Null when the mouse has a single switch type or did not report it. */
+  switchType: "magnetic" | "optical" | null;
+  /** Trigger point, inside `triggerPointRange`. Null when the mouse returned no valid value. */
+  triggerPoint: number | null;
+  /** Release travel. Null when the release follows the trigger point or is unsupported. */
+  releasePoint?: number | null;
+  /** Rapid trigger value, inside `rapidTriggerRange`. Null when unknown. */
+  rapidTrigger: number | null;
+  rapidTriggerEnabled: boolean | null;
+}
+
+export interface MagneticButtonsStatus {
+  /** Left button first, right button second. */
+  buttons: MagneticButtonStatus[];
+  triggerPointRange: { min: number; max: number };
+  releasePointRange?: { min: number; max: number };
+  /** Null when rapid trigger cannot be changed on this connection. */
+  rapidTriggerRange: { min: number; max: number } | null;
+  rapidTriggerUnit: "level" | "ms";
+  /** Whether rapid trigger has its own on/off switch, or is off at its lowest value. */
+  rapidTriggerSwitch: boolean;
+  canChooseSwitchType: boolean;
+  /** Null when the mouse cannot be calibrated on this connection. */
+  calibration: "calibrated" | "needed" | "unknown" | null;
+  /** The mouse streams live press depth (0 to 100) while buttons are pressed. */
+  liveDepth: boolean;
+}
+
+export interface MagneticCalibrationProgress {
+  left: number;
+  right: number;
+  message: string;
+  /** 1-based step out of `steps`. */
+  step: number;
+  steps: number;
+}
+
 export interface MouseStatus {
   brand: "RAWM" | "Motospeed" | "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "VAXEE" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Noir Gear" | "Lingbao" | "GearHub" | "AJAZZ" | "Corsair" | "Microsoft" | "Dareu" | "Redragon" | "Incott" | "HyperX" | "ASUS" | "Ryunix" | "Delux" | "GravaStar" | "IPI" | "Rapoo" | "Fater" | "Cooler Master";
   name: string;
@@ -178,6 +216,12 @@ export interface MouseStatus {
       rapidTriggerEnabled?: boolean;
     }>;
   };
+  /**
+   * Magnetic (Hall-effect) primary-button settings: where the click registers,
+   * rapid trigger, and whether each button uses its magnetic or optical switch.
+   * Absent on mice without magnetic buttons.
+   */
+  magneticButtons?: MagneticButtonsStatus;
   pollingRateHz: number;
   supportedPollingRates?: number[];
   activeProfile: number | null;

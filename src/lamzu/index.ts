@@ -1,11 +1,14 @@
 export * from "../compx/codec.js";
 export * from "./atlantis.js";
 export * from "./lunafury.js";
+export * from "./magnetic.js";
 export interface LamzuProduct {
   model: string;
   wireless: boolean;
   pollingRates: readonly number[];
-  brand?: "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury";
+  brand?: "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "RAWM";
+  /** Left and right buttons are magnetic switches (Leviathan V4 GT). */
+  magnetic?: boolean;
   uiFamily?: string;
   mouseTarget?: number;
   maxDpi?: number;
@@ -29,6 +32,16 @@ export const LUNAFURY_PRODUCT_IDS = [0x0032, 0x0033, 0x0054, 0x0084] as const;
 // Only the R5 Ultra has been seen on hardware.
 export const ATTACKSHARK_PRODUCT_IDS = [0x0046, 0x0047, 0x0021, 0x0022, 0x003a, 0x003b] as const;
 export const LAMZU_PRODUCTS: ReadonlyMap<number, LamzuProduct> = new Map([
+  // RAWM's Leviathan V4 GT answers the same page-command framing. Product ids
+  // come from the V4 GT's web hub; not yet tried on hardware.
+  [0x0098, {
+    brand: "RAWM", model: "Leviathan V4 GT", wireless: false,
+    pollingRates: RATES_8K_FULL, maxDpi: 45000, magnetic: true,
+  }],
+  [0x0099, {
+    brand: "RAWM", model: "Leviathan V4 GT", wireless: true,
+    pollingRates: RATES_8K_FULL, maxDpi: 45000, magnetic: true,
+  }],
   [0x001c, { model: "Maya X", wireless: false, pollingRates: RATES_1K }],
   [0x001d, { model: "Maya X", wireless: true, pollingRates: RATES_1K }],
   [0x001e, { model: "Maya X", wireless: true, pollingRates: RATES_8K }],

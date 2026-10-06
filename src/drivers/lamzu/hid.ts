@@ -1,4 +1,4 @@
-import type { MouseStatus } from "../mouse-types.ts";
+import type { MagneticButtonsStatus, MagneticCalibrationProgress, MouseStatus } from "../mouse-types.ts";
 import {
   COMPX_HEADER_LENGTH as HEADER_LENGTH,
   COMPX_PACKET_LENGTH as PACKET_LENGTH,
@@ -23,6 +23,22 @@ import {
   type LunaFuryLightningMode,
   type LunaFurySettings,
   type LunaFuryWheelGuard,
+  MAGNETIC_CALIBRATION_ERRORS,
+  MAGNETIC_CALIBRATION_STATE,
+  MAGNETIC_CALIBRATION_STEPS,
+  MAGNETIC_RAPID_TRIGGER_MAX_MS,
+  MAGNETIC_RELEASE_FOLLOWS,
+  MAGNETIC_SWITCH,
+  MAGNETIC_TRAVEL_MAX,
+  magneticCalibrationPrompt,
+  magneticDecodeCalibration,
+  magneticDecodeEid,
+  magneticDecodeFault,
+  magneticDecodeRapidTrigger,
+  magneticDecodeSwitchTypes,
+  magneticDecodeTravel,
+  magneticRead,
+  magneticWrite,
   type CompaxDpiStage,
   type LamzuProduct,
 } from "@openmouse/protocol/lamzu";
@@ -36,6 +52,7 @@ const QUICK_ATTEMPTS = 3;
 const SLEEP_DISABLED_MIN = 0xff00;
 const SLEEP_MAX_SECONDS = 0xfeff;
 const DPI_STEP = 50;
+const CALIBRATION_MAX_MS = 240_000;
 const DPI_MAX = 30000;
 const DEBOUNCE_MAX_MS = 15;
 const NOTIFY_REPORT_ID = 4;
@@ -69,6 +86,8 @@ interface LamzuRequest {
   args: readonly number[];
   attempts?: number;
   matchesReply?: (payload: Uint8Array) => boolean;
+  /** Return the whole 58 byte payload instead of the length the mouse echoes. */
+  full?: boolean;
 }
 
 const READ = {
@@ -284,7 +303,9 @@ export class LamzuHidClient {
       ? await this.readLunaFurySettings(profile) : undefined;
     const stage = stages[activeStage];
     if (!stage) throw new Error("The mouse did not report any DPI stages.");
+    const magneticButtons = this.profile()?.magnetic ? await this.readMagnetic(profile).catch(() => undefined) : undefined;
     return this.lastStatus = {
+      ...(magneticButtons ? { magneticButtons } : {}),
       brand: this.deviceBrand(),
       name: this.displayName(),
       ui: {
@@ -534,6 +555,128 @@ export class LamzuHidClient {
     return confirmed.x;
   }
 
+  async readMagnetic(profile: number = this.activeProfile): Promise<MagneticButtonsStatus> {
+    const fault = await this.request(magneticRead.fault).then(magneticDecodeFault).catch(() => null);
+    const types = !fault || fault.calibrated
+      ? await this.request(magneticRead.switchTypes).then(magneticDecodeSwitchTypes).catch(() => null)
+      : null;
+    const buttons: MagneticButtonsStatus["buttons"] = [];
+    for (const side of [0, 1] as const) {
+      const key = side + 1;
+      const travel = await this.request(magneticRead.travel(profile, key)).then(magneticDecodeTravel).catch(() => null);
+      const rapid = await this.request(magneticRead.rapidTrigger(profile, key)).then(magneticDecodeRapidTrigger).catch(() => null);
+      const type = fault && !fault.calibrated ? MAGNETIC_SWITCH.optical : types?.[side];
+      buttons.push({
+        switchType: type === MAGNETIC_SWITCH.magnetic ? "magnetic" : type === MAGNETIC_SWITCH.optical ? "optical" : null,
+        triggerPoint: travel && travel.press >= 1 && travel.press <= MAGNETIC_TRAVEL_MAX ? travel.press : null,
+        releasePoint: travel ? (travel.release === MAGNETIC_RELEASE_FOLLOWS ? null : travel.release) : null,
+        rapidTrigger: rapid ? rapid : null,
+        rapidTriggerEnabled: rapid === null ? null : rapid > 0,
+      });
+    }
+    return {
+      buttons,
+      triggerPointRange: { min: 1, max: MAGNETIC_TRAVEL_MAX },
+      releasePointRange: { min: 1, max: MAGNETIC_TRAVEL_MAX },
+      rapidTriggerRange: { min: 1, max: MAGNETIC_RAPID_TRIGGER_MAX_MS },
+      rapidTriggerUnit: "ms",
+      rapidTriggerSwitch: false,
+      canChooseSwitchType: true,
+      calibration: !fault ? "unknown" : fault.calibrated && !fault.needsRecalibration ? "calibrated" : "needed",
+      liveDepth: false,
+    };
+  }
+
+  /** Press travel for one button, keeping its release travel. */
+  async setMagneticTriggerPoint(button: 0 | 1, point: number): Promise<number> {
+    if (!Number.isInteger(point) || point < 1 || point > MAGNETIC_TRAVEL_MAX) {
+      throw new RangeError(`Trigger point must be 1 to ${MAGNETIC_TRAVEL_MAX}.`);
+    }
+    const profile = await this.currentProfile();
+    const current = magneticDecodeTravel(await this.request(magneticRead.travel(profile, button + 1)));
+    await this.request(magneticWrite.travel(profile, button + 1, point, current.release));
+    const confirmed = magneticDecodeTravel(await this.request(magneticRead.travel(profile, button + 1)));
+    if (confirmed.press !== point) throw new Error(`The mouse kept trigger point ${confirmed.press} instead of ${point}.`);
+    return confirmed.press;
+  }
+
+  /** Release travel for one button; null makes the release follow the trigger point. */
+  async setMagneticReleasePoint(button: 0 | 1, point: number | null): Promise<number | null> {
+    if (point !== null && (!Number.isInteger(point) || point < 1 || point > MAGNETIC_TRAVEL_MAX || point === MAGNETIC_RELEASE_FOLLOWS)) {
+      throw new RangeError(`Release point must be 1 to ${MAGNETIC_TRAVEL_MAX}, other than ${MAGNETIC_RELEASE_FOLLOWS}.`);
+    }
+    const profile = await this.currentProfile();
+    const current = magneticDecodeTravel(await this.request(magneticRead.travel(profile, button + 1)));
+    const wanted = point ?? MAGNETIC_RELEASE_FOLLOWS;
+    await this.request(magneticWrite.travel(profile, button + 1, current.press, wanted));
+    const confirmed = magneticDecodeTravel(await this.request(magneticRead.travel(profile, button + 1)));
+    if (confirmed.release !== wanted) throw new Error(`The mouse kept release travel ${confirmed.release} instead of ${wanted}.`);
+    return point;
+  }
+
+  /** Rapid trigger in milliseconds; off is stored as 0. */
+  async setMagneticRapidTrigger(button: 0 | 1, enabled: boolean, milliseconds: number): Promise<{ enabled: boolean; level: number }> {
+    if (!Number.isInteger(milliseconds) || milliseconds < 1 || milliseconds > MAGNETIC_RAPID_TRIGGER_MAX_MS) {
+      throw new RangeError(`Rapid trigger must be 1 to ${MAGNETIC_RAPID_TRIGGER_MAX_MS} ms.`);
+    }
+    const profile = await this.currentProfile();
+    const wanted = enabled ? milliseconds : 0;
+    await this.request(magneticWrite.rapidTrigger(profile, button + 1, wanted));
+    const confirmed = magneticDecodeRapidTrigger(await this.request(magneticRead.rapidTrigger(profile, button + 1)));
+    if (confirmed !== wanted) throw new Error(`The mouse kept rapid trigger at ${confirmed} ms instead of ${wanted} ms.`);
+    return { enabled, level: milliseconds };
+  }
+
+  /** Chooses magnetic or optical for each button. Magnetic needs a calibrated mouse. */
+  async setMagneticSwitchTypes(types: readonly ["magnetic" | "optical", "magnetic" | "optical"]): Promise<void> {
+    const fault = magneticDecodeFault(await this.request(magneticRead.fault));
+    if (!fault.calibrated && types.includes("magnetic")) throw new Error("Calibrate the magnetic switches before choosing Magnetic.");
+    const eid = magneticDecodeEid(await this.request(magneticRead.eid));
+    const wanted = types.map((type) => MAGNETIC_SWITCH[type]) as [number, number];
+    await this.request(magneticWrite.switchTypes(eid, wanted[0], wanted[1]));
+    const confirmed = magneticDecodeSwitchTypes(await this.request(magneticRead.switchTypes));
+    if (confirmed[0] !== wanted[0] || confirmed[1] !== wanted[1]) throw new Error("The mouse kept its previous switch mode.");
+  }
+
+  /** Runs the manual calibration. Resolves on success, rejects with the mouse's own reason on failure. */
+  async calibrateMagneticButtons(onProgress: (progress: MagneticCalibrationProgress) => void, signal?: AbortSignal): Promise<void> {
+    const poll = (state: number): Promise<Uint8Array> => this.request({ ...magneticWrite.calibration(state), full: true });
+    const wait = (milliseconds: number): Promise<void> => this.delay(milliseconds);
+    const first = magneticDecodeCalibration(await poll(5));
+    const two = first.twoButtons;
+    await poll(two ? 4 : 1);
+    const started = Date.now();
+    let silent = 0;
+    for (;;) {
+      if (signal?.aborted) throw new Error("Calibration cancelled.");
+      if (Date.now() - started > CALIBRATION_MAX_MS) throw new Error("Calibration timed out. Fully press and release as prompted, then recalibrate.");
+      await wait(100);
+      let reading;
+      try {
+        reading = magneticDecodeCalibration(await poll(two ? 5 : 3));
+      } catch (error) {
+        if (++silent > 25) throw new Error("The mouse stopped answering during calibration.", { cause: error });
+        continue;
+      }
+      silent = 0;
+      const message = two
+        ? magneticCalibrationPrompt(reading.mask) ?? MAGNETIC_CALIBRATION_STEPS[reading.state] ?? "Calibrating..."
+        : MAGNETIC_CALIBRATION_STEPS[reading.state] ?? "Calibrating...";
+      onProgress({
+        left: two ? Math.min(reading.left, 100) : Math.min(reading.progress, 100),
+        right: two ? Math.min(reading.right, 100) : Math.min(reading.progress, 100),
+        message,
+        step: Math.min(Math.max(reading.state, 1), 6),
+        steps: 6,
+      });
+      if (reading.state === MAGNETIC_CALIBRATION_STATE.success) return;
+      if (reading.state === MAGNETIC_CALIBRATION_STATE.cancelled) throw new Error(MAGNETIC_CALIBRATION_STEPS[9]);
+      if (reading.state === MAGNETIC_CALIBRATION_STATE.failed) {
+        throw new Error(MAGNETIC_CALIBRATION_ERRORS[reading.code] ?? MAGNETIC_CALIBRATION_STEPS[8]);
+      }
+    }
+  }
+
   private async currentProfile(): Promise<number> {
     const reply = await this.request(READ.activeProfile);
     this.activeProfile = Math.max(1, reply[0]);
@@ -572,7 +715,7 @@ export class LamzuHidClient {
       const reply = this.copyDataView(await this.device.receiveFeatureReport(REPORT_ID));
       if (reply[0] === STATUS.unsupported) throw new Error(this.describe(spec, "is not supported by this mouse"));
       if (reply[0] === STATUS.ok && reply[4] === spec.page && reply[5] === spec.command) {
-        const length = Math.min(reply[3], PACKET_LENGTH - HEADER_LENGTH);
+        const length = spec.full ? PACKET_LENGTH - HEADER_LENGTH : Math.min(reply[3], PACKET_LENGTH - HEADER_LENGTH);
         const payload = reply.slice(HEADER_LENGTH, HEADER_LENGTH + length);
         if (!spec.matchesReply || spec.matchesReply(payload)) return payload;
       }

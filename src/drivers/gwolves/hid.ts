@@ -1,13 +1,27 @@
-import type { MouseStatus } from "../mouse-types.ts";
+import type { MagneticButtonsStatus, MagneticCalibrationProgress, MouseStatus } from "../mouse-types.ts";
 import {
   GWOLVES_ADDRESS,
   GWOLVES_COMMAND,
+  GWOLVES_HTS_PLUS_PRO_MODEL_ID,
+  GWOLVES_NOTIFICATION,
+  GWOLVES_RAPID_TRIGGER_MAX,
   GWOLVES_REPORT_ID,
+  GWOLVES_TRIGGER_POINT_MAX,
+  gwolvesAdvanceCalibration,
+  gwolvesBuildCalibrationPayload,
+  gwolvesBuildModelPayload,
   gwolvesBuildReadPayload,
   gwolvesBuildSimplePayload,
   gwolvesBuildWritePayload,
   gwolvesBuildWriteScalarPayload,
   gwolvesDecodeProfile,
+  gwolvesDecodeRapidTrigger,
+  gwolvesDecodeTriggerPoint,
+  gwolvesEncodeRapidTrigger,
+  gwolvesEncodeTriggerPoint,
+  gwolvesParseButtonDepth,
+  gwolvesParseModelId,
+  type GWolvesCalibrationStage,
   gwolvesEncodeDpi,
   gwolvesEncodePollingRate,
   gwolvesParseBattery,
@@ -48,6 +62,11 @@ const RESPONSE_TIMEOUT_MS = 700;
 // the key table's sixth, DPI, slot stays hidden.
 const BUTTON_LIMITS = { buttons: 5, actions: TEEVOLUTION_SHARED_BUTTON_OPTIONS };
 const SUPPORTED_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
+const CALIBRATION_TIMING = { settleMs: 2_000, noReadingsMs: 8_000, idleMs: 30_000, maxMs: 90_000 };
+const MAGNETIC_ADDRESS = {
+  trigger: [GWOLVES_ADDRESS.leftTrigger, GWOLVES_ADDRESS.rightTrigger],
+  rapidTrigger: [GWOLVES_ADDRESS.leftRapidTrigger, GWOLVES_ADDRESS.rightRapidTrigger],
+} as const;
 
 export class GWolvesHidClient {
   readonly device: HIDDevice;
@@ -58,11 +77,21 @@ export class GWolvesHidClient {
     timer: number;
   } | null = null;
 
+  /** Exposed so tests do not have to wait out the real delays. */
+  calibrationTiming = { ...CALIBRATION_TIMING };
+  private receiverModelId: number | null | undefined;
+  private readonly depthListeners = new Set<(left: number, right: number) => void>();
+
   private readonly onInputReport = (event: HIDInputReportEvent): void => {
     if (event.reportId !== GWOLVES_REPORT_ID) return;
     const response = new Uint8Array(
       event.data.buffer.slice(event.data.byteOffset, event.data.byteOffset + event.data.byteLength),
     );
+    if (response[0] === GWOLVES_NOTIFICATION) {
+      const depth = gwolvesParseButtonDepth(response);
+      if (depth) for (const listener of this.depthListeners) listener(depth.left, depth.right);
+      return;
+    }
     const waiter = this.waiter;
     if (!waiter || response[0] !== waiter.command) return;
     window.clearTimeout(waiter.timer);
@@ -117,7 +146,9 @@ export class GWolvesHidClient {
 
   async readStatus(): Promise<MouseStatus> {
     await this.open();
-    const { model, wireless } = this.product;
+    const { wireless } = this.product;
+    const magnetic = await this.isMagnetic();
+    const model = magnetic && wireless ? "HTS Plus Pro" : this.product.model;
     const batteryResponse = await this.transact(gwolvesBuildSimplePayload(GWOLVES_COMMAND.battery));
     const firmwareResponse = await this.transact(gwolvesBuildSimplePayload(GWOLVES_COMMAND.firmware));
     const profile = await this.readProfile();
@@ -148,6 +179,7 @@ export class GWolvesHidClient {
       rippleControl: settings.rippleControl,
       performanceMode: settings.performanceMode,
       liftOffDistance: settings.liftOffDistance,
+      ...(magnetic ? { magneticButtons: await this.readMagnetic().catch(() => undefined) } : {}),
       ...(keys ? { buttonMappings: teevolutionDecodeButtonMappings(keys, 0, BUTTON_LIMITS.buttons), buttonOptions: BUTTON_LIMITS.actions } : {}),
       firmware: firmware ? [`Mouse ${firmware}`] : [],
       ui: {
@@ -204,7 +236,123 @@ export class GWolvesHidClient {
     );
   }
 
+  /** True for the magnetic model. On the shared receiver the mouse behind it is asked once. */
+  async isMagnetic(): Promise<boolean> {
+    if (!this.product.wireless) return this.product.magnetic === true;
+    if (this.receiverModelId === undefined) {
+      this.receiverModelId = await this.transact(gwolvesBuildModelPayload(Array.from({ length: 4 }, () => Math.floor(Math.random() * 256))))
+        .then((response) => gwolvesParseModelId(response)?.modelId ?? null)
+        .catch(() => null);
+    }
+    return this.receiverModelId === GWOLVES_HTS_PLUS_PRO_MODEL_ID;
+  }
+
+  async readMagnetic(): Promise<MagneticButtonsStatus> {
+    const wired = !this.product.wireless;
+    const buttons: MagneticButtonsStatus["buttons"] = [];
+    for (const side of [0, 1] as const) {
+      const triggerPoint = gwolvesDecodeTriggerPoint(await this.read(MAGNETIC_ADDRESS.trigger[side], 2));
+      const rapid = gwolvesDecodeRapidTrigger(await this.read(MAGNETIC_ADDRESS.rapidTrigger[side], 2));
+      buttons.push({
+        switchType: "magnetic",
+        triggerPoint,
+        rapidTrigger: rapid && rapid.level >= 1 && rapid.level <= GWOLVES_RAPID_TRIGGER_MAX ? rapid.level : null,
+        rapidTriggerEnabled: rapid ? rapid.enabled : null,
+      });
+    }
+    return {
+      buttons,
+      triggerPointRange: { min: 1, max: GWOLVES_TRIGGER_POINT_MAX },
+      // The web driver offers rapid trigger and calibration on a cable only.
+      rapidTriggerRange: wired ? { min: 1, max: GWOLVES_RAPID_TRIGGER_MAX } : null,
+      rapidTriggerUnit: "level",
+      rapidTriggerSwitch: true,
+      canChooseSwitchType: false,
+      calibration: wired ? "unknown" : null,
+      liveDepth: true,
+    };
+  }
+
+  async setMagneticTriggerPoint(button: 0 | 1, point: number): Promise<number> {
+    await this.writeScalar(MAGNETIC_ADDRESS.trigger[button], gwolvesEncodeTriggerPoint(point));
+    const confirmed = gwolvesDecodeTriggerPoint(await this.read(MAGNETIC_ADDRESS.trigger[button], 2));
+    if (confirmed !== point) throw new Error(`The ${this.product.model} kept trigger point ${confirmed ?? "unknown"} instead of ${point}.`);
+    return confirmed;
+  }
+
+  async setMagneticRapidTrigger(button: 0 | 1, enabled: boolean, level: number): Promise<{ enabled: boolean; level: number }> {
+    if (this.product.wireless) throw new Error("Rapid trigger can only be changed with the mouse on its cable.");
+    await this.writeScalar(MAGNETIC_ADDRESS.rapidTrigger[button], gwolvesEncodeRapidTrigger(enabled, level));
+    const confirmed = gwolvesDecodeRapidTrigger(await this.read(MAGNETIC_ADDRESS.rapidTrigger[button], 2));
+    if (!confirmed || confirmed.enabled !== enabled || confirmed.level !== level) {
+      throw new Error(`The ${this.product.model} did not keep the rapid trigger setting.`);
+    }
+    return confirmed;
+  }
+
+  /** Live press depth of the left and right button, 0 to 100, while the mouse streams it. */
+  onButtonDepth(listener: (left: number, right: number) => void): () => void {
+    this.depthListeners.add(listener);
+    return () => { this.depthListeners.delete(listener); };
+  }
+
+  /**
+   * Starts the calibration and follows it by press depth. The mouse does not
+   * report a result, so success means both buttons were seen fully pressed and
+   * then fully released. Wired only, like G-Wolves' web driver.
+   */
+  async calibrateMagneticButtons(onProgress: (progress: MagneticCalibrationProgress) => void, signal?: AbortSignal): Promise<void> {
+    if (this.product.wireless) throw new Error("Calibrate the magnetic switches with the mouse on its cable.");
+    let stage = "pressBoth" as GWolvesCalibrationStage;
+    let settled = false;
+    let seen = false;
+    let last = Date.now();
+    let depth = { left: 0, right: 0 };
+    const report = (): void => onProgress({
+      ...depth,
+      step: stage === "pressBoth" ? 2 : 3,
+      steps: 3,
+      message: stage === "pressBoth"
+        ? "Press and hold both the left and right buttons fully for 2 seconds."
+        : stage === "releaseBoth" ? "Release both the left and right buttons." : "Calibration Successful",
+    });
+    const stop = this.onButtonDepth((left, right) => {
+      seen = true;
+      last = Date.now();
+      depth = { left, right };
+      if (!settled) return;
+      stage = gwolvesAdvanceCalibration(stage, depth);
+      report();
+    });
+    try {
+      onProgress({ ...depth, step: 1, steps: 3, message: "Do not press any buttons until the white LED stops blinking and turns solid green." });
+      const response = await this.transact(gwolvesBuildCalibrationPayload());
+      if (!gwolvesReportChecksumIsValid(response)) throw new Error("The mouse did not answer the calibration request.");
+      await new Promise<void>((resolve) => window.setTimeout(resolve, this.calibrationTiming.settleMs));
+      settled = true;
+      seen = false;
+      const started = Date.now();
+      last = started;
+      report();
+      while (stage !== "done") {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+        if (signal?.aborted) throw new Error("Calibration cancelled.");
+        const now = Date.now();
+        if (!seen && now - started > this.calibrationTiming.noReadingsMs) {
+          throw new Error("No live button readings arrived from the mouse, so the calibration could not be followed.");
+        }
+        if (now - started > this.calibrationTiming.maxMs || (seen && now - last > this.calibrationTiming.idleMs)) {
+          throw new Error("Calibration did not finish. Fully press and release both buttons as prompted, then try again.");
+        }
+      }
+      report();
+    } finally {
+      stop();
+    }
+  }
+
   async close(): Promise<void> {
+    this.depthListeners.clear();
     this.failWaiter(new Error("The G-Wolves device was closed."));
     this.device.removeEventListener("inputreport", this.onInputReport);
     if (this.device.opened) await this.device.close();

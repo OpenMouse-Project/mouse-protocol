@@ -35,6 +35,7 @@ export const GWOLVES_COMMAND = {
   profile: 0x0e,
   firmware: 0x12,
   dongleFirmware: 0x1d,
+  calibrate: 0x2e,
 } as const;
 
 export const GWOLVES_ADDRESS = {
@@ -49,7 +50,18 @@ export const GWOLVES_ADDRESS = {
   angleSnapping: 0xaf,
   rippleControl: 0xb1,
   performanceMode: 0xb5,
+  leftTrigger: 0xef,
+  leftRapidTrigger: 0xf1,
+  rightTrigger: 0xf5,
+  rightRapidTrigger: 0xf7,
 } as const;
+
+/** Input report 8 whose first byte is this is a mouse-initiated notification, not a reply. */
+export const GWOLVES_NOTIFICATION = 0x0a;
+export const GWOLVES_TRIGGER_POINT_MAX = 20;
+export const GWOLVES_RAPID_TRIGGER_MAX = 10;
+/** Model ids the receiver reports for the magnetic generation (MID in G-Wolves' env-models.json). */
+export const GWOLVES_HTS_PLUS_PRO_MODEL_ID = 11;
 
 export interface GWolvesBattery {
   percent: number;
@@ -218,4 +230,79 @@ export function gwolvesDecodeProfile(profile: Uint8Array): GWolvesProfile {
     rippleControl: boolean(GWOLVES_ADDRESS.rippleControl),
     performanceMode: boolean(GWOLVES_ADDRESS.performanceMode),
   };
+}
+
+/**
+ * Magnetic buttons (HTS Plus Pro). Every value is a [v, 0x55 - v] pair like the
+ * other flash scalars. Reads that fail the pair check are unknown, not zero:
+ * G-Wolves' own web driver would show the most sensitive setting for them.
+ */
+export function gwolvesDecodeTriggerPoint(pair: Uint8Array | readonly number[]): number | null {
+  const value = gwolvesUnpackScalar(pair[0] ?? 0, pair[1] ?? 0);
+  return value === null || value >= GWOLVES_TRIGGER_POINT_MAX ? null : value + 1;
+}
+
+export function gwolvesEncodeTriggerPoint(point: number): number {
+  if (!Number.isInteger(point) || point < 1 || point > GWOLVES_TRIGGER_POINT_MAX) {
+    throw new RangeError(`G-Wolves trigger point must be 1 to ${GWOLVES_TRIGGER_POINT_MAX}.`);
+  }
+  return point - 1;
+}
+
+export interface GWolvesRapidTrigger {
+  enabled: boolean;
+  level: number;
+}
+
+export function gwolvesDecodeRapidTrigger(pair: Uint8Array | readonly number[]): GWolvesRapidTrigger | null {
+  const value = gwolvesUnpackScalar(pair[0] ?? 0, pair[1] ?? 0);
+  return value === null ? null : { enabled: (value >> 7) === 1, level: value & 0x0f };
+}
+
+export function gwolvesEncodeRapidTrigger(enabled: boolean, level: number): number {
+  if (!Number.isInteger(level) || level < 1 || level > GWOLVES_RAPID_TRIGGER_MAX) {
+    throw new RangeError(`G-Wolves rapid trigger must be 1 to ${GWOLVES_RAPID_TRIGGER_MAX}.`);
+  }
+  return ((enabled ? 1 : 0) << 7) | level;
+}
+
+/** Starts the magnetic button calibration. The mouse sends no result; press depth notifications follow. */
+export function gwolvesBuildCalibrationPayload(): Uint8Array {
+  const payload = gwolvesBuildSimplePayload(GWOLVES_COMMAND.calibrate);
+  payload[4] = 10;
+  payload[5] = 1;
+  payload[7] = 3;
+  return finalize(payload);
+}
+
+/** Press depth of the left and right button, 0 to 100, from a notification. Null for any other report. */
+export function gwolvesParseButtonDepth(report: Uint8Array): { left: number; right: number } | null {
+  if (report.length < 15 || report[0] !== GWOLVES_NOTIFICATION || report[5] !== 0) return null;
+  return { left: report[13]! & 0x7f, right: report[14]! & 0x7f };
+}
+
+/** The receiver is shared by every model; this handshake says which mouse is behind it. */
+export function gwolvesBuildModelPayload(random: readonly number[]): Uint8Array {
+  const payload = gwolvesBuildSimplePayload(GWOLVES_COMMAND.handshake);
+  payload[4] = 8;
+  for (let index = 0; index < 4; index += 1) payload[5 + index] = (random[index] ?? 0) & 0xff;
+  return finalize(payload);
+}
+
+export function gwolvesParseModelId(response: Uint8Array): { modelId: number; fourKReceiver: boolean } | null {
+  if (!gwolvesReportChecksumIsValid(response) || response[0] !== GWOLVES_COMMAND.handshake) return null;
+  return { modelId: response[10] === 0 ? 2 : response[10]!, fourKReceiver: response[11] === 1 };
+}
+
+export type GWolvesCalibrationStage = "pressBoth" | "releaseBoth" | "done";
+
+/**
+ * Follows press depth through the calibration the way G-Wolves' web driver
+ * does: both buttons to full depth, then both back to zero. The mouse never
+ * reports a result, so "done" only means a full press and release was seen.
+ */
+export function gwolvesAdvanceCalibration(stage: GWolvesCalibrationStage, depth: { left: number; right: number }): GWolvesCalibrationStage {
+  if (stage === "pressBoth" && depth.left >= 100 && depth.right >= 100) return "releaseBoth";
+  if (stage === "releaseBoth" && depth.left === 0 && depth.right === 0) return "done";
+  return stage;
 }
