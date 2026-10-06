@@ -117,15 +117,28 @@ export const LAMZU_VENDOR_IDS: readonly number[] = [LAMZU_VENDOR_ID, LAMZU_INCA_
  * has NOT been exercised on hardware; the protocol is the receiver protocol
  * either way, so the risk is a wrong rate list rather than a dead device.
  *
+ * The Paro Aurora (released mid-2025, PAW3950) is also entered here from that
+ * table, under the same vendor id and protocol flags as the Inca
+ * (`IsNewProtocol`: 1, `IsCompx`: 0, `DPIMax` 30000 — the driver default, so
+ * no `maxDpi` override). Its three ids are `PIDWired` 0x0007 (125-1000),
+ * `_1KDongle` 0x000d (125-1000) and `_8KDongle` 0x000e (500-8000). None of
+ * them has been exercised on hardware yet — issue #167 — so a wrong rate list
+ * is the failure mode, not a dead device.
+ *
  * Deliberately absent: 0x000a and 0x0002, which Aurora lists as
  * `DeviceBLPID` and `Receiver4K8KBLPID` — the DFU bootloader identities the
  * mouse and dongle take while flashing firmware. They never speak this
- * protocol and must not be offered in the picker.
+ * protocol and must not be offered in the picker. The Paro's own bootloader
+ * ids, 0x0008 (`DeviceBLPID`) and 0x0004 (`_1KDongleIDVD`), are excluded for
+ * the same reason; its 8K dongle shares 0x0002 with the Inca.
  */
 export const LAMZU_INCA_PRODUCTS: ReadonlyMap<number, LamzuProduct> = new Map([
   [0x0009, { model: "Inca 8K", wireless: false, pollingRates: RATES_1K }],
   [0x000f, { model: "Inca 8K", wireless: true, pollingRates: RATES_1K }],
   [0x0010, { model: "Inca 8K", wireless: true, pollingRates: RATES_8K }],
+  [0x0007, { model: "Paro Aurora", wireless: false, pollingRates: RATES_1K }],
+  [0x000d, { model: "Paro Aurora", wireless: true, pollingRates: RATES_1K }],
+  [0x000e, { model: "Paro Aurora", wireless: true, pollingRates: RATES_8K }],
 ]);
 
 /**
