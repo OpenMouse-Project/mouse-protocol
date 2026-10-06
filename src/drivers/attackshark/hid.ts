@@ -110,8 +110,9 @@ const attackShark = (model: string, battery?: ReceiverModel["battery"]): Receive
  * Models identified by the model id their receiver messages carry. Attack
  * Shark ids: HarukaYamamoto0/attack-shark-x11-driver src/core/devices.ts.
  */
+const X11_MODEL_ID = 0x55;
 const X11_RECEIVER_MODELS: ReadonlyMap<number, ReceiverModel> = new Map([
-  [0x55, attackShark("X11", "percent")],
+  [X11_MODEL_ID, attackShark("X11", "percent")],
   // xb-bx/attack-shark-r1-driver reports charge as p2 * 10.
   [0x10, attackShark("R1", "tenths")],
   [0x85, attackShark("X6", "tenths")],
@@ -253,8 +254,12 @@ const X11_DPI_PIDS: ReadonlySet<number> = new Set([0xfa55, 0xfa60]);
 // A rebuilt config collection (see x11RebuiltConfigCollection) carries no
 // report sizes and no hint of which firmware is behind it, so writes through
 // it are only enabled once a receiver message names a model checked on that
-// path (docs/delux-m600-pro-testing.md).
-const X11_REBUILT_CONFIG_MODELS: ReadonlySet<number> = new Set([DELUX_M600_PRO_MODEL_ID]);
+// path (docs/delux-m600-pro-testing.md). The M600 Pro was captured through
+// Bridge on Windows; the genuine X11 (model id 0x55 — issue #161) rides the
+// same receiver and protocol and resolves to the receiver's 56-byte DPI
+// frame, so it is enabled too. Models whose frame shape is not established
+// (R1 0x10, X3 0x4d/0x4e, X6 0x85, …) stay read-only.
+const X11_REBUILT_CONFIG_MODELS: ReadonlySet<number> = new Set([DELUX_M600_PRO_MODEL_ID, X11_MODEL_ID]);
 
 // The firmware has no cheap "current DPI" command, so — exactly like the
 // reference driver — the last full six-stage table this process wrote (or
