@@ -14,7 +14,6 @@ import {
   COOLERMASTER_LIGHTING_MODE_CUSTOM,
   COOLERMASTER_LIGHTING_MODE_OFF,
   COOLERMASTER_LIGHTING_MODE_STATIC,
-  COOLERMASTER_LIGHTING_ZONES,
   COOLERMASTER_POLLING_RATES,
   COOLERMASTER_PRODUCT_IDS,
   COOLERMASTER_PRODUCT_NAMES,
@@ -47,7 +46,6 @@ import {
   coolermasterToHexColor,
   type CoolerMasterCustomEffect,
   type CoolerMasterGeneralEffect,
-  type CoolerMasterLightingZone,
   type CoolerMasterPerformance,
 } from "@openmouse/protocol/coolermaster";
 
@@ -187,11 +185,11 @@ export class CoolerMasterHidClient {
       }
 
       // Step 5: Read lighting
-      let lightingZones: MouseLighting[] | undefined;
+      let lighting: MouseLighting | undefined;
       try {
-        lightingZones = await this.readLighting();
+        lighting = await this.readLighting();
       } catch {
-        lightingZones = undefined;
+        lighting = undefined;
       }
 
       const name = COOLERMASTER_PRODUCT_NAMES.get(this.device.productId) ?? "Cooler Master MM711";
@@ -234,8 +232,7 @@ export class CoolerMasterHidClient {
         activeProfile: 1,
         connectionType: "Wired",
         firmware: [],
-        lighting: lightingZones?.[0],
-        lightingZones,
+        lighting,
       };
     });
   }
@@ -408,10 +405,7 @@ export class CoolerMasterHidClient {
   }
 
   async setLighting(lighting: MouseLighting): Promise<MouseLighting> {
-    const zoneIndex = COOLERMASTER_LIGHTING_ZONES.indexOf(
-      lighting.zone as CoolerMasterLightingZone,
-    );
-    if (zoneIndex < 0) {
+    if (lighting.zone && lighting.zone !== "Mouse") {
       throw new Error(`Unknown Cooler Master lighting zone: ${lighting.zone}`);
     }
     if (!lighting.mode) {
@@ -472,28 +466,31 @@ export class CoolerMasterHidClient {
         );
       } else if (lighting.mode === "Static") {
         const newColor = coolermasterParseHexColor(lighting.color);
-        if (lighting.zone === "Scroll wheel") {
-          this.lastCustomLighting.wheel = newColor;
-        } else {
-          this.lastCustomLighting.logo = newColor;
-        }
+        const brightness = Math.max(
+          0,
+          Math.min(255, Math.round(((lighting.brightness ?? 100) * 255) / 100)),
+        );
+        this.lastCustomLighting = { wheel: newColor, logo: newColor };
         await this.exchange(
-          coolermasterEncodeSetCustomEffect(
-            this.lastCustomLighting.wheel,
-            this.lastCustomLighting.logo,
-          ),
+          coolermasterEncodeSetGeneralEffect({
+            modeId: COOLERMASTER_LIGHTING_MODE_STATIC,
+            brightness,
+            color: newColor,
+          }),
         );
         await this.exchange(
-          coolermasterEncodeSetEffectMode(COOLERMASTER_LIGHTING_MODE_CUSTOM),
+          coolermasterEncodeSetCustomEffect(newColor, newColor),
+        );
+        await this.exchange(
+          coolermasterEncodeSetEffectMode(COOLERMASTER_LIGHTING_MODE_STATIC),
         );
       }
 
-      const refreshed = await this.readLighting();
-      return refreshed[zoneIndex]!;
+      return await this.readLighting();
     });
   }
 
-  private async readLighting(): Promise<MouseLighting[]> {
+  private async readLighting(): Promise<MouseLighting> {
     let modeId = COOLERMASTER_LIGHTING_MODE_COLOR_CYCLE;
     try {
       const modeReply = await this.exchange(coolermasterEncodeGetEffectMode());
@@ -530,8 +527,6 @@ export class CoolerMasterHidClient {
       }
     }
 
-    const { wheel, logo } = this.lastCustomLighting;
-
     let activeMode: MouseLightingMode = "Cycling";
     let speed: number | null = null;
     let brightness = 100;
@@ -555,29 +550,29 @@ export class CoolerMasterHidClient {
       brightness = Math.round((general.brightness * 100) / 255);
     }
 
-    return COOLERMASTER_LIGHTING_ZONES.map((zone) => {
-      let color: string | null = null;
-      if (activeMode === "Static") {
-        color = zone === "Scroll wheel" ? coolermasterToHexColor(wheel) : coolermasterToHexColor(logo);
-      } else if (activeMode === "Breathing single") {
-        color = coolermasterToHexColor(general.color);
-      }
+    let color: string | null = null;
+    if (activeMode === "Static") {
+      color = modeId === COOLERMASTER_LIGHTING_MODE_CUSTOM
+        ? coolermasterToHexColor(this.lastCustomLighting.logo)
+        : coolermasterToHexColor(general.color);
+    } else if (activeMode === "Breathing single") {
+      color = coolermasterToHexColor(general.color);
+    }
 
-      return {
-        zone,
-        modes: MM711_LIGHTING_MODES,
-        mode: activeMode,
-        color,
-        color2: null,
-        colorModes: MM711_COLOR_MODES,
-        dualColorModes: [],
-        reactiveModes: MM711_SPEED_MODES,
-        speeds: MM711_SPEEDS,
-        speed,
-        brightness: Math.max(0, Math.min(100, brightness)),
-        brightnessLevels: MM711_BRIGHTNESS_LEVELS,
-      };
-    });
+    return {
+      zone: "Mouse",
+      modes: MM711_LIGHTING_MODES,
+      mode: activeMode,
+      color,
+      color2: null,
+      colorModes: MM711_COLOR_MODES,
+      dualColorModes: [],
+      reactiveModes: MM711_SPEED_MODES,
+      speeds: MM711_SPEEDS,
+      speed,
+      brightness: Math.max(0, Math.min(100, brightness)),
+      brightnessLevels: MM711_BRIGHTNESS_LEVELS,
+    };
   }
 
   private async ensurePerformance(): Promise<CoolerMasterPerformance> {

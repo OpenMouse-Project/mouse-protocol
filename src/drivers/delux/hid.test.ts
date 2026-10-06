@@ -233,3 +233,121 @@ test("M600 Pro wired writes match the packets verified on hardware", async () =>
     ),
   });
 });
+
+// The wired M600 Pro as OpenMouse Bridge presents it on Windows: every
+// interface merged into one device, with descriptors hidapi rebuilt from the
+// preparsed data, so the 0x0b config collection declares nothing
+// (captures/delux-m600-pro/windows-bridge.txt).
+const M600_PRO_WINDOWS_BRIDGE_COLLECTIONS = [
+  { usagePage: 0x01, usage: 0x06 },
+  { usagePage: 0x01, usage: 0x02 },
+  { usagePage: 0x01, usage: 0x80 },
+  { usagePage: 0x0c, usage: 0x01 },
+  { usagePage: 0x0a, usage: 0x00 },
+  { usagePage: 0x0b, usage: 0x00 },
+  { usagePage: 0x01, usage: 0x06 },
+];
+
+test("M600 Pro wired through Bridge on Windows is claimed and writable", async () => {
+  resetDeluxDpiState();
+  resetDeluxRuntimeState();
+  const device = fakeDevice(DELUX_M600_PRO_WIRED_PID, "USB Gaming Mouse", M600_PRO_WINDOWS_BRIDGE_COLLECTIONS);
+  assert.equal(DeluxHidClient.isSupported(device), true);
+  assert.ok(createSupportedClient(device) instanceof DeluxHidClient);
+  assert.equal(AttackSharkHidClient.isSupported(device), false);
+
+  const client = new DeluxHidClient(device);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Delux M600 Pro (Wired)");
+  assert.equal(status.ui?.settingsReady, true);
+  assert.equal(status.ui?.statusNote, undefined);
+  assert.equal(status.ui?.forceShowBattery, false);
+  assert.deepEqual(device.featureReads, []);
+
+  // Same packets as the verified Linux writes.
+  assert.equal(await client.setPollingRate(125), 125);
+  assert.deepEqual(device.sentFeatureReports.at(-1), {
+    reportId: 0x06,
+    data: hexBytes("09 01 08 f7 00 00 00 00"),
+  });
+  await client.setDpi(400);
+  assert.equal(device.sentFeatureReports.at(-1)?.reportId, DELUX_DPI_REPORT_ID);
+  assert.equal(device.sentFeatureReports.at(-1)?.data.length, 51);
+  assert.deepEqual(device.featureReads, []);
+});
+
+test("M600 Pro wired through Bridge on Windows drives every polling rate and DPI control", async () => {
+  resetDeluxDpiState();
+  resetDeluxRuntimeState();
+  const device = fakeDevice(DELUX_M600_PRO_WIRED_PID, "USB Gaming Mouse", M600_PRO_WINDOWS_BRIDGE_COLLECTIONS);
+  const client = new DeluxHidClient(device);
+  await client.readStatus();
+
+  const codes = new Map([[125, 0x08], [250, 0x04], [500, 0x02], [1000, 0x01]]);
+  for (const [hz, code] of codes) {
+    assert.equal(await client.setPollingRate(hz), hz);
+    assert.deepEqual(device.sentFeatureReports.at(-1), {
+      reportId: 0x06,
+      data: new Uint8Array([0x09, 0x01, code, 0xff - code, 0, 0, 0, 0]),
+    });
+  }
+  await assert.rejects(() => client.setPollingRate(2000), /does not support 2000 Hz/);
+
+  // Every DPI control re-sends the whole 52-byte table.
+  const before = device.sentFeatureReports.length;
+  await client.setDpiStageValue(2, 3200);
+  await client.setActiveDpiStage(2);
+  await client.setAngleSnapping(true);
+  await client.setRippleControl(false);
+  const dpiWrites = device.sentFeatureReports.slice(before);
+  assert.equal(dpiWrites.length, 4);
+  for (const write of dpiWrites) {
+    assert.equal(write.reportId, DELUX_DPI_REPORT_ID);
+    assert.equal(write.data.length, 51);
+  }
+  const last = new Uint8Array(52);
+  last[0] = DELUX_DPI_REPORT_ID;
+  last.set(dpiWrites.at(-1)!.data, 1);
+  const decoded = decodeDeluxM800MiniDpiReport(last);
+  assert.equal(decoded?.stages[2], 3200);
+  assert.equal(decoded?.activeStage, 3);
+  assert.equal(decoded?.angleSnap, true);
+  assert.equal(decoded?.rippleControl, false);
+
+  const status = await client.readStatus();
+  assert.equal(status.dpi, 3200);
+  assert.equal(status.pollingRateHz, 1000);
+  assert.deepEqual(device.featureReads, []);
+});
+
+test("the rebuilt Bridge shape does not widen the Delux claim beyond the unbranded M600 Pro", () => {
+  // An M800 Mini PID with a generic name stays with the Attack Shark X11 path.
+  const receiver = fakeDevice(DELUX_M800_MINI_WIRELESS_PID, "2.4G Wireless Device", M600_PRO_WINDOWS_BRIDGE_COLLECTIONS);
+  assert.equal(DeluxHidClient.isSupported(receiver), false);
+  assert.ok(createSupportedClient(receiver) instanceof AttackSharkHidClient);
+  const wired = fakeDevice(DELUX_M800_MINI_WIRED_PID, "USB Gaming Mouse", M600_PRO_WINDOWS_BRIDGE_COLLECTIONS);
+  assert.equal(DeluxHidClient.isSupported(wired), false);
+  // A Delux-named M800 Mini receiver keeps its status-only claim.
+  const named = fakeDevice(DELUX_M800_MINI_WIRELESS_PID, "Delux M800 Mini", M600_PRO_WINDOWS_BRIDGE_COLLECTIONS);
+  assert.equal(DeluxHidClient.isSupported(named), true);
+  assert.equal(DeluxHidClient.isSupported({ ...named, vendorId: 0x1234 } as HIDDevice), false);
+});
+
+test("M800 Mini through the rebuilt Bridge shape stays status-only", async () => {
+  resetDeluxRuntimeState();
+  const named = fakeDevice(DELUX_M800_MINI_WIRELESS_PID, "Delux M800 Mini", M600_PRO_WINDOWS_BRIDGE_COLLECTIONS);
+  const status = await new DeluxHidClient(named).readStatus();
+  assert.equal(status.ui?.settingsReady, false);
+  assert.match(status.ui?.statusNote ?? "", /needs a native driver/);
+});
+
+test("M600 Pro wired in Chrome on Windows (consumer collection only) stays unclaimed", () => {
+  // captures/delux-m600-pro/windows-webhid.txt: Chrome lists neither 0x0a nor 0x0b.
+  const chrome = fakeDevice(DELUX_M600_PRO_WIRED_PID, "USB Gaming Mouse", [{ usagePage: 0x0c, usage: 0x01 }]);
+  assert.equal(DeluxHidClient.isSupported(chrome), false);
+  // A 0x0b collection that declares reports other than 0x04/0x06 is not the rebuilt shape.
+  const partial = fakeDevice(DELUX_M600_PRO_WIRED_PID, "USB Gaming Mouse", [
+    { usagePage: 0x0b, usage: 0x00, feature: [0x05] },
+  ]);
+  assert.equal(DeluxHidClient.isSupported(partial), false);
+});

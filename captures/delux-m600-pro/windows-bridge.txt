@@ -1,0 +1,28 @@
+# Receiver fa60 on Windows 11 (10.0.26200), Chrome 154 with OpenMouse Bridge
+# serving navigator.hid over /v1/hid, 2026-10-03. Read only: getDevices(),
+# collections, then 15 s of inputreport events while moving the mouse.
+#
+# Bridge merges every interface into one device; hidapi rebuilds each
+# collection's descriptor from the Windows preparsed data.
+#0 "2.4G Wireless Device" collections=7
+  UP 0x01 U 0x80 | in 0x01(1B) | out - | feat -
+  UP 0x0c U 0x01 | in 0x02(2B) | out - | feat -
+  UP 0x0a U 0x00 | in 0x00(4B) | out - | feat -
+  UP 0x01 U 0x06 | in 0x00(7B) | out - | feat -
+  UP 0x0b U 0x00 | in - | out - | feat -
+  UP 0x01 U 0x06 | in 0x00(8B) | out 0x00(1B) | feat -
+  UP 0x01 U 0x02 | in - | out - | feat -
+    UP 0x01 U 0x01 | in 0x00(7B) | out - | feat -
+# The 0x0a collection lost report id 0x03 and the 0x0b collection lost every
+# feature report (see windows-webhid.txt: no caps for either).
+#
+# inputreport events, 15 s: 7, all from the battery collection
+report 0x00: 03 20 40 01 4c    (x7; model 0x20, 76 %)
+# The receiver message arrives as report 0 with its 0x03 id still in the data.
+#
+# Same session, Win32 ReadFile on MI_02&COL03, 12 s:
+03 20 40 01 4c    (7 identical reports)
+#
+# Wired fa71 through Bridge, as OpenMouse's connection error listed it before
+# the Delux driver accepted this shape:
+USB Gaming Mouse (VID 0x1d57 PID 0xfa71; usage 0x1:6 feat[none] | usage 0x1:2 feat[none] | usage 0x1:80 feat[none] | usage 0xc:1 feat[none] | usage 0xa:0 feat[none] | usage 0xb:0 feat[none] | usage 0x1:6 feat[none])

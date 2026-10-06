@@ -378,6 +378,275 @@ test("the declared DPI report length picks the 56-byte receiver form", async () 
   assert.equal(sent[0].data.length, 55);
 });
 
+// An 0xfa60 receiver as OpenMouse Bridge presents it on Windows: every
+// interface merged into one device, with descriptors hidapi rebuilt from the
+// preparsed data. The 0x0a battery collection reads as unnumbered and the
+// 0x0b config collection declares nothing
+// (captures/delux-m600-pro/windows-bridge.txt).
+function windowsBridgeX11Receiver() {
+  const sent: Array<{ reportId: number; data: number[] }> = [];
+  const reads: number[] = [];
+  const listeners = new Map<string, (event: { reportId: number; data: DataView }) => void>();
+  const collection = (
+    usagePage: number,
+    usage: number,
+    input: number[],
+    output: number[] = [],
+    children: unknown[] = [],
+  ) => ({
+    usagePage,
+    usage,
+    type: 1,
+    children,
+    inputReports: input.map((reportId) => ({ reportId, items: [] })),
+    outputReports: output.map((reportId) => ({ reportId, items: [] })),
+    featureReports: [],
+  });
+  const unit = {
+    vendorId: 0x1d57,
+    productId: 0xfa60,
+    productName: "2.4G Wireless Device",
+    collections: [
+      collection(0x01, 0x80, [1]),
+      collection(0x0c, 0x01, [2]),
+      collection(0x0a, 0x00, [0]),
+      collection(0x01, 0x06, [0]),
+      collection(0x0b, 0x00, []),
+      collection(0x01, 0x06, [0], [0]),
+      collection(0x01, 0x02, [], [], [collection(0x01, 0x01, [0])]),
+    ],
+    opened: false,
+    open() { (this as { opened: boolean }).opened = true; return Promise.resolve(); },
+    close() { (this as { opened: boolean }).opened = false; return Promise.resolve(); },
+    sendFeatureReport(reportId: number, data: BufferSource) {
+      sent.push({ reportId, data: [...new Uint8Array(data as ArrayBuffer)] });
+      return Promise.resolve();
+    },
+    receiveFeatureReport(reportId: number) {
+      reads.push(reportId);
+      return Promise.reject(new DOMException("not declared", "NotAllowedError"));
+    },
+    addEventListener(type: string, listener: (event: { reportId: number; data: DataView }) => void) {
+      listeners.set(type, listener);
+    },
+    removeEventListener(type: string) { listeners.delete(type); },
+  } as unknown as HIDDevice;
+  const push = (bytes: number[]) => {
+    listeners.get("inputreport")?.({ reportId: 0x00, data: new DataView(new Uint8Array(bytes).buffer) });
+  };
+  return { unit, sent, reads, push };
+}
+
+test("Bridge on Windows: the M600 Pro is named by its unnumbered receiver message and becomes writable", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { unit, sent, reads, push } = windowsBridgeX11Receiver();
+  assert.equal(AttackSharkHidClient.isSupported(unit), true);
+  const client = new AttackSharkHidClient(unit, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+
+  // No receiver message yet: nothing names the mouse, so nothing is writable.
+  const before = await client.readStatus();
+  assert.equal(before.name, "Attack Shark mouse (2.4 GHz receiver)");
+  assert.equal(before.ui?.settingsReady, false);
+  assert.equal(before.ui?.forceShowBattery, true);
+  assert.equal(before.batteryPercent, null);
+  await assert.rejects(() => client.setPollingRate(500), /not reachable from a browser/);
+
+  // Captured through Bridge: 03 20 40 01 4c, the M600 Pro at 76 %.
+  push([0x03, 0x20, 0x40, 0x01, 0x4c]);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Delux M600 Pro (Wireless)");
+  assert.equal(status.brand, "Delux");
+  assert.equal(status.batteryPercent, 76);
+  assert.equal(status.ui?.settingsReady, true);
+  assert.equal(status.ui?.statusNote, undefined);
+  assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
+  assert.equal(status.pollingRateHz, 1000);
+  assert.equal(status.dpi, 1600);
+  assert.deepEqual(reads, []);
+
+  // Same packets as the verified Linux writes.
+  assert.equal(await client.setPollingRate(500), 500);
+  assert.deepEqual(sent, [{ reportId: 0x06, data: [0x09, 0x01, 0x02, 0xfd, 0, 0, 0, 0] }]);
+  sent.length = 0;
+  assert.equal(await client.setDpi(400), 400);
+  assert.equal(sent[0].reportId, 0x04);
+  // The 52-byte form the M600 Pro descriptor declares, minus the report id.
+  assert.equal(sent[0].data.length, 51);
+  assert.deepEqual(sent[0].data.slice(0, 2), [0x38, 0x01]);
+  assert.deepEqual(reads, []);
+});
+
+test("Bridge on Windows: other models are named but stay read-only", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { unit, sent, push } = windowsBridgeX11Receiver();
+  const client = new AttackSharkHidClient(unit, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  push([0x03, 0x55, 0x40, 0x01, 0x50]);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Attack Shark X11");
+  assert.equal(status.batteryPercent, 80);
+  assert.equal(status.ui?.settingsReady, false);
+  await assert.rejects(() => client.setDpi(800), /not reachable from a browser/);
+  assert.deepEqual(sent, []);
+});
+
+test("Bridge on Windows: unnumbered mouse and keyboard reports are not receiver messages", async () => {
+  resetAttackSharkX11RuntimeState();
+  const { unit, push } = windowsBridgeX11Receiver();
+  const client = new AttackSharkHidClient(unit, { batteryWaitMs: 0 });
+  await client.open();
+  // Boot mouse, left+right held and X = +0x0020: 7 bytes, starts like a receiver message.
+  push([0x03, 0x20, 0x40, 0x01, 0x4c, 0x00, 0x00]);
+  // Keyboard with modifiers 0x03: 8 bytes.
+  push([0x03, 0x20, 0x40, 0x01, 0x4c, 0x00, 0x00, 0x00]);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Attack Shark mouse (2.4 GHz receiver)");
+  assert.equal(status.batteryPercent, null);
+  assert.equal(status.ui?.settingsReady, false);
+});
+
+test("Bridge on Windows: status waits for the receiver message that names the mouse", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { unit, push } = windowsBridgeX11Receiver();
+  const client = new AttackSharkHidClient(unit, { batteryWaitMs: 2_000 });
+  await client.open();
+  setTimeout(() => push([0x03, 0x20, 0x40, 0x01, 0x4c]), 150);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Delux M600 Pro (Wireless)");
+  assert.equal(status.ui?.settingsReady, true);
+  assert.equal(status.batteryPercent, 76);
+});
+
+test("Bridge on Windows: a write acknowledgement names the mouse without counting as battery", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { unit, push } = windowsBridgeX11Receiver();
+  const client = new AttackSharkHidClient(unit, { batteryWaitMs: 0 });
+  await client.open();
+  // 03 20 50 00 06: model, feature-report status event, success, report id.
+  push([0x03, 0x20, 0x50, 0x00, 0x06]);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Delux M600 Pro (Wireless)");
+  assert.equal(status.batteryPercent, null);
+  assert.equal(status.ui?.settingsReady, true);
+});
+
+test("Bridge on Windows: an unknown model id neither renames the unit nor unlocks writes", async () => {
+  resetAttackSharkX11RuntimeState();
+  const { unit, sent, push } = windowsBridgeX11Receiver();
+  const client = new AttackSharkHidClient(unit, { batteryWaitMs: 0 });
+  await client.open();
+  push([0x03, 0x21, 0x40, 0x01, 0x4c]);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Attack Shark mouse (2.4 GHz receiver)");
+  assert.equal(status.batteryPercent, null);
+  assert.equal(status.ui?.settingsReady, false);
+  assert.deepEqual(sent, []);
+});
+
+test("Bridge on Windows: receiver writes keep the minimum gap", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { unit, push } = windowsBridgeX11Receiver();
+  const sentAt: number[] = [];
+  const send = unit.sendFeatureReport.bind(unit);
+  (unit as { sendFeatureReport: HIDDevice["sendFeatureReport"] }).sendFeatureReport = (reportId, data) => {
+    sentAt.push(Date.now());
+    return send(reportId, data);
+  };
+  const client = new AttackSharkHidClient(unit, { batteryWaitMs: 0, receiverWriteGapMs: 200 });
+  await client.open();
+  push([0x03, 0x20, 0x40, 0x01, 0x4c]);
+  await Promise.all([client.setPollingRate(500), client.setPollingRate(1000)]);
+  assert.equal(sentAt.length, 2);
+  assert.ok(sentAt[1] - sentAt[0] >= 195, `second write came ${sentAt[1] - sentAt[0]} ms after the first`);
+});
+
+test("Bridge on Windows: wired X11-family PIDs name no model and stay read-only", async () => {
+  resetAttackSharkX11RuntimeState();
+  for (const productId of [0xfa55, 0xfa61]) {
+    const { unit, sent } = windowsBridgeX11Receiver();
+    (unit as { productId: number }).productId = productId;
+    (unit as { productName: string }).productName = "USB Gaming Mouse";
+    assert.equal(AttackSharkHidClient.isSupported(unit), true);
+    const patient = new AttackSharkHidClient(unit, { batteryWaitMs: 10_000 });
+    const started = Date.now();
+    const status = await patient.readStatus();
+    // Wired units send no receiver messages, so the status read does not wait for one.
+    assert.ok(Date.now() - started < 1_000, `0x${productId.toString(16)} waited for a receiver message`);
+    assert.equal(status.name, "Attack Shark mouse (wired)");
+    assert.equal(status.ui?.settingsReady, false);
+    assert.equal(status.ui?.forceShowBattery, false);
+    assert.deepEqual(sent, []);
+  }
+});
+
+test("a native adapter keeps the product-id DPI length even once the M600 Pro is named", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const sent: Array<{ reportId: number; data: number[] }> = [];
+  const listeners = new Map<string, (event: { reportId: number; data: DataView }) => void>();
+  const native = {
+    vendorId: 0x1d57,
+    productId: 0xfa60,
+    productName: "2.4G Wireless Device",
+    collections: [],
+    opened: false,
+    open() { (this as { opened: boolean }).opened = true; return Promise.resolve(); },
+    close() { return Promise.resolve(); },
+    sendFeatureReport(reportId: number, data: BufferSource) {
+      sent.push({ reportId, data: [...new Uint8Array(data as ArrayBuffer)] });
+      return Promise.resolve();
+    },
+    receiveFeatureReport() { return Promise.resolve(new DataView(new ArrayBuffer(0))); },
+    addEventListener(type: string, listener: (event: { reportId: number; data: DataView }) => void) {
+      listeners.set(type, listener);
+    },
+    removeEventListener() { return undefined; },
+  } as unknown as HIDDevice;
+  const client = new AttackSharkHidClient(native, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  listeners.get("inputreport")?.({ reportId: 0x03, data: new DataView(new Uint8Array([0x20, 0x40, 0x01, 0x4c]).buffer) });
+  assert.equal((await client.readStatus()).name, "Delux M600 Pro (Wireless)");
+  await client.setDpi(800);
+  // Unchanged from before the Bridge shape was recognised: 56-byte form for 0xfa60.
+  assert.equal(sent[0].data.length, 55);
+});
+
+test("Linux hidraw: report-0 packets are not receiver messages", async () => {
+  resetAttackSharkX11RuntimeState();
+  const { unit, listeners } = linuxX11Receiver(51);
+  const client = new AttackSharkHidClient(unit, { batteryWaitMs: 0 });
+  await client.readStatus();
+  // Linux hands the battery report over as report 0x03; a report-0 packet of
+  // the same bytes comes from an unnumbered collection and must not count.
+  listeners.get("inputreport")?.({ reportId: 0x00, data: new DataView(new Uint8Array([0x03, 0x20, 0x40, 0x01, 0x4c, 0x00, 0x00]).buffer) });
+  const status = await client.readStatus();
+  assert.equal(status.name, "Attack Shark mouse (2.4 GHz receiver)");
+  assert.equal(status.batteryPercent, null);
+});
+
+test("Chrome on Windows lists only the consumer collection: read-only, no battery column", async () => {
+  resetAttackSharkX11RuntimeState();
+  // captures/delux-m600-pro/windows-webhid.txt (Chrome 154)
+  const composite = {
+    ...x11Entry(0xfa60, [[0x0c, 0x01]]),
+    opened: true,
+    open: () => Promise.resolve(),
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  } as unknown as HIDDevice;
+  (composite.collections[0] as { inputReports: unknown[] }).inputReports = [{ reportId: 0x02, items: [] }];
+  assert.equal(AttackSharkHidClient.isSupported(composite), true);
+  const status = await new AttackSharkHidClient(composite, { batteryWaitMs: 0 }).readStatus();
+  assert.equal(status.ui?.settingsReady, false);
+  assert.equal(status.ui?.forceShowBattery, false);
+  assert.match(status.ui?.statusNote ?? "", /needs a native driver/);
+});
+
 // ── 0x25a7 protocol tests ────────────────────────────────────────────────
 
 test("checksum25a7 pads to 9 bytes and places checksum at byte 7", () => {

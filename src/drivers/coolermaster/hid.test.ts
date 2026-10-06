@@ -240,11 +240,9 @@ test("CoolerMasterHidClient reads complete status from device", async () => {
     stepDpi: 100,
   });
   assert.ok(status.lighting);
-  assert.equal(status.lighting.zone, "Scroll wheel");
+  assert.equal(status.lighting.zone, "Mouse");
   assert.equal(status.lighting.mode, "Cycling");
-  assert.equal(status.lightingZones?.length, 2);
-  assert.equal(status.lightingZones[0]?.zone, "Scroll wheel");
-  assert.equal(status.lightingZones[1]?.zone, "Logo");
+  assert.equal(status.lightingZones, undefined);
 });
 
 test("CoolerMasterHidClient sets active DPI stage and stage values", async () => {
@@ -346,38 +344,27 @@ test("Cooler Master device is registered and resolved in the driver registry", (
   assert.equal(clientSupportScore(fake as unknown as HIDDevice), 7);
 });
 
-test("CoolerMasterHidClient sets static lighting per zone", async () => {
+test("CoolerMasterHidClient sets static lighting for mouse zone", async () => {
   const fake = new FakeCoolerMasterDevice();
   const client = new CoolerMasterHidClient(fake as unknown as HIDDevice);
 
   const status = await client.readStatus();
-  const wheelZone = status.lightingZones![0]!;
-  const logoZone = status.lightingZones![1]!;
+  assert.ok(status.lighting);
 
-  // Set Scroll wheel to blue
-  const updatedWheel = await client.setLighting({
-    ...wheelZone,
+  // Set mouse zone to blue
+  const updated = await client.setLighting({
+    ...status.lighting,
     mode: "Static",
     color: "#0000ff",
   });
-  assert.equal(updatedWheel.zone, "Scroll wheel");
-  assert.equal(updatedWheel.mode, "Static");
-  assert.equal(updatedWheel.color, "#0000ff");
+  assert.equal(updated.zone, "Mouse");
+  assert.equal(updated.mode, "Static");
+  assert.equal(updated.color, "#0000ff");
 
-  // Set Logo to magenta
-  const updatedLogo = await client.setLighting({
-    ...logoZone,
-    mode: "Static",
-    color: "#ff00ff",
-  });
-  assert.equal(updatedLogo.zone, "Logo");
-  assert.equal(updatedLogo.mode, "Static");
-  assert.equal(updatedLogo.color, "#ff00ff");
-
-  // Re-read status and verify both zones kept their colors
+  // Re-read status and verify color persisted
   const recheck = await client.readStatus();
-  assert.equal(recheck.lightingZones![0]!.color, "#0000ff");
-  assert.equal(recheck.lightingZones![1]!.color, "#ff00ff");
+  assert.equal(recheck.lighting?.color, "#0000ff");
+  assert.equal(recheck.lighting?.mode, "Static");
 });
 
 test("CoolerMasterHidClient sets breathing and color cycle lighting", async () => {
@@ -385,7 +372,7 @@ test("CoolerMasterHidClient sets breathing and color cycle lighting", async () =
   const client = new CoolerMasterHidClient(fake as unknown as HIDDevice);
 
   const status = await client.readStatus();
-  const zone = status.lightingZones![0]!;
+  const zone = status.lighting!;
 
   // Breathing single color
   const breath = await client.setLighting({

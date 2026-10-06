@@ -26,7 +26,9 @@ import {
   decodeAnalogButtons,
   encodeAnalogButtons,
   encodeReportRate,
+  factoryDirectoryForFormat,
   factoryProfileForFormat,
+  isBlankDirectory,
   supportsFactoryReset,
   reportRateCapabilitiesFor,
   reportRatesFor,
@@ -729,7 +731,7 @@ test("format-4 encoders prepare reversible scalar DPI, shared-rate and name prob
 
 test("factory reset image is exact, CRC-valid and limited to captured geometry", () => {
   assert.equal(supportsFactoryReset(7), true);
-  for (const format of [1, 2, 3, 4, 5, 6, 8, null, undefined]) {
+  for (const format of [1, 2, 3, 4, 5, 6, null, undefined]) {
     assert.equal(supportsFactoryReset(format), false, `format ${format ?? "missing"}`);
   }
   const factory = factoryProfileForFormat(7, 255);
@@ -737,7 +739,7 @@ test("factory reset image is exact, CRC-valid and limited to captured geometry",
   assert.deepEqual([...factory], [...SECTOR_2]);
   assert.equal(profileCrc(factory), storedCrc(factory));
   assert.equal(factoryProfileForFormat(7, 256), null);
-  assert.equal(factoryProfileForFormat(8, 255), null);
+  assert.equal(factoryProfileForFormat(6, 255), null);
 });
 
 test("factory reset reproduces erased name, bunny-hop and G-Shift regions", () => {
@@ -1322,4 +1324,33 @@ test("HITS in the profile: one button at a time, the on/off bit, and the checks"
   assert.throws(() => encodeAnalogButtons(SECTOR_1_SUPERSTRIKE, 7, [{ button: 0, actuation: 5, rapidTrigger: 2, haptics: 3 }]), /no analog button/);
   assert.throws(() => encodeAnalogButtons(SECTOR_1_SUPERSTRIKE, 8, [{ button: 2, actuation: 5, rapidTrigger: 2, haptics: 3 }]), /left and right/);
   assert.throws(() => encodeAnalogButtons(SECTOR_1_SUPERSTRIKE, 8, [{ button: 0, actuation: 64, rapidTrigger: 2, haptics: 3 }]), /outside/);
+});
+
+test("format 8 factory sector is the captured G HUB reset image", () => {
+  assert.equal(supportsFactoryReset(8), true);
+  const factory = factoryProfileForFormat(8, 255);
+  assert.ok(factory);
+  assert.deepEqual([...factory], [...SECTOR_1_SUPERSTRIKE]);
+  assert.equal(profileCrc(factory), storedCrc(factory));
+  assert.equal(storedCrc(factory), 0x2a38);
+  assert.equal(factoryProfileForFormat(8, 256), null);
+});
+
+test("format 8 factory directory lists sectors 1 to 5 with only the first enabled, CRC 0x4037", () => {
+  const directory = factoryDirectoryForFormat(8, 255);
+  assert.ok(directory);
+  assert.equal(directory.length, 255);
+  assert.equal(profileCrc(directory), storedCrc(directory));
+  assert.equal(storedCrc(directory), 0x4037);
+  assert.deepEqual([...directory.slice(0, 24)], [0, 1, 1, 255, 0, 2, 0, 255, 0, 3, 0, 255, 0, 4, 0, 255, 0, 5, 0, 255, 255, 255, 255, 255]);
+  assert.deepEqual(parseDirectory(directory).map((entry) => [entry.sector, entry.enabled]), [[1, true], [2, false], [3, false], [4, false], [5, false]]);
+  assert.equal(factoryDirectoryForFormat(7, 255), null, "only captured for format 8");
+  assert.equal(factoryDirectoryForFormat(8, 256), null);
+});
+
+test("a directory is blank only when it lists no profiles", () => {
+  assert.equal(isBlankDirectory(new Uint8Array(255).fill(0xff)), true);
+  assert.equal(isBlankDirectory(new Uint8Array(255)), true);
+  assert.equal(isBlankDirectory(factoryDirectoryForFormat(8, 255)!), false);
+  assert.equal(isBlankDirectory(new Uint8Array(2)), false, "a short read is not proof of blank");
 });
