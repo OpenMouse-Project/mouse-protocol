@@ -25,6 +25,11 @@
  * here: its DPI command differs from Aerox 3's even though most other
  * commands match).
  *
+ * The Aerox 3 Wireless (`"aerox3-wireless"`, four PIDs across its USB-cabled
+ * and 2.4 GHz dongle modes, see `./aerox3-wireless.ts`) shares nothing with
+ * the wired Aerox 3 beyond the name: its command set is Aerox 5 Wireless's,
+ * with a shorter 6-button mapping packet.
+ *
  * The Aerox 5 is split across **two** families despite one product line and
  * mostly-shared command bytes: `"aerox5"` (`0x1850`, the plain wired mouse —
  * see `./aerox5.ts`) and `"aerox5-wireless"` (the separately-sold Aerox 5
@@ -64,6 +69,7 @@ export type SteelSeriesProtocolFamily =
   | "rival3"
   | "rival310"
   | "aerox3"
+  | "aerox3-wireless"
   | "rival3-wireless"
   | "aerox5"
   | "aerox5-wireless"
@@ -118,6 +124,42 @@ export const STEELSERIES_PRODUCTS: ReadonlyMap<number, SteelSeriesProduct> = new
     model: "Aerox 3",
     family: "aerox3",
     wireless: false,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // aerox3_wireless_wired.py: usb-cabled mode, interface 3, usage page 0xFFC0.
+  // every setting exercised on hardware, see docs/steelseries-testing.md.
+  [0x183a, {
+    model: "Aerox 3 Wireless (wired mode)",
+    family: "aerox3-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: true,
+  }],
+  [0x187a, {
+    model: "Aerox 3 Wireless CS2 Dragon Lore Edition (wired mode)",
+    family: "aerox3-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: false,
+  }],
+  // aerox3_wireless_wireless.py: same mouse over the 2.4 GHz dongle, every
+  // command byte ORed with 0x40, see ./aerox3-wireless.ts.
+  [0x1838, {
+    model: "Aerox 3 Wireless (2.4 GHz mode)",
+    family: "aerox3-wireless",
+    wireless: true,
+    settingsReadable: false,
+    hasFirmwareQuery: false,
+    verified: true,
+  }],
+  [0x1878, {
+    model: "Aerox 3 Wireless CS2 Dragon Lore Edition (2.4 GHz mode)",
+    family: "aerox3-wireless",
+    wireless: true,
     settingsReadable: false,
     hasFirmwareQuery: false,
     verified: false,

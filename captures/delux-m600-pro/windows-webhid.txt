@@ -1,0 +1,37 @@
+# Receiver fa60 on Windows 11 (10.0.26200), 2026-10-03. Read only: nothing was
+# sent to the device.
+#
+# Win32 HidP_GetCaps for each HID collection of the receiver (opened with
+# access 0). "caps" counts the button/value caps the preparsed data holds.
+MI_00        UP=0x0001 U=0x0006  In=9 Out=2 Feat=0    caps: inBtn=2 inVal=1 featBtn=0 featVal=0
+MI_01        UP=0x0001 U=0x0002  In=8 Out=0 Feat=0    caps: inBtn=1 inVal=4 featBtn=0 featVal=0
+MI_02&COL01  UP=0x0001 U=0x0080  In=2 Out=0 Feat=0    caps: inBtn=1 inVal=0 featBtn=0 featVal=0
+MI_02&COL02  UP=0x000C U=0x0001  In=3 Out=0 Feat=0    caps: inBtn=1 inVal=0 featBtn=0 featVal=0
+MI_02&COL03  UP=0x000A U=0x0000  In=5 Out=0 Feat=0    caps: inBtn=0 inVal=0 featBtn=0 featVal=0
+MI_02&COL04  UP=0x000B U=0x0000  In=0 Out=0 Feat=262  caps: inBtn=0 inVal=0 featBtn=0 featVal=0
+MI_03        UP=0x0001 U=0x0006  In=8 Out=0 Feat=0    caps: inBtn=2 inVal=0 featBtn=0 featVal=0
+# COL03 (battery, input 0x03) and COL04 (config, features 0x04-0x2e, 0xa0)
+# declare only Constant items, so the preparsed data has no caps for them.
+# Feat=262 is the largest declared feature report (0x23, 261 B) plus the id.
+#
+# Win32 ReadFile on MI_02&COL03 (GENERIC_READ, stock driver), 12 s:
+03 20 40 01 4d    (7 identical reports; model 0x20, 77 %)
+#
+# Chrome 154 WebHID, navigator.hid.getDevices() for 1d57:fa60, then 15 s of
+# inputreport events while moving the mouse:
+#0 "2.4G Wireless Device" collections=1
+  UP 0x0c U 0x01 | in 0x02(2B) | out - | feat -
+events: 0 (report 0x03: 0)
+# Chrome builds the collections from the caps: COL03 and COL04 are not listed,
+# and COL01 (system control) is protected and hidden.
+#
+# Wired fa71, same machine and day. Win32 HidP_GetCaps:
+MI_00        UP=0x0001 U=0x0006  In=9 Out=2 Feat=0    caps: inBtn=2 inVal=1 featBtn=0 featVal=0
+MI_01        UP=0x0001 U=0x0002  In=8 Out=0 Feat=0    caps: inBtn=1 inVal=4 featBtn=0 featVal=0
+MI_02&COL01  UP=0x0001 U=0x0080  In=2 Out=0 Feat=0    caps: inBtn=1 inVal=0 featBtn=0 featVal=0
+MI_02&COL02  UP=0x000C U=0x0001  In=3 Out=0 Feat=0    caps: inBtn=1 inVal=0 featBtn=0 featVal=0
+MI_02&COL03  UP=0x000A U=0x0000  In=5 Out=0 Feat=0    caps: inBtn=0 inVal=0 featBtn=0 featVal=0
+MI_02&COL04  UP=0x000B U=0x0000  In=0 Out=0 Feat=262  caps: inBtn=0 inVal=0 featBtn=0 featVal=0
+MI_03        UP=0x0001 U=0x0006  In=8 Out=0 Feat=0    caps: inBtn=2 inVal=0 featBtn=0 featVal=0
+# Same shape as the receiver. ReadFile on MI_02&COL03 for 12 s: no reports
+# (no battery stream on the cable).

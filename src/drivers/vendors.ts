@@ -112,6 +112,10 @@ import {
 import {
   REDRAGON_CONFIG_USAGE,
   REDRAGON_CONFIG_USAGE_PAGE,
+  REDRAGON_M690_PRO_PRODUCT_IDS,
+  REDRAGON_M690_PRO_USAGE,
+  REDRAGON_M690_PRO_USAGE_PAGE,
+  REDRAGON_M690_PRO_VENDOR_ID,
   REDRAGON_PRODUCT_IDS,
   REDRAGON_VENDOR_ID,
 } from "@openmouse/protocol/redragon";
@@ -139,6 +143,7 @@ export const VENDOR_ID = {
   endgameGear: 0x3367,
   wlmouse: 0x36a7,
   lamzu: 0x373e,
+  lunafury: 0x373e,
   bytech: 0x372e,
   lamzuInca: LAMZU_INCA_VENDOR_ID,
   attackshark: 0x373e,
@@ -178,6 +183,9 @@ export const VENDOR_ID = {
   microsoft: MICROSOFT_VENDOR_ID,
   dareu: DAREU_VENDOR_ID,
   redragon: REDRAGON_VENDOR_ID,
+  // Shares SinoWealth's 0x258a with the Glorious classic line (see
+  // `gloriousClassic` above); disjoint by product id.
+  redragonM690Pro: REDRAGON_M690_PRO_VENDOR_ID,
   fater: FATER_VENDOR_ID,
   // Shares 0x093a with Glorious's Pixart-based Model O 2 / I 2 family (see
   // `glorious` above); GloriousHidClient.isSupported() only claims its own
@@ -223,6 +231,17 @@ export const FATER_HID_FILTERS: HIDDeviceFilter[] = [...FATER_PRODUCT_IDS].map((
 }));
 
 /** Holtek config collection measured on the M724 K1NG 1K (usbmon + usbhid-dump). */
+/**
+ * Redragon M690 PRO (SinoWealth): cable and 2.4 GHz receiver, both exposing
+ * the vendor collection with feature reports 5 and 8 on USB interface 1.
+ */
+export const REDRAGON_M690_PRO_HID_FILTERS: HIDDeviceFilter[] = REDRAGON_M690_PRO_PRODUCT_IDS.map((productId) => ({
+  vendorId: REDRAGON_M690_PRO_VENDOR_ID,
+  productId,
+  usagePage: REDRAGON_M690_PRO_USAGE_PAGE,
+  usage: REDRAGON_M690_PRO_USAGE,
+}));
+
 export const REDRAGON_HID_FILTERS: HIDDeviceFilter[] = [...REDRAGON_PRODUCT_IDS].map((productId) => ({
   vendorId: REDRAGON_VENDOR_ID,
   productId,
@@ -752,6 +771,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ASUS_HID_FILTERS,
   ...DAREU_HID_FILTERS,
   ...REDRAGON_HID_FILTERS,
+  ...REDRAGON_M690_PRO_HID_FILTERS,
   ...FATER_HID_FILTERS,
   ...MOTOSPEED_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
@@ -771,9 +791,9 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.vgn },
   { vendorId: VENDOR_ID.endgameGear },
   { vendorId: VENDOR_ID.wlmouse },
-  // 0x373e is the shared CompX ODM vendor id behind Lamzu, CRDRAKO, and
-  // Attack Shark. The broad filter surfaces all of them; each driver rejects
-  // interfaces that lack the feature-report-0 control channel.
+  // 0x373e is the shared CompX ODM vendor id behind Lamzu, CRDRAKO,
+  // LunaFury, and Attack Shark. The broad filter surfaces all of them; each
+  // driver rejects interfaces that lack the feature-report-0 control channel.
   { vendorId: VENDOR_ID.lamzu },
   ...LAMZU_INCA_HID_FILTERS,
   { vendorId: VENDOR_ID.bytech, usagePage: 0xff00, usage: 0x0001 },

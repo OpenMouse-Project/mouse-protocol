@@ -1,0 +1,18 @@
+# Redragon M690 PRO: This driver in OpenMouse through OpenMouse Bridge, receiver path. Bridge reads report 5 with
+# wLength 8, so the short answers arrive: link 05 80 00 02 while the mouse sleeps (battery then reads
+# the receiver's last value, 11 64), 05 80 01 01 once it wakes (battery 11 63 = 99). Two lighting
+# writes follow, each read back.
+GET 08 21 00 00 00 00 00 00 64 13 01 25 00 02 00 05 00 0e 00 13 00 18 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ff 80 80 ff ff 00 00 ff 00 00 00 ff ff 80 c0 ff 46 00 00 ff ff ff ff ff 03 44 01 40 ff 00 00 44 07 00 00 00 00 ff 00 00 00 ff ff ff 00 00 ff ff ff 80 00 ff 00 ff 02 02 00 e9 5a ee 00 ff 00 00 00 ff ff ff 00 00 ff ff ff 80 00 ff 00 ff ff 00 00 ff 00 00 ff 00 00 02 00 ff 00 fa 03 6a 42 42 02 ff 00 00 00 00 01 02 ff 00 00 a5
+GET 05 80 00 02
+GET 08 22 00 00 00 00 00 00 11 01 00 00 11 02 00 00 11 02 00 00 11 08 00 00 11 10 00 00 41 01 00 00 41 02 00 00 31 01 32 03 50 04 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01 00 00 50 01
+GET 05 90 11 64
+GET 05 80 01 01
+GET 05 90 11 63
+EVT 07 11 01 03 0e
+GET 08 21 00 00 ..  [0x0b] 25 -> 35
+SET 08 21 00 92 ..  [0x45] 03 -> 01
+SET 08 22 00 50 ..  unchanged
+GET 08 21 ..  identical to the write
+GET 08 22 ..  identical to the write
+SET 08 21 00 92 ..  [0x45] 01 -> 03
+GET 08 21 ..  identical to the write
