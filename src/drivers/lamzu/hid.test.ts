@@ -3,12 +3,14 @@ import test from "node:test";
 
 import { LamzuHidClient } from "./hid.ts";
 import { AttackSharkHidClient } from "../attackshark/hid.ts";
-import { deviceBrand } from "../registry.ts";
+import { DEVICE_DRIVERS, deviceBrand } from "../registry.ts";
 import {
   ATTACKSHARK_PRODUCT_IDS,
   LAMZU_INCA_PRODUCTS,
   LAMZU_INCA_VENDOR_ID,
+  LAMZU_PRODUCTS,
   LAMZU_VENDOR_ID,
+  LUNAFURY_PRODUCT_IDS,
   lamzuProduct,
 } from "@openmouse/protocol/lamzu";
 
@@ -256,6 +258,55 @@ test("the Attack Shark R6 and R8 run on the CompX driver, not the Attack Shark o
     assert.deepEqual(status.supportedPollingRates, connectionType === "Wired"
       ? [125, 250, 500, 1000]
       : [125, 250, 500, 1000, 2000, 4000, 8000]);
+  }
+});
+
+test("the LunaFury catalog contains only the four runtime identities", () => {
+  assert.deepEqual([...LUNAFURY_PRODUCT_IDS], [0x0032, 0x0033, 0x0054, 0x0084]);
+  for (const bootloader of [0xb032, 0xb033, 0xb054, 0xb084]) {
+    assert.equal(LAMZU_PRODUCTS.has(bootloader), false);
+  }
+});
+
+test("LunaFury LUNA33 and TYPE33 use the CompX driver with their own brand", async () => {
+  const cases = [
+    [0x0032, "LUNA33", "Wired", 6, [125, 250, 500, 1000]],
+    [0x0033, "LUNA33", "Wireless", 6, [125, 250, 500, 1000, 2000, 4000, 8000]],
+    [0x0054, "TYPE33", "Wired", 5, [125, 250, 500, 1000, 2000, 4000, 8000]],
+    [0x0084, "TYPE33", "Wireless", 5, [125, 250, 500, 1000, 2000, 4000, 8000]],
+  ] as const;
+
+  for (const [productId, model, connectionType, maxDpiStages, pollingRates] of cases) {
+    const { device, sent } = fakeR5Ultra(productId);
+    assert.equal(LamzuHidClient.isSupported(device), true);
+    assert.equal(AttackSharkHidClient.isSupported(device), false);
+    assert.deepEqual(
+      DEVICE_DRIVERS.filter((driver) => driver.supports(device)).map((driver) => driver.brand),
+      ["Lamzu"],
+    );
+
+    const client = new LamzuHidClient(device);
+    const status = await client.readStatus();
+    assert.equal(status.brand, "LunaFury");
+    assert.equal(status.name, `LunaFury ${model}`);
+    assert.equal(status.ui?.family, "lunafury");
+    assert.equal(deviceBrand(client), "LunaFury");
+    assert.equal(status.connectionType, connectionType);
+    assert.equal(client.getDpiOptions().at(-1), 30000);
+    assert.deepEqual(status.supportedPollingRates, pollingRates);
+    const dpiRead = sent.find((packet) => packet[4] === 0x01 && packet[5] === 0x81);
+    assert.equal(dpiRead?.[7], maxDpiStages);
+
+    if (connectionType === "Wired") {
+      assert.ok(sent.every((packet) => packet[2] === 0x00));
+    } else {
+      const dongleFirmware = sent.filter((packet) =>
+        packet[2] === 0x00 && packet[4] === 0x00 && packet[5] === 0x81);
+      const mouseRequests = sent.filter((packet) => !dongleFirmware.includes(packet));
+      assert.equal(dongleFirmware.length, 1);
+      assert.ok(mouseRequests.length > 0);
+      assert.ok(mouseRequests.every((packet) => packet[2] === 0x02));
+    }
   }
 });
 
