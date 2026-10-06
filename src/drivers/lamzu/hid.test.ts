@@ -413,10 +413,27 @@ test("each Inca connection gets the rate list that connection actually offers", 
   assert.equal(LAMZU_INCA_PRODUCTS.get(0x0010)?.wireless, true);
 });
 
-test("the Inca's DFU bootloader identities are not offered as mice", () => {
-  // 0x000a is the mouse's flashing identity and 0x0002 the dongle's; neither
-  // speaks the config protocol, so a picker entry for them would be dead.
-  for (const bootloader of [0x000a, 0x0002]) {
+test("the Paro Aurora carries the same split as the Inca, from the same vendor table", () => {
+  // Issue #167: Lamzu's own env-models.json gives the Paro Aurora PIDWired
+  // 0x0007, _1KDongle 0x000d and _8KDongle 0x000e, with the same
+  // IsNewProtocol/IsCompx flags and DPIMax as the Inca. None exercised on
+  // hardware yet, so the catalog is the only claim.
+  assert.equal(lamzuProduct(LAMZU_INCA_VENDOR_ID, 0x0007)?.model, "Paro Aurora");
+  assert.equal(lamzuProduct(LAMZU_INCA_VENDOR_ID, 0x000d)?.model, "Paro Aurora");
+  assert.equal(lamzuProduct(LAMZU_INCA_VENDOR_ID, 0x000e)?.model, "Paro Aurora");
+  assert.deepEqual(LAMZU_INCA_PRODUCTS.get(0x0007)?.pollingRates, [125, 250, 500, 1000]);
+  assert.deepEqual(LAMZU_INCA_PRODUCTS.get(0x000d)?.pollingRates, [125, 250, 500, 1000]);
+  assert.deepEqual(LAMZU_INCA_PRODUCTS.get(0x000e)?.pollingRates, [500, 1000, 2000, 4000, 8000]);
+  assert.equal(LAMZU_INCA_PRODUCTS.get(0x0007)?.wireless, false);
+  assert.equal(LAMZU_INCA_PRODUCTS.get(0x000d)?.wireless, true);
+  assert.equal(LAMZU_INCA_PRODUCTS.get(0x000e)?.wireless, true);
+});
+
+test("the Inca's and Paro Aurora's DFU bootloader identities are not offered as mice", () => {
+  // 0x000a is the Inca mouse's flashing identity and 0x0002 the shared dongle's;
+  // the Paro adds 0x0008 (mouse) and 0x0004 (1K dongle). None speaks the config
+  // protocol, so a picker entry for one would be dead.
+  for (const bootloader of [0x000a, 0x0002, 0x0008, 0x0004]) {
     assert.equal(LAMZU_INCA_PRODUCTS.has(bootloader), false);
     assert.equal(LamzuHidClient.isSupported(fakeInca(bootloader)), false);
   }
