@@ -131,9 +131,11 @@ import {
   COOLERMASTER_USAGE_PAGE,
   COOLERMASTER_VENDOR_ID,
 } from "@openmouse/protocol/coolermaster";
+import { AJAZZ_AK820_WIRED_PID } from "../ajazz/index.ts";
 
 export const VENDOR_ID = {
   coolermaster: COOLERMASTER_VENDOR_ID,
+  ajazz: 0x1a2c,
   vaxee: VAXEE_VENDOR_ID,
   asus: ASUS_VENDOR_ID,
   ryunix: RYUNIX_VENDOR_ID,
@@ -874,4 +876,6 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...RYUNIX_HID_FILTERS,
   ...RAPOO_HID_FILTERS,
   { vendorId: VENDOR_ID.coolermaster, usagePage: COOLERMASTER_USAGE_PAGE, usage: COOLERMASTER_USAGE },
+  { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff00 },
+  { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff60 },
 ];
