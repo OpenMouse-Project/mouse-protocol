@@ -5,6 +5,7 @@ import {
   PULSAR_FLASH,
   pulsarPacketChecksum,
 } from "../pulsar/index.js";
+import type { MouseStatus } from "../drivers/mouse-types.js";
 
 /**
  * Lamzu's "Atlantis" generation — CompX vendor id 0x3554.
@@ -114,11 +115,27 @@ export type LamzuAtlantisRateFamily = "wired" | "receiver";
 
 export interface LamzuAtlantisProduct {
   model: string;
+  brand?: MouseStatus["brand"];
   wireless: boolean;
   pollingRates: readonly number[];
   rateFamily: LamzuAtlantisRateFamily;
   /** False until this exact product id has been exercised on hardware. */
   verified: boolean;
+  /** Per-product sensor limits where they differ from Atlantis defaults. */
+  minDpi?: number;
+  maxDpi?: number;
+  dpiStep?: number;
+  maxDpiStages?: number;
+  /** Zero means that this transport has no firmware-managed numbered profiles. */
+  profileCount?: number;
+  /** Omit unsupported controls rather than presenting speculative settings. */
+  supportsLiftOffDistance?: boolean;
+  supportsSleepTimeout?: boolean;
+  supportsMotionSync?: boolean;
+  supportsAngleSnapping?: boolean;
+  supportsRippleControl?: boolean;
+  supportsPerformanceMode?: boolean;
+  supportsHyperMode?: boolean;
 }
 
 const RATES_WIRED = [125, 250, 500, 1000] as const;

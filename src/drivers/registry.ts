@@ -14,6 +14,7 @@ import { Keychron8kHidClient } from "./keychron/mouse-8k-hid.ts";
 import { Keychron8kNordicHidClient } from "./keychron/mouse-8k-nordic-hid.ts";
 import { KeychronNapeHidClient } from "./keychron/nape-hid.ts";
 import { LamzuAtlantisHidClient } from "./lamzu-atlantis/hid.ts";
+import { NoirM1NexHidClient } from "./noir/m1-nex-hid.ts";
 import { LamzuHidClient } from "./lamzu/hid.ts";
 import { LogitechHidppClient } from "./logitech/hidpp.ts";
 import { ModdoHidClient } from "./moddo/hid.ts";
@@ -118,6 +119,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "WLMouse", supports: (device) => WLMouseBeastX4kHidClient.isSupported(device), create: (device) => new WLMouseBeastX4kHidClient(device), score: () => 6 },
   { brand: "WLMouse", supports: (device) => WLMouseHidClient.isSupported(device), create: (device) => new WLMouseHidClient(device), score: () => 5 },
   { brand: "Lamzu", supports: (device) => LamzuHidClient.isSupported(device), create: (device) => new LamzuHidClient(device), score: () => 5 },
+  { brand: "Noir Gear", supports: (device) => NoirM1NexHidClient.isSupported(device), create: (device) => new NoirM1NexHidClient(device), score: () => 8 },
   { brand: "Lamzu", supports: (device) => LamzuAtlantisHidClient.isSupported(device), create: (device) => new LamzuAtlantisHidClient(device), score: () => 5 },
   { brand: "moddoMOUSE", supports: (device) => ModdoHidClient.isSupported(device), create: (device) => new ModdoHidClient(device), score: () => 5 },
   { brand: "Ninjutso", supports: (device) => NinjutsoHidClient.isSupported(device), create: (device) => new NinjutsoHidClient(device), score: () => 7 },
