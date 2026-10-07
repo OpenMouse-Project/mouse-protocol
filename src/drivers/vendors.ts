@@ -125,6 +125,13 @@ import {
   FATER_PRODUCT_IDS,
   FATER_VENDOR_ID,
 } from "@openmouse/protocol/fater";
+import {
+  AJAZZ_DONGLE_VENDOR_ID,
+  AJAZZ_PRODUCTS,
+  AJAZZ_USAGE,
+  AJAZZ_USAGE_PAGE,
+  AJAZZ_USB_VENDOR_ID,
+} from "@openmouse/protocol/ajazz";
 import { MOTOSPEED_PRODUCTS, MOTOSPEED_USAGE_PAGE, MOTOSPEED_VENDOR_ID } from "@openmouse/protocol/motospeed";
 import {
   COOLERMASTER_USAGE,
@@ -221,6 +228,16 @@ export const DAREU_HID_FILTERS: HIDDeviceFilter[] = [...DAREU_PRODUCT_IDS].map((
   usagePage: DAREU_COMMAND_USAGE_PAGE,
   usage: DAREU_COMMAND_USAGE,
 }));
+
+/** NJ07 / NJ08 control collection, on the wired VID and on the 2.4 GHz dongle VID. */
+export const AJAZZ_HID_FILTERS: HIDDeviceFilter[] = [...AJAZZ_PRODUCTS.keys()].flatMap((productId) =>
+  [AJAZZ_USB_VENDOR_ID, AJAZZ_DONGLE_VENDOR_ID].map((vendorId) => ({
+    vendorId,
+    productId,
+    usagePage: AJAZZ_USAGE_PAGE,
+    usage: AJAZZ_USAGE,
+  })),
+);
 
 /** Holtek vendor collection on the MCR-9000B's interface 2, as reported by its owner. */
 export const FATER_HID_FILTERS: HIDDeviceFilter[] = [...FATER_PRODUCT_IDS].map((productId) => ({
@@ -868,6 +885,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // both the wired USB VID and the 2.4 GHz dongle VID.
   { vendorId: VENDOR_ID.ksnakeUsb, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
   { vendorId: VENDOR_ID.ksnakeDongle, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
+  ...AJAZZ_HID_FILTERS,
   ...MICROSOFT_HID_FILTERS,
   ...INCOTT_HID_FILTERS,
   ...HYPERX_HID_FILTERS,
