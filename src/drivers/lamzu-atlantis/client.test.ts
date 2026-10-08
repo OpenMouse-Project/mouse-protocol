@@ -13,6 +13,7 @@ import {
 import { pulsarVgnEncodeDpi } from "@openmouse/protocol/pulsar";
 import { TEEVOLUTION_KEY_CLASS as KEY, teevolutionEncodeKeyFunction } from "@openmouse/protocol/teevolution";
 import { LamzuAtlantisHidClient } from "./hid.ts";
+import { NoirM1NexHidClient } from "../noir/m1-nex-hid.ts";
 
 const REPORT_ID = 8;
 const PACKET = 16;
@@ -147,6 +148,30 @@ class FakeAtlantis extends EventTarget {
 
 const clientFor = (device: FakeAtlantis) =>
   new LamzuAtlantisHidClient(device as unknown as HIDDevice);
+
+test("M1-NEX uses its own identity, verified seven-stage limits, and no unsupported profile/LOD controls", async () => {
+  const device = new FakeAtlantis(0xf500);
+  const client = new NoirM1NexHidClient(device as unknown as HIDDevice);
+  const status = await client.readStatus();
+
+  assert.equal(client.displayName(), "M1-NEX");
+  assert.equal(client.deviceBrand(), "Noir Gear");
+  assert.equal(client.maxDpi(), 12000);
+  assert.equal(client.getDpiOptions()[0], 400);
+  assert.equal(client.getDpiOptions().at(-1), 12000);
+  assert.equal(status.name, "M1-NEX");
+  assert.equal(status.brand, "Noir Gear");
+  assert.equal(status.ui?.dpiStageEditor?.maxStages, 7);
+  assert.equal(status.activeProfile, null);
+  assert.equal(status.profileCount, undefined);
+  assert.equal(status.liftOffDistance, null);
+  assert.equal(status.sleepTimeout, undefined);
+  assert.equal(status.motionSync, undefined);
+  assert.equal(status.angleSnapping, false);
+  assert.equal(status.rippleControl, false);
+  assert.equal(status.performanceMode, undefined);
+  await client.close();
+});
 
 test("a full status read comes back from real flash bytes", async () => {
   const device = new FakeAtlantis();

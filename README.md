@@ -39,6 +39,7 @@ checklist.
 
 | Brand | Import |
 | --- | --- |
+| AJAZZ | `@openmouse/protocol/ajazz` |
 | ATK | `@openmouse/protocol/atk` |
 | Corsair | `@openmouse/protocol/corsair` |
 | Dareu | `@openmouse/protocol/dareu` |

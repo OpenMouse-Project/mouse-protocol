@@ -77,23 +77,55 @@ export class LamzuAtlantisHidClient {
    * stage's Y.
    */
   private stagesY: number[] = [];
+  private readonly productOverride: LamzuAtlantisProduct | null;
 
-  constructor(device: HIDDevice) {
+  constructor(device: HIDDevice, productOverride: LamzuAtlantisProduct | null = null) {
     this.device = device;
+    this.productOverride = productOverride;
   }
 
-  static isSupported(device: HIDDevice): boolean {
+  static hasConfigCollection(device: HIDDevice): boolean {
     const search = (collection: HIDCollectionInfo): boolean =>
       (collection.usagePage === CONFIG_USAGE_PAGE
         && collection.usage === CONFIG_USAGE
         && collection.outputReports.some((report) => report.reportId === REPORT_ID))
       || collection.children.some(search);
+    return device.collections.some(search);
+  }
+
+  static isSupported(device: HIDDevice): boolean {
     return lamzuAtlantisProduct(device.vendorId, device.productId) !== undefined
-      && device.collections.some(search);
+      && LamzuAtlantisHidClient.hasConfigCollection(device);
   }
 
   private product(): LamzuAtlantisProduct | undefined {
-    return lamzuAtlantisProduct(this.device.vendorId, this.device.productId);
+    return this.productOverride ?? lamzuAtlantisProduct(this.device.vendorId, this.device.productId);
+  }
+
+  protected minimumDpi(): number {
+    return this.product()?.minDpi ?? DPI_MIN;
+  }
+
+  protected maximumDpi(): number {
+    return this.product()?.maxDpi ?? DPI_MAX;
+  }
+
+  protected dpiStep(): number {
+    return this.product()?.dpiStep ?? DPI_STEP;
+  }
+
+  protected maximumDpiStages(): number {
+    return this.product()?.maxDpiStages ?? MAX_STAGES;
+  }
+
+  protected onboardProfileCount(): number {
+    return this.product()?.profileCount ?? PROFILE_COUNT;
+  }
+
+  private supports(control: keyof Pick<LamzuAtlantisProduct,
+    "supportsLiftOffDistance" | "supportsSleepTimeout" | "supportsMotionSync"
+    | "supportsAngleSnapping" | "supportsRippleControl" | "supportsPerformanceMode" | "supportsHyperMode">): boolean {
+    return this.product()?.[control] ?? true;
   }
 
   /**
@@ -184,15 +216,15 @@ export class LamzuAtlantisHidClient {
 
   displayName(): string {
     const known = this.product();
-    return known ? `Lamzu ${known.model}` : this.device.productName || "Lamzu";
+    return known ? `${known.brand ?? "Lamzu"} ${known.model}` : this.device.productName || "Lamzu";
   }
 
   deviceBrand(): MouseStatus["brand"] {
-    return "Lamzu";
+    return this.product()?.brand ?? "Lamzu";
   }
 
   maxDpi(): number {
-    return DPI_MAX;
+    return this.maximumDpi();
   }
 
   getDebounceMaxMs(): number {
@@ -209,7 +241,7 @@ export class LamzuAtlantisHidClient {
 
   getDpiOptions(): number[] {
     const options: number[] = [];
-    for (let dpi = DPI_MIN; dpi <= DPI_MAX; dpi += DPI_STEP) options.push(dpi);
+    for (let dpi = this.minimumDpi(); dpi <= this.maximumDpi(); dpi += this.dpiStep()) options.push(dpi);
     return options;
   }
 
@@ -225,14 +257,15 @@ export class LamzuAtlantisHidClient {
       if (live && this.lastStatus) return await this.readLiveStatus(this.lastStatus);
 
       const battery = lamzuAtlantisDecodeBattery(await this.request(COMMAND.batteryLevel));
-      const activeProfile = (await this.request(COMMAND.getCurrentConfig))[0] ?? 0;
+      const profileCount = this.onboardProfileCount();
+      const activeProfile = profileCount > 0 ? (await this.request(COMMAND.getCurrentConfig))[0] ?? 0 : null;
       if (this.firmware === null) {
         this.firmware = lamzuAtlantisDecodeFirmware("Mouse", await this.request(COMMAND.readVersionId))
           ?? "Mouse firmware unavailable";
       }
 
       const pollingRaw = (await this.readField(FLASH.reportRate, 1))[0] ?? 0;
-      const stageCount = Math.min((await this.readField(FLASH.dpiStageCount, 1))[0] ?? 1, MAX_STAGES);
+      const stageCount = Math.min((await this.readField(FLASH.dpiStageCount, 1))[0] ?? 1, this.maximumDpiStages());
       const stageIndex = Math.min((await this.readField(FLASH.currentDpi, 1))[0] ?? 0, Math.max(stageCount - 1, 0));
 
       const stages: number[] = [];
@@ -250,21 +283,35 @@ export class LamzuAtlantisHidClient {
         colors.push(`#${[...color].map((value) => value.toString(16).padStart(2, "0")).join("")}`);
       }
 
-      const liftOffRaw = (await this.readField(FLASH.liftOffDistance, 1))[0] ?? 0;
+      const liftOffRaw = this.supports("supportsLiftOffDistance")
+        ? (await this.readField(FLASH.liftOffDistance, 1))[0] ?? 0
+        : null;
       const debounceMs = (await this.readField(FLASH.debounceTime, 1))[0] ?? 0;
-      const sleepRaw = (await this.readField(FLASH.sleepTime, 1))[0] ?? 0;
-      const motionSync = (await this.readField(FLASH.motionSync, 1))[0] === 1;
-      const angleSnapping = (await this.readField(FLASH.angleSnapping, 1))[0] === 1;
-      const rippleControl = (await this.readField(FLASH.rippleControl, 1))[0] === 1;
-      const performanceMode = (await this.readField(FLASH.performanceState, 1))[0] === 1;
-      const hyperMode = (await this.readField(FLASH.highPerformance, 1))[0] === 1;
+      const sleepRaw = this.supports("supportsSleepTimeout")
+        ? (await this.readField(FLASH.sleepTime, 1))[0] ?? 0
+        : null;
+      const motionSync = this.supports("supportsMotionSync")
+        ? (await this.readField(FLASH.motionSync, 1))[0] === 1
+        : undefined;
+      const angleSnapping = this.supports("supportsAngleSnapping")
+        ? (await this.readField(FLASH.angleSnapping, 1))[0] === 1
+        : undefined;
+      const rippleControl = this.supports("supportsRippleControl")
+        ? (await this.readField(FLASH.rippleControl, 1))[0] === 1
+        : undefined;
+      const performanceMode = this.supports("supportsPerformanceMode")
+        ? (await this.readField(FLASH.performanceState, 1))[0] === 1
+        : undefined;
+      const hyperMode = this.supports("supportsHyperMode")
+        ? (await this.readField(FLASH.highPerformance, 1))[0] === 1
+        : undefined;
       const keys = await teevolutionReadKeyTable((address, length) => this.readRaw(address, length));
       const buttonMappings = teevolutionDecodeButtonMappings(keys, 0);
 
       const wireless = this.isWireless();
       this.stagesY = stagesY;
       return this.lastStatus = {
-        brand: "Lamzu",
+        brand: this.deviceBrand(),
         name: this.displayName(),
         ui: {
           family: "lamzu-atlantis",
@@ -273,36 +320,36 @@ export class LamzuAtlantisHidClient {
           hideSignalCard: true,
           showAdvancedSection: true,
           dpiStageEditor: {
-            maxStages: MAX_STAGES,
+            maxStages: this.maximumDpiStages(),
             countEditable: true,
-            minDpi: DPI_MIN,
-            maxDpi: DPI_MAX,
-            stepDpi: DPI_STEP,
+            minDpi: this.minimumDpi(),
+            maxDpi: this.maximumDpi(),
+            stepDpi: this.dpiStep(),
           },
         },
         batteryPercent: battery.percent,
         batteryVoltageMv: battery.millivolts,
         batteryState: battery.charging ? "Charging" : "Discharging",
-        dpi: stages[stageIndex] ?? stages[0] ?? DPI_MIN,
-        dpiY: stagesY[stageIndex] ?? stagesY[0] ?? DPI_MIN,
+        dpi: stages[stageIndex] ?? stages[0] ?? this.minimumDpi(),
+        dpiY: stagesY[stageIndex] ?? stagesY[0] ?? this.minimumDpi(),
         dpiStages: stages,
         dpiStageColors: colors,
         activeDpiStage: stageIndex,
         pollingRateHz: lamzuAtlantisDecodePollingRate(pollingRaw) ?? this.getSupportedPollingRates()[0] ?? 1000,
         supportedPollingRates: this.getSupportedPollingRates(),
         // The profile byte is 0-based on the wire and 1-based in Lamzu's UI.
-        activeProfile: activeProfile + 1,
-        profileCount: PROFILE_COUNT,
+        activeProfile: activeProfile === null ? null : activeProfile + 1,
+        ...(profileCount > 0 ? { profileCount } : {}),
         connectionType: wireless ? "Wireless" : "Wired",
         connectionDetail: wireless ? "2.4 GHz receiver" : "Wired USB",
         debounceMs,
-        sleepTimeout: sleepRaw > 0 ? sleepRaw * TIMER_STEP_SECONDS : null,
-        liftOffDistance: lamzuAtlantisDecodeLiftOffDistance(liftOffRaw),
-        motionSync,
-        angleSnapping,
-        rippleControl,
-        performanceMode,
-        hyperMode,
+        ...(sleepRaw !== null ? { sleepTimeout: sleepRaw > 0 ? sleepRaw * TIMER_STEP_SECONDS : null } : {}),
+        liftOffDistance: liftOffRaw === null ? null : lamzuAtlantisDecodeLiftOffDistance(liftOffRaw),
+        ...(motionSync !== undefined ? { motionSync } : {}),
+        ...(angleSnapping !== undefined ? { angleSnapping } : {}),
+        ...(rippleControl !== undefined ? { rippleControl } : {}),
+        ...(performanceMode !== undefined ? { performanceMode } : {}),
+        ...(hyperMode !== undefined ? { hyperMode } : {}),
         buttonMappings,
         buttonOptions: TEEVOLUTION_SHARED_BUTTON_OPTIONS,
         firmware: [this.firmware],
@@ -340,6 +387,9 @@ export class LamzuAtlantisHidClient {
 
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
     return await this.transaction(async () => {
+      if (!this.supports("supportsLiftOffDistance")) {
+        throw new Error("This mouse does not expose a configurable lift-off distance.");
+      }
       const encoded = lamzuAtlantisEncodeLiftOffDistance(value);
       if (encoded === null) {
         throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
@@ -369,6 +419,9 @@ export class LamzuAtlantisHidClient {
 
   async setSleepTimeout(seconds: number): Promise<number> {
     return await this.transaction(async () => {
+      if (!this.supports("supportsSleepTimeout")) {
+        throw new Error("This mouse does not expose a configurable sleep timeout.");
+      }
       if (!Number.isInteger(seconds)
         || seconds < TIMER_STEP_SECONDS
         || seconds > MAX_TIMER_SECONDS
@@ -385,22 +438,27 @@ export class LamzuAtlantisHidClient {
   }
 
   async setMotionSync(enabled: boolean): Promise<boolean> {
+    if (!this.supports("supportsMotionSync")) throw new Error("This mouse does not expose Motion Sync.");
     return await this.setFlag(FLASH.motionSync, enabled, "motionSync", "Motion Sync");
   }
 
   async setAngleSnapping(enabled: boolean): Promise<boolean> {
+    if (!this.supports("supportsAngleSnapping")) throw new Error("This mouse does not expose angle snapping.");
     return await this.setFlag(FLASH.angleSnapping, enabled, "angleSnapping", "angle snapping");
   }
 
   async setRippleControl(enabled: boolean): Promise<boolean> {
+    if (!this.supports("supportsRippleControl")) throw new Error("This mouse does not expose ripple control.");
     return await this.setFlag(FLASH.rippleControl, enabled, "rippleControl", "ripple control");
   }
 
   async setPerformanceMode(enabled: boolean): Promise<boolean> {
+    if (!this.supports("supportsPerformanceMode")) throw new Error("This mouse does not expose performance mode.");
     return await this.setFlag(FLASH.performanceState, enabled, "performanceMode", "competition mode");
   }
 
   async setHyperMode(enabled: boolean): Promise<boolean> {
+    if (!this.supports("supportsHyperMode")) throw new Error("This mouse does not expose a high-performance mode.");
     return await this.setFlag(FLASH.highPerformance, enabled, "hyperMode", "high performance");
   }
 
@@ -418,8 +476,15 @@ export class LamzuAtlantisHidClient {
   }
 
   private async writeStage(stage: number, dpi: number): Promise<number> {
-    if (!Number.isInteger(stage) || stage < 0 || stage >= MAX_STAGES) {
+    const maxStages = this.maximumDpiStages();
+    if (!Number.isInteger(stage) || stage < 0 || stage >= maxStages) {
       throw new Error(`This mouse has no DPI stage ${stage + 1}.`);
+    }
+    const minDpi = this.minimumDpi();
+    const maxDpi = this.maximumDpi();
+    const dpiStep = this.dpiStep();
+    if (!Number.isInteger(dpi) || dpi < minDpi || dpi > maxDpi || (dpi - minDpi) % dpiStep !== 0) {
+      throw new Error(`DPI must be between ${minDpi} and ${maxDpi} in ${dpiStep}-DPI steps.`);
     }
     const address = FLASH.dpiValues + stage * STAGE_STRIDE;
     // pulsarVgnEncodeDpi returns the stage's four bytes with its checksum
@@ -469,8 +534,9 @@ export class LamzuAtlantisHidClient {
 
   async setDpiStageCount(count: number): Promise<number> {
     return await this.transaction(async () => {
-      if (!Number.isInteger(count) || count < 1 || count > MAX_STAGES) {
-        throw new Error(`This mouse supports between 1 and ${MAX_STAGES} DPI stages.`);
+      const maxStages = this.maximumDpiStages();
+      if (!Number.isInteger(count) || count < 1 || count > maxStages) {
+        throw new Error(`This mouse supports between 1 and ${maxStages} DPI stages.`);
       }
       // Dropped before the write, not after: if the verification read fails
       // the mouse has still changed, and a cache kept through that failure
@@ -493,7 +559,7 @@ export class LamzuAtlantisHidClient {
       // Without this bound the stage index scales straight into a flash address:
       // stage -8 lands on the DPI stages at 12, stage 13 on the button actions
       // at 96, and the colour reads back cleanly from wherever it landed.
-      if (!Number.isInteger(stage) || stage < 0 || stage >= MAX_STAGES) {
+      if (!Number.isInteger(stage) || stage < 0 || stage >= this.maximumDpiStages()) {
         throw new Error(`This mouse has no DPI stage ${stage + 1}.`);
       }
       const match = /^#?([0-9a-f]{6})$/i.exec(color.trim());
@@ -530,8 +596,10 @@ export class LamzuAtlantisHidClient {
 
   async setProfile(profile: number): Promise<number> {
     return await this.transaction(async () => {
-      if (!Number.isInteger(profile) || profile < 1 || profile > PROFILE_COUNT) {
-        throw new Error(`This mouse has profiles 1 to ${PROFILE_COUNT}.`);
+      const profileCount = this.onboardProfileCount();
+      if (profileCount < 1) throw new Error("This mouse does not expose firmware-managed profiles.");
+      if (!Number.isInteger(profile) || profile < 1 || profile > profileCount) {
+        throw new Error(`This mouse has profiles 1 to ${profileCount}.`);
       }
       // Every cached field — DPI stages, colours, active stage, the toggles —
       // describes the profile we are leaving, and setDpi trusts the cached
