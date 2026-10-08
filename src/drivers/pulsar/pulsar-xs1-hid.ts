@@ -24,11 +24,16 @@ type LiftOffDistance = NonNullable<MouseStatus["liftOffDistance"]>;
 const RESPONSE_ATTEMPTS = 5;
 const RESPONSE_DELAY_MS = 25;
 const DPI_VALUE_OFFSET = 7;
+// The shared 8K receiver in the X2A v3 ticket enumerates as 3710:5403.
+const EIGHT_K_RECEIVER_PRODUCT_ID = 0x5403;
+const EIGHT_K_POLLING_RATES = [...POLLING_RATES, 2000, 4000, 8000];
 
-// The X3 family dongles report a generic "1K Dongle" product name from WebHID,
-// which is useless in the UI. Known product ids map to the paired model name.
+// Only model-specific IDs may name a mouse. The shared 8K receiver's ID says
+// nothing about which model is paired with it.
 const XS1_PRODUCT_NAMES: ReadonlyMap<number, string> = new Map([
+  [0x3404, "Pulsar X2A v3"],
   [0x5402, "Pulsar X3 M"],
+  [EIGHT_K_RECEIVER_PRODUCT_ID, "Pulsar 8K Dongle"],
 ]);
 
 const LIFT_OFF_DISTANCES: ReadonlyArray<readonly [number, LiftOffDistance]> = [
@@ -113,7 +118,7 @@ export class PulsarXs1HidClient {
     await this.open();
     this.deviceInfo = {
       connection: PULSAR_XS1_WIRELESS_PRODUCT_IDS.has(this.device.productId) ? "Wireless" : "Wired",
-      maximumPollingRateHz: 1000,
+      maximumPollingRateHz: this.device.productId === EIGHT_K_RECEIVER_PRODUCT_ID ? 8000 : 1000,
     };
     return this.deviceInfo;
   }
@@ -131,9 +136,15 @@ export class PulsarXs1HidClient {
     const liftOffDistance = await this.query(QUERY.liftOffDistance).catch(() => null);
     const debounce = await this.query(QUERY.debounce).catch(() => null);
     const pollingRate = await this.query(QUERY.pollingRate).catch(() => null);
+    const supportedPollingRates = info.maximumPollingRateHz === 8000 ? EIGHT_K_POLLING_RATES : POLLING_RATES;
+    const decodedPollingRate = pollingRate ? pulsarXs1DecodePollingRate(pollingRate[7]) : null;
+    // An unanswered/unknown value is not proof of 1 kHz. Zero is the shared
+    // MouseStatus sentinel for an unavailable rate (also used by Ajazz/Dareu).
+    const pollingRateHz = decodedPollingRate !== null && supportedPollingRates.includes(decodedPollingRate)
+      ? decodedPollingRate : 0;
     return this.lastStatus = {
       brand: "Pulsar",
-      name: XS1_PRODUCT_NAMES.get(this.device.productId) ?? (this.device.productName || "Pulsar X3"),
+      name: XS1_PRODUCT_NAMES.get(this.device.productId) ?? (this.device.productName || "Pulsar XS-1 mouse"),
       ui: {
         family: "pulsar",
         hideUnsupportedPollingRates: true,
@@ -141,13 +152,15 @@ export class PulsarXs1HidClient {
         hideSleepCard: true,
         hideSignalCard: true,
         forceShowBattery: true,
-        pollingNote: "The X3 exposes its polling rate through the feature interface, but the reported value is not reliable.",
+        pollingNote: pollingRateHz > 0
+          ? "The XS-1 polling readout is not hardware-verified. Polling changes are unavailable; check the rate in Pulsar's software."
+          : "The XS-1 interface did not return a recognized polling rate. Polling changes are unavailable; check the rate in Pulsar's software.",
       },
       batteryPercent,
       batteryState: batteryPercent === null ? "Unknown" : batteryPercent === 100 ? "Full" : "Discharging",
       dpi: readUint16LE(dpiReply, DPI_VALUE_OFFSET),
-      pollingRateHz: pollingRate ? pulsarXs1DecodePollingRate(pollingRate[7]) ?? POLLING_RATES[3] : POLLING_RATES[3],
-      supportedPollingRates: [...POLLING_RATES],
+      pollingRateHz,
+      supportedPollingRates: [...supportedPollingRates],
       activeProfile: null,
       connectionType: info.connection,
       connectionDetail: "XS-1 feature-report interface",
@@ -254,7 +267,7 @@ export class PulsarXs1HidClient {
         await this.delay(RESPONSE_DELAY_MS);
         const reply = this.copyDataView(await this.device.receiveFeatureReport(REPORT_ID));
         if (reply.length !== PACKET_LENGTH) {
-          throw new Error(`The Pulsar X3 answered with ${reply.length} bytes instead of ${PACKET_LENGTH}.`);
+          throw new Error(`The Pulsar XS-1 device answered with ${reply.length} bytes instead of ${PACKET_LENGTH}.`);
         }
         return reply;
       } catch (error) {
@@ -263,7 +276,7 @@ export class PulsarXs1HidClient {
       }
     }
     throw new Error(
-      `The Pulsar X3 did not answer ${this.describe(command)} after ${RESPONSE_ATTEMPTS} attempts. ${this.describeError(lastError)}`,
+      `The Pulsar XS-1 device did not answer ${this.describe(command)} after ${RESPONSE_ATTEMPTS} attempts. ${this.describeError(lastError)}`,
     );
   }
 
@@ -272,7 +285,7 @@ export class PulsarXs1HidClient {
     try {
       await this.device.sendFeatureReport(REPORT_ID, pulsarXs1EncodeRequest(command));
     } catch (error) {
-      throw new Error(`Chrome could not write the Pulsar X3 feature report. ${this.describeError(error)}`);
+      throw new Error(`The browser could not write the Pulsar XS-1 feature report. ${this.describeError(error)}`);
     }
   }
 

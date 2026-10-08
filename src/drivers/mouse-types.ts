@@ -110,7 +110,7 @@ export interface MouseLighting {
   brightnessLevels?: readonly number[];
   /** True when the mouse cannot report the effect back (Razer effect writes). */
   writeOnly?: boolean;
-  /** HID++ per-key/per-LED zone id when this is a directly painted RGB cell. */
+  /** Driver-specific per-LED zone id when this is a directly painted RGB cell. */
   hardwareZoneId?: number;
   /** Lets the UI group individually painted cells into one physical surface. */
   group?: string;
