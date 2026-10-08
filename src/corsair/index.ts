@@ -13,7 +13,11 @@
  * replies but must be sent little-endian in SET payloads. Identity fields are
  * little-endian. Nothing here transports bytes; the WebHID client lives in
  * `src/drivers/corsair/hid.ts`.
+ *
+ * Newer Corsair mice speak Bragi instead; that codec is `./bragi.ts`.
  */
+export * from "./bragi.js";
+
 export const CORSAIR_VENDOR_ID = 0x1b1c;
 export const CORSAIR_USAGE_PAGE = 0xffc2;
 /** Usage of the config collection. MI_00 also carries an 0xffc2 collection with usage 3 that never answers. */
