@@ -18,7 +18,11 @@ interface FakeState {
   debounce: number;
 }
 
-function fakeDevice(productId: number, productName = "Pulsar X3 Medium 1K Dongle") {
+function fakeDevice(
+  productId: number,
+  productName = "Pulsar X3 Medium 1K Dongle",
+  options: { pollingCode?: number; failPolling?: boolean } = {},
+) {
   const sent: Uint8Array[] = [];
   const state: FakeState = {
     dpi: 1600,
@@ -64,7 +68,10 @@ function fakeDevice(productId: number, productName = "Pulsar X3 Medium 1K Dongle
       reply[2] = request[2];
       reply[3] = request[3];
       if (request[1] === 0x08 && request[2] === 0x81) reply[6] = 80;
-      if (request[1] === 0x08 && request[2] === 0x85) reply[7] = 30;
+      if (request[1] === 0x08 && request[2] === 0x85) {
+        if (options.failPolling) throw new Error("Polling query failed");
+        reply[7] = options.pollingCode ?? 30;
+      }
       if (request[1] === 0x05 && request[2] === 0x82) {
         reply[7] = state.dpi & 0xff;
         reply[8] = state.dpi >> 8;
@@ -168,6 +175,53 @@ test("reads the X3 status from the feature interface", async () => {
 test("reports the wired X3 as wired", async () => {
   const status = await new PulsarXs1HidClient(fakeDevice(0x3409).device).readStatus();
   assert.equal(status.connectionType, "Wired");
+});
+
+test("the X2A v3 cable ID is named and stays on the wired 1K capability path", async () => {
+  const client = new PulsarXs1HidClient(fakeDevice(0x3404).device);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Pulsar X2A v3");
+  assert.equal(status.connectionType, "Wired");
+  assert.equal((await client.readDeviceInfo()).maximumPollingRateHz, 1000);
+  assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
+});
+
+test("the shared 8K dongle advertises high rates without inventing the paired mouse model", async () => {
+  for (const [code, rate] of [[15, 2000], [8, 4000], [4, 8000]]) {
+    const client = new PulsarXs1HidClient(fakeDevice(0x5403, "1K Dongle", { pollingCode: code }).device);
+    const status = await client.readStatus();
+    assert.equal(status.name, "Pulsar 8K Dongle");
+    assert.equal(status.connectionType, "Wireless");
+    assert.equal((await client.readDeviceInfo()).maximumPollingRateHz, 8000);
+    assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000, 2000, 4000, 8000]);
+    assert.equal(status.pollingRateHz, rate);
+    assert.equal(status.ui?.pollingReadOnly, true);
+  }
+});
+
+test("unknown and failed polling reads never turn into a fabricated 1000 Hz", async () => {
+  for (const options of [{ pollingCode: 0 }, { pollingCode: 255 }, { failPolling: true }]) {
+    const status = await new PulsarXs1HidClient(fakeDevice(0x5403, "8K Dongle", options).device).readStatus();
+    assert.equal(status.pollingRateHz, 0);
+    assert.equal(status.dpi, 1600);
+    assert.equal(status.ui?.pollingReadOnly, true);
+    assert.match(status.ui!.pollingNote!, /did not return a recognized polling rate/);
+  }
+  const oneK = await new PulsarXs1HidClient(fakeDevice(0x5402, "1K Dongle", { pollingCode: 4 }).device).readStatus();
+  assert.equal(oneK.pollingRateHz, 0);
+  assert.deepEqual(oneK.supportedPollingRates, [125, 250, 500, 1000]);
+});
+
+test("X2A cable and shared 8K receiver retain confirmed DPI, debounce and processing writes", async () => {
+  for (const productId of [0x3404, 0x5403]) {
+    const client = new PulsarXs1HidClient(fakeDevice(productId).device);
+    assert.equal(await client.setDpi(800), 800);
+    assert.equal(await client.setDebounceTime(4), 4);
+    assert.equal(await client.setMotionSync(false), false);
+    assert.equal(await client.setRippleControl(true), true);
+    assert.equal(await client.setAngleSnapping(true), true);
+    assert.equal(await client.setLiftOffDistance("Low"), "Low");
+  }
 });
 
 test("writes and confirms the DPI", async () => {
