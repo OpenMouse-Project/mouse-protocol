@@ -5,6 +5,7 @@ import {
   MODE_STATUS,
   buildModeStatusWrite,
   decodeModeStatus,
+  hasLightforceSwitches,
   encodeModeStatus,
   type GamingSurfaceMode,
   type LightforceSwitchMode,
@@ -66,4 +67,11 @@ test("setModeStatus payload uses one-byte fields and a change mask", () => {
 
 test("the change mask never covers another field's bits", () => {
   assert.equal(gamingSurface.mask & lightforce.mask, 0);
+});
+
+test("a HITS mouse (PRO X 2 / PRO X 3 Superstrike) has no LightForce switches to offer", () => {
+  // The PRO X 3's mode byte, as captured, decodes to "Optical" even though it has no such switches.
+  assert.equal(decodeModeStatus(0x02, lightforce), "Optical");
+  assert.equal(hasLightforceSwitches(true), false);
+  assert.equal(hasLightforceSwitches(false), true, "mice without HITS keep the control");
 });
