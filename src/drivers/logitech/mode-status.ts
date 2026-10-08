@@ -73,3 +73,15 @@ export function buildModeStatusWriteMany(statusByte: number, updates: ModeStatus
   }
   return [0x00, value, 0x00, mask];
 }
+
+/**
+ * LightForce is the hybrid optical/mechanical switch of mice like the PRO X
+ * SUPERLIGHT 2 and G502 X. The PRO X 2 and PRO X 3 Superstrike have none: their
+ * main buttons are HITS (an inductive analog trigger, feature 0x1B0C). Their
+ * Mode Status byte still decodes to "Optical", and a write is rejected with
+ * INVALID_ARGUMENT (captured on a PRO X 3: FF 1C 15 | 00 03 00 01 answered by
+ * FF FF 1C 15 02). So the switch mode is not offered where HITS is present.
+ */
+export function hasLightforceSwitches(hasAnalogButtons: boolean): boolean {
+  return !hasAnalogButtons;
+}

@@ -698,6 +698,18 @@ is already set, so re-selecting the current option is free. These are
 user-driven toggles clicked occasionally, so wear is not a practical concern —
 but nothing should ever write them in a loop or on a restore path.
 
+**HITS mice have no LightForce switches.** The PRO X 2 and PRO X 3 Superstrike use
+HITS (feature 0x1B0C, an inductive analog trigger) instead of the hybrid
+optical/mechanical switches of the PRO X SUPERLIGHT 2 and G502 X. Their Mode Status
+(0x8090, version 3) still reads a byte that decodes to "Optical", but a LightForce
+write is rejected. Captured on a PRO X 3 over the cable (feature index 0x1C):
+`FF 1C 15 | 00 03 00 01` is answered by `FF FF 1C 15 02`, HID++ error 2
+(INVALID_ARGUMENT). So `lightforceSwitchMode` is reported only when HITS is absent,
+and `setModeStatus` refuses a LightForce change on a HITS mouse. Gaming surface is
+unchanged: whether the Superstrike accepts it has not been tested. G HUB also asks
+this feature a second question (function 2) that OpenMouse does not; the X3 answers
+`00 08`, which is not yet decoded.
+
 ### Other formats
 
 Offsets are format-specific; never apply one format's layout to another. Only
