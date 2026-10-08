@@ -152,6 +152,17 @@ export interface AtkReceiverInfo {
   pairingSecondsRemaining: number | null;
 }
 
+export interface AsusOmniDevice {
+  productId: number;
+  kind: "mouse" | "keyboard" | "unknown";
+  name: string;
+}
+
+export interface AsusOmniInfo {
+  firmware: string;
+  devices: AsusOmniDevice[];
+}
+
 export interface MagneticButtonStatus {
   /** Null when the mouse has a single switch type or did not report it. */
   switchType: "magnetic" | "optical" | null;
@@ -231,6 +242,8 @@ export interface MouseStatus {
   atkButtonMappings?: AtkStoredButton[];
   /** Receiver and pairing telemetry. Pairing controls are intentionally separate. */
   atkReceiver?: AtkReceiverInfo;
+  /** ROG Omni receiver firmware and paired devices. */
+  asusOmni?: AsusOmniInfo;
   /**
    * F1 Ultimate sensor sampling-rate mode: 0 Basic, 1 Shard, 2 Shard MAX.
    * Null until read; drivers without the 0x00b5 row leave it undefined.

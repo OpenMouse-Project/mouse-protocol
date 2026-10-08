@@ -1,4 +1,6 @@
 import {
+  ASUS_OMNI_PRODUCT_ID,
+  ASUS_OMNI_USAGE_PAGE,
   ASUS_PRODUCT_IDS,
   ASUS_USAGE,
   ASUS_USAGE_PAGE,
@@ -209,12 +211,15 @@ export const VENDOR_ID = {
  * ASUS ROG / TUF configuration interface (usage page 0xFF01, usage 0x0001),
  * verified on the Gladius II P502 and assumed for the rest of the table.
  */
-export const ASUS_HID_FILTERS: HIDDeviceFilter[] = ASUS_PRODUCT_IDS.map((productId) => ({
-  vendorId: ASUS_VENDOR_ID,
-  productId,
-  usagePage: ASUS_USAGE_PAGE,
-  usage: ASUS_USAGE,
-}));
+export const ASUS_HID_FILTERS: HIDDeviceFilter[] = [
+  ...ASUS_PRODUCT_IDS.map((productId) => ({
+    vendorId: ASUS_VENDOR_ID,
+    productId,
+    usagePage: ASUS_USAGE_PAGE,
+    usage: ASUS_USAGE,
+  })),
+  { vendorId: ASUS_VENDOR_ID, productId: ASUS_OMNI_PRODUCT_ID, usagePage: ASUS_OMNI_USAGE_PAGE, usage: ASUS_USAGE },
+];
 
 export const MCHOSE_A5_HID_FILTERS: HIDDeviceFilter[] = [
   ...[...MCHOSE_A5_GEN1_PRODUCTS.keys()].map((productId) => ({

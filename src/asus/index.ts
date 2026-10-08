@@ -28,6 +28,7 @@
 import type { AsusMouseModel } from "./devices.js";
 
 export * from "./devices.js";
+export * from "./omni.js";
 
 export const ASUS_VENDOR_ID = 0x0b05;
 
@@ -37,7 +38,8 @@ export const ASUS_USAGE = 0x0001;
 export const ASUS_REPORT_ID = 0;
 export const ASUS_REPORT_SIZE = 64;
 
-export const ASUS_POLLING_RATES = [125, 250, 500, 1000] as const;
+/** Wire value is the index. 2000 Hz and up need the polling booster. */
+export const ASUS_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000] as const;
 
 export const ASUS_DEBOUNCE_MS = [12, 16, 20, 24, 28, 32] as const;
 
@@ -75,6 +77,13 @@ export type AsusRgb = readonly [number, number, number];
 const FIELD_RATE = 0;
 const FIELD_DEBOUNCE = 1;
 const FIELD_SNAPPING = 2;
+
+/** Wire zone ids by position. A model lists only the zones it has, so its index is not the id. */
+const ZONE_IDS: readonly string[] = ["Logo", "Scroll wheel", "Underglow"];
+
+function zoneId(model: AsusMouseModel, zone: number): number {
+  return ZONE_IDS.indexOf(model.zones[zone]);
+}
 
 function settingField(model: AsusMouseModel, field: number): number {
   return model.dpiStages + field;
@@ -120,12 +129,13 @@ function requireStage(model: AsusMouseModel, stage: number): void {
  * READ DECODERS
  * --------------------------------- */
 
-export function asusDecodeSettings(model: AsusMouseModel, data: Uint8Array): AsusSettings {
+export function asusDecodeSettings(model: AsusMouseModel, data: Uint8Array, booster = false): AsusSettings {
   const rateOffset = settingOffset(model, FIELD_RATE);
   requirePrefix(data, [0x12, 0x04, 0x00], "ASUS settings", settingOffset(model, FIELD_SNAPPING) + 1);
 
-  // Newer firmware keeps a polling-booster value in the high nibble.
-  const pollingRaw = data[rateOffset] & 0x07;
+  // Newer firmware keeps a polling-booster value in the high nibble. G-Helper reads it only when the booster is on.
+  const boosterRaw = booster ? data[rateOffset] >> 4 : 0;
+  const pollingRaw = boosterRaw || data[rateOffset] & 0x07;
   const pollingRateHz = ASUS_POLLING_RATES[pollingRaw];
   if (pollingRateHz === undefined) {
     throw new Error(`Unknown ASUS polling value 0x${pollingRaw.toString(16).padStart(2, "0")}.`);
@@ -181,7 +191,7 @@ export function asusDecodeLiftOffDistance(data: Uint8Array): AsusLiftOffDistance
 }
 
 export function asusDecodeLighting(model: AsusMouseModel, data: Uint8Array, zone: number): AsusRawLightingZone {
-  const offset = model.lightingAllZones ? 4 + zone * 5 : 4;
+  const offset = model.lightingAllZones ? 4 + zoneId(model, zone) * 5 : 4;
   requirePrefix(data, [0x12, 0x03], "ASUS lighting", offset + 5);
 
   return {
@@ -227,7 +237,7 @@ export function asusReadLiftOffRequest(): Uint8Array {
 }
 
 export function asusReadLightingRequest(model: AsusMouseModel, zone: number): Uint8Array {
-  return request(0x12, 0x03, model.lightingAllZones ? 0x00 : zone);
+  return request(0x12, 0x03, model.lightingAllZones ? 0x00 : zoneId(model, zone));
 }
 
 export function asusReadBatteryRequest(): Uint8Array {
@@ -309,7 +319,7 @@ export function asusSetLightingRequest(
   }
 
   // Bytes 9 and 10 are the animation direction and random-colour flag, unused here.
-  return request(0x51, 0x28, zone, 0x00, mode, brightness, red, green, blue, 0x00, 0x00, speed);
+  return request(0x51, 0x28, zoneId(model, zone), 0x00, mode, brightness, red, green, blue, 0x00, 0x00, speed);
 }
 
 export function asusSaveRequest(): Uint8Array {
