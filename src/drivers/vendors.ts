@@ -54,6 +54,8 @@ import {
   ZAUNKOENIG_VENDOR_ID,
 } from "@openmouse/protocol/zaunkoenig";
 import {
+  CORSAIR_BRAGI_PRODUCT_IDS,
+  CORSAIR_BRAGI_USAGE_PAGE,
   CORSAIR_CONFIG_USAGE,
   CORSAIR_PRODUCT_IDS,
   CORSAIR_USAGE_PAGE,
@@ -125,13 +127,20 @@ import {
   FATER_PRODUCT_IDS,
   FATER_VENDOR_ID,
 } from "@openmouse/protocol/fater";
+import {
+  AJAZZ_DONGLE_VENDOR_ID,
+  AJAZZ_PRODUCTS,
+  AJAZZ_USAGE,
+  AJAZZ_USAGE_PAGE,
+  AJAZZ_USB_VENDOR_ID,
+} from "@openmouse/protocol/ajazz";
 import { MOTOSPEED_PRODUCTS, MOTOSPEED_USAGE_PAGE, MOTOSPEED_VENDOR_ID } from "@openmouse/protocol/motospeed";
 import {
   COOLERMASTER_USAGE,
   COOLERMASTER_USAGE_PAGE,
   COOLERMASTER_VENDOR_ID,
 } from "@openmouse/protocol/coolermaster";
-import { AJAZZ_AK820_WIRED_PID } from "../ajazz/index.ts";
+import { AJAZZ_AK820_WIRED_PID } from "../ajazz/ak820.ts";
 
 export const VENDOR_ID = {
   coolermaster: COOLERMASTER_VENDOR_ID,
@@ -223,6 +232,16 @@ export const DAREU_HID_FILTERS: HIDDeviceFilter[] = [...DAREU_PRODUCT_IDS].map((
   usagePage: DAREU_COMMAND_USAGE_PAGE,
   usage: DAREU_COMMAND_USAGE,
 }));
+
+/** NJ07 / NJ08 control collection, on the wired VID and on the 2.4 GHz dongle VID. */
+export const AJAZZ_HID_FILTERS: HIDDeviceFilter[] = [...AJAZZ_PRODUCTS.keys()].flatMap((productId) =>
+  [AJAZZ_USB_VENDOR_ID, AJAZZ_DONGLE_VENDOR_ID].map((vendorId) => ({
+    vendorId,
+    productId,
+    usagePage: AJAZZ_USAGE_PAGE,
+    usage: AJAZZ_USAGE,
+  })),
+);
 
 /** Holtek vendor collection on the MCR-9000B's interface 2, as reported by its owner. */
 export const FATER_HID_FILTERS: HIDDeviceFilter[] = [...FATER_PRODUCT_IDS].map((productId) => ({
@@ -707,6 +726,18 @@ export const CORSAIR_HID_FILTERS: HIDDeviceFilter[] = CORSAIR_PRODUCT_IDS.map((p
   usage: CORSAIR_CONFIG_USAGE,
 }));
 
+/**
+ * Bragi mice and their receivers. Interface 2 of the receiver is 0xFF42 as
+ * well (input only), so the picker may list two entries; the driver claims
+ * only the one that takes output reports. The HID report descriptor, and with
+ * it the usage that would tell the two apart here, has not been captured yet.
+ */
+export const CORSAIR_BRAGI_HID_FILTERS: HIDDeviceFilter[] = CORSAIR_BRAGI_PRODUCT_IDS.map((productId) => ({
+  vendorId: CORSAIR_VENDOR_ID,
+  productId,
+  usagePage: CORSAIR_BRAGI_USAGE_PAGE,
+}));
+
 export const MICROSOFT_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.microsoft, productId: MICROSOFT_PRODUCT_CLASSIC, usagePage: MICROSOFT_CLASSIC_USAGE_PAGE, usage: MICROSOFT_CLASSIC_USAGE }, // Classic
   { vendorId: VENDOR_ID.microsoft, productId: MICROSOFT_PRODUCT_PRO, usagePage: MICROSOFT_PRO_USAGE_PAGE, usage: MICROSOFT_PRO_USAGE }, // Pro
@@ -782,6 +813,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
     usagePage: ZAUNKOENIG_USAGE_PAGE,
   })),
   ...CORSAIR_HID_FILTERS,
+  ...CORSAIR_BRAGI_HID_FILTERS,
   { vendorId: VENDOR_ID.finalmouse, productId: 0x0100, usagePage: 0xff00, usage: 0x0001 },
   { vendorId: VENDOR_ID.pulsar },
   ...PULSAR_XS1_HID_FILTERS,
@@ -870,6 +902,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // both the wired USB VID and the 2.4 GHz dongle VID.
   { vendorId: VENDOR_ID.ksnakeUsb, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
   { vendorId: VENDOR_ID.ksnakeDongle, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },
+  ...AJAZZ_HID_FILTERS,
   ...MICROSOFT_HID_FILTERS,
   ...INCOTT_HID_FILTERS,
   ...HYPERX_HID_FILTERS,

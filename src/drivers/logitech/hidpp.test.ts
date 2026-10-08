@@ -688,3 +688,12 @@ test("initialising refuses a mouse that reports fewer profiles than the captured
   assert.equal(state.writes, 0);
   assert.equal(state.mode, 0x01);
 });
+
+test("LightForce switch mode is refused on a HITS mouse and nothing is sent to Mode Status", async () => {
+  const { client } = analogButtonsMouse();
+  await resolveIndex(client);
+  const device = (client as unknown as { device: { probed: Array<{ data: Uint8Array }> } }).device;
+  await assert.rejects(client.setLightforceSwitchMode("Hybrid"), /no LightForce switches/);
+  const askedForModeStatus = device.probed.some(({ data }) => data[1] === 0x00 && ((data[3] << 8) | data[4]) === 0x8090);
+  assert.equal(askedForModeStatus, false, "the mode-status feature is never looked up, let alone written");
+});

@@ -1,4 +1,3 @@
-import { AjazzAk820HidClient } from "./ajazz/hid.ts";
 import { AsusHidClient } from "./asus/hid.ts";
 import { AtkBitmouseHidClient } from "./atk/bitmouse-hid.ts";
 import { AtkHidClient } from "./atk/hid.ts";
@@ -15,6 +14,7 @@ import { Keychron8kHidClient } from "./keychron/mouse-8k-hid.ts";
 import { Keychron8kNordicHidClient } from "./keychron/mouse-8k-nordic-hid.ts";
 import { KeychronNapeHidClient } from "./keychron/nape-hid.ts";
 import { LamzuAtlantisHidClient } from "./lamzu-atlantis/hid.ts";
+import { NoirM1NexHidClient } from "./noir/m1-nex-hid.ts";
 import { LamzuHidClient } from "./lamzu/hid.ts";
 import { LogitechHidppClient } from "./logitech/hidpp.ts";
 import { ModdoHidClient } from "./moddo/hid.ts";
@@ -41,6 +41,7 @@ import { WLMouseBeastX4kHidClient } from "./wlmouse/beast-x-4k-hid.ts";
 import { WootingHidClient } from "./wooting/hid.ts";
 import { ZaunkoenigHidClient } from "./zaunkoenig/hid.ts";
 import { CorsairHidClient } from "./corsair/hid.ts";
+import { CorsairBragiHidClient } from "./corsair/bragi-hid.ts";
 import { GWolvesHidClient } from "./gwolves/hid.ts";
 import { GWolvesXviHidClient } from "./gwolves/xvi-hid.ts";
 import { SteelSeriesRival3HidClient } from "./steelseries/hid.ts";
@@ -75,9 +76,11 @@ import { KyuProMx1Client } from "./ryunix/kyu-pro-mx1-hid.ts";
 import { BytechHidClient } from "./bytech/hid.ts";
 import { RapooHidClient } from "./rapoo/hid.ts";
 import { CoolerMasterHidClient } from "./coolermaster/hid.ts";
+import { AjazzHidClient } from "./ajazz/hid.ts";
+import { AjazzAk820HidClient } from "./ajazz/ak820-hid.ts";
 
 export type PulsarClient = PulsarHidClient | PulsarProHidClient | PulsarXs1HidClient;
-export type SupportedClient = RawmHidClient | MotospeedHidClient | LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | WLMouseBeastX4kHidClient | LamzuHidClient | LamzuAtlantisHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | AtkBitmouseHidClient | VgnF2HidClient | VaxeeHidClient | Keychron8kHidClient | Keychron1kHidClient | Keychron4kHidClient | Keychron8kNordicHidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | CorsairHidClient | AttackSharkHidClient | FantechHidClient | GearHubHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | GWolvesXviHidClient | SteelSeriesRival3HidClient | SteelSeriesAerox3HidClient | SteelSeriesAerox3WirelessHidClient | SteelSeriesRival3WirelessHidClient | SteelSeriesAerox5HidClient | SteelSeriesAerox5WirelessHidClient | SteelSeriesRival650HidClient | SteelSeriesAerox9WirelessHidClient | SteelSeriesRival310HidClient | SteelSeriesPrimePlusHidClient | SteelSeriesPrimeMiniWirelessHidClient | SteelSeriesSenseiTenHidClient | GloriousHidClient | GloriousClassicHidClient | MchoseHidClient | MchoseDockHidClient | MchoseA5ProMaxHidClient | KsnakeHidClient | MicrosoftHidClient | DareuHidClient | RedragonHidClient | RedragonM690ProHidClient | IncottHidClient | HyperXHidClient | MchoseV3HidClient | AsusHidClient | KyuProMx1Client | DeluxHidClient | BytechHidClient | RapooHidClient | FaterHidClient | CoolerMasterHidClient | AjazzAk820HidClient;
+export type SupportedClient = RawmHidClient | MotospeedHidClient | LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | WLMouseBeastX4kHidClient | LamzuHidClient | LamzuAtlantisHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | AtkBitmouseHidClient | VgnF2HidClient | VaxeeHidClient | Keychron8kHidClient | Keychron1kHidClient | Keychron4kHidClient | Keychron8kNordicHidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | CorsairHidClient | CorsairBragiHidClient | AttackSharkHidClient | FantechHidClient | GearHubHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | GWolvesXviHidClient | SteelSeriesRival3HidClient | SteelSeriesAerox3HidClient | SteelSeriesAerox3WirelessHidClient | SteelSeriesRival3WirelessHidClient | SteelSeriesAerox5HidClient | SteelSeriesAerox5WirelessHidClient | SteelSeriesRival650HidClient | SteelSeriesAerox9WirelessHidClient | SteelSeriesRival310HidClient | SteelSeriesPrimePlusHidClient | SteelSeriesPrimeMiniWirelessHidClient | SteelSeriesSenseiTenHidClient | GloriousHidClient | GloriousClassicHidClient | MchoseHidClient | MchoseDockHidClient | MchoseA5ProMaxHidClient | KsnakeHidClient | MicrosoftHidClient | DareuHidClient | RedragonHidClient | RedragonM690ProHidClient | IncottHidClient | HyperXHidClient | MchoseV3HidClient | AsusHidClient | KyuProMx1Client | DeluxHidClient | BytechHidClient | RapooHidClient | FaterHidClient | CoolerMasterHidClient | AjazzHidClient | AjazzAk820HidClient;
 
 export interface DeviceDriver {
   brand: string;
@@ -101,6 +104,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Motospeed", supports: (device) => MotospeedHidClient.isSupported(device), create: (device) => new MotospeedHidClient(device), score: () => 7 },
   { brand: "Zaunkoenig", supports: (device) => ZaunkoenigHidClient.isSupported(device), create: (device) => new ZaunkoenigHidClient(device), score: () => 10 },
   { brand: "Corsair", supports: (device) => CorsairHidClient.isSupported(device), create: (device) => new CorsairHidClient(device), score: () => 8 },
+  { brand: "Corsair", supports: (device) => CorsairBragiHidClient.isSupported(device), create: (device) => new CorsairBragiHidClient(device), score: () => 8 },
   { brand: "Finalmouse", supports: (device) => FinalmouseHidClient.isSupported(device), create: (device) => new FinalmouseHidClient(device), score: () => 10 },
   // Scored above EggWeHidClient.supportScore's ~50 ceiling: a 4K v2 dongle
   // (PID 0x1970) exposes WE-shaped sibling interfaces next to this one.
@@ -118,6 +122,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "WLMouse", supports: (device) => WLMouseBeastX4kHidClient.isSupported(device), create: (device) => new WLMouseBeastX4kHidClient(device), score: () => 6 },
   { brand: "WLMouse", supports: (device) => WLMouseHidClient.isSupported(device), create: (device) => new WLMouseHidClient(device), score: () => 5 },
   { brand: "Lamzu", supports: (device) => LamzuHidClient.isSupported(device), create: (device) => new LamzuHidClient(device), score: () => 5 },
+  { brand: "Noir Gear", supports: (device) => NoirM1NexHidClient.isSupported(device), create: (device) => new NoirM1NexHidClient(device), score: () => 8 },
   { brand: "Lamzu", supports: (device) => LamzuAtlantisHidClient.isSupported(device), create: (device) => new LamzuAtlantisHidClient(device), score: () => 5 },
   { brand: "moddoMOUSE", supports: (device) => ModdoHidClient.isSupported(device), create: (device) => new ModdoHidClient(device), score: () => 5 },
   { brand: "Ninjutso", supports: (device) => NinjutsoHidClient.isSupported(device), create: (device) => new NinjutsoHidClient(device), score: () => 7 },
@@ -173,6 +178,9 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   // two matchers are kept disjoint by product id.
   { brand: "MCHOSE", supports: (device) => MchoseV3HidClient.isSupported(device), create: (device) => new MchoseV3HidClient(device), score: () => 7 },
   { brand: "K-snake", supports: (device) => KsnakeHidClient.isSupported(device), create: (device) => new KsnakeHidClient(device), score: () => 5 },
+  // Shares VIDs 0xA8A4/0xA8A5 and the 0xFF01:0x10 collection with K-snake; the
+  // two stay disjoint by product id (K-snake owns 0x2255).
+  { brand: "AJAZZ", supports: (device) => AjazzHidClient.isSupported(device), create: (device) => new AjazzHidClient(device), score: () => 7 },
   { brand: "Microsoft", supports: (device) => MicrosoftHidClient.isSupported(device), create: (device) => new MicrosoftHidClient(device), score: () => 5 },
   // Shares vendor id 0x093a with Glorious (see vendors.ts), but claims only
   // its own two product ids, so the two drivers never contend for a device.

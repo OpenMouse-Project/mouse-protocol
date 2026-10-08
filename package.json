@@ -206,6 +206,10 @@
       "types": "./dist/fater/index.d.ts",
       "import": "./dist/fater/index.js"
     },
+    "./ajazz": {
+      "types": "./dist/ajazz/index.d.ts",
+      "import": "./dist/ajazz/index.js"
+    },
     "./coolermaster": {
       "types": "./dist/coolermaster/index.d.ts",
       "import": "./dist/coolermaster/index.js"

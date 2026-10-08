@@ -83,6 +83,7 @@ import {
   MODE_STATUS,
   buildModeStatusWriteMany,
   decodeModeStatus,
+  hasLightforceSwitches,
   type GamingSurfaceMode,
   type LightforceSwitchMode,
   type ModeStatusField,
@@ -883,7 +884,7 @@ export class LogitechHidppClient {
       gamingSurfaceMode: modeStatus === null || !hasLiveLiftOffControl
         ? null
         : decodeModeStatus(modeStatus, MODE_STATUS.gamingSurface),
-      lightforceSwitchMode: modeStatus === null || !hasLiveLiftOffControl
+      lightforceSwitchMode: modeStatus === null || !hasLiveLiftOffControl || !hasLightforceSwitches(Boolean(analogButtonsFeature.index))
         ? null
         : decodeModeStatus(modeStatus, MODE_STATUS.lightforce),
       lighting: lighting ?? undefined,
@@ -2866,6 +2867,10 @@ export class LogitechHidppClient {
       requested.push({ field: MODE_STATUS.gamingSurface, mode: values.gamingSurface, label: "gaming surface mode" });
     }
     if (values.lightforce) {
+      const hits = await this.getFeature(FEATURE.analogButtons);
+      if (!hasLightforceSwitches(Boolean(hits.index))) {
+        throw new Error("This mouse has no LightForce switches (its buttons are HITS), so there is no switch mode to change.");
+      }
       requested.push({ field: MODE_STATUS.lightforce, mode: values.lightforce, label: "LightForce switch mode" });
     }
     if (requested.length === 0) return;

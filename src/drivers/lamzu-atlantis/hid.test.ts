@@ -7,6 +7,8 @@ import {
   LAMZU_ATLANTIS_VENDOR_ID,
 } from "@openmouse/protocol/lamzu";
 import { LamzuAtlantisHidClient } from "./hid.ts";
+import { NOIR_M1_NEX_PRODUCT_ID, NoirM1NexHidClient } from "../noir/m1-nex-hid.ts";
+import { createSupportedClient, deviceBrand } from "../registry.ts";
 
 function collection(
   usagePage: number,
@@ -85,6 +87,19 @@ test("a nested config collection is found", () => {
     }),
   ];
   assert.ok(LamzuAtlantisHidClient.isSupported(device(LAMZU_ATLANTIS_VENDOR_ID, 0xf50f, nested)));
+});
+
+test("Noir M1-NEX is claimed only on its exact CompX PID and report-8 config collection", () => {
+  assert.ok(NoirM1NexHidClient.isSupported(device(LAMZU_ATLANTIS_VENDOR_ID, NOIR_M1_NEX_PRODUCT_ID)));
+  assert.equal(NoirM1NexHidClient.isSupported(device(0x1234, NOIR_M1_NEX_PRODUCT_ID)), false);
+  assert.equal(NoirM1NexHidClient.isSupported(device(LAMZU_ATLANTIS_VENDOR_ID, 0xf50f)), false);
+  assert.equal(NoirM1NexHidClient.isSupported(device(LAMZU_ATLANTIS_VENDOR_ID, NOIR_M1_NEX_PRODUCT_ID, [])), false);
+});
+
+test("the protocol registry creates M1-NEX as Noir Gear, not Lamzu", () => {
+  const client = createSupportedClient(device(LAMZU_ATLANTIS_VENDOR_ID, NOIR_M1_NEX_PRODUCT_ID));
+  assert.ok(client instanceof NoirM1NexHidClient);
+  assert.equal(deviceBrand(client), "Noir Gear");
 });
 
 test("the receivers report themselves as wireless and the cable does not", () => {
