@@ -101,6 +101,8 @@ export interface RazerProduct {
    * hardware run can tell.
    */
   standardMatrixLighting?: boolean;
+  /** Volatile, zero-based RGB cells using the single-row custom-frame command. */
+  oneRowCustomFrameLedCount?: number;
   /**
    * The extended-matrix lighting commands (class `0x0f`: effect `0x02` and
    * the brightness pair `0x04`/`0x84`) on transaction id `0x1f`, addressed per
@@ -465,7 +467,7 @@ const PRODUCT_DEFINITIONS: ReadonlyArray<[number, Omit<RazerProduct, "transactio
   // saw dropouts, so the rate was read back but not measured. The stage read
   // gave nothing usable, so no stage editor is offered. Lighting follows
   // OpenRazer's standard-matrix commands and has not been tried on it yet.
-  [0x004c, { model: "Diamondback Chroma", ...STANDARD, verified: true, standardMatrixLighting: true }],
+  [0x004c, { model: "Diamondback Chroma", ...STANDARD, verified: true, standardMatrixLighting: true, oneRowCustomFrameLedCount: 21 }],
   [0x004f, { model: "DeathAdder 2000", ...STANDARD, maxDpi: 2000 }],
   [0x0050, { model: "Naga Hex V2", ...STANDARD }],
   [0x0053, { model: "Naga Chroma", ...STANDARD }],

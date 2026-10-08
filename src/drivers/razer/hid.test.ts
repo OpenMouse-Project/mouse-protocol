@@ -922,7 +922,13 @@ test("a Chrome-refused feature-report write surfaces troubleshooting, not the ba
  * Brightness is held on the mouse's 0-255 scale; `ignoreWrites` acknowledges
  * a brightness write and keeps the old level.
  */
-function fakeChromaMouse(options: { productId?: number; brightness?: number; ignoreWrites?: boolean } = {}) {
+function fakeChromaMouse(options: {
+  productId?: number;
+  brightness?: number;
+  ignoreWrites?: boolean;
+  failCustomFrame?: boolean;
+  failCustomEffect?: boolean;
+} = {}) {
   const sent: Uint8Array[] = [];
   let level = options.brightness ?? 0xff;
   let pending = new Uint8Array(RAZER_PACKET_LENGTH);
@@ -942,7 +948,15 @@ function fakeChromaMouse(options: { productId?: number; brightness?: number; ign
       if (commandClass === 0x00 && commandId === 0x81) pending = answer(0x02, [1, 0]);
       else if (commandClass === 0x04 && commandId === 0x85) pending = answer(0x07, [0x01, 0x07, 0x08, 0x07, 0x08]);
       else if (commandClass === 0x00 && commandId === 0x85) pending = answer(0x01, [2]);
-      else if (commandClass === 0x03 && commandId === 0x0a) pending = answer(data[5], [...data.slice(8, 8 + data[5])]);
+      else if (commandClass === 0x03 && commandId === 0x0c) {
+        pending = options.failCustomFrame
+          ? replyPacket(commandClass, commandId, data[5], [], RAZER_STATUS.unsupported)
+          : answer(data[5], [...data.slice(8, 8 + data[5])]);
+      } else if (commandClass === 0x03 && commandId === 0x0a) {
+        pending = options.failCustomEffect && data[8] === 0x05
+          ? replyPacket(commandClass, commandId, data[5], [], RAZER_STATUS.unsupported)
+          : answer(data[5], [...data.slice(8, 8 + data[5])]);
+      }
       else if (commandClass === 0x03 && commandId === 0x03) {
         if (!options.ignoreWrites) level = data[10];
         pending = answer(0x03, [data[8], data[9], data[10]]);
@@ -980,6 +994,111 @@ test("a Razer model off the lighting allowlist is never sent a lighting command"
     /does not support changing the lighting/,
   );
   assert.equal(sent.some((packet) => packet[6] === 0x03), false);
+});
+
+test("the Diamondback exposes 21 unknown, write-only LED cells beside its whole-mouse effects", async () => {
+  const { client, sent } = fakeChromaMouse();
+  const status = await client.readStatus();
+  assert.equal(status.lightingZones?.length, 22);
+  assert.equal(status.lightingZones?.[0], status.lighting);
+  const cells = status.lightingZones!.slice(1);
+  assert.deepEqual(cells.map((cell) => cell.hardwareZoneId), Array.from({ length: 21 }, (_, i) => i));
+  for (const cell of cells) {
+    assert.equal(cell.mode, null);
+    assert.equal(cell.writeOnly, true);
+    assert.deepEqual(cell.modes, ["Off", "Static"]);
+    assert.equal(cell.brightnessLevels, undefined);
+  }
+  assert.equal(sent.some((packet) => packet[6] === 0x03 && packet[7] === 0x0c), false);
+});
+
+test("painting LED 20 uploads only that cell before activating the volatile custom frame", async () => {
+  const { client, sent } = fakeChromaMouse();
+  const status = await client.readStatus();
+  sent.length = 0;
+  await client.setLighting({ ...status.lightingZones![21], mode: "Static", color: "#123456" });
+  assert.deepEqual(sent.map((p) => [p[1], p[5], p[6], p[7]]), [[0xff, 0x32, 0x03, 0x0c], [0xff, 0x02, 0x03, 0x0a]]);
+  assert.deepEqual([...sliceArgs(sent[0], 0, 5)], [20, 20, 0x12, 0x34, 0x56]);
+  assert.deepEqual([...sliceArgs(sent[1], 0, 2)], [0x05, 0x00]);
+  const after = await client.readStatus();
+  assert.equal(after.lighting?.mode, null);
+  assert.equal(after.lightingZones![21].mode, "Static");
+  assert.equal(after.lightingZones![21].color, "#123456");
+  assert.equal(after.lightingZones![1].mode, null);
+});
+
+test("LED zero supports Off without overwriting other cells or global brightness", async () => {
+  const { client, sent } = fakeChromaMouse();
+  const zones = (await client.readStatus()).lightingZones!;
+  await client.setLighting({ ...zones[2], mode: "Static", color: "#abcdef" });
+  sent.length = 0;
+  await client.setLighting({ ...zones[1], mode: "Off", color: "#ff0000", brightness: 25 });
+  assert.equal(sent.length, 1);
+  assert.deepEqual([...sliceArgs(sent[0], 0, 5)], [0, 0, 0, 0, 0]);
+  const after = await client.readStatus();
+  assert.equal(after.lightingZones![1].mode, "Off");
+  assert.equal(after.lightingZones![2].color, "#abcdef");
+  assert.equal(after.lighting?.brightness, 100);
+});
+
+test("a whole-mouse effect clears the active LED modes and the next cell reactivates custom lighting", async () => {
+  const { client, sent } = fakeChromaMouse();
+  const zones = (await client.readStatus()).lightingZones!;
+  await client.setLighting({ ...zones[1], mode: "Static", color: "#abcdef" });
+  await client.setLighting({ ...zones[0], mode: "Spectrum" });
+  const after = await client.readStatus();
+  assert.equal(after.lighting?.mode, "Spectrum");
+  assert.ok(after.lightingZones!.slice(1).every((cell) => cell.mode === null));
+  sent.length = 0;
+  await client.setLighting({ ...after.lightingZones![2], mode: "Static", color: "#654321" });
+  assert.deepEqual(sent.map((p) => p[7]), [0x0c, 0x0a]);
+});
+
+test("failed frame uploads and activations never populate the write-only cache", async () => {
+  for (const failure of ["failCustomFrame", "failCustomEffect"] as const) {
+    const options = { [failure]: true };
+    const { client, sent } = fakeChromaMouse(options);
+    const zones = (await client.readStatus()).lightingZones!;
+    sent.length = 0;
+    await assert.rejects(client.setLighting({ ...zones[1], mode: "Static", color: "#123456" }));
+    assert.equal((await client.readStatus()).lightingZones![1].mode, null);
+    if (failure === "failCustomFrame") assert.equal(sent.some((p) => p[7] === 0x0a), false);
+    options[failure] = false;
+    sent.length = 0;
+    await client.setLighting({ ...zones[1], mode: "Static", color: "#123456" });
+    assert.deepEqual(sent.map((p) => p[7]), [0x0c, 0x0a]);
+  }
+});
+
+test("LED validation rejects unknown indices, mismatched zones, effects and colours before writing", async () => {
+  const { client, sent } = fakeChromaMouse();
+  const cell = (await client.readStatus()).lightingZones![1];
+  sent.length = 0;
+  for (const patch of [
+    { hardwareZoneId: -1 }, { hardwareZoneId: 21 }, { hardwareZoneId: 0.5 },
+    { hardwareZoneId: NaN }, { zone: "Logo" }, { mode: "Wave" as const },
+    { color: "no-colour" }, { color: null },
+  ]) {
+    await assert.rejects(client.setLighting({ ...cell, mode: "Static", color: "#112233", ...patch }));
+  }
+  assert.equal(sent.length, 0);
+  const other = fakeChromaMouse({ productId: 0x006c });
+  await assert.rejects(other.client.setLighting({ ...cell, mode: "Static" }), /individual LED zone/);
+  assert.equal(other.sent.length, 0);
+});
+
+test("concurrent LED writes keep the upload and activation together", async () => {
+  const { client, sent } = fakeChromaMouse();
+  const zones = (await client.readStatus()).lightingZones!;
+  sent.length = 0;
+  await Promise.all([
+    client.setLighting({ ...zones[1], mode: "Static", color: "#112233" }),
+    client.setLighting({ ...zones[2], mode: "Static", color: "#445566" }),
+  ]);
+  assert.deepEqual(sent.map((p) => p[7]), [0x0c, 0x0a, 0x0c]);
+  const after = await client.readStatus();
+  assert.equal(after.lightingZones![1].color, "#112233");
+  assert.equal(after.lightingZones![2].color, "#445566");
 });
 
 test("an effect change sends one standard-matrix write and leaves an unchanged brightness alone", async () => {
