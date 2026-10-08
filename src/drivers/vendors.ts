@@ -7,6 +7,7 @@ import {
 import { ATK_COMPX_PRODUCT_IDS } from "./atk/products.ts";
 import { MICROSOFT_PRODUCT_CLASSIC, MICROSOFT_PRODUCT_PRO, MICROSOFT_VENDOR_ID, MICROSOFT_CLASSIC_USAGE_PAGE, MICROSOFT_CLASSIC_USAGE, MICROSOFT_PRO_USAGE_PAGE, MICROSOFT_PRO_USAGE } from "../microsoft/index.ts";
 import { INCOTT_PRODUCT_IDS, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../incott/index.ts";
+import { GLORIOUS_CORE2_PRODUCTS, GLORIOUS_CORE2_USAGE_PAGE, GLORIOUS_CORE2_VENDOR_ID } from "../glorious-core2/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { VAXEE_PRODUCT_IDS, VAXEE_USAGE, VAXEE_USAGE_PAGE, VAXEE_VENDOR_ID } from "@openmouse/protocol/vaxee";
 import {
@@ -287,7 +288,8 @@ export const GLORIOUS_PRODUCTS: ReadonlyMap<number, { name: string; wireless: bo
  * - "core1": the original protocol korkje/mxw reverse-engineered. Full
  *   support — RGB, debounce, battery (glorious-ctl), DPI/polling/LOD (mxw).
  * - "core2": a newer, mostly-undocumented protocol generation (the 4K/8K-class
- *   mice: Model O3 Wireless, Model O2 Pro 4K/8K, Model D2 Pro 4K/8K). Only
+ *   mice: Model O3 Wireless, Model D2 Pro 4K/8K; the Model O2 Pro 4K/8K has
+ *   its own driver, see GLORIOUS_CORE2_PRODUCTS). Only
  *   RGB, debounce, and battery are enabled for these — glorious-ctl's own
  *   `devices.json` lists Model O3/D2Pro-4K8K alongside the core1 devices and
  *   applies the exact same `mouse.py` commands uniformly, and
@@ -348,11 +350,22 @@ export const GLORIOUS_CLASSIC_PRODUCTS: ReadonlyMap<number, { name: string; wire
   // core2 — RGB/debounce/battery only, see the doc comment above.
   [0xa312, { name: "Model O3 Wireless", wireless: true, generation: "core2" }],
   [0xa300, { name: "Model O3 Wireless receiver", wireless: true, generation: "core2" }],
-  [0x201b, { name: "Model O2 Pro 4K/8K", wireless: false, generation: "core2" }],
-  [0x2035, { name: "Model O2 Pro 4K/8K Wireless receiver", wireless: true, generation: "core2" }],
   [0x201c, { name: "Model D 2 PRO 4K/8KHz Edition", wireless: false, generation: "core2" }],
   [0x2036, { name: "Model D 2 PRO 4K/8KHz Edition receiver", wireless: true, generation: "core2" }],
 ]);
+
+/**
+ * Model O2 Pro 4K/8K. The config collection is usage page 0xffff, usage 0.
+ * Interface 1 has another 0xffff collection (usage 1, no feature report), so
+ * the picker may list two entries; the driver claims only the one that takes
+ * the feature report. The usage is left out so a firmware that reports another
+ * one is still offered.
+ */
+export const GLORIOUS_CORE2_HID_FILTERS: HIDDeviceFilter[] = [...GLORIOUS_CORE2_PRODUCTS.keys()].map((productId) => ({
+  vendorId: GLORIOUS_CORE2_VENDOR_ID,
+  productId,
+  usagePage: GLORIOUS_CORE2_USAGE_PAGE,
+}));
 
 export const GLORIOUS_CLASSIC_HID_FILTERS: HIDDeviceFilter[] = [...GLORIOUS_CLASSIC_PRODUCTS.keys()].flatMap(
   (productId) => [
@@ -864,6 +877,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...STEELSERIES_RIVAL3_FILTERS,
   { vendorId: VENDOR_ID.glorious },
   ...GLORIOUS_CLASSIC_HID_FILTERS,
+  ...GLORIOUS_CORE2_HID_FILTERS,
   // K-snake X11 exposes its 0x55-framed control channel on 0xFF01:0x10 for
   // both the wired USB VID and the 2.4 GHz dongle VID.
   { vendorId: VENDOR_ID.ksnakeUsb, productId: 0x2255, usagePage: 0xff01, usage: 0x10 },

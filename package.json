@@ -178,6 +178,10 @@
       "types": "./dist/glorious-classic/index.d.ts",
       "import": "./dist/glorious-classic/index.js"
     },
+    "./glorious-core2": {
+      "types": "./dist/glorious-core2/index.d.ts",
+      "import": "./dist/glorious-core2/index.js"
+    },
     "./ksnake": {
       "types": "./dist/ksnake/index.d.ts",
       "import": "./dist/ksnake/index.js"

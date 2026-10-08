@@ -23,6 +23,7 @@ export * as corsair from "./corsair/index.js";
 export * as dareu from "./dareu/index.js";
 export * as gwolves from "./gwolves/index.js";
 export * as glorious from "./glorious/index.js";
+export * as gloriousCore2 from "./glorious-core2/index.js";
 export * as ksnake from "./ksnake/index.js";
 export * as hyperx from "./hyperx/index.js";
 export * as valkyrie from "./valkyrie/index.js";
