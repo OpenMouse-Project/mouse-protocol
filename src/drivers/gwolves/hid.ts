@@ -34,7 +34,7 @@ import {
   teevolutionReadKeyTable,
   teevolutionRemapButton,
 } from "@openmouse/protocol/teevolution";
-import { GWOLVES_PRODUCTS, GWOLVES_VENDOR_ID, type GWolvesProduct } from "./products.ts";
+import { GWOLVES_PRODUCTS, GWOLVES_RECEIVER_MODELS, GWOLVES_VENDOR_ID, type GWolvesProduct } from "./products.ts";
 
 // G-Wolves mice enumerate under their own vendor id (0x33e4) but speak the
 // exact same shared VGN-family wire protocol already implemented
@@ -124,6 +124,11 @@ export class GWolvesHidClient {
     return product;
   }
 
+  private get model(): string {
+    if (!this.product.wireless) return this.product.model;
+    return GWOLVES_RECEIVER_MODELS.get(this.receiverModelId ?? -1) ?? "8K receiver";
+  }
+
   isWirelessPath(): boolean {
     return this.product.wireless;
   }
@@ -148,7 +153,7 @@ export class GWolvesHidClient {
     await this.open();
     const { wireless } = this.product;
     const magnetic = await this.isMagnetic();
-    const model = magnetic && wireless ? "HTS Plus Pro" : this.product.model;
+    const model = this.model;
     const batteryResponse = await this.transact(gwolvesBuildSimplePayload(GWOLVES_COMMAND.battery));
     const firmwareResponse = await this.transact(gwolvesBuildSimplePayload(GWOLVES_COMMAND.firmware));
     const profile = await this.readProfile();
@@ -197,7 +202,7 @@ export class GWolvesHidClient {
     const address = GWOLVES_ADDRESS.dpiStages + profile.activeDpiStage * 4;
     await this.write(address, [...gwolvesEncodeDpi(dpi)]);
     const confirmed = gwolvesDecodeProfile(await this.readProfile()).dpi;
-    if (confirmed !== dpi) throw new Error(`The ${this.product.model} kept ${confirmed} DPI instead of ${dpi} DPI.`);
+    if (confirmed !== dpi) throw new Error(`The ${this.model} kept ${confirmed} DPI instead of ${dpi} DPI.`);
     return confirmed;
   }
 
@@ -208,7 +213,7 @@ export class GWolvesHidClient {
       const hint = this.isWirelessPath()
         ? " (on the wireless path, the mouse must be actively awake — try moving it first)"
         : "";
-      throw new Error(`The ${this.product.model} kept ${confirmed} Hz instead of ${rate} Hz.${hint}`);
+      throw new Error(`The ${this.model} kept ${confirmed} Hz instead of ${rate} Hz.${hint}`);
     }
     return confirmed;
   }
@@ -217,7 +222,7 @@ export class GWolvesHidClient {
     const raw = value === "Low" ? 3 : value === "Medium" ? 1 : 2;
     await this.writeScalar(GWOLVES_ADDRESS.lod, raw);
     const confirmed = gwolvesDecodeProfile(await this.readProfile()).liftOffDistance;
-    if (confirmed !== value) throw new Error(`The ${this.product.model} kept ${confirmed ?? "unknown"} LOD instead of ${value}.`);
+    if (confirmed !== value) throw new Error(`The ${this.model} kept ${confirmed ?? "unknown"} LOD instead of ${value}.`);
     return confirmed;
   }
 
@@ -276,7 +281,7 @@ export class GWolvesHidClient {
   async setMagneticTriggerPoint(button: 0 | 1, point: number): Promise<number> {
     await this.writeScalar(MAGNETIC_ADDRESS.trigger[button], gwolvesEncodeTriggerPoint(point));
     const confirmed = gwolvesDecodeTriggerPoint(await this.read(MAGNETIC_ADDRESS.trigger[button], 2));
-    if (confirmed !== point) throw new Error(`The ${this.product.model} kept trigger point ${confirmed ?? "unknown"} instead of ${point}.`);
+    if (confirmed !== point) throw new Error(`The ${this.model} kept trigger point ${confirmed ?? "unknown"} instead of ${point}.`);
     return confirmed;
   }
 
@@ -285,7 +290,7 @@ export class GWolvesHidClient {
     await this.writeScalar(MAGNETIC_ADDRESS.rapidTrigger[button], gwolvesEncodeRapidTrigger(enabled, level));
     const confirmed = gwolvesDecodeRapidTrigger(await this.read(MAGNETIC_ADDRESS.rapidTrigger[button], 2));
     if (!confirmed || confirmed.enabled !== enabled || confirmed.level !== level) {
-      throw new Error(`The ${this.product.model} did not keep the rapid trigger setting.`);
+      throw new Error(`The ${this.model} did not keep the rapid trigger setting.`);
     }
     return confirmed;
   }
@@ -372,25 +377,25 @@ export class GWolvesHidClient {
   private async read(address: number, length: number): Promise<Uint8Array> {
     const response = await this.transact(gwolvesBuildReadPayload(address, length));
     const data = gwolvesParseReadResponse(response, address, length);
-    if (!data) throw new Error(`${this.product.model} flash read failed at 0x${address.toString(16)}.`);
+    if (!data) throw new Error(`${this.model} flash read failed at 0x${address.toString(16)}.`);
     return data;
   }
 
   private async writeScalar(address: number, value: number): Promise<void> {
     const response = await this.transact(gwolvesBuildWriteScalarPayload(address, value));
     if (!gwolvesReportChecksumIsValid(response) || response[0] !== GWOLVES_COMMAND.write || response[1] !== 0) {
-      throw new Error(`${this.product.model} flash write failed at 0x${address.toString(16)}.`);
+      throw new Error(`${this.model} flash write failed at 0x${address.toString(16)}.`);
     }
     const confirmed = await this.read(address, 2);
     if (confirmed[0] !== value || ((confirmed[0]! + confirmed[1]!) & 0xff) !== 0x55) {
-      throw new Error(`The ${this.product.model} did not retain the value written at 0x${address.toString(16)}.`);
+      throw new Error(`The ${this.model} did not retain the value written at 0x${address.toString(16)}.`);
     }
   }
 
   private async write(address: number, data: readonly number[]): Promise<void> {
     const response = await this.transact(gwolvesBuildWritePayload(address, data));
     if (!gwolvesReportChecksumIsValid(response) || response[0] !== GWOLVES_COMMAND.write || response[1] !== 0) {
-      throw new Error(`${this.product.model} flash write failed at 0x${address.toString(16)}.`);
+      throw new Error(`${this.model} flash write failed at 0x${address.toString(16)}.`);
     }
   }
 
