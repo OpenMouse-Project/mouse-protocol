@@ -699,32 +699,39 @@ test("LightForce switch mode is refused on a HITS mouse and nothing is sent to M
 });
 
 // --- Receiver firmware register (HID++ 1.0 register 0xF1) -------------------
-// The vendor agent reads receiver firmware "from 0xf1"; framing follows the
-// HID++ 1.0 short-register convention (device 0xFF = the receiver). The
-// dotted-decimal decode matches a live LIGHTSPEED readout ([14, 3, 19] for
-// entityVersion "14.3.19"); raw bytes are asserted too so a mismatching
-// generation fails loudly instead of misreporting.
+// Live PRO LIGHTSPEED receiver replies stayed [1, 7, 2] and [2, 0, 17]
+// across a G HUB update from 14.3.19 to 14.4.20. The bytes are useful
+// diagnostics, but do not directly encode the receiver package version.
 
-test("receiver firmware reads register 0xF1 and decodes dotted-decimal", async () => {
+test("receiver firmware register queries MCU2 without inventing a version", async () => {
   const device = new FakeHidDevice(LIGHTSPEED_RECEIVER, "PRO LIGHTSPEED Receiver", USB_HIDPP_COLLECTIONS);
   device.onRequest = (request) => {
-    if (request[0] === 0xff && request[1] === 0x81 && request[2] === 0xf1) {
-      return new Uint8Array([0xff, 0x81, 0xf1, 14, 3, 19, 0]);
+    if (request[0] === 0xff && request[1] === 0x81 && request[2] === 0xf1 && request[3] === 2) {
+      return new Uint8Array([0xff, 0x81, 0xf1, 2, 0, 17]);
     }
     return null;
   };
   const client = new LogitechHidppClient(device as unknown as HIDDevice);
   const result = await client.readReceiverFirmware();
-  assert.equal(result.version, "14.3.19");
-  assert.deepEqual(result.raw, [14, 3, 19, 0]);
+  assert.equal(result.version, null);
+  assert.deepEqual(result.raw, [2, 0, 17]);
   const sent = device.probed.at(-1);
-  assert.deepEqual([...(sent?.data ?? [])], [0xff, 0x81, 0xf1, 0, 0, 0]);
+  assert.deepEqual([...(sent?.data ?? [])], [0xff, 0x81, 0xf1, 2, 0, 0]);
 });
 
-test("receiver firmware short replies decode to null without three bytes", async () => {
+test("receiver firmware register can query MCU1 independently", async () => {
   const device = new FakeHidDevice(LIGHTSPEED_RECEIVER, "PRO LIGHTSPEED Receiver", USB_HIDPP_COLLECTIONS);
-  device.onRequest = () => new Uint8Array([0xff, 0x81, 0xf1, 14]);
+  device.onRequest = () => new Uint8Array([0xff, 0x81, 0xf1, 1, 7, 2]);
   const client = new LogitechHidppClient(device as unknown as HIDDevice);
-  const result = await client.readReceiverFirmware();
+  const result = await client.readReceiverFirmware(1);
   assert.equal(result.version, null);
+  assert.deepEqual(result.raw, [1, 7, 2]);
+  assert.deepEqual([...(device.probed.at(-1)?.data ?? [])], [0xff, 0x81, 0xf1, 1, 0, 0]);
+});
+
+test("receiver firmware register rejects the HID++ error promptly", async () => {
+  const device = new FakeHidDevice(LIGHTSPEED_RECEIVER, "PRO LIGHTSPEED Receiver", USB_HIDPP_COLLECTIONS);
+  device.onRequest = () => new Uint8Array([0xff, 0x8f, 0x81, 0xf1, 0x03, 0]);
+  const client = new LogitechHidppClient(device as unknown as HIDDevice);
+  await assert.rejects(client.readReceiverFirmware(), /HID\+\+ error 0x3/);
 });
