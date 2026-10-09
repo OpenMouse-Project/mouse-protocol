@@ -697,3 +697,34 @@ test("LightForce switch mode is refused on a HITS mouse and nothing is sent to M
   const askedForModeStatus = device.probed.some(({ data }) => data[1] === 0x00 && ((data[3] << 8) | data[4]) === 0x8090);
   assert.equal(askedForModeStatus, false, "the mode-status feature is never looked up, let alone written");
 });
+
+// --- Receiver firmware register (HID++ 1.0 register 0xF1) -------------------
+// The vendor agent reads receiver firmware "from 0xf1"; framing follows the
+// HID++ 1.0 short-register convention (device 0xFF = the receiver). The
+// dotted-decimal decode matches a live LIGHTSPEED readout ([14, 3, 19] for
+// entityVersion "14.3.19"); raw bytes are asserted too so a mismatching
+// generation fails loudly instead of misreporting.
+
+test("receiver firmware reads register 0xF1 and decodes dotted-decimal", async () => {
+  const device = new FakeHidDevice(LIGHTSPEED_RECEIVER, "PRO LIGHTSPEED Receiver", USB_HIDPP_COLLECTIONS);
+  device.onRequest = (request) => {
+    if (request[0] === 0xff && request[1] === 0x81 && request[2] === 0xf1) {
+      return new Uint8Array([0xff, 0x81, 0xf1, 14, 3, 19, 0]);
+    }
+    return null;
+  };
+  const client = new LogitechHidppClient(device as unknown as HIDDevice);
+  const result = await client.readReceiverFirmware();
+  assert.equal(result.version, "14.3.19");
+  assert.deepEqual(result.raw, [14, 3, 19, 0]);
+  const sent = device.probed.at(-1);
+  assert.deepEqual([...(sent?.data ?? [])], [0xff, 0x81, 0xf1, 0, 0, 0]);
+});
+
+test("receiver firmware short replies decode to null without three bytes", async () => {
+  const device = new FakeHidDevice(LIGHTSPEED_RECEIVER, "PRO LIGHTSPEED Receiver", USB_HIDPP_COLLECTIONS);
+  device.onRequest = () => new Uint8Array([0xff, 0x81, 0xf1, 14]);
+  const client = new LogitechHidppClient(device as unknown as HIDDevice);
+  const result = await client.readReceiverFirmware();
+  assert.equal(result.version, null);
+});

@@ -303,6 +303,7 @@ const HOST_SWITCH_ACK_TIMEOUT_MS = 1500;
 const FEATURE = {
   deviceName: 0x0005,
   firmware: 0x0003,
+
   unifiedBattery: 0x1004,
   // Pre-unified battery reporting, still the only one on HERO-era mice.
   batteryStatus: 0x1000,
@@ -330,6 +331,16 @@ const FEATURE = {
   changeHost: 0x1814,
   reprogControls: 0x1b04,
 } as const;
+
+/**
+ * HID++ 1.0 short-register access for the receiver itself. The agent reads
+ * receiver firmware "from 0xf1"; framing follows the HID++ 1.0 short
+ * convention (device 0xFF = the receiver, sub-ID 0x81 = get-register).
+ */
+const RECEIVER_DEVICE_INDEX = 0xff;
+const HIDPP1_GET_REGISTER = 0x81;
+const RECEIVER_FIRMWARE_REGISTER = 0xf1;
+
 
 interface ResolvedFeature {
   index: number;
@@ -466,6 +477,15 @@ export class LogitechHidppClient {
     }
 
     const report = new Uint8Array(event.data.buffer.slice(event.data.byteOffset, event.data.byteOffset + event.data.byteLength));
+    const registerIndex = this.registerWaiters.findIndex(
+      () => report[0] === RECEIVER_DEVICE_INDEX
+        && report[1] === HIDPP1_GET_REGISTER
+        && report[2] === RECEIVER_FIRMWARE_REGISTER,
+    );
+    if (registerIndex >= 0) {
+      this.registerWaiters.splice(registerIndex, 1)[0]?.resolve(report);
+      return;
+    }
     if (report[0] === this.deviceIndex && report[1] === this.reportRateFeatureIndex && report[2] === 0x00 && report[3] === 0x01) {
       const rate = REPORT_RATE_HZ[report[4] ?? -1];
       if (rate) {
@@ -507,6 +527,16 @@ export class LogitechHidppClient {
   private readonly waiters: Array<{
     featureIndex: number;
     functionId: number;
+    resolve: (report: Uint8Array) => void;
+    reject: (reason: Error) => void;
+  }> = [];
+
+  /**
+   * One-shot waiters for HID++ 1.0 register replies, matched on the exact
+   * [0xFF, 0x81, register] prefix. Separate from `waiters` because 1.0
+   * replies carry no software id, so the 2.0 matcher would never fire.
+   */
+  private readonly registerWaiters: Array<{
     resolve: (report: Uint8Array) => void;
     reject: (reason: Error) => void;
   }> = [];
@@ -3406,6 +3436,59 @@ export class LogitechHidppClient {
       firmware.push(`${name} ${major}.${minor}`);
     }
     return firmware;
+  }
+
+  /**
+   * Reads the receiver's own firmware version via HID++ 1.0 register 0xF1.
+   *
+   * EXPERIMENTAL: the register is confirmed (the vendor agent reads receiver
+   * firmware "from 0xf1") and the framing follows the HID++ 1.0 short
+   * convention, but the version decode is validated against a single live
+   * readout so far (bytes [14, 3, 19] for entityVersion "14.3.19"). The raw
+   * bytes are always returned alongside, so a mismatching receiver generation
+   * can be diagnosed from Diagnostics instead of misreported. Read-only.
+   */
+  async readReceiverFirmware(): Promise<{ version: string | null; raw: number[] }> {
+    await this.open();
+    const report = new Uint8Array([
+      RECEIVER_DEVICE_INDEX,
+      HIDPP1_GET_REGISTER,
+      RECEIVER_FIRMWARE_REGISTER,
+      0,
+      0,
+      0,
+    ]);
+    const response = this.waitForRegisterReply();
+    void response.catch(() => undefined);
+    await this.reportDevice.sendReport(SHORT_REPORT_ID, report);
+    const reply = await response;
+    const payload = [...reply.subarray(3, 7)];
+    return {
+      version: payload.length >= 3 ? `${payload[0]}.${payload[1]}.${payload[2]}` : null,
+      raw: payload,
+    };
+  }
+
+  private waitForRegisterReply(timeoutMs = REQUEST_TIMEOUT_MS): Promise<Uint8Array> {
+    return new Promise<Uint8Array>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        const index = this.registerWaiters.findIndex((waiter) => waiter.reject === reject);
+        if (index >= 0) {
+          this.registerWaiters.splice(index, 1);
+        }
+        reject(new HidppTimeoutError("The receiver did not answer its firmware register."));
+      }, timeoutMs);
+      this.registerWaiters.push({
+        resolve: (report) => {
+          window.clearTimeout(timeout);
+          resolve(report);
+        },
+        reject: (reason) => {
+          window.clearTimeout(timeout);
+          reject(reason);
+        },
+      });
+    });
   }
 
   private async request(featureIndex: number, functionId: number, ...parameters: number[]): Promise<Uint8Array> {
