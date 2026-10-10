@@ -867,8 +867,10 @@ test("A9 Plus Nearlink capture decodes as PAW3395 with a 1K polling ceiling", as
   assert.equal(client.maxDpi(), 30000);
 });
 
-test("A9 Plus Nearlink through its Nearlink dongle reads as the same mouse, wirelessly", async () => {
-  const fake = device(0x10c9, "Nearlink Mouse Dongle");
+// The receiver renamed itself after its firmware update; the PID did not change.
+for (const dongleName of ["Nearlink Mouse Dongle", "NK mouse NANO dongle"]) {
+test(`A9 Plus Nearlink through "${dongleName}" reads as the same mouse, wirelessly`, async () => {
+  const fake = device(0x10c9, dongleName);
   // Captured through the dongle: identical to the cable except the battery is discharging.
   const replies = A9_PLUS_NEARLINK_STATUS.map((frame) => [...frame]);
   replies[1] = hexFrame("04 00 00 00 02 64 00 10 8e 00 00 00 00 00 00 45");
@@ -887,6 +889,25 @@ test("A9 Plus Nearlink through its Nearlink dongle reads as the same mouse, wire
   assert.equal(status.dpi, 1600);
   assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
   assert.deepEqual(status.supportedLiftOffDistances, ["Low", "High"]);
+});
+}
+
+test("A9 Plus Nearlink on firmware 1.30 keeps its identity and straight-line source", async () => {
+  // Firmware 1.30 renamed the USB product and programmed the 0x00bd row, which ATK HUB
+  // reads as Sensor Rotation: [angle, check, switch, check].
+  const fake = device(0x1115, "ATK A9 PLUS 2.0 NK");
+  const replies = A9_PLUS_NEARLINK_STATUS.map((frame) => [...frame]);
+  replies[4] = hexFrame("12 00 00 00 02 01 30 00 00 00 00 00 00 00 00 08");
+  replies[7] = hexFrame("08 00 00 bd 04 00 55 00 55 00 00 00 00 00 00 da");
+  // Straight-line on (advanced offset 6) while the rotation switch stays off.
+  replies[6] = reply(0x08, 0xa9, [0x02, 0x53, 0x00, 0x55, 0x0c, 0x49, 0x01, 0x54, 0x00, 0x55]);
+  (fake as unknown as FakeAtkDevice).replies = replies;
+  const status = await new AtkHidClient(fake).readStatus();
+  assert.equal(status.name, "ATK A9 Plus Nearlink");
+  assert.equal(status.connectionDetail, "Wired USB");
+  assert.deepEqual(status.firmware, ["Mouse 1.30"]);
+  assert.equal(status.angleSnapping, true);
+  assert.equal(status.angleTuning, 0);
 });
 
 test("A9 Plus Nearlink offers ATK HUB's debounce and sleep lists", async () => {

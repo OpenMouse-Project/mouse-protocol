@@ -74,6 +74,9 @@ const VXE_R1_PRO_MAX_RECEIVER_PID = 0xf58a;
 const VXE_R1_PRO_MAX_MOUSE_PID = 0xf58c;
 const VXE_R1_COMPX_RECEIVER_PID = 0xf58e;
 const VXE_R1_COMPX_MOUSE_PID = 0xf58f;
+// ATK HUB's generic "NK Mouse Dongle". Its product string changed from
+// "Nearlink Mouse Dongle" to "NK mouse NANO dongle" with a receiver update.
+const NEARLINK_RECEIVER_PID = 0x10c9;
 const R1_SETTINGS_LENGTH = 4;
 
 // Byte addresses in the mouse's configuration EEPROM.
@@ -239,10 +242,11 @@ export class AtkHidClient {
       || /receiver|dongle/i.test(this.device.productName || "");
   }
 
-  /** NearLink dongles: catalog-flagged models, or a product string naming the radio. */
+  /** NearLink dongles: catalog-flagged models, HUB's generic NK receiver, or a product string naming the radio. */
   private receiverDetail(): string {
     const nearlink = this.features().isNearlink === true
-      || /nearlink/i.test(this.device.productName || "");
+      || (this.device.vendorId === VENDOR_ID.atk && this.device.productId === NEARLINK_RECEIVER_PID)
+      || /\b(?:nearlink|nk)\b/i.test(this.device.productName || "");
     return nearlink ? "NearLink receiver" : "2.4 GHz receiver";
   }
 
