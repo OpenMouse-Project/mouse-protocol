@@ -22,18 +22,28 @@ export type AtkSensor =
   | "PAW3395Ultra"
   | "PAW3395"
   | "PAW3395SE"
+  | "PAW3315"
+  | "PAW3311"
+  | "PAW3320"
   | "CORE26K"
   | "PAW3955Master";
 
-export type AtkDpiFamily = "ultra" | "step50" | "paw3395se" | "paw3955master";
+export type AtkDpiFamily = "ultra" | "step50" | "stepped" | "paw3395se" | "paw3955master";
 
 export interface AtkSensorProfile {
   family: AtkDpiFamily;
   minDpi: number;
   maxDpi: number;
+  /**
+   * Per-axis DPI increments for the "stepped" family. Valid values are
+   * minDpi + k*step (the vendor's origin-is-min model, e.g. PAW3315 at 200 +
+   * k*100). Only the "stepped" family reads these.
+   */
+  xStep?: number;
+  yStep?: number;
 }
 
-/** Limits and encoding families transcribed from ATK HUB 3.2.21. */
+/** Limits and encoding families transcribed from ATK HUB 3.2.27. */
 export const ATK_SENSORS: Record<AtkSensor, AtkSensorProfile> = {
   PAW3950Ultra: { family: "ultra", minDpi: 10, maxDpi: 42000 },
   PAW3950: { family: "step50", minDpi: 50, maxDpi: 36000 },
@@ -41,6 +51,10 @@ export const ATK_SENSORS: Record<AtkSensor, AtkSensorProfile> = {
   PAW3395Ultra: { family: "step50", minDpi: 100, maxDpi: 30000 },
   PAW3395: { family: "step50", minDpi: 100, maxDpi: 30000 },
   PAW3395SE: { family: "paw3395se", minDpi: 200, maxDpi: 18000 },
+  // Stepped sensors from the ATK HUB device table; valid DPI is min + k*step.
+  PAW3315: { family: "stepped", minDpi: 200, maxDpi: 16000, xStep: 100, yStep: 100 },
+  PAW3311: { family: "stepped", minDpi: 200, maxDpi: 15000, xStep: 100, yStep: 100 },
+  PAW3320: { family: "stepped", minDpi: 200, maxDpi: 4000, xStep: 39, yStep: 38 },
   CORE26K: { family: "step50", minDpi: 50, maxDpi: 26000 },
   PAW3955Master: { family: "paw3955master", minDpi: 50, maxDpi: 40000 },
 };
@@ -109,6 +123,21 @@ function atkDecodeDpiAxisStep50(byte: number, nibble: number): number {
   return (nibble & 1) !== 0 ? dpi * 2 : dpi;
 }
 
+/**
+ * Stepped sensors (PAW3315/PAW3311/PAW3320): valid DPI is `min + count*step`,
+ * matching the vendor's I$()/bMe() model whose origin is the sensor minimum.
+ * The axis step can differ (PAW3320 uses 39 for X, 38 for Y).
+ */
+function atkEncodeDpiAxisStepped(dpi: number, min: number, step: number): { byte: number; nibble: number } {
+  const count = Math.round((dpi - min) / step);
+  return { byte: count & 0xff, nibble: ((count >> 8) & 0x03) << 2 };
+}
+
+function atkDecodeDpiAxisStepped(byte: number, nibble: number, min: number, step: number): number {
+  const count = (byte & 0xff) | (((nibble >> 2) & 0x03) << 8);
+  return min + count * step;
+}
+
 function atkEncodeDpiAxisPaw3395Se(dpi: number): { byte: number; nibble: number } | null {
   const doubled = dpi > 10000;
   const baseDpi = doubled ? dpi / 2 : dpi;
@@ -162,13 +191,36 @@ export function atkDpiStageLength(sensor: AtkSensor | null): number {
   return sensor && ATK_SENSORS[sensor].family === "paw3955master" ? 6 : 4;
 }
 
+/** True when `value` is on a stepped sensor's grid for one axis. */
+function atkSteppedValueValid(value: number, profile: AtkSensorProfile, step: number): boolean {
+  return Number.isInteger(value)
+    && value >= profile.minDpi
+    && value <= profile.maxDpi
+    && (value - profile.minDpi) % step === 0;
+}
+
 export function atkPackDpiStageForSensor(sensor: AtkSensor | null, x: number, y: number): number[] | null {
   if (sensor) {
-    const options = atkDpiOptionsForSensor(sensor);
-    if (!options.includes(x) || !options.includes(y)) return null;
+    const profile = ATK_SENSORS[sensor];
+    if (profile.family === "stepped") {
+      // Asymmetric steps (PAW3320: 39 X / 38 Y) need per-axis validation.
+      const yStep = profile.yStep ?? profile.xStep ?? 1;
+      if (!atkSteppedValueValid(x, profile, profile.xStep ?? 1) || !atkSteppedValueValid(y, profile, yStep)) return null;
+    } else {
+      const options = atkDpiOptionsForSensor(sensor);
+      if (!options.includes(x) || !options.includes(y)) return null;
+    }
   }
   const family = sensor ? ATK_SENSORS[sensor].family : "ultra";
   if (family === "paw3955master") return atkPackDpiStagePaw3955Master(x, y);
+  if (family === "stepped" && sensor) {
+    const profile = ATK_SENSORS[sensor];
+    const encodedX = atkEncodeDpiAxisStepped(x, profile.minDpi, profile.xStep ?? 1);
+    const encodedY = atkEncodeDpiAxisStepped(y, profile.minDpi, profile.yStep ?? profile.xStep ?? 1);
+    const mode = ((encodedY.nibble & 0x0f) << 4) | (encodedX.nibble & 0x0f);
+    const sum = (encodedX.byte + encodedY.byte + mode) & 0xff;
+    return [encodedX.byte, encodedY.byte, mode, (CHECKSUM_TOTAL - sum) & 0xff];
+  }
   const encode = family === "paw3395se"
     ? atkEncodeDpiAxisPaw3395Se
     : family === "step50"
@@ -189,6 +241,13 @@ export function atkUnpackDpiStageForSensor(
   const family = sensor ? ATK_SENSORS[sensor].family : "ultra";
   if (family === "paw3955master") return atkUnpackDpiStagePaw3955Master(data);
   if (data.length < 4 || (data[0]! + data[1]! + data[2]! + data[3]!) % 0x100 !== CHECKSUM_TOTAL) return null;
+  if (family === "stepped" && sensor) {
+    const profile = ATK_SENSORS[sensor];
+    return {
+      x: atkDecodeDpiAxisStepped(data[0]!, data[2]! & 0x0f, profile.minDpi, profile.xStep ?? 1),
+      y: atkDecodeDpiAxisStepped(data[1]!, (data[2]! >> 4) & 0x0f, profile.minDpi, profile.yStep ?? profile.xStep ?? 1),
+    };
+  }
   const decode = family === "paw3395se"
     ? atkDecodeDpiAxisPaw3395Se
     : family === "step50"
@@ -218,6 +277,12 @@ export function atkDpiOptionsForSensor(sensor: AtkSensor): number[] {
     const options: number[] = [];
     for (let dpi = profile.minDpi; dpi <= profile.maxDpi; dpi += 10) options.push(dpi);
     if (options[options.length - 1] !== profile.maxDpi) options.push(profile.maxDpi);
+    return options;
+  }
+  if (profile.family === "stepped") {
+    const step = profile.xStep ?? 1;
+    const options: number[] = [];
+    for (let dpi = profile.minDpi; dpi <= profile.maxDpi; dpi += step) options.push(dpi);
     return options;
   }
   const options: number[] = [];

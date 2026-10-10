@@ -3,6 +3,8 @@
  * Drivers added in a PR should set only the flags they need so the shell
  * stays free of brand-specific branching.
  */
+import type { AtkDeviceFeatures } from "./atk/device-catalog.generated.js";
+
 export interface MouseUiHints {
   /** Stable driver id, e.g. "egg-we". */
   family?: string;
@@ -260,6 +262,11 @@ export interface MouseStatus {
    * driver's last write rather than the hardware.
    */
   atkDongleLight?: number | null;
+  /**
+   * Vendor catalog capability flags for ATK/VXE mice (e.g. noBottomButton,
+   * noAthleticsMax, supportDpiToggle). Undefined when the model is unlisted.
+   */
+  atkCatalogFeatures?: AtkDeviceFeatures;
   /**
    * How many onboard profiles the device exposes, when it has a simple
    * numbered set the user can switch between (distinct from Logitech's

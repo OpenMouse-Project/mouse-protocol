@@ -880,6 +880,13 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...RAZER_VIPER_CONTROL_FILTERS,
   { vendorId: VENDOR_ID.vgn, productId: 0xfb56 },
   { vendorId: VENDOR_ID.vgn, productId: 0xfb57 },
+  // ATK/VXE config collection. ATK HUB 3.2.27 targets 0xFF04:0x02 (and
+  // 0xFF05:0x01 on the NearLink generation) on the same composite device and
+  // does not list 0xFF02 at all, yet the driver's hardware captures answered
+  // the 0x55-framed commands on 0xFF02:0x02. Both collections appear to be
+  // present; this filter and AtkHidClient.isSupported use 0xFF02 to match the
+  // verified transport. Re-evaluate with a per-interface collection dump if an
+  // ATK mouse ever fails to appear in the picker.
   { vendorId: VENDOR_ID.atk, usagePage: 0xff02, usage: 2 },
   ...BITMOUSE_PRODUCT_IDS.map((productId) => (
     { vendorId: VENDOR_ID.atk, productId, usagePage: BITMOUSE_USAGE_PAGE, usage: BITMOUSE_USAGE })),
