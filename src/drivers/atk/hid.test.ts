@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { atkPackDpiStage, atkPackDpiStageForSensor } from "@openmouse/protocol/atk";
+import { atkDpiOptionsForSensor, atkPackDpiStage, atkPackDpiStageForSensor, atkUnpackDpiStageForSensor } from "@openmouse/protocol/atk";
 import { wePackScalarPair } from "@openmouse/protocol/endgame-gear-we";
 import { AtkHidClient } from "./hid.ts";
 import { PulsarHidClient } from "../pulsar/pulsar-hid.ts";
@@ -1008,4 +1008,68 @@ test("setLiftOffScale is refused for a sensor without a continuous range", async
   (fake as unknown as FakeAtkDevice).replies = [reply(0x10, 0x0000, [0xfe, 0xed])];
 
   await assert.rejects(new AtkHidClient(fake).setLiftOffScale(9), /does not support a continuous lift-off range/);
+});
+
+// ── Vendor catalog wiring ──────────────────────────────────────────────────
+
+test("catalog fills the sensor for a mouse outside the hand-built table", () => {
+  // VXE X3 (0x373b:0x1248) is catalog-only and uses the step-100 PAW3315.
+  const client = new AtkHidClient(device(0x1248, "VXE X3"));
+  assert.equal(client.maxDpi(), 16000);
+  const options = client.getDpiOptions();
+  assert.equal(options[0], 200);
+  assert.equal(options[1], 300);
+  assert.ok(options.includes(16000), "16 000 DPI must be offered");
+});
+
+test("PAW3315 DPI stages round-trip through the step-100 codec", () => {
+  const packed = atkPackDpiStageForSensor("PAW3315", 800, 1600);
+  assert.ok(packed);
+  assert.deepEqual(atkUnpackDpiStageForSensor("PAW3315", packed), { x: 800, y: 1600 });
+});
+
+test("PAW3311 offers step-100 options and rejects off-step DPI", () => {
+  const options = atkUnpackDpiStageForSensor("PAW3311", atkPackDpiStageForSensor("PAW3311", 15000, 15000)!);
+  assert.deepEqual(options, { x: 15000, y: 15000 });
+  assert.equal(atkPackDpiStageForSensor("PAW3311", 15050, 15050), null);
+});
+
+test("stepped sensors use the vendor min-origin (200 DPI is code 0)", () => {
+  const packed = atkPackDpiStageForSensor("PAW3315", 200, 200)!;
+  assert.equal(packed[0], 0, "X code for 200 DPI");
+  assert.equal(packed[1], 0, "Y code for 200 DPI");
+  assert.deepEqual(atkUnpackDpiStageForSensor("PAW3315", packed), { x: 200, y: 200 });
+});
+
+test("PAW3320 uses per-axis min-origin steps (39 X / 38 Y)", () => {
+  const options = atkDpiOptionsForSensor("PAW3320");
+  assert.equal(options[0], 200);
+  assert.equal(options[1], 239);
+  const packed = atkPackDpiStageForSensor("PAW3320", 590, 580);
+  assert.ok(packed);
+  assert.deepEqual(atkUnpackDpiStageForSensor("PAW3320", packed!), { x: 590, y: 580 });
+});
+
+test("noZeroKeyDebounce removes the 0 ms option", () => {
+  // ATK X1 (0x373b:0x10d8) carries the vendor noZeroKeyDebounce flag.
+  const flagged = new AtkHidClient(device(0x10d8, "ATK X1"));
+  assert.ok(!flagged.getDebounceOptions().includes(0), "0 ms must be absent");
+  assert.deepEqual([...flagged.getDebounceOptions()].slice(0, 3), [1, 2, 3]);
+});
+
+test("a mouse without the flag keeps the 0 ms debounce option", () => {
+  const plain = new AtkHidClient(device(0x1017, "ATK X1 PRO MAX"));
+  assert.ok(plain.getDebounceOptions().includes(0), "0 ms must be offered");
+});
+
+test("a catalog-only mouse shows its real name and brand", () => {
+  const client = new AtkHidClient(device(0x1248, "USB Composite Device"));
+  assert.equal(client.displayName(), "VXE X3");
+  assert.equal(client.deviceBrand(), "VXE");
+});
+
+test("an unlisted mouse falls back to its USB product string", () => {
+  const client = new AtkHidClient(device(0x1085, "Wireless mouse -1k dongle"));
+  assert.equal(client.displayName(), "ATK Wireless mouse -1k dongle");
+  assert.equal(client.deviceBrand(), "ATK");
 });

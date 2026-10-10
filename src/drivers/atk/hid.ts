@@ -45,7 +45,9 @@ import {
   atkUnpackDpiStage,
   atkUnpackDpiStageForSensor,
 } from "@openmouse/protocol/atk";
-import { type AtkProduct, ATK_COMPX_PRODUCT_IDS, ATK_PRODUCTS } from "./products.ts";
+import { type AtkProduct, ATK_COMPX_PRODUCT_IDS, ATK_PRODUCTS, atkCatalogDevice, atkCatalogSensorToSensor } from "./products.ts";
+import type { AtkDeviceDescriptor, AtkDeviceFeatures } from "./device-catalog.generated.ts";
+import type { AtkSensor } from "@openmouse/protocol/atk";
 
 // ATK mice (A9 family and siblings) use the same OEM framing as the Endgame
 // Gear WE series — 16-byte EEPROM commands on report 0x08 — but carry them on
@@ -155,6 +157,14 @@ export class AtkHidClient {
   private product: AtkProduct | null = null;
   private identified = false;
   private identifyAttempts = 0;
+  /** Runtime CID/MID from command 0x10, e.g. "1,8". Null until identified. */
+  private cidMid: string | null = null;
+  /** Vendor catalog entry for this USB id, resolved lazily. */
+  private catalog: AtkDeviceDescriptor | null = null;
+  /** Whether the catalog lookup has run at least once. */
+  private catalogResolved = false;
+  /** CID/MID key the catalog entry was resolved for (null = USB id only). */
+  private catalogResolvedFor: string | null = null;
   /** Last dongle-light mode written; no read command is known. */
   private dongleLightCache: number | null = null;
 
@@ -162,6 +172,13 @@ export class AtkHidClient {
     this.device = device;
   }
 
+  /**
+   * Claims ATK/VXE config interfaces. The 0x55-framed transport was captured
+   * on the 0xFF02:0x02 collection; the vendor HUB prefers 0xFF04:0x02 (and
+   * 0xFF05:0x01 on NearLink) on the same composite device and never lists
+   * 0xFF02, so the two are believed to coexist. Widening this to the vendor's
+   * pages needs a collection dump to confirm the framing carries over.
+   */
   static isSupported(device: HIDDevice): boolean {
     const search = (collection: HIDCollectionInfo): boolean =>
       (collection.usagePage === 0xff02 && collection.usage === 0x0002)
@@ -181,6 +198,10 @@ export class AtkHidClient {
     this.dongleLightCache = null;
     this.identified = false;
     this.identifyAttempts = 0;
+    this.cidMid = null;
+    this.catalog = null;
+    this.catalogResolved = false;
+    this.catalogResolvedFor = null;
     if (this.device.opened) await this.device.close();
   }
 
@@ -191,13 +212,18 @@ export class AtkHidClient {
 
   displayName(): string {
     if (this.product) return `${this.product.brand} ${this.product.model}`;
+    // Catalog-only mice show their real model name instead of the USB string.
+    const catalog = this.catalogEntry();
+    if (catalog) return catalog.model;
     const name = this.device.productName?.trim();
     if (!name) return "ATK";
     return /^atk/i.test(name) ? name : `ATK ${name}`;
   }
 
   deviceBrand(): AtkProduct["brand"] {
-    return this.product?.brand ?? (/^vxe\b/i.test(this.device.productName || "") ? "VXE" : "ATK");
+    return this.product?.brand
+      ?? this.catalogEntry()?.brand
+      ?? (/^vxe\b/i.test(this.device.productName || "") ? "VXE" : "ATK");
   }
 
   /**
@@ -220,7 +246,8 @@ export class AtkHidClient {
   }
 
   maxDpi(): number {
-    return this.product ? ATK_SENSORS[this.product.sensor].maxDpi : DPI_MAX;
+    const sensor = this.sensorKey();
+    return sensor ? ATK_SENSORS[sensor].maxDpi : DPI_MAX;
   }
 
   private isX1ProMax(): boolean {
@@ -236,12 +263,15 @@ export class AtkHidClient {
   }
 
   getDebounceOptions(): readonly number[] {
-    return (this.isR1() && !this.usesR1LiveSettings()) || this.isX1ProMax()
-      ? R1_DEBOUNCE_MILLISECONDS
-      : Array.from(
-        { length: this.getDebounceMaxMs() + (this.usesR1LiveSettings() ? 0 : 1) },
-        (_, index) => index + (this.usesR1LiveSettings() ? 1 : 0),
-      );
+    if ((this.isR1() && !this.usesR1LiveSettings()) || this.isX1ProMax()) {
+      return R1_DEBOUNCE_MILLISECONDS;
+    }
+    // Devices flagged noZeroKeyDebounce start at 1 ms; the rest offer 0.
+    const startAtOne = this.usesR1LiveSettings() || this.features().noZeroKeyDebounce === true;
+    return Array.from(
+      { length: this.getDebounceMaxMs() + (startAtOne ? 0 : 1) },
+      (_, index) => index + (startAtOne ? 1 : 0),
+    );
   }
 
   getSupportedPollingRates(): number[] {
@@ -258,7 +288,8 @@ export class AtkHidClient {
    * Models top out below 42,000; writes are confirmed by reading back.
    */
   getDpiOptions(): number[] {
-    if (this.product) return atkDpiOptionsForSensor(this.product.sensor);
+    const sensor = this.sensorKey();
+    if (sensor) return atkDpiOptionsForSensor(sensor);
     const options: number[] = [];
     for (let dpi = DPI_MIN; dpi <= 10000; dpi += 10) options.push(dpi);
     for (let dpi = 10050; dpi <= 30000; dpi += 50) options.push(dpi);
@@ -307,14 +338,22 @@ export class AtkHidClient {
       : null;
     const angleTuning = angle ? weUnpackScalarPair(angle[0], angle[1]) : null;
     const angleSnapping = angle ? weUnpackScalarPair(angle[2], angle[3]) : null;
-    const sensorProfile = this.product ? ATK_SENSORS[this.product.sensor] : null;
+    const sensor = this.sensorKey();
+    const sensorProfile = sensor ? ATK_SENSORS[sensor] : null;
     return this.lastStatus = {
       brand: this.deviceBrand(),
       name: this.displayName(),
       ui: {
         family: "atk",
         hideUnsupportedPollingRates: true,
-        forceShowBattery: battery !== null,
+        forceShowBattery: battery !== null && this.features().noShowPower !== true,
+        // A catalog-only model (no hand-verified identity) is read/written with
+        // the generic protocol, so be explicit that it is unverified.
+        statusNote: this.product === null && this.catalogEntry() !== null
+          ? "Model identified from the ATK catalog; settings use the generic protocol and are not yet verified on this exact model."
+          : undefined,
+        // Vendor catalog: models flagged noSensorAngle have no angle control.
+        hideAngleSnapping: this.features().noSensorAngle === true ? true : undefined,
         dpiStageEditor: this.usesR1ProMaxUiTransport() ? {
           maxStages: R1_MAX_DPI_STAGES,
           countEditable: true,
@@ -322,7 +361,8 @@ export class AtkHidClient {
           maxDpi: sensorProfile?.maxDpi ?? DPI_MAX,
           stepDpi: 50,
         } : undefined,
-        dpiLighting: r1Extras ? {
+        // Vendor catalog: noDpiRGB models have no DPI-indicator LED control.
+        dpiLighting: r1Extras && this.features().noDpiRGB !== true ? {
           modes: [0, 1, 2],
           brightness: [0, 1, 2],
           speed: [0, 1, 2],
@@ -336,7 +376,7 @@ export class AtkHidClient {
       dpiStages: dpiStages.map(({ x }) => x),
       dpiStageColors: r1Extras?.dpiStageColors,
       activeDpiStage,
-      supportsSeparateDpiAxes: this.isR1ProMax(),
+      supportsSeparateDpiAxes: this.isR1ProMax() && this.features().noXyDpi !== true,
       pollingRateHz: await this.readPollingRate(system),
       supportedPollingRates: this.getSupportedPollingRates(),
       activeProfile: stored?.activeProfile ?? null,
@@ -344,7 +384,10 @@ export class AtkHidClient {
       atkButtonMappings: stored?.buttons,
       atkReceiver: receiver ?? undefined,
       connectionType: this.isWireless() ? "Wireless" : "Wired",
-      connectionDetail: this.isWireless() ? "2.4 GHz receiver" : "Wired USB",
+      connectionDetail: this.isWireless()
+        ? (this.features().isNearlink === true ? "NearLink receiver" : "2.4 GHz receiver")
+        : "Wired USB",
+      atkCatalogFeatures: this.catalogEntry()?.features,
       debounceMs: advanced[0],
       motionSync: advanced[2] === 1,
       sleepTimeout: advanced[4] * SLEEP_STEP_SECONDS || null,
@@ -508,7 +551,7 @@ export class AtkHidClient {
 
   async setDpi(dpi: number, dpiY: number = dpi): Promise<number> {
     await this.identify();
-    const sensor = this.product?.sensor ?? null;
+    const sensor = this.sensorKey();
     const options = sensor ? atkDpiOptionsForSensor(sensor) : null;
     for (const value of [dpi, dpiY]) {
       if (!Number.isInteger(value) || (options ? !options.includes(value) : value < DPI_MIN || value > DPI_MAX)) {
@@ -659,7 +702,7 @@ export class AtkHidClient {
     if (!Number.isInteger(index) || index < 0 || index >= count) {
       throw new Error(`DPI stage must be between 1 and ${count}.`);
     }
-    const sensor = this.product?.sensor ?? null;
+    const sensor = this.sensorKey();
     const options = sensor ? atkDpiOptionsForSensor(sensor) : this.getDpiOptions();
     if (!Number.isInteger(dpi) || !options.includes(dpi)) {
       throw new Error(`${dpi.toLocaleString()} is not a supported DPI value.`);
@@ -739,6 +782,10 @@ export class AtkHidClient {
 
   async setLongRangeMode(enabled: boolean): Promise<boolean> {
     await this.identify();
+
+    if (this.features().noFarDistance === true) {
+      throw new Error("This mouse does not support long-range mode.");
+    }
 
     const receiver = this.usesVerifiedR1ProMaxReceiverTransport();
     if (!this.usesVerifiedR1WiredTransport() && !receiver) {
@@ -1316,7 +1363,7 @@ export class AtkHidClient {
   }
 
   private dpiAddress(index: number): number {
-    const sensor = this.product?.sensor ?? null;
+    const sensor = this.sensorKey();
     if (sensor && ATK_SENSORS[sensor].family === "paw3955master") {
       return REGISTER.paw3955DpiBase + index * atkDpiStageLength(sensor);
     }
@@ -1324,10 +1371,10 @@ export class AtkHidClient {
   }
 
   private async readDpiStage(index: number): Promise<{ x: number; y: number }> {
-    const sensor = this.product?.sensor ?? null;
+    const sensor = this.sensorKey();
     const data = await this.read(this.dpiAddress(index), atkDpiStageLength(sensor));
-    const stage = this.product
-      ? atkUnpackDpiStageForSensor(this.product.sensor, data)
+    const stage = sensor
+      ? atkUnpackDpiStageForSensor(sensor, data)
       : atkUnpackDpiStage(data);
     if (!stage) throw new Error("The mouse reported a DPI stage that failed its checksum.");
     return stage;
@@ -1359,7 +1406,8 @@ export class AtkHidClient {
   }
 
   private supportsLiftOffScale(): boolean {
-    return this.product?.sensor === "PAW3950Ultra" || this.product?.sensor === "PAW3955Master";
+    const sensor = this.sensorKey();
+    return sensor === "PAW3950Ultra" || sensor === "PAW3955Master";
   }
 
   private liftOffScale(code: number): MouseStatus["liftOffScale"] {
@@ -1488,7 +1536,40 @@ export class AtkHidClient {
       return;
     }
     this.identified = true;
-    this.product = ATK_PRODUCTS[`${reply[DATA_OFFSET]},${reply[DATA_OFFSET + 1]}`] ?? null;
+    this.cidMid = `${reply[DATA_OFFSET]},${reply[DATA_OFFSET + 1]}`;
+    this.product = ATK_PRODUCTS[this.cidMid] ?? null;
+  }
+
+  /**
+   * Resolve the vendor catalog entry for this device, caching per CID/MID key
+   * so a later identification refreshes a USB-id-only lookup. Works without a
+   * CID/MID reply, so USB-id-only devices still get their feature set.
+   */
+  private resolveCatalog(): void {
+    if (this.catalogResolved && this.catalogResolvedFor === this.cidMid) return;
+    this.catalogResolved = true;
+    this.catalogResolvedFor = this.cidMid;
+    this.catalog = atkCatalogDevice(this.device.vendorId, this.device.productId, this.cidMid) ?? null;
+  }
+
+  /** Vendor catalog entry for this device, or null when it is unlisted. */
+  private catalogEntry(): AtkDeviceDescriptor | null {
+    this.resolveCatalog();
+    return this.catalog;
+  }
+
+  /** Vendor capability flags for this device; empty when unlisted. */
+  private features(): AtkDeviceFeatures {
+    return this.catalogEntry()?.features ?? {};
+  }
+
+  /**
+   * Sensor driving DPI limits and encoding: the verified hand-built product
+   * sensor wins, otherwise the catalog sensor fills in for newly covered mice.
+   */
+  private sensorKey(): AtkSensor | null {
+    if (this.product) return this.product.sensor;
+    return atkCatalogSensorToSensor(this.catalogEntry()?.sensor ?? null);
   }
 
   private usesSharedR1Transport(): boolean {

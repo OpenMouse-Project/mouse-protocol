@@ -1,4 +1,9 @@
 import type { AtkSensor } from "@openmouse/protocol/atk";
+import {
+  atkDeviceForHid,
+  type AtkCatalogSensor,
+  type AtkDeviceDescriptor,
+} from "./device-catalog.generated.ts";
 
 export interface AtkProduct {
   brand: "ATK" | "VXE";
@@ -7,6 +12,44 @@ export interface AtkProduct {
   family?: "r1";
   verified: boolean;
 }
+
+/**
+ * Map a catalog sensor onto the codec's supported {@link AtkSensor} union.
+ * Returns null for sensors with no verified codec yet (currently PAW3320) so
+ * callers fall back to the generic profile rather than a guessed one.
+ */
+export function atkCatalogSensorToSensor(sensor: AtkCatalogSensor | null): AtkSensor | null {
+  switch (sensor) {
+    case "PAW3950Ultra":
+    case "PAW3950":
+    case "PAW3950DM":
+    case "PAW3395Ultra":
+    case "PAW3395":
+    case "PAW3395SE":
+    case "PAW3315":
+    case "PAW3311":
+    case "PAW3320":
+    case "CORE26K":
+    case "PAW3955Master":
+      return sensor;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Full vendor descriptor for a connected mouse, looked up by USB id and
+ * disambiguated with the runtime CID/MID when a USB id is shared. Falls back to
+ * undefined for devices the vendor table does not list.
+ */
+export function atkCatalogDevice(
+  vendorId: number,
+  productId: number,
+  cidMid?: string | null,
+): AtkDeviceDescriptor | undefined {
+  return atkDeviceForHid(vendorId, productId, cidMid);
+}
+
 
 /** Mouse identity returned by GetMouseCIDMID (command 0x10). */
 export const ATK_PRODUCTS: Record<string, AtkProduct> = {
