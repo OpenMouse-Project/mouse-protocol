@@ -45,6 +45,18 @@ function collection(
   } as unknown as HIDCollectionInfo;
 }
 
+/**
+ * The collection shapes a hypothetical device can present.
+ *
+ * The vocabulary is deliberately finite so the sweep can exhaust it, but it is
+ * kept as small as it can be while still firing every driver: each usage page ×
+ * usage gets one collection carrying every report id, plus singleton shapes for
+ * the drivers that require exactly one input/output report (Teevolution,
+ * Pulsar) or a lone feature report. The exhaustive per-page × per-usage ×
+ * per-report-id cross product this used to enumerate was ~8,600 shapes and made
+ * the file take ~15 minutes; this pruned set is ~250. The "every driver fires"
+ * assertion below is the guard that the pruning did not drop a driver.
+ */
 function collectionShapes(): HIDCollectionInfo[][] {
   const shapes: HIDCollectionInfo[][] = [[]];
   // Dareu's receiver exposes a service collection beside its report-8 command
@@ -55,17 +67,25 @@ function collectionShapes(): HIDCollectionInfo[][] {
   ]);
   // G-Wolves XVI: a single unnumbered 64-byte feature report, found by shape.
   shapes.push([{ ...collection(0xff00, 1), featureReports: [report(0, 64)] } as HIDCollectionInfo]);
+  // A device offering every usage page at once, so a driver that only needs one
+  // of them is reachable without a shape per page.
   shapes.push(USAGE_PAGES.map((page) =>
     collection(page, 1, { feature: REPORT_IDS, input: REPORT_IDS, output: REPORT_IDS })));
   for (const page of USAGE_PAGES) {
     for (const usage of USAGES) {
       shapes.push([collection(page, usage, { feature: REPORT_IDS, input: REPORT_IDS, output: REPORT_IDS })]);
-      for (const id of REPORT_IDS) {
-        shapes.push([collection(page, usage, { input: [id], output: [id] })]);
-        shapes.push([collection(page, usage, { feature: [id] })]);
-      }
     }
   }
+  for (const id of REPORT_IDS) {
+    // Exactly one input and one output report.
+    shapes.push([collection(0x01, 0, { input: [id], output: [id] })]);
+    // Exactly one feature report.
+    shapes.push([collection(0x01, 0, { feature: [id] })]);
+  }
+  // The Pulsar XS1 dongle is claimed on the 0xffff:0x01 feature interface but
+  // only when no legacy input/output control collection sits beside it, so
+  // probe that interface feature-only.
+  shapes.push([collection(0xffff, 0x01, { feature: REPORT_IDS })]);
   return shapes;
 }
 
@@ -104,8 +124,35 @@ function candidateProductIds(): number[] {
     if (filter.productId !== undefined) ids.add(filter.productId);
   }
   for (const file of sourceFiles(DEVICES_DIR)) {
-    for (const match of readFileSync(file, "utf8").matchAll(/0x[0-9a-f]{4}\b/gi)) {
-      ids.add(Number.parseInt(match[0], 16));
+    const text = readFileSync(file, "utf8");
+    // Ids a driver compares directly against `device.productId`.
+    for (const line of text.split("\n")) {
+      if (!/product|pid/i.test(line)) continue;
+      for (const match of line.matchAll(/0x[0-9a-f]{4}\b/gi)) {
+        ids.add(Number.parseInt(match[0], 16));
+      }
+    }
+    // Ids listed inside a product-id set or map. Their entries rarely carry the
+    // word "product" on the line itself (e.g. Glorious' [[0x821d, {…}]] table,
+    // Gravastar's bare id list), so match the declaration and take every id
+    // literal up to the closing bracket. Scanning every 0x#### literal in the
+    // tree instead pulled in ~700 report sizes and command bytes that no driver
+    // can ever match on; this keeps the list to real product ids.
+    for (const decl of text.matchAll(
+      /(?:PRODUCT_IDS|PRODUCTS|PRODUCT_MAP|productIds?)\b[^=\n]*[=:][^=\n]*?(?:new\s+(?:Set|Map)\s*\(|\[)/gi,
+    )) {
+      let depth = 1;
+      let cursor = (decl.index ?? 0) + decl[0].length;
+      const start = cursor;
+      while (cursor < text.length && depth > 0) {
+        const ch = text[cursor];
+        if (ch === "[" || ch === "(") depth += 1;
+        else if (ch === "]" || ch === ")") depth -= 1;
+        cursor += 1;
+      }
+      for (const match of text.slice(start, cursor).matchAll(/0x[0-9a-f]{4}\b/gi)) {
+        ids.add(Number.parseInt(match[0], 16));
+      }
     }
   }
   return [...ids];
@@ -161,42 +208,63 @@ function claimsFor(
   return claims;
 }
 
-test("the probe matrix can trigger every driver", () => {
+/**
+ * One pass over the whole probe space. Both the coverage check and the overlap
+ * check read this single result: the space is millions of devices × 80
+ * drivers, and sweeping it once per test doubled the file's cost for no
+ * benefit.
+ */
+function sweepProbeSpace(): { fired: Set<number>; clashes: string[] } {
   const fired = new Set<number>();
-  for (const vendorId of VENDOR_IDS) {
-    for (const productId of PRODUCT_IDS) {
-      for (const collections of SHAPES) {
-        const mutable = probe as unknown as {
-          vendorId: number;
-          productId: number;
-          productName: string;
-          collections: HIDCollectionInfo[];
-        };
-        mutable.vendorId = vendorId;
-        mutable.productId = productId;
-        mutable.productName = "probe";
-        mutable.collections = collections;
-        DEVICE_DRIVERS.forEach((driver, index) => {
-          if (driver.supports(probe)) fired.add(index);
-        });
-      }
-    }
-  }
-  for (const named of NAMED_PROBES) {
+  const clashes = new Set<string>();
+  const visit = (
+    vendorId: number,
+    productId: number,
+    collections: HIDCollectionInfo[],
+    productName = "probe",
+  ): void => {
     const mutable = probe as unknown as {
       vendorId: number;
       productId: number;
       productName: string;
       collections: HIDCollectionInfo[];
     };
-    Object.assign(mutable, named);
+    mutable.vendorId = vendorId;
+    mutable.productId = productId;
+    mutable.productName = productName;
+    mutable.collections = collections;
+    const claims: string[] = [];
     DEVICE_DRIVERS.forEach((driver, index) => {
-      if (driver.supports(probe)) fired.add(index);
+      if (driver.supports(probe)) {
+        fired.add(index);
+        claims.push(driver.brand);
+      }
     });
+    if (claims.length > 1) {
+      clashes.add(
+        `vid 0x${vendorId.toString(16)} pid 0x${productId.toString(16)}`
+        + (productName === "probe" ? "" : ` name "${productName}"`)
+        + `: ${claims.join(" + ")}`,
+      );
+    }
+  };
+  for (const vendorId of VENDOR_IDS) {
+    for (const productId of PRODUCT_IDS) {
+      for (const collections of SHAPES) visit(vendorId, productId, collections);
+    }
   }
+  for (const named of NAMED_PROBES) {
+    visit(named.vendorId, named.productId, named.collections, named.productName);
+  }
+  return { fired, clashes: [...clashes] };
+}
+
+const PROBE_RESULT = sweepProbeSpace();
+
+test("the probe matrix can trigger every driver", () => {
   const never = DEVICE_DRIVERS
     .map((driver, index) => ({ driver, index }))
-    .filter(({ index }) => !fired.has(index))
+    .filter(({ index }) => !PROBE_RESULT.fired.has(index))
     .map(({ driver, index }) => `[${index}] ${driver.brand}`);
   assert.deepEqual(
     never,
@@ -206,28 +274,8 @@ test("the probe matrix can trigger every driver", () => {
 });
 
 test("no device can be claimed by more than one driver", () => {
-  const clashes: string[] = [];
-  for (const vendorId of VENDOR_IDS) {
-    for (const productId of PRODUCT_IDS) {
-      for (const collections of SHAPES) {
-        const claims = claimsFor(vendorId, productId, collections);
-        if (claims.length > 1) {
-          clashes.push(`vid 0x${vendorId.toString(16)} pid 0x${productId.toString(16)}: ${claims.join(" + ")}`);
-        }
-      }
-    }
-  }
-  for (const named of NAMED_PROBES) {
-    const claims = claimsFor(named.vendorId, named.productId, named.collections, named.productName);
-    if (claims.length > 1) {
-      clashes.push(
-        `vid 0x${named.vendorId.toString(16)} pid 0x${named.productId.toString(16)} `
-        + `name "${named.productName}": ${claims.join(" + ")}`,
-      );
-    }
-  }
   assert.deepEqual(
-    [...new Set(clashes)],
+    PROBE_RESULT.clashes,
     [],
     "Two drivers accept the same device. driverFor() returns the first match in DEVICE_DRIVERS, so the later one is silently dead. Narrow one driver's isSupported().",
   );
