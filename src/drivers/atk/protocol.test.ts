@@ -155,6 +155,18 @@ test("both A9 Mini + identities select PAW3955 Master and no R1 family", () => {
   assert.equal(ATK_SENSORS.PAW3955Master.maxDpi, 40000);
 });
 
+test("the A9 Plus Nearlink identity selects PAW3395, a 1K ceiling and no R1 family", () => {
+  // ATK HUB 3.2.27 maps CID/MID 2,83 on 373b:1115 to "ATK A9 Plus NK" with PAW3395.
+  assert.deepEqual(ATK_PRODUCTS["2,83"], {
+    brand: "ATK",
+    model: "A9 Plus Nearlink",
+    sensor: "PAW3395",
+    maxPollingHz: 1000,
+    verified: true,
+  });
+  assert.equal(ATK_PRODUCTS["2,83"]!.family, undefined);
+});
+
 test("PAW3955 Master uses six-byte rows, not the four-byte mode-nibble layout", () => {
   assert.equal(atkDpiStageLength("PAW3955Master"), 6);
   assert.equal(atkDpiStageLength("PAW3950Ultra"), 4);

@@ -98,6 +98,71 @@ selection, stage-count editing, and the full DPI/rate ranges are not claimed
 as tested. Sanitized driver traces and restoration results are in
 `captures/atk-x1-pro-max/`.
 
+## Verified ATK A9 Plus Nearlink
+
+ATK HUB 3.2.27 maps CID/MID `2,83` on `373b:1115` to "ATK A9 Plus NK" with
+PAW3395, `firmwareMark` `a9`, and `noFarDistance` (no long-range mode). The
+same entry appears in both the `hub.atk.pro` and `v3-hub.atk.store` builds,
+where HUB groups it with the VXE R1 and R1 Pro Max under one PAW3395 COMPX
+controller. OpenMouse names it after the mouse's own USB product string.
+
+| Connection | VID:PID | Product | Mouse firmware |
+| --- | --- | --- | --- |
+| Cable | `373b:1115` | ATK A9 Plus Nearlink | 1.20 |
+
+The cable interface exposes two `ff02:0002` collections, one with report `08`
+(16 bytes) and one with report `13` (19 bytes), beside a consumer-control
+collection and an `ff04:0002` collection with feature report `06`. The driver
+uses report `08`. The owner's wired read trace is in
+`captures/atk-a9-plus-nk/wired.json`.
+
+- Before this identity was added, the unknown-product fallback decoded the
+  active stage `1f 1f 00 17` as 320 DPI. The owner had set 1,600 DPI in ATK
+  HUB, which matches PAW3395's 50-DPI encoding.
+- ATK HUB's connect handshake (`DownLoadData`, command `0x01`, with four
+  random bytes) returned CID/MID `2,83` and connection type `2`, which HUB
+  names wired 1K. The owner confirms 1,000 Hz is the ceiling on both cable and
+  receiver, so OpenMouse offers 125 through 1,000 Hz and rejects higher rates
+  before writing. The driver does not send this handshake itself.
+- Lift-off read code `1`. The mouse uses the R1's codes, `1 = 1 mm` and
+  `2 = 2 mm`, not the continuous scale whose code `1` means 0.7 mm.
+- Straight-line correction is the pair at offset 6 of the `00a9` advanced row,
+  as on the X1 Pro Max. The `00bd` angle row read `ff ff ff ff` and is unused.
+- The battery reply declared two bytes (100%, charging). Bytes after the
+  declared payload are padding and are not interpreted as voltage.
+
+The owner read these choices from ATK HUB's settings for this mouse, and
+OpenMouse offers exactly the same lists:
+
+- Polling: 125, 250, 500, 1,000 Hz.
+- Lift-off: 1 mm and 2 mm, exposed as Low/High.
+- Debounce: 0, 1, 2, 4, 8, 15, 20 ms.
+- Sleep: 30, 60, 120, 180, 300, 1200, 1500, 1800 seconds.
+- Motion Sync, straight-line correction, and ripple correction: on/off.
+
+On 2026-10-10 the owner tested the locally built OpenMouse web UI in a
+Chromium browser over the cable, on mouse firmware 1.20. Each change below was
+applied without a readback error, survived a page reload, and was then restored.
+Where marked, the owner also confirmed the written value in ATK HUB. These are
+owner-reported observations.
+
+| Setting | Baseline | Test | Restored | Confirmed in ATK HUB |
+| --- | --- | --- | --- | --- |
+| Active-stage DPI | 1,600 | 800 | 1,600 | |
+| Polling setting | 1,000 Hz | 500 Hz | 1,000 Hz | Yes |
+| Lift-off | 1 mm | 2 mm | 1 mm | Yes, both values |
+| Debounce | 2 ms | 4 ms | 2 ms | |
+| Sleep | 120 seconds | 300 seconds | 120 seconds | |
+| Motion Sync | Off | On | Off | Yes |
+| Ripple correction | Off | On | Off | Yes |
+| Straight-line correction | Off | On | Off | Yes |
+
+The catalog verification covers these settings over the cable on firmware
+1.20. ATK HUB offered a firmware update from V1.2 to V1.3 that was not
+applied. The Nearlink receiver, HUB's Basic/Competitive sensor mode, button
+remapping, profile selection, stage-count editing, and the full DPI range are
+not claimed as tested.
+
 ## Verified VXE R1 SE+
 
 The raw EEPROM and identity values below were captured directly from one VXE R1
