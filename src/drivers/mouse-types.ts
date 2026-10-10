@@ -308,6 +308,35 @@ export interface MouseStatus {
   finalmouseDongleLedMode?: number | null;
   finalmouseTournamentScrollMode?: number | null;
   finalmouseTournamentScrollTimeoutMs?: number | null;
+  /** True on Starlight X dongles; false/undefined on Ultralight X. */
+  finalmouseIsSlx?: boolean | null;
+  /** Starlight X click mode per switch: 0 mechanical, 1 TMR analog. */
+  finalmouseClickModeL?: number | null;
+  finalmouseClickModeR?: number | null;
+  /** Starlight X release point per switch: 0 normal, 1 early, 2 late. */
+  finalmouseClickReleaseL?: number | null;
+  finalmouseClickReleaseR?: number | null;
+  /** Starlight X TMR actuation steps in 0.01 mm units (1-40). */
+  finalmouseTmrThrL?: number | null;
+  finalmouseTmrThrR?: number | null;
+  /** Starlight X rapid-trigger sensitivity in µm (150-250). */
+  finalmouseTmrHystL?: number | null;
+  finalmouseTmrHystR?: number | null;
+  /** Starlight X calibrated most-sensitive-point reference in µm. */
+  finalmouseTmrMspL?: number | null;
+  finalmouseTmrMspR?: number | null;
+  /** Starlight X PAW lift-off in millimetres (0.7-2.0). */
+  finalmousePawLodMm?: number | null;
+  /** True when the PAW value came from the custom slider rather than a preset. */
+  finalmousePawLodCustom?: boolean | null;
+  /** Starlight X profile roster size, when readable. */
+  finalmouseProfileCount?: number | null;
+  /** Starlight X active profile as a 0-based index. */
+  finalmouseProfileActive?: number | null;
+  /** Starlight X profile enable bitmask. */
+  finalmouseProfileEnabledMask?: number | null;
+  /** Starlight X profile names by 0-based index. */
+  finalmouseProfileNames?: Record<number, string> | null;
   /**
    * Incott's 2.4 GHz receiver LED: 0 connect & polling rate, 1 battery
    * status, 2 battery warning. A property of the dongle, so it is omitted
