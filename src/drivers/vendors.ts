@@ -604,12 +604,12 @@ export const TEEVOLUTION_PRODUCT_IDS = [0xf520, 0xf523, 0xf5bb, 0xf522] as const
 // 1..6, often past a keyboard paired first), and Bolt product ids live in
 // ./logitech/protocol with the direct-connect list.
 /**
- * USB product IDs devices re-enumerate as in bootloader/DFU mode, observed
- * adjacent to the vendor agent's Yeti bootloader binding
- * (USB_<vid>_<pid>_<iface> records: 046d:0ad0, 046d:0ad2, 046d:0ad3,
- * 046d:0ad6). A flasher opens these — never the runtime PID — once the
- * device has been rebooted into DFU mode. Verified presence only; protocol
- * behavior behind them is still unmapped.
+ * USB product IDs devices re-enumerate as in bootloader/DFU mode. The
+ * 046d:0ad0/ad2/ad3/ad6 set was observed adjacent to the vendor agent's
+ * Yeti bootloader binding; 046d:0ab24 was observed LIVE as a PRO LIGHTSPEED
+ * receiver's bootloader PID (runtime 046d:c54d -> bootloader 046d:ab24 ->
+ * runtime during a real vendor flash). A flasher opens these — never the
+ * runtime PID — once the device has been rebooted into DFU mode.
  */
 export const LOGITECH_BOOTLOADER_PRODUCT_IDS = [
   0x0ad0,

@@ -3441,12 +3441,13 @@ export class LogitechHidppClient {
   /**
    * Reads the receiver's own firmware version via HID++ 1.0 register 0xF1.
    *
-   * EXPERIMENTAL: the register is confirmed (the vendor agent reads receiver
-   * firmware "from 0xf1") and the framing follows the HID++ 1.0 short
-   * convention, but the version decode is validated against a single live
-   * readout so far (bytes [14, 3, 19] for entityVersion "14.3.19"). The raw
-   * bytes are always returned alongside, so a mismatching receiver generation
-   * can be diagnosed from Diagnostics instead of misreported. Read-only.
+   * EXPERIMENTAL: the register and framing are confirmed (the vendor
+   * agent reads receiver firmware "from 0xf1"; verified live against a PRO
+   * LIGHTSPEED receiver), but the reply bytes are per-MCU BOOTLOADER
+   * identifiers, not app versions — a full vendor flash
+   * (14.3.19 -> 14.4.20) left them byte-identical, so the dotted-decimal
+   * decode must not drive version verdicts. The raw bytes are always
+   * returned alongside for hardware identification. Read-only.
    */
   async readReceiverFirmware(): Promise<{ version: string | null; raw: number[] }> {
     await this.open();
