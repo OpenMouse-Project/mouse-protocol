@@ -486,6 +486,18 @@ export class LogitechHidppClient {
       this.registerWaiters.splice(registerIndex, 1)[0]?.resolve(report);
       return;
     }
+    const registerErrorIndex = this.registerWaiters.findIndex(
+      () => report[0] === RECEIVER_DEVICE_INDEX
+        && report[1] === 0x8f
+        && report[2] === HIDPP1_GET_REGISTER
+        && report[3] === RECEIVER_FIRMWARE_REGISTER,
+    );
+    if (registerErrorIndex >= 0) {
+      this.registerWaiters.splice(registerErrorIndex, 1)[0]?.reject(
+        new Error(`The receiver rejected register 0xF1 (HID++ error 0x${(report[4] ?? 0).toString(16)}).`),
+      );
+      return;
+    }
     if (report[0] === this.deviceIndex && report[1] === this.reportRateFeatureIndex && report[2] === 0x00 && report[3] === 0x01) {
       const rate = REPORT_RATE_HZ[report[4] ?? -1];
       if (rate) {
@@ -3439,23 +3451,21 @@ export class LogitechHidppClient {
   }
 
   /**
-   * Reads the receiver's own firmware version via HID++ 1.0 register 0xF1.
+   * Reads raw receiver MCU information via HID++ 1.0 register 0xF1.
    *
-   * EXPERIMENTAL: the register and framing are confirmed (the vendor
-   * agent reads receiver firmware "from 0xf1"; verified live against a PRO
-   * LIGHTSPEED receiver), but the reply bytes are per-MCU BOOTLOADER
-   * identifiers, not app versions — a full vendor flash
-   * (14.3.19 -> 14.4.20) left them byte-identical, so the dotted-decimal
-   * decode must not drive version verdicts. The raw bytes are always
-   * returned alongside for hardware identification. Read-only.
+   * On a live PRO LIGHTSPEED receiver, selector 1 returned [1, 7, 2] and
+   * selector 2 returned [2, 0, 17] both before and after G HUB updated the
+   * receiver from 14.3.19 to 14.4.20. These bytes do not encode the package
+   * version, so the version remains unknown until a verified read is found.
+   * Selector 0 returned HID++ error 0x03 on that receiver. Read-only.
    */
-  async readReceiverFirmware(): Promise<{ version: string | null; raw: number[] }> {
+  async readReceiverFirmware(mcu: 1 | 2 = 2): Promise<{ version: string | null; raw: number[] }> {
     await this.open();
     const report = new Uint8Array([
       RECEIVER_DEVICE_INDEX,
       HIDPP1_GET_REGISTER,
       RECEIVER_FIRMWARE_REGISTER,
-      0,
+      mcu,
       0,
       0,
     ]);
@@ -3464,10 +3474,10 @@ export class LogitechHidppClient {
     await this.reportDevice.sendReport(SHORT_REPORT_ID, report);
     const reply = await response;
     const payload = [...reply.subarray(3, 7)];
-    return {
-      version: payload.length >= 3 ? `${payload[0]}.${payload[1]}.${payload[2]}` : null,
-      raw: payload,
-    };
+    if (payload[0] !== mcu) {
+      throw new Error(`Receiver register 0xF1 answered for MCU ${payload[0] ?? "?"}, expected ${mcu}.`);
+    }
+    return { version: null, raw: payload };
   }
 
   private waitForRegisterReply(timeoutMs = REQUEST_TIMEOUT_MS): Promise<Uint8Array> {
