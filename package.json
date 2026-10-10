@@ -222,7 +222,7 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.json",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "tsx --import ./scripts/fast-test-timers.mjs --test \"src/**/*.test.ts\"",
     "check": "npm run build && npm test && npm pack --dry-run",
     "prepare": "npm run build"
   },
