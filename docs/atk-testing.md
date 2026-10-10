@@ -109,12 +109,22 @@ controller. OpenMouse names it after the mouse's own USB product string.
 | Connection | VID:PID | Product | Mouse firmware |
 | --- | --- | --- | --- |
 | Cable | `373b:1115` | ATK A9 Plus Nearlink | 1.20 |
+| NearLink receiver | `373b:10c9` | Nearlink Mouse Dongle | 1.20 |
 
 The cable interface exposes two `ff02:0002` collections, one with report `08`
 (16 bytes) and one with report `13` (19 bytes), beside a consumer-control
 collection and an `ff04:0002` collection with feature report `06`. The driver
-uses report `08`. The owner's wired read trace is in
-`captures/atk-a9-plus-nk/wired.json`.
+uses report `08`. The owner's read traces are in
+`captures/atk-a9-plus-nk/wired.json` and `receiver.json`.
+
+The receiver exposes the same four collections and answers for the mouse
+behind it: CID/MID `2,83` and the same status read as the cable, except that
+the battery reply reports discharging. ATK HUB lists `373b:10c9` as a generic
+receiver, "NK Mouse Dongle", in the same COMPX group, so the model is selected
+by CID/MID on both paths. OpenMouse labels the link "NearLink receiver" from
+the dongle's product string. HUB's separate Bitmouse entries named "ATK A9
+Plus NK" (`373b:1224`, `1263`, `1300` on usage page `ff05`) belong to other
+hardware revisions and were not seen on this unit.
 
 - Before this identity was added, the unknown-product fallback decoded the
   active stage `1f 1f 00 17` as 320 DPI. The owner had set 1,600 DPI in ATK
@@ -128,8 +138,12 @@ uses report `08`. The owner's wired read trace is in
   `2 = 2 mm`, not the continuous scale whose code `1` means 0.7 mm.
 - Straight-line correction is the pair at offset 6 of the `00a9` advanced row,
   as on the X1 Pro Max. The `00bd` angle row read `ff ff ff ff` and is unused.
-- The battery reply declared two bytes (100%, charging). Bytes after the
-  declared payload are padding and are not interpreted as voltage.
+- The battery reply declared two bytes: 100% and charging on the cable,
+  discharging through the receiver. Bytes after the declared payload are
+  padding and are not interpreted as voltage.
+- `GetMouseVersion` (`0x12`) returned 1.20 on both paths. ATK HUB reported
+  1.20 for both the mouse and the receiver, so the receiver capture does not
+  show which of the two answered.
 
 The owner read these choices from ATK HUB's settings for this mouse, and
 OpenMouse offers exactly the same lists:
@@ -141,10 +155,11 @@ OpenMouse offers exactly the same lists:
 - Motion Sync, straight-line correction, and ripple correction: on/off.
 
 On 2026-10-10 the owner tested the locally built OpenMouse web UI in a
-Chromium browser over the cable, on mouse firmware 1.20. Each change below was
-applied without a readback error, survived a page reload, and was then restored.
-Where marked, the owner also confirmed the written value in ATK HUB. These are
-owner-reported observations.
+Chromium browser over the cable and then through the NearLink receiver, with
+mouse and receiver firmware 1.20. On each connection, each change below was
+applied without a readback error, survived a page reload, and was then
+restored. Where marked, the owner also confirmed the written value in ATK HUB.
+These are owner-reported observations.
 
 | Setting | Baseline | Test | Restored | Confirmed in ATK HUB |
 | --- | --- | --- | --- | --- |
@@ -157,11 +172,11 @@ owner-reported observations.
 | Ripple correction | Off | On | Off | Yes |
 | Straight-line correction | Off | On | Off | Yes |
 
-The catalog verification covers these settings over the cable on firmware
-1.20. ATK HUB offered a firmware update from V1.2 to V1.3 that was not
-applied. The Nearlink receiver, HUB's Basic/Competitive sensor mode, button
-remapping, profile selection, stage-count editing, and the full DPI range are
-not claimed as tested.
+The catalog verification covers these settings on both connections with
+mouse and receiver firmware 1.20. ATK HUB offered updates to mouse firmware
+V1.3 and receiver firmware 1.23 that were not applied. HUB's Basic/Competitive
+sensor mode, button remapping, profile selection, stage-count editing, and the
+full DPI range are not claimed as tested.
 
 ## Verified VXE R1 SE+
 

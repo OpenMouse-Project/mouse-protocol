@@ -816,6 +816,10 @@ test("X1 Pro Max lift-off uses discrete 0.7, 1 and 2 mm codes", async () => {
   }
 });
 
+function hexFrame(line: string): number[] {
+  return line.split(" ").map((byte) => Number.parseInt(byte, 16));
+}
+
 /** Status replies captured from an ATK A9 Plus Nearlink (373b:1115, firmware 1.20) over its cable. */
 const A9_PLUS_NEARLINK_STATUS = [
   "10 00 00 00 02 02 53 00 00 00 00 00 00 00 00 e6", // CID/MID 2,83
@@ -826,7 +830,7 @@ const A9_PLUS_NEARLINK_STATUS = [
   "08 00 00 0a 02 01 54 00 00 00 00 00 00 00 00 e4", // lift-off code 1
   "08 00 00 a9 0a 02 53 00 55 0c 49 00 55 00 55 e9", // 2 ms debounce, 120 s sleep
   "08 00 00 bd 04 ff ff ff ff 00 00 00 00 00 00 88", // unprogrammed angle row
-].map((line) => line.split(" ").map((byte) => Number.parseInt(byte, 16)));
+].map(hexFrame);
 
 test("A9 Plus Nearlink capture decodes as PAW3395 with a 1K polling ceiling", async () => {
   const fake = device(0x1115, "ATK A9 Plus Nearlink");
@@ -841,6 +845,7 @@ test("A9 Plus Nearlink capture decodes as PAW3395 with a 1K polling ceiling", as
   assert.equal(status.name, "ATK A9 Plus Nearlink");
   assert.equal(status.brand, "ATK");
   assert.equal(status.connectionType, "Wired");
+  assert.equal(status.connectionDetail, "Wired USB");
   // The unknown-product Ultra fallback decoded this stage as 320 DPI.
   assert.equal(status.dpi, 1600);
   assert.deepEqual(status.dpiStages, [1600]);
@@ -860,6 +865,28 @@ test("A9 Plus Nearlink capture decodes as PAW3395 with a 1K polling ceiling", as
   assert.deepEqual(status.firmware, ["Mouse 1.20"]);
   assert.equal(client.isR1(), false);
   assert.equal(client.maxDpi(), 30000);
+});
+
+test("A9 Plus Nearlink through its Nearlink dongle reads as the same mouse, wirelessly", async () => {
+  const fake = device(0x10c9, "Nearlink Mouse Dongle");
+  // Captured through the dongle: identical to the cable except the battery is discharging.
+  const replies = A9_PLUS_NEARLINK_STATUS.map((frame) => [...frame]);
+  replies[1] = hexFrame("04 00 00 00 02 64 00 10 8e 00 00 00 00 00 00 45");
+  (fake as unknown as FakeAtkDevice).replies = replies;
+  assert.ok(SUPPORTED_HID_FILTERS.some((filter) =>
+    filter.vendorId === fake.vendorId && (filter.productId === undefined || filter.productId === 0x10c9)
+    && (filter.usagePage === undefined || filter.usagePage === 0xff02)
+    && (filter.usage === undefined || filter.usage === 2)));
+  assert.ok(createSupportedClient(fake) instanceof AtkHidClient);
+  const status = await new AtkHidClient(fake).readStatus();
+  assert.equal(status.name, "ATK A9 Plus Nearlink");
+  assert.equal(status.connectionType, "Wireless");
+  assert.equal(status.connectionDetail, "NearLink receiver");
+  assert.equal(status.batteryPercent, 100);
+  assert.equal(status.batteryState, "Discharging");
+  assert.equal(status.dpi, 1600);
+  assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
+  assert.deepEqual(status.supportedLiftOffDistances, ["Low", "High"]);
 });
 
 test("A9 Plus Nearlink offers ATK HUB's debounce and sleep lists", async () => {

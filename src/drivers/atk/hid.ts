@@ -239,6 +239,13 @@ export class AtkHidClient {
       || /receiver|dongle/i.test(this.device.productName || "");
   }
 
+  /** NearLink dongles: catalog-flagged models, or a product string naming the radio. */
+  private receiverDetail(): string {
+    const nearlink = this.features().isNearlink === true
+      || /nearlink/i.test(this.device.productName || "");
+    return nearlink ? "NearLink receiver" : "2.4 GHz receiver";
+  }
+
   /** VXE R1-family devices using the shared EEPROM command framing. */
   isR1(): boolean {
     return this.product?.family === "r1"
@@ -404,9 +411,7 @@ export class AtkHidClient {
       atkButtonMappings: stored?.buttons,
       atkReceiver: receiver ?? undefined,
       connectionType: this.isWireless() ? "Wireless" : "Wired",
-      connectionDetail: this.isWireless()
-        ? (this.features().isNearlink === true ? "NearLink receiver" : "2.4 GHz receiver")
-        : "Wired USB",
+      connectionDetail: this.isWireless() ? this.receiverDetail() : "Wired USB",
       atkCatalogFeatures: this.catalogEntry()?.features,
       debounceMs: advanced[0],
       motionSync: advanced[2] === 1,
