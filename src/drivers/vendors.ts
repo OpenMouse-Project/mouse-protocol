@@ -603,6 +603,21 @@ export const TEEVOLUTION_PRODUCT_IDS = [0xf520, 0xf523, 0xf5bb, 0xf522] as const
 // MX Vertical / MX Master 2S / MX Anywhere 2 behind it are HID++ 2.0 on slots
 // 1..6, often past a keyboard paired first), and Bolt product ids live in
 // ./logitech/protocol with the direct-connect list.
+/**
+ * USB product IDs devices re-enumerate as in bootloader/DFU mode. The
+ * 046d:0ad0/ad2/ad3/ad6 set was observed adjacent to the vendor agent's
+ * Yeti bootloader binding; 046d:0ab24 was observed LIVE as a PRO LIGHTSPEED
+ * receiver's bootloader PID (runtime 046d:c54d -> bootloader 046d:ab24 ->
+ * runtime during a real vendor flash). A flasher opens these — never the
+ * runtime PID — once the device has been rebooted into DFU mode.
+ */
+export const LOGITECH_BOOTLOADER_PRODUCT_IDS = [
+  0x0ad0,
+  0x0ad2,
+  0x0ad3,
+  0x0ad6,
+] as const;
+
 export const LOGITECH_RECEIVER_PRODUCT_IDS = [
   0xc54d,
   0xc543,

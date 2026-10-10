@@ -411,6 +411,27 @@ export interface MouseStatus {
   sensorMode?: "Eco" | "High" | "Ultra" | null;
   sensorModeStored?: 0 | 1 | null;
   sensorModeEditable?: boolean | null;
+  /**
+   * WALLHACK M-001 sensor scanning mode (function area 116): HIGH is the
+   * default frame rate, ACCEL pins the sensor to high performance at higher
+   * battery cost. Undefined when the mouse did not answer.
+   */
+  sensorScanningMode?: "HIGH" | "ACCEL" | null;
+  /** WALLHACK M-001 DPI acceleration on/off. Needs mouse firmware 57+. */
+  dynamicSensitivityEnabled?: boolean | null;
+  /** WALLHACK M-001 active DPI-acceleration curve. Needs mouse firmware 57+. */
+  dynamicSensitivityMode?: "classic" | "natural" | "jump" | "custom" | null;
+  /** WALLHACK M-001 motion-speed reporting (used to preview curves). */
+  dynamicSensitivitySpeedReporting?: boolean | null;
+  /**
+   * WALLHACK M-001 DPI-acceleration curve tables by mode. Each curve holds
+   * exactly 5 points: speed in sensor counts/ms, gain multiplier. Read on
+   * demand (not with the status poll); null until loaded.
+   */
+  dynamicSensitivityCurves?: Record<
+    "classic" | "natural" | "jump" | "custom",
+    Array<{ speed: number; gain: number }>
+  > | null;
   performanceDuration?: number | null;
   angleTuning?: number | null;
   wheelAcceleration?: boolean | null;

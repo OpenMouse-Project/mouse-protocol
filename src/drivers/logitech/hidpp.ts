@@ -303,6 +303,7 @@ const HOST_SWITCH_ACK_TIMEOUT_MS = 1500;
 const FEATURE = {
   deviceName: 0x0005,
   firmware: 0x0003,
+
   unifiedBattery: 0x1004,
   // Pre-unified battery reporting, still the only one on HERO-era mice.
   batteryStatus: 0x1000,
@@ -330,6 +331,16 @@ const FEATURE = {
   changeHost: 0x1814,
   reprogControls: 0x1b04,
 } as const;
+
+/**
+ * HID++ 1.0 short-register access for the receiver itself. The agent reads
+ * receiver firmware "from 0xf1"; framing follows the HID++ 1.0 short
+ * convention (device 0xFF = the receiver, sub-ID 0x81 = get-register).
+ */
+const RECEIVER_DEVICE_INDEX = 0xff;
+const HIDPP1_GET_REGISTER = 0x81;
+const RECEIVER_FIRMWARE_REGISTER = 0xf1;
+
 
 interface ResolvedFeature {
   index: number;
@@ -466,6 +477,27 @@ export class LogitechHidppClient {
     }
 
     const report = new Uint8Array(event.data.buffer.slice(event.data.byteOffset, event.data.byteOffset + event.data.byteLength));
+    const registerIndex = this.registerWaiters.findIndex(
+      () => report[0] === RECEIVER_DEVICE_INDEX
+        && report[1] === HIDPP1_GET_REGISTER
+        && report[2] === RECEIVER_FIRMWARE_REGISTER,
+    );
+    if (registerIndex >= 0) {
+      this.registerWaiters.splice(registerIndex, 1)[0]?.resolve(report);
+      return;
+    }
+    const registerErrorIndex = this.registerWaiters.findIndex(
+      () => report[0] === RECEIVER_DEVICE_INDEX
+        && report[1] === 0x8f
+        && report[2] === HIDPP1_GET_REGISTER
+        && report[3] === RECEIVER_FIRMWARE_REGISTER,
+    );
+    if (registerErrorIndex >= 0) {
+      this.registerWaiters.splice(registerErrorIndex, 1)[0]?.reject(
+        new Error(`The receiver rejected register 0xF1 (HID++ error 0x${(report[4] ?? 0).toString(16)}).`),
+      );
+      return;
+    }
     if (report[0] === this.deviceIndex && report[1] === this.reportRateFeatureIndex && report[2] === 0x00 && report[3] === 0x01) {
       const rate = REPORT_RATE_HZ[report[4] ?? -1];
       if (rate) {
@@ -507,6 +539,16 @@ export class LogitechHidppClient {
   private readonly waiters: Array<{
     featureIndex: number;
     functionId: number;
+    resolve: (report: Uint8Array) => void;
+    reject: (reason: Error) => void;
+  }> = [];
+
+  /**
+   * One-shot waiters for HID++ 1.0 register replies, matched on the exact
+   * [0xFF, 0x81, register] prefix. Separate from `waiters` because 1.0
+   * replies carry no software id, so the 2.0 matcher would never fire.
+   */
+  private readonly registerWaiters: Array<{
     resolve: (report: Uint8Array) => void;
     reject: (reason: Error) => void;
   }> = [];
@@ -3406,6 +3448,58 @@ export class LogitechHidppClient {
       firmware.push(`${name} ${major}.${minor}`);
     }
     return firmware;
+  }
+
+  /**
+   * Reads raw receiver MCU information via HID++ 1.0 register 0xF1.
+   *
+   * On a live PRO LIGHTSPEED receiver, selector 1 returned [1, 7, 2] and
+   * selector 2 returned [2, 0, 17] both before and after G HUB updated the
+   * receiver from 14.3.19 to 14.4.20. These bytes do not encode the package
+   * version, so the version remains unknown until a verified read is found.
+   * Selector 0 returned HID++ error 0x03 on that receiver. Read-only.
+   */
+  async readReceiverFirmware(mcu: 1 | 2 = 2): Promise<{ version: string | null; raw: number[] }> {
+    await this.open();
+    const report = new Uint8Array([
+      RECEIVER_DEVICE_INDEX,
+      HIDPP1_GET_REGISTER,
+      RECEIVER_FIRMWARE_REGISTER,
+      mcu,
+      0,
+      0,
+    ]);
+    const response = this.waitForRegisterReply();
+    void response.catch(() => undefined);
+    await this.reportDevice.sendReport(SHORT_REPORT_ID, report);
+    const reply = await response;
+    const payload = [...reply.subarray(3, 7)];
+    if (payload[0] !== mcu) {
+      throw new Error(`Receiver register 0xF1 answered for MCU ${payload[0] ?? "?"}, expected ${mcu}.`);
+    }
+    return { version: null, raw: payload };
+  }
+
+  private waitForRegisterReply(timeoutMs = REQUEST_TIMEOUT_MS): Promise<Uint8Array> {
+    return new Promise<Uint8Array>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        const index = this.registerWaiters.findIndex((waiter) => waiter.reject === reject);
+        if (index >= 0) {
+          this.registerWaiters.splice(index, 1);
+        }
+        reject(new HidppTimeoutError("The receiver did not answer its firmware register."));
+      }, timeoutMs);
+      this.registerWaiters.push({
+        resolve: (report) => {
+          window.clearTimeout(timeout);
+          resolve(report);
+        },
+        reject: (reason) => {
+          window.clearTimeout(timeout);
+          reject(reason);
+        },
+      });
+    });
   }
 
   private async request(featureIndex: number, functionId: number, ...parameters: number[]): Promise<Uint8Array> {
