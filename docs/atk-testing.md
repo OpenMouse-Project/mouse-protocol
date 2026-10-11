@@ -118,8 +118,9 @@ The cable interface exposes two `ff02:0002` collections, one with report `08`
 (16 bytes) and one with report `13` (19 bytes), beside a consumer-control
 collection and an `ff04:0002` collection with feature report `06`. The driver
 uses report `08`. The owner's read traces are in `captures/atk-a9-plus-nk/`:
-`wired.json` and `receiver.json` on firmware 1.20, and `wired-1.30.json` and
-`receiver-1.30.json` after the update.
+`wired.json` and `receiver.json` on firmware 1.20, `wired-1.30.json` and
+`receiver-1.30.json` after the update, and `sensor-mode.json` with the `00b5`
+row in each sensor mode.
 
 The receiver exposes the same four collections and answers for the mouse
 behind it: CID/MID `2,83` and the same status read as the cable, except that
@@ -150,6 +151,16 @@ this unit.
 - `GetMouseVersion` (`0x12`) returned 1.20 on both paths while the mouse and
   receiver both ran 1.20. After the update it returned 1.30 on both paths with
   the receiver at 1.23, so through the receiver the mouse answers.
+- HUB's Sensor Sampling Rate is the sensor-model pair at bytes 4-5 of the
+  `00b5` row, laid out as on the R1: sensor-sleep enabled, sensor-sleep time,
+  sensor model. HUB 1.30 offers "Basic Mode" (`0`) and "ATK Shard Competitive
+  Firmware" (`1`); the row read `01 54 0c 49 00 55` and `01 54 0c 49 01 54`
+  respectively, identically over cable and receiver. HUB adds a third mode,
+  Competitive Max (`2`), only for models whose upgrade entry sets
+  `cordedMode`; the `2,83` entry sets only `sensorAngle`, and the owner's HUB
+  showed only the two modes. OpenMouse exposes the pair as the R1's
+  Performance mode switch, writes the whole row with the sensor-sleep pairs
+  unchanged, and confirms the mode by reading it back.
 
 The owner read these choices from ATK HUB's settings for this mouse, and
 OpenMouse offers exactly the same lists:
@@ -159,6 +170,8 @@ OpenMouse offers exactly the same lists:
 - Debounce: 0, 1, 2, 4, 8, 15, 20 ms.
 - Sleep: 30, 60, 120, 180, 300, 1200, 1500, 1800 seconds.
 - Motion Sync, straight-line correction, and ripple correction: on/off.
+- Sensor Sampling Rate: Basic Mode and ATK Shard Competitive Firmware,
+  exposed as Performance mode off/on.
 
 On 2026-10-10 the owner tested the locally built OpenMouse web UI in a
 Chromium browser over the cable and then through the NearLink receiver, with
@@ -188,11 +201,16 @@ dial from -30 to 30 degrees with an on/off switch. Per HUB's code the row is
 as two's complement, and changing the angle keeps the switch. OpenMouse reads
 the stored angle into `angleTuning` but does not write this row yet.
 
+On firmware 1.30 with receiver 1.23, the owner also switched Performance mode
+on and off in OpenMouse, over the cable and then through the receiver. Each
+change applied without a readback error, survived a page reload, and showed
+in ATK HUB as the matching Sensor Sampling Rate.
+
 The catalog verification covers these settings on both connections, with the
-mouse on firmware 1.20 and 1.30 and the receiver on 1.20 and 1.23. Sensor
-Rotation, HUB's Basic/Competitive sensor mode, button remapping, profile
-selection, stage-count editing, and the full DPI range are not claimed as
-tested.
+mouse on firmware 1.20 and 1.30 and the receiver on 1.20 and 1.23; the sensor
+mode was verified on 1.30 and 1.23 only. Sensor Rotation, button remapping,
+profile selection, stage-count editing, and the full DPI range are not
+claimed as tested.
 
 ## Verified VXE R1 SE+
 
