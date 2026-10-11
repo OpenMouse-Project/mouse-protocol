@@ -290,11 +290,18 @@ export class LamzuHidClient {
     const activeStage = this.stageIndex((await this.request(PROFILE_READ.activeStage(profile)))[1], stages.length);
     const pollingRate = await this.request(PROFILE_READ.pollingRate(profile));
     const liftOffDistance = await this.request(PROFILE_READ.liftOffDistance(profile));
-    const separateAxes = await this.request(PROFILE_READ.separateAxes(profile)).catch(() => null);
+    const separateAxes = this.profile()?.separateDpiAxes === false
+      ? null
+      : await this.request(PROFILE_READ.separateAxes(profile)).catch(() => null);
     const angleSnapping = await this.request(PROFILE_READ.angleSnapping(profile)).catch(() => null);
     const motionSync = await this.request(PROFILE_READ.motionSync(profile)).catch(() => null);
-    const competitiveMode = await this.request(PROFILE_READ.competitiveMode(profile)).catch(() => null);
-    const hyperMode = await this.request(PROFILE_READ.hyperMode(profile)).catch(() => null);
+    const competitiveMode = this.profile()?.performanceMode === false
+      ? null
+      : await this.request(PROFILE_READ.competitiveMode(profile)).catch(() => null);
+    const hyperMode = this.profile()?.hyperMode === false
+      ? null
+      : await this.request(PROFILE_READ.hyperMode(profile)).catch(() => null);
+    const liftOffDistances = this.profile()?.liftOffDistances;
     const rippleControl = await this.request(PROFILE_READ.rippleControl(profile)).catch(() => null);
     const dongleLed = this.profile()?.dongleLed
       ? await this.request(PROFILE_READ.dongleLed(profile)).catch(() => null)
@@ -333,6 +340,7 @@ export class LamzuHidClient {
       debounceMs: debounce ? debounce[1] : null,
       sleepTimeout: this.decodeSleepTimeout(sleepTimeout),
       liftOffDistance: this.decodeLiftOffDistance(liftOffDistance[1]),
+      ...(liftOffDistances ? { supportedLiftOffDistances: [...liftOffDistances] } : {}),
       firmware: dongleFirmware
         ? [this.decodeFirmware("Mouse", firmware), this.decodeFirmware("Dongle", dongleFirmware)]
         : [this.decodeFirmware("Mouse", firmware)],
@@ -440,7 +448,10 @@ export class LamzuHidClient {
 
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
     const encoded = LIFT_OFF_DISTANCES.find(([, name]) => name === value);
-    if (!encoded) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
+    const offered = this.profile()?.liftOffDistances;
+    if (!encoded || (offered && !offered.includes(value))) {
+      throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
+    }
     const profile = await this.currentProfile();
     await this.write(PAGE.profile, WRITE.liftOffDistance, profile, [encoded[0]]);
     const confirmed = this.decodeLiftOffDistance((await this.request(PROFILE_READ.liftOffDistance(profile)))[1]);
@@ -460,10 +471,12 @@ export class LamzuHidClient {
   }
 
   async setPerformanceMode(enabled: boolean): Promise<boolean> {
+    if (this.profile()?.performanceMode === false) throw new Error("This mouse does not offer this sensor mode.");
     return await this.setFlag(WRITE.competitiveMode, PROFILE_READ.competitiveMode, enabled, "performanceMode", "competitive mode");
   }
 
   async setHyperMode(enabled: boolean): Promise<boolean> {
+    if (this.profile()?.hyperMode === false) throw new Error("This mouse does not offer Hyper mode.");
     return await this.setFlag(WRITE.hyperMode, PROFILE_READ.hyperMode, enabled, "hyperMode", "Hyper mode");
   }
 

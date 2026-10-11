@@ -158,6 +158,7 @@ export const VENDOR_ID = {
   wlmouse: 0x36a7,
   lamzu: 0x373e,
   lunafury: 0x373e,
+  vancer: 0x373e,
   bytech: 0x372e,
   lamzuInca: LAMZU_INCA_VENDOR_ID,
   attackshark: 0x373e,
@@ -859,8 +860,9 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.endgameGear },
   { vendorId: VENDOR_ID.wlmouse },
   // 0x373e is the shared CompX ODM vendor id behind Lamzu, CRDRAKO,
-  // LunaFury, and Attack Shark. The broad filter surfaces all of them; each
-  // driver rejects interfaces that lack the feature-report-0 control channel.
+  // LunaFury, Vancer, and Attack Shark. The broad filter surfaces all of them;
+  // each driver rejects interfaces that lack the feature-report-0 control
+  // channel.
   { vendorId: VENDOR_ID.lamzu },
   ...LAMZU_INCA_HID_FILTERS,
   { vendorId: VENDOR_ID.bytech, usagePage: 0xff00, usage: 0x0001 },

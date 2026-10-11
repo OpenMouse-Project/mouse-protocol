@@ -1,0 +1,169 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+import { LamzuHidClient } from "./hid.ts";
+import { AttackSharkHidClient } from "../attackshark/hid.ts";
+import { DEVICE_DRIVERS, deviceBrand } from "../registry.ts";
+import { LAMZU_PRODUCTS, LAMZU_VENDOR_ID, VANCER_PRODUCT_IDS } from "@openmouse/protocol/lamzu";
+
+const globals = globalThis as { window?: { setTimeout: typeof setTimeout } };
+globals.window ??= { setTimeout };
+
+interface Capture { trace: { request: string; reply: string }[] }
+const bytes = (hex: string) => Uint8Array.from(hex.split(" "), (byte) => parseInt(byte, 16));
+const capture = JSON.parse(readFileSync(
+  new URL("../../../captures/vancer-akitsu-medium/wired.json", import.meta.url), "utf8",
+)) as Capture;
+
+/**
+ * Answers every read with the payload the Akitsu Medium returned on hardware
+ * (captures/vancer-akitsu-medium/wired.json). Writes replace the payload the
+ * matching read returns, and commands the capture never saw are refused.
+ */
+function fakeAkitsu(productId = 0x0066) {
+  const sent: Uint8Array[] = [];
+  const payloads = new Map<string, number[]>();
+  for (const { reply } of capture.trace) {
+    const packet = bytes(reply);
+    payloads.set(`${packet[4]}:${packet[5]}`, [...packet.slice(6, 6 + packet[3]!)]);
+  }
+  const device = {
+    vendorId: LAMZU_VENDOR_ID, productId, productName: "Vancer Akitsu Mouse", opened: true,
+    collections: [{ usagePage: 0xffff, usage: 0, type: 1, children: [],
+      featureReports: [{ reportId: 0, items: [{ reportSize: 8, reportCount: 64 }] }],
+      inputReports: [], outputReports: [] }],
+    open: async () => {}, close: async () => {},
+    addEventListener: () => {}, removeEventListener: () => {},
+    sendFeatureReport: async (id: number, packet: Uint8Array) => {
+      assert.equal(id, 0);
+      sent.push(new Uint8Array(packet));
+      const command = packet[5]!;
+      if (command < 0x80) payloads.set(`${packet[4]}:${command | 0x80}`, [...packet.slice(6, 6 + packet[3]!)]);
+    },
+    receiveFeatureReport: async () => {
+      const packet = sent.at(-1)!;
+      const reply = new Uint8Array(64);
+      const payload = packet[5]! < 0x80 ? [] : payloads.get(`${packet[4]}:${packet[5]}`);
+      reply[0] = payload ? 0xa1 : 0xa2;
+      reply[2] = packet[2]!; reply[4] = packet[4]!; reply[5] = packet[5]!;
+      reply[3] = payload?.length ?? 0;
+      reply.set(payload ?? [], 6);
+      return new DataView(reply.buffer);
+    },
+  } as unknown as HIDDevice;
+  return { device, sent };
+}
+
+test("the Vancer catalog holds the three Akitsu models and none of their bootloaders", () => {
+  assert.deepEqual([...VANCER_PRODUCT_IDS], [0x0009, 0x000a, 0x0038, 0x0039, 0x0066, 0x0067]);
+  for (const productId of VANCER_PRODUCT_IDS) assert.equal(LAMZU_PRODUCTS.get(productId)?.brand, "Vancer");
+  for (const bootloader of [0xb009, 0xb00a, 0xb038, 0xb039]) assert.equal(LAMZU_PRODUCTS.has(bootloader), false);
+});
+
+test("every Akitsu runs on the CompX driver, not the Attack Shark one", () => {
+  for (const productId of VANCER_PRODUCT_IDS) {
+    const { device } = fakeAkitsu(productId);
+    assert.equal(AttackSharkHidClient.isSupported(device), false);
+    assert.deepEqual(DEVICE_DRIVERS.filter((driver) => driver.supports(device)).map((driver) => driver.brand), ["Lamzu"]);
+    assert.equal(deviceBrand(new LamzuHidClient(device)), "Vancer");
+  }
+});
+
+test("the Akitsu Medium cable capture replays into the settings the mouse held", async () => {
+  const { device, sent } = fakeAkitsu();
+  const client = new LamzuHidClient(device);
+  const status = await client.readStatus();
+
+  assert.deepEqual(sent.map((packet) => [...packet]), capture.trace.map(({ request }) => [...bytes(request)]));
+  assert.equal(status.brand, "Vancer");
+  assert.equal(status.name, "Vancer Akitsu Medium 3950");
+  assert.equal(status.connectionType, "Wired");
+  assert.deepEqual(status.firmware, ["Mouse 7.2"]);
+  assert.equal(status.batteryPercent, 100);
+  assert.equal(status.activeProfile, 1);
+  assert.equal(status.dpi, 2400);
+  assert.equal(status.dpiY, 2400);
+  assert.equal(status.pollingRateHz, 1000);
+  assert.deepEqual(status.supportedPollingRates, [500, 1000]);
+  assert.equal(status.liftOffDistance, "Low");
+  assert.equal(status.supportedLiftOffDistances, undefined);
+  assert.equal(status.debounceMs, 12);
+  assert.equal(status.sleepTimeout, 300);
+  assert.equal(status.angleSnapping, false);
+  assert.equal(status.motionSync, true);
+  assert.equal(status.performanceMode, true);
+  assert.equal(status.rippleControl, true);
+  assert.equal(client.getDpiOptions().at(-1), 30000);
+  assert.equal(client.maxDpiStages(), 5);
+  assert.deepEqual(client.getSleepOptions(), Array.from({ length: 30 }, (_, index) => (index + 1) * 60));
+});
+
+test("controls the Arbiter Web HUB hides are neither read nor offered", async () => {
+  const { device, sent } = fakeAkitsu();
+  const client = new LamzuHidClient(device);
+  const status = await client.readStatus();
+
+  assert.equal(status.supportsSeparateDpiAxes, false);
+  assert.equal(status.hyperMode, null);
+  assert.ok(!sent.some((packet) => packet[4] === 0x01 && (packet[5] === 0x8d || packet[5] === 0x8b)));
+  const count = sent.length;
+  await assert.rejects(client.setHyperMode(true), /does not offer Hyper mode/);
+  assert.equal(sent.length, count);
+});
+
+test("Akitsu writes use the Web HUB encodings and are confirmed by read-back", async () => {
+  const { device, sent } = fakeAkitsu();
+  const client = new LamzuHidClient(device);
+  await client.readStatus();
+  const writes = () => sent.filter((packet) => packet[5]! < 0x80).map((packet) => [...packet.slice(2, 10)]);
+
+  assert.equal(await client.setPollingRate(500), 500);
+  assert.equal(await client.setDpi(2450), 2450);
+  assert.equal(await client.setLiftOffDistance("Medium"), "Medium");
+  assert.equal(await client.setPerformanceMode(false), false);
+  assert.deepEqual(writes(), [
+    [0x02, 0x02, 0x01, 0x00, 0x01, 0x02, 0x00, 0x00],
+    [0x02, 0x06, 0x01, 0x01, 0x01, 0x01, 0x09, 0x92],
+    [0x02, 0x02, 0x01, 0x08, 0x01, 0x01, 0x00, 0x00],
+    [0x02, 0x02, 0x01, 0x13, 0x01, 0x00, 0x00, 0x00],
+  ]);
+  await assert.rejects(client.setPollingRate(2000), /does not support 2000 Hz/);
+});
+
+test("the 8K receivers offer 500 Hz to 8000 Hz and address the mouse behind them", async () => {
+  for (const productId of [0x000a, 0x0039, 0x0067]) {
+    const { device, sent } = fakeAkitsu(productId);
+    const status = await new LamzuHidClient(device).readStatus();
+    assert.equal(status.connectionType, "Wireless");
+    assert.deepEqual(status.supportedPollingRates, [500, 1000, 2000, 4000, 8000]);
+    const mouseRequests = sent.filter((packet) => !(packet[4] === 0x00 && packet[5] === 0x81 && packet[2] === 0x00));
+    assert.ok(mouseRequests.every((packet) => packet[2] === 0x02));
+  }
+});
+
+test("20K FPS is offered only on the Akitsu Medium, as in the Web HUB", async () => {
+  for (const productId of VANCER_PRODUCT_IDS) {
+    const { device, sent } = fakeAkitsu(productId);
+    const client = new LamzuHidClient(device);
+    const status = await client.readStatus();
+    const medium = productId === 0x0066 || productId === 0x0067;
+    assert.equal(status.performanceMode, medium ? true : null);
+    assert.equal(sent.some((packet) => packet[4] === 0x01 && packet[5] === 0x93), medium);
+    if (!medium) await assert.rejects(client.setPerformanceMode(true), /does not offer/);
+  }
+});
+
+test("the PAW3395 Akitsu offers only the 1 mm and 2 mm lift-off", async () => {
+  const { device, sent } = fakeAkitsu(0x0009);
+  const client = new LamzuHidClient(device);
+  const status = await client.readStatus();
+
+  assert.equal(status.name, "Vancer Akitsu 3395");
+  assert.deepEqual(status.supportedLiftOffDistances, ["Medium", "High"]);
+  assert.equal(client.getDpiOptions().at(-1), 26000);
+  const count = sent.length;
+  await assert.rejects(client.setLiftOffDistance("Low"), /does not support a low lift-off/);
+  assert.equal(sent.length, count);
+  assert.equal(await client.setLiftOffDistance("High"), "High");
+});

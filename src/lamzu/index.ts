@@ -2,13 +2,23 @@ export * from "../compx/codec.js";
 export * from "./atlantis.js";
 export * from "./lunafury.js";
 export * from "./magnetic.js";
+import type { CompaxLiftOffDistance } from "../compx/codec.js";
 export interface LamzuProduct {
   model: string;
   wireless: boolean;
   pollingRates: readonly number[];
-  brand?: "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "RAWM";
+  brand?: "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "RAWM" | "Vancer";
   /** Left and right buttons are magnetic switches (Leviathan V4 GT). */
   magnetic?: boolean;
+  /** Lift-off choices when the vendor offers fewer than all three. */
+  liftOffDistances?: readonly CompaxLiftOffDistance[];
+  /**
+   * False when the vendor configurator hides a control the firmware still
+   * answers, so the driver neither reads nor offers it.
+   */
+  separateDpiAxes?: boolean;
+  hyperMode?: boolean;
+  performanceMode?: boolean;
   uiFamily?: string;
   mouseTarget?: number;
   maxDpi?: number;
@@ -31,6 +41,22 @@ export const LUNAFURY_PRODUCT_IDS = [0x0032, 0x0033, 0x0054, 0x0084] as const;
 // same CompX platform: wired 125-1000, 8K receiver 125-8000, DPIMax 42000.
 // Only the R5 Ultra has been seen on hardware.
 export const ATTACKSHARK_PRODUCT_IDS = [0x0046, 0x0047, 0x0021, 0x0022, 0x003a, 0x003b] as const;
+// Vancer x Arbiter Studio Akitsu, from the Arbiter Web HUB device table
+// (webapp.arbiterstudio.com/Config/env-models.json, inspected 2026-10-11).
+// Each model pairs a cable id with an 8K receiver id; the B0xx bootloader
+// ids that table also lists are firmware-update identities and are left out.
+// See docs/vancer-akitsu.md.
+export const VANCER_PRODUCT_IDS = [0x0009, 0x000a, 0x0038, 0x0039, 0x0066, 0x0067] as const;
+const RATES_VANCER_WIRED = [500, 1000] as const;
+const RATES_VANCER_8K = [500, 1000, 2000, 4000, 8000] as const;
+// Whole minutes from 1 to 30, the range of the Web HUB's sleep slider.
+const SLEEP_VANCER: readonly number[] = Array.from({ length: 30 }, (_, index) => (index + 1) * 60);
+// The Web HUB sets DPIXYEnable and HyperModeEnable to 0 for every Akitsu, and
+// _20KFPS (its 0x93 toggle) to 1 only for the Akitsu Medium.
+const VANCER: Partial<LamzuProduct> = {
+  brand: "Vancer", maxDpiStages: 5, sleepOptions: SLEEP_VANCER,
+  separateDpiAxes: false, hyperMode: false, performanceMode: false,
+};
 export const LAMZU_PRODUCTS: ReadonlyMap<number, LamzuProduct> = new Map([
   // RAWM's Leviathan V4 GT answers the same page-command framing. Product ids
   // come from the V4 GT's web hub; not yet tried on hardware.
@@ -97,6 +123,24 @@ export const LAMZU_PRODUCTS: ReadonlyMap<number, LamzuProduct> = new Map([
   [0x003b, {
     brand: "Attack Shark", model: "R8", wireless: true,
     pollingRates: RATES_8K_FULL, maxDpi: 42000, uiFamily: "attack-shark",
+  }],
+  // The PAW3395 Akitsu offers only 1 mm and 2 mm lift-off; the 3950 models
+  // add 0.7 mm. Only the Akitsu Medium cable (0x0066) has been on hardware.
+  [0x0009, {
+    ...VANCER, model: "Akitsu 3395", wireless: false,
+    pollingRates: RATES_VANCER_WIRED, maxDpi: 26000, liftOffDistances: ["Medium", "High"],
+  }],
+  [0x000a, {
+    ...VANCER, model: "Akitsu 3395", wireless: true,
+    pollingRates: RATES_VANCER_8K, maxDpi: 26000, liftOffDistances: ["Medium", "High"],
+  }],
+  [0x0038, { ...VANCER, model: "Akitsu 3950", wireless: false, pollingRates: RATES_VANCER_WIRED }],
+  [0x0039, { ...VANCER, model: "Akitsu 3950", wireless: true, pollingRates: RATES_VANCER_8K }],
+  [0x0066, {
+    ...VANCER, model: "Akitsu Medium 3950", wireless: false, pollingRates: RATES_VANCER_WIRED, performanceMode: true,
+  }],
+  [0x0067, {
+    ...VANCER, model: "Akitsu Medium 3950", wireless: true, pollingRates: RATES_VANCER_8K, performanceMode: true,
   }],
 ]);
 /**
