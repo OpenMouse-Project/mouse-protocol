@@ -74,6 +74,9 @@ const VXE_R1_PRO_MAX_RECEIVER_PID = 0xf58a;
 const VXE_R1_PRO_MAX_MOUSE_PID = 0xf58c;
 const VXE_R1_COMPX_RECEIVER_PID = 0xf58e;
 const VXE_R1_COMPX_MOUSE_PID = 0xf58f;
+// ATK HUB's generic "NK Mouse Dongle". Its product string changed from
+// "Nearlink Mouse Dongle" to "NK mouse NANO dongle" with a receiver update.
+const NEARLINK_RECEIVER_PID = 0x10c9;
 const R1_SETTINGS_LENGTH = 4;
 
 // Byte addresses in the mouse's configuration EEPROM.
@@ -239,6 +242,14 @@ export class AtkHidClient {
       || /receiver|dongle/i.test(this.device.productName || "");
   }
 
+  /** NearLink dongles: catalog-flagged models, HUB's generic NK receiver, or a product string naming the radio. */
+  private receiverDetail(): string {
+    const nearlink = this.features().isNearlink === true
+      || (this.device.vendorId === VENDOR_ID.atk && this.device.productId === NEARLINK_RECEIVER_PID)
+      || /\b(?:nearlink|nk)\b/i.test(this.device.productName || "");
+    return nearlink ? "NearLink receiver" : "2.4 GHz receiver";
+  }
+
   /** VXE R1-family devices using the shared EEPROM command framing. */
   isR1(): boolean {
     return this.product?.family === "r1"
@@ -254,16 +265,31 @@ export class AtkHidClient {
     return this.product === ATK_PRODUCTS["2,39"];
   }
 
+  /** A9 Plus Nearlink (CID 2, MID 83): PAW3395 under the same ATK HUB controller as the R1. */
+  private isA9PlusNearlink(): boolean {
+    return this.product === ATK_PRODUCTS["2,83"];
+  }
+
+  /** Lift-off stored as 1 = 1 mm and 2 = 2 mm rather than the continuous 0.7 mm scale. */
+  private usesR1LiftOffCodes(): boolean {
+    return this.isR1() || this.isA9PlusNearlink();
+  }
+
+  /** ATK HUB's wired-R1 debounce and sleep lists, and straight-line correction at advanced offset 6. */
+  private sharesR1Settings(): boolean {
+    return this.isX1ProMax() || this.isA9PlusNearlink();
+  }
+
   getSleepOptions(): readonly number[] {
-    return (this.isR1() && !this.usesR1LiveSettings()) || this.isX1ProMax() ? R1_SLEEP_SECONDS : SLEEP_SECONDS;
+    return (this.isR1() && !this.usesR1LiveSettings()) || this.sharesR1Settings() ? R1_SLEEP_SECONDS : SLEEP_SECONDS;
   }
 
   getDebounceMaxMs(): number {
-    return this.isR1() || this.isX1ProMax() || this.isF1Ultimate() ? R1_DEBOUNCE_MAX_MS : DEBOUNCE_MAX_MS;
+    return this.isR1() || this.sharesR1Settings() || this.isF1Ultimate() ? R1_DEBOUNCE_MAX_MS : DEBOUNCE_MAX_MS;
   }
 
   getDebounceOptions(): readonly number[] {
-    if ((this.isR1() && !this.usesR1LiveSettings()) || this.isX1ProMax()) {
+    if ((this.isR1() && !this.usesR1LiveSettings()) || this.sharesR1Settings()) {
       return R1_DEBOUNCE_MILLISECONDS;
     }
     // Devices flagged noZeroKeyDebounce start at 1 ms; the rest offer 0.
@@ -275,6 +301,11 @@ export class AtkHidClient {
   }
 
   getSupportedPollingRates(): number[] {
+    const ceiling = this.product?.maxPollingHz ?? Infinity;
+    return this.transportPollingRates().filter((hertz) => hertz <= ceiling);
+  }
+
+  private transportPollingRates(): number[] {
     if (this.usesAtk1kReceiver()) return POLLING_RATES.map(([, hertz]) => hertz).filter((hertz) => hertz <= 1000);
     return this.usesR1LiveSettings()
       ? [...ATK_VXE_R1_POLLING_RATES]
@@ -384,9 +415,7 @@ export class AtkHidClient {
       atkButtonMappings: stored?.buttons,
       atkReceiver: receiver ?? undefined,
       connectionType: this.isWireless() ? "Wireless" : "Wired",
-      connectionDetail: this.isWireless()
-        ? (this.features().isNearlink === true ? "NearLink receiver" : "2.4 GHz receiver")
-        : "Wired USB",
+      connectionDetail: this.isWireless() ? this.receiverDetail() : "Wired USB",
       atkCatalogFeatures: this.catalogEntry()?.features,
       debounceMs: advanced[0],
       motionSync: advanced[2] === 1,
@@ -400,12 +429,12 @@ export class AtkHidClient {
       dpiLedMode: r1Extras?.dpiLedMode,
       dpiLedBrightness: r1Extras?.dpiLedBrightness,
       dpiLedSpeed: r1Extras?.dpiLedSpeed,
-      angleSnapping: this.isR1() || this.isX1ProMax() || this.isF1Ultimate()
+      angleSnapping: this.isR1() || this.sharesR1Settings() || this.isF1Ultimate()
         ? advanced[6] === 1
         : angleSnapping === null ? null : angleSnapping === 1,
       angleTuning: angleTuning === null ? null : this.decodeAngle(angleTuning),
       liftOffDistance: this.decodeLiftOffDistance(liftOffDistance[0]),
-      supportedLiftOffDistances: this.isR1() ? ["Low", "High"] : undefined,
+      supportedLiftOffDistances: this.usesR1LiftOffCodes() ? ["Low", "High"] : undefined,
       liftOffScale: this.supportsLiftOffScale() ? this.liftOffScale(liftOffDistance[0]) : undefined,
       firmware,
     };
@@ -527,6 +556,9 @@ export class AtkHidClient {
       throw new Error(`This receiver does not support ${pollingRateHz} Hz.`);
     }
     if (!this.usesR1LiveSettings()) await this.identify();
+    if (pollingRateHz > (this.product?.maxPollingHz ?? Infinity)) {
+      throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
+    }
     if (this.usesR1LiveSettings()) return await this.setR1PollingRate(pollingRateHz);
     const encoded = POLLING_RATES.find(([, hertz]) => hertz === pollingRateHz);
     if (!encoded) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
@@ -968,7 +1000,7 @@ export class AtkHidClient {
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
     if (!this.usesR1LiveSettings()) await this.identify();
     if (this.usesR1LiveSettings()) return await this.setR1LiftOffDistance(value);
-    const codes = this.isX1ProMax() ? X1_LIFT_OFF_CODES : this.isR1() ? R1_LIFT_OFF_CODES : LIFT_OFF_CODES;
+    const codes = this.isX1ProMax() ? X1_LIFT_OFF_CODES : this.usesR1LiftOffCodes() ? R1_LIFT_OFF_CODES : LIFT_OFF_CODES;
     const encoded = codes.find(([, name]) => name === value);
     if (!encoded) throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
     if (this.usesVerifiedR1ProMaxReceiverTransport()) {
@@ -1068,7 +1100,7 @@ export class AtkHidClient {
       return confirmed;
     }
 
-    if (this.isR1() || this.isX1ProMax() || this.isF1Ultimate()) {
+    if (this.isR1() || this.sharesR1Settings() || this.isF1Ultimate()) {
       return await this.setAdvancedFlag(
         6,
         enabled,
@@ -1104,7 +1136,7 @@ export class AtkHidClient {
 
   async setSleepTimeout(seconds: number): Promise<number> {
     if (!this.usesR1LiveSettings()) await this.identify();
-    const valid = this.isR1() || this.isX1ProMax()
+    const valid = this.isR1() || this.sharesR1Settings()
       ? this.getSleepOptions().includes(seconds)
       : Number.isInteger(seconds) && seconds >= SLEEP_STEP_SECONDS
         && seconds <= 0xff * SLEEP_STEP_SECONDS && seconds % SLEEP_STEP_SECONDS === 0;
@@ -1398,7 +1430,7 @@ export class AtkHidClient {
 
   private decodeLiftOffDistance(code: number): LiftOffDistance | null {
     if (this.isX1ProMax()) return X1_LIFT_OFF_CODES.find(([value]) => value === code)?.[1] ?? null;
-    if (this.isR1()) return R1_LIFT_OFF_CODES.find(([value]) => value === code)?.[1] ?? null;
+    if (this.usesR1LiftOffCodes()) return R1_LIFT_OFF_CODES.find(([value]) => value === code)?.[1] ?? null;
     const millimetres = atkDecodeLiftOff(code);
     if (millimetres === null) return null;
     if (millimetres < 1) return "Low";

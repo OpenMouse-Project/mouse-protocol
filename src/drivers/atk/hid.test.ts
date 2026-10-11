@@ -816,6 +816,169 @@ test("X1 Pro Max lift-off uses discrete 0.7, 1 and 2 mm codes", async () => {
   }
 });
 
+function hexFrame(line: string): number[] {
+  return line.split(" ").map((byte) => Number.parseInt(byte, 16));
+}
+
+/** Status replies captured from an ATK A9 Plus Nearlink (373b:1115, firmware 1.20) over its cable. */
+const A9_PLUS_NEARLINK_STATUS = [
+  "10 00 00 00 02 02 53 00 00 00 00 00 00 00 00 e6", // CID/MID 2,83
+  "04 00 00 00 02 64 01 10 8e 00 00 00 00 00 00 44", // 100 %, charging
+  "08 00 00 00 06 01 54 01 54 00 55 00 00 00 00 40", // 1000 Hz, one stage, stage 0 active
+  "08 00 00 0c 04 1f 1f 00 17 00 00 00 00 00 00 e0", // 1600 DPI, as set in ATK HUB
+  "12 00 00 00 02 01 20 00 00 00 00 00 00 00 00 18", // firmware 1.20
+  "08 00 00 0a 02 01 54 00 00 00 00 00 00 00 00 e4", // lift-off code 1
+  "08 00 00 a9 0a 02 53 00 55 0c 49 00 55 00 55 e9", // 2 ms debounce, 120 s sleep
+  "08 00 00 bd 04 ff ff ff ff 00 00 00 00 00 00 88", // unprogrammed angle row
+].map(hexFrame);
+
+test("A9 Plus Nearlink capture decodes as PAW3395 with a 1K polling ceiling", async () => {
+  const fake = device(0x1115, "ATK A9 Plus Nearlink");
+  (fake as unknown as FakeAtkDevice).replies = A9_PLUS_NEARLINK_STATUS.map((frame) => [...frame]);
+  assert.ok(SUPPORTED_HID_FILTERS.some((filter) =>
+    filter.vendorId === fake.vendorId && (filter.productId === undefined || filter.productId === 0x1115)
+    && (filter.usagePage === undefined || filter.usagePage === 0xff02)
+    && (filter.usage === undefined || filter.usage === 2)));
+  assert.ok(createSupportedClient(fake) instanceof AtkHidClient);
+  const client = new AtkHidClient(fake);
+  const status = await client.readStatus();
+  assert.equal(status.name, "ATK A9 Plus Nearlink");
+  assert.equal(status.brand, "ATK");
+  assert.equal(status.connectionType, "Wired");
+  assert.equal(status.connectionDetail, "Wired USB");
+  // The unknown-product Ultra fallback decoded this stage as 320 DPI.
+  assert.equal(status.dpi, 1600);
+  assert.deepEqual(status.dpiStages, [1600]);
+  assert.equal(status.pollingRateHz, 1000);
+  assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
+  assert.equal(status.liftOffDistance, "Low");
+  assert.deepEqual(status.supportedLiftOffDistances, ["Low", "High"]);
+  assert.equal(status.liftOffScale, undefined);
+  assert.equal(status.batteryPercent, 100);
+  assert.equal(status.batteryState, "Charging");
+  assert.equal(status.debounceMs, 2);
+  assert.equal(status.sleepTimeout, 120);
+  assert.equal(status.motionSync, false);
+  assert.equal(status.rippleControl, false);
+  // Straight-line correction is advanced offset 6, not the unprogrammed angle row.
+  assert.equal(status.angleSnapping, false);
+  assert.deepEqual(status.firmware, ["Mouse 1.20"]);
+  assert.equal(client.isR1(), false);
+  assert.equal(client.maxDpi(), 30000);
+});
+
+// The receiver renamed itself after its firmware update; the PID did not change.
+for (const dongleName of ["Nearlink Mouse Dongle", "NK mouse NANO dongle"]) {
+test(`A9 Plus Nearlink through "${dongleName}" reads as the same mouse, wirelessly`, async () => {
+  const fake = device(0x10c9, dongleName);
+  // Captured through the dongle: identical to the cable except the battery is discharging.
+  const replies = A9_PLUS_NEARLINK_STATUS.map((frame) => [...frame]);
+  replies[1] = hexFrame("04 00 00 00 02 64 00 10 8e 00 00 00 00 00 00 45");
+  (fake as unknown as FakeAtkDevice).replies = replies;
+  assert.ok(SUPPORTED_HID_FILTERS.some((filter) =>
+    filter.vendorId === fake.vendorId && (filter.productId === undefined || filter.productId === 0x10c9)
+    && (filter.usagePage === undefined || filter.usagePage === 0xff02)
+    && (filter.usage === undefined || filter.usage === 2)));
+  assert.ok(createSupportedClient(fake) instanceof AtkHidClient);
+  const status = await new AtkHidClient(fake).readStatus();
+  assert.equal(status.name, "ATK A9 Plus Nearlink");
+  assert.equal(status.connectionType, "Wireless");
+  assert.equal(status.connectionDetail, "NearLink receiver");
+  assert.equal(status.batteryPercent, 100);
+  assert.equal(status.batteryState, "Discharging");
+  assert.equal(status.dpi, 1600);
+  assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
+  assert.deepEqual(status.supportedLiftOffDistances, ["Low", "High"]);
+});
+}
+
+test("A9 Plus Nearlink on firmware 1.30 keeps its identity and straight-line source", async () => {
+  // Firmware 1.30 renamed the USB product and programmed the 0x00bd row, which ATK HUB
+  // reads as Sensor Rotation: [angle, check, switch, check].
+  const fake = device(0x1115, "ATK A9 PLUS 2.0 NK");
+  const replies = A9_PLUS_NEARLINK_STATUS.map((frame) => [...frame]);
+  replies[4] = hexFrame("12 00 00 00 02 01 30 00 00 00 00 00 00 00 00 08");
+  replies[7] = hexFrame("08 00 00 bd 04 00 55 00 55 00 00 00 00 00 00 da");
+  // Straight-line on (advanced offset 6) while the rotation switch stays off.
+  replies[6] = reply(0x08, 0xa9, [0x02, 0x53, 0x00, 0x55, 0x0c, 0x49, 0x01, 0x54, 0x00, 0x55]);
+  (fake as unknown as FakeAtkDevice).replies = replies;
+  const status = await new AtkHidClient(fake).readStatus();
+  assert.equal(status.name, "ATK A9 Plus Nearlink");
+  assert.equal(status.connectionDetail, "Wired USB");
+  assert.deepEqual(status.firmware, ["Mouse 1.30"]);
+  assert.equal(status.angleSnapping, true);
+  assert.equal(status.angleTuning, 0);
+});
+
+test("A9 Plus Nearlink offers ATK HUB's debounce and sleep lists", async () => {
+  const fake = device(0x1115, "ATK A9 Plus Nearlink");
+  (fake as unknown as FakeAtkDevice).replies = [reply(0x10, 0, [2, 83])];
+  const client = new AtkHidClient(fake);
+  await assert.rejects(client.setDebounceTime(3), /does not support/);
+  assert.deepEqual(client.getDebounceOptions(), [0, 1, 2, 4, 8, 15, 20]);
+  assert.equal(client.getDebounceMaxMs(), 20);
+  assert.deepEqual(client.getSleepOptions(), [30, 60, 120, 180, 300, 1200, 1500, 1800]);
+  await assert.rejects(client.setSleepTimeout(600), /does not support/);
+  assert.equal((fake as unknown as FakeAtkDevice).sent.some(({ data }) => data[0] === 0x07), false);
+});
+
+test("A9 Plus Nearlink straight-line correction preserves the other advanced pairs", async () => {
+  const fake = device(0x1115, "ATK A9 Plus Nearlink");
+  const before = [0x02, 0x53, 0x00, 0x55, 0x0c, 0x49, 0x00, 0x55, 0x00, 0x55];
+  const after = [0x02, 0x53, 0x00, 0x55, 0x0c, 0x49, 0x01, 0x54, 0x00, 0x55];
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0, [2, 83]), reply(0x08, 0xa9, before), reply(0x08, 0xa9, after),
+  ];
+  assert.equal(await new AtkHidClient(fake).setAngleSnapping(true), true);
+  assert.deepEqual(Array.from(wrote(fake).subarray(2, 15)), [0, 0xa9, 10, ...after]);
+});
+
+test("A9 Plus Nearlink rejects polling rates above 1000 Hz before writing", async () => {
+  const fake = device(0x1115, "ATK A9 Plus Nearlink");
+  (fake as unknown as FakeAtkDevice).replies = [reply(0x10, 0, [2, 83])];
+  const client = new AtkHidClient(fake);
+  for (const rate of [2000, 4000, 8000]) await assert.rejects(client.setPollingRate(rate), /mouse does not support/);
+  assert.equal((fake as unknown as FakeAtkDevice).sent.some(({ data }) => data[0] === 0x07), false);
+});
+
+test("A9 Plus Nearlink writes and confirms a supported polling rate", async () => {
+  const fake = device(0x1115, "ATK A9 Plus Nearlink");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0, [2, 83]), reply(0x08, 0, [2, 0x53, 1, 0x54, 0, 0x55]),
+  ];
+  assert.equal(await new AtkHidClient(fake).setPollingRate(500), 500);
+  assert.deepEqual(Array.from(wrote(fake).subarray(2, 7)), [0, 0, 2, 2, 0x53]);
+});
+
+test("A9 Plus Nearlink DPI writes use the PAW3395 50-DPI encoding", async () => {
+  const fake = device(0x1115, "ATK A9 Plus Nearlink");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0, [2, 83]),
+    reply(0x08, 0, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x000c, [0x0f, 0x0f, 0x00, 0x37]),
+  ];
+  assert.equal(await new AtkHidClient(fake).setDpi(800), 800);
+  const frame = wrote(fake);
+  // 800 / 50 - 1 = 15; the Ultra fallback would have written 79 (0x4f).
+  assert.deepEqual(Array.from(frame.subarray(2, 9)), [0, 12, 4, 0x0f, 0x0f, 0x00, 0x37]);
+  assert.equal(sumFrame(8, frame), 0x55);
+});
+
+test("A9 Plus Nearlink lift-off uses the 1 mm and 2 mm codes", async () => {
+  for (const [level, code] of [["Low", 1], ["High", 2]] as const) {
+    const fake = device(0x1115, "ATK A9 Plus Nearlink");
+    (fake as unknown as FakeAtkDevice).replies = [
+      reply(0x10, 0, [2, 83]), reply(0x08, 10, [code, 0x55 - code]),
+    ];
+    assert.equal(await new AtkHidClient(fake).setLiftOffDistance(level), level);
+    assert.deepEqual(Array.from(wrote(fake).subarray(2, 7)), [0, 10, 2, code, 0x55 - code]);
+  }
+  const fake = device(0x1115, "ATK A9 Plus Nearlink");
+  (fake as unknown as FakeAtkDevice).replies = [reply(0x10, 0, [2, 83])];
+  await assert.rejects(new AtkHidClient(fake).setLiftOffDistance("Medium"), /does not support a medium/);
+  assert.equal((fake as unknown as FakeAtkDevice).sent.some(({ data }) => data[0] === 0x07), false);
+});
+
 test("X1 Pro Max straight-line correction preserves the other advanced pairs", async () => {
   const fake = device(0x101b, "ATK Mouse 8K Dongle");
   const before = [0, 0x55, 1, 0x54, 6, 0x4f, 1, 0x54, 1, 0x54];
