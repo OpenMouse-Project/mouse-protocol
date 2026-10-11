@@ -29,15 +29,36 @@ export interface GWolvesProduct {
 
 export const GWOLVES_VENDOR_ID = 0x33e4;
 
+/**
+ * Mouse identity behind the shared 0x3854 receiver, from the XVI=0 entries in
+ * G-Wolves' https://mouse.fit/Config/env-models.json (MID is decimal).
+ * This names a handshake response; it does not verify a new model's settings.
+ */
+export const GWOLVES_RECEIVER_MODELS: ReadonlyMap<number, string> = new Map([
+  [2, "HTS Plus"],
+  [4, "Lycan"],
+  [5, "HTX Ultra"],
+  [6, "Lycan"],
+  [7, "HTX Ultra"],
+  [8, "HTS Plus"],
+  [9, "Fenrir Pro"],
+  [10, "HTX Mini"],
+  [11, "HTS Plus Pro"],
+  [12, "WARG"],
+  [13, "HTX Mini Asym"],
+  [17, "Fenrir Asym"],
+]);
+
 export const GWOLVES_PRODUCTS: ReadonlyMap<number, GWolvesProduct> = new Map([
   [0x5618, { model: "HTX Ultra", wireless: false, verified: true, protocol: "vgn" }],
-  [0x3854, { model: "HTX Ultra", wireless: true, verified: true, protocol: "vgn" }],
+  // The USB id belongs to the shared receiver; the handshake identifies its mouse.
+  [0x3854, { model: "8K receiver", wireless: true, verified: true, protocol: "vgn" }],
   // Read from mouse.fit (env-models.json, XVI 0, ButtonType 1, MID 11). Not tried on hardware.
   [0x5219, { model: "HTS Plus Pro", wireless: false, verified: false, protocol: "vgn", magnetic: true }],
   // Everything below is transcribed from G-Wolves' own live web-driver config
   // (https://mouse.xyz/Config/env-models.json), not independently
-  // hardware-tested. Re-checked 2026-09-26: only the HTX Ultra generation
-  // (wireless 0x3854) is XVI 0; every entry below is XVI 1, and all but the
+  // hardware-tested. The shared receiver above uses XVI 0. Every entry
+  // below is XVI 1, and all but the
   // "xvi-new" ones have "IsNewProtocol": "0". Add further G-Wolves models here
   // as they're captured/verified, but confirm with a real capture before
   // setting verified: true, since a wrong address/encoding on an unverified
@@ -87,5 +108,5 @@ export const GWOLVES_PRODUCTS: ReadonlyMap<number, GWolvesProduct> = new Map([
   [0x5903, { model: "HSK Plus ACE", wireless: true, verified: false, protocol: "xvi" }],
   // "TEST HTS Plus" in that config (wired 0x5428, wireless 0x3854) is
   // deliberately skipped: its own name marks it a dev/test entry, and its
-  // wireless id collides with the already-verified HTX Ultra's 0x3854.
+  // wireless id is the shared receiver's 0x3854, not a model-specific identity.
 ]);

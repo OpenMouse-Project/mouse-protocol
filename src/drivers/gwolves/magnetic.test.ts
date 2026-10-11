@@ -15,7 +15,7 @@ interface FakeOptions {
   noDepth?: boolean;
 }
 
-function magneticDevice(options: FakeOptions = {}): HIDDevice & { flash: Uint8Array; writes: number[]; calibrations: number; notify: (left: number, right: number) => void } {
+function magneticDevice(options: FakeOptions = {}): HIDDevice & { flash: Uint8Array; writes: number[]; calibrations: number; handshakes: number; notify: (left: number, right: number) => void } {
   const flash = new Uint8Array(256);
   const pair = (address: number, value: number): void => { flash[address] = value; flash[address + 1] = (0x55 - value) & 0xff; };
   pair(0xef, 4);
@@ -30,7 +30,7 @@ function magneticDevice(options: FakeOptions = {}): HIDDevice & { flash: Uint8Ar
     report[0] = 10; report[13] = left; report[14] = right;
     emit(report);
   };
-  const state = { writes: [] as number[], calibrations: 0 };
+  const state = { writes: [] as number[], calibrations: 0, handshakes: 0 };
   const fake = {
     vendorId: 0x33e4,
     productId: options.productId ?? 0x5219,
@@ -40,6 +40,7 @@ function magneticDevice(options: FakeOptions = {}): HIDDevice & { flash: Uint8Ar
     notify,
     get writes() { return state.writes; },
     get calibrations() { return state.calibrations; },
+    get handshakes() { return state.handshakes; },
     collections: [{
       usagePage: 0xff02, usage: 2, children: [], featureReports: [],
       inputReports: [{ reportId: 8, items: [{ reportCount: 16, reportSize: 8 }] }],
@@ -55,6 +56,7 @@ function magneticDevice(options: FakeOptions = {}): HIDDevice & { flash: Uint8Ar
       if (packet[0] === GWOLVES_COMMAND.read) reply.set(flash.subarray(address, address + packet[4]!), 5);
       if (packet[0] === GWOLVES_COMMAND.write) { flash.set(packet.subarray(5, 5 + packet[4]!), address); state.writes.push(address); }
       if (packet[0] === GWOLVES_COMMAND.handshake) {
+        state.handshakes += 1;
         if (options.modelId === null) return;
         reply[10] = options.modelId ?? 11;
       }
@@ -70,7 +72,7 @@ function magneticDevice(options: FakeOptions = {}): HIDDevice & { flash: Uint8Ar
       queueMicrotask(() => emit(reply));
     },
   };
-  return fake as unknown as HIDDevice & { flash: Uint8Array; writes: number[]; calibrations: number; notify: (left: number, right: number) => void };
+  return fake as unknown as HIDDevice & { flash: Uint8Array; writes: number[]; calibrations: number; handshakes: number; notify: (left: number, right: number) => void };
 }
 
 test("only the magnetic catalog entry reads magnetic settings over the cable", async () => {
@@ -102,6 +104,37 @@ test("a trigger point that fails its pair check is unknown rather than the most 
   const status = await new GWolvesHidClient(magneticDevice({ badTrigger: true })).readStatus();
   assert.equal(status.magneticButtons?.buttons[0]?.triggerPoint, null);
   assert.equal(status.magneticButtons?.buttons[1]?.triggerPoint, 5);
+});
+
+test("the shared receiver identifies Fenrir Pro from MID 9 without enabling magnetic controls", async () => {
+  const fake = magneticDevice({ productId: 0x3854, modelId: 9 });
+  const client = new GWolvesHidClient(fake);
+  const status = await client.readStatus();
+  assert.equal(status.name, "G-Wolves Fenrir Pro");
+  assert.equal(status.ui?.defaultDisplayName, "G-Wolves Fenrir Pro");
+  assert.match(status.ui!.pollingNote!, /Fenrir Pro/);
+  assert.equal(status.magneticButtons, undefined);
+  assert.equal(status.connectionType, "Wireless");
+  assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000, 2000, 4000, 8000]);
+  assert.equal((await client.readStatus()).name, "G-Wolves Fenrir Pro");
+  assert.equal(fake.handshakes, 1, "identity reuses the existing receiver handshake cache");
+  assert.equal(fake.writes.length, 0, "reading the identity writes no settings");
+});
+
+test("both HTX Ultra MIDs retain their existing display identity", async () => {
+  for (const modelId of [5, 7]) {
+    const status = await new GWolvesHidClient(magneticDevice({ productId: 0x3854, modelId })).readStatus();
+    assert.equal(status.name, "G-Wolves HTX Ultra");
+    assert.equal(status.magneticButtons, undefined);
+  }
+});
+
+test("an unknown or silent shared receiver is not labelled as an HTX Ultra", async () => {
+  for (const modelId of [99, null]) {
+    const status = await new GWolvesHidClient(magneticDevice({ productId: 0x3854, modelId })).readStatus();
+    assert.equal(status.name, "G-Wolves 8K receiver");
+    assert.equal(status.magneticButtons, undefined);
+  }
 });
 
 test("trigger point and rapid trigger write the stored value with its complement", async () => {
