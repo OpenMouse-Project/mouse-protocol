@@ -60,7 +60,10 @@ command and encoding in the Web HUB:
 
 The Web HUB always addresses the mouse as target `0x02`, on the cable as well
 as through the receiver. On hardware the Akitsu Medium cable answered both
-`0x02` and `0x00`, so no `mouseTarget` override is needed.
+`0x02` and `0x00`, so no `mouseTarget` override is needed. Through the 8K
+receiver, target `0x02` reaches the mouse and target `0x00` is the dongle
+itself. The dongle answers only the firmware read (page `0x00`, command
+`0x81`) and ignores every other command.
 
 The Web HUB sends lift-off as three bytes, `[profile, lod, extra]`, and echoes
 back a trailing byte it read. The Akitsu Medium returns only two bytes, so the
@@ -83,20 +86,26 @@ any packet.
 
 ## Hardware verification
 
-The Akitsu Medium 3950 cable (`0x0066`, mouse firmware `0.0.7.2`) was tested
-on macOS through node-hid with the real `LamzuHidClient`:
+The Akitsu Medium 3950 was tested on macOS through node-hid with the real
+`LamzuHidClient`, over the cable (`0x0066`) and the 8K receiver (`0x0067`).
+Mouse firmware was `0.0.7.2` and receiver firmware `0.0.7.0`.
 
-- `readStatus()` decoded firmware, battery, active profile, sleep, debounce,
-  DPI stages, polling rate, lift-off, angle snap, Motion Sync, 20K FPS and
-  Ripple Control. The session is recorded in
-  `captures/vancer-akitsu-medium/wired.json` and replayed by
+- On both connections, `readStatus()` decoded firmware, battery, active
+  profile, sleep, debounce, DPI stages, polling rate, lift-off, angle snap,
+  Motion Sync, 20K FPS and Ripple Control. The receiver also reported its own
+  firmware. Both sessions are recorded in `captures/vancer-akitsu-medium/`
+  (`wired.json`, `receiver.json`) and replayed by
   `src/drivers/lamzu/vancer.test.ts`.
-- 1000 → 500 → 1000 Hz, 2400 → 2450 → 2400 DPI and 0.7 → 1 → 0.7 mm lift-off
-  were each confirmed by read-back. A fresh `readStatus()` afterwards matched
-  the original settings.
+- Over the cable, 1000 → 500 → 1000 Hz was confirmed by read-back.
+- Through the receiver, each of 500, 2000, 4000 and 8000 Hz was confirmed by
+  read-back, then 1000 Hz was restored. Motion Sync stayed on after the
+  8000 Hz write. The Web HUB disables Motion Sync at 8000 Hz in its UI, but
+  the firmware did not.
+- On both connections, 2400 → 2450 → 2400 DPI and 0.7 → 1 → 0.7 mm lift-off
+  were confirmed by read-back. A fresh `readStatus()` afterwards matched the
+  original settings.
 - `setHyperMode` was refused without sending a packet.
 
-Not yet exercised: the Akitsu Medium 8K receiver (`0x0067`), the Akitsu 3395
-and 3950 at all, persistence across a power cycle, and testing in Chromium
-through OpenMouse. The receiver and other-model entries come from the vendor
-table only.
+Not yet exercised: the Akitsu 3395 and 3950 at all, persistence across a
+power cycle, and testing in Chromium through OpenMouse. The entries for the
+other two models come from the vendor table only.
