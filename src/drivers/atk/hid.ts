@@ -364,6 +364,9 @@ export class AtkHidClient {
     const stored = this.usesR1ProMaxUiTransport()
       ? await this.readR1StoredConfiguration().catch(() => null)
       : null;
+    const a9PerformanceMode = this.isA9PlusNearlink()
+      ? await this.readPerformanceMode()
+      : undefined;
     const receiver = this.usesR1LiveSettings()
       ? await this.readR1ReceiverInfo().catch(() => null)
       : null;
@@ -421,7 +424,7 @@ export class AtkHidClient {
       motionSync: advanced[2] === 1,
       sleepTimeout: advanced[4] * SLEEP_STEP_SECONDS || null,
       rippleControl: advanced[8] === 1,
-      performanceMode: r1Extras?.performanceMode,
+      performanceMode: r1Extras?.performanceMode ?? a9PerformanceMode,
       longRangeMode: r1Extras?.longRangeMode,
       atkSensorMode: f1Extras?.sensorMode ?? null,
       atkAntiMistouchMs: f1Extras?.antiMistouchMs ?? null,
@@ -804,7 +807,7 @@ export class AtkHidClient {
 
     const confirmed = this.usesVerifiedR1ProMaxReceiverTransport()
       ? await this.writeR1ProMaxReceiverPerformanceBlock(change)
-      : await this.writeR1PerformanceBlock(change);
+      : await this.writePerformanceBlock(change);
 
     const value = weUnpackScalarPair(confirmed[4]!, confirmed[5]!) === 1;
     if (value !== enabled) throw new Error(`The mouse left performance mode ${value ? "on" : "off"}.`);
@@ -1291,6 +1294,16 @@ export class AtkHidClient {
     }
   }
 
+  /**
+   * ATK HUB's "Basic Mode" (0) or "ATK Shard Competitive Firmware" (1): the
+   * pair at bytes 4-5 of the 0x00b5 row; null when unreadable or out of range.
+   */
+  private async readPerformanceMode(): Promise<boolean | null> {
+    const row = await this.read(REGISTER.sensorPerformance, R1_SENSOR_PERFORMANCE_LENGTH).catch(() => null);
+    const mode = row ? weUnpackScalarPair(row[4]!, row[5]!) : null;
+    return mode === 0 || mode === 1 ? mode === 1 : null;
+  }
+
   private decodeR1DpiLighting(block: Uint8Array): {
     dpiLedMode: number;
     dpiLedBrightness: number;
@@ -1383,9 +1396,10 @@ export class AtkHidClient {
     return await this.read(address, R1_SENSOR_PERFORMANCE_LENGTH);
   }
 
-  private async writeR1PerformanceBlock(change: (block: number[]) => void): Promise<Uint8Array> {
+  /** Wired R1s, and the A9 Plus Nearlink over its cable or NearLink receiver. */
+  private async writePerformanceBlock(change: (block: number[]) => void): Promise<Uint8Array> {
     await this.identify();
-    if (!this.usesVerifiedR1WiredTransport()) {
+    if (!this.usesVerifiedR1WiredTransport() && !this.isA9PlusNearlink()) {
       throw new Error("Performance mode is not available on this connection.");
     }
     const block = Array.from(await this.read(REGISTER.sensorPerformance, R1_SENSOR_PERFORMANCE_LENGTH));

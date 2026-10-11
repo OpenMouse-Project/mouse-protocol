@@ -830,7 +830,11 @@ const A9_PLUS_NEARLINK_STATUS = [
   "08 00 00 0a 02 01 54 00 00 00 00 00 00 00 00 e4", // lift-off code 1
   "08 00 00 a9 0a 02 53 00 55 0c 49 00 55 00 55 e9", // 2 ms debounce, 120 s sleep
   "08 00 00 bd 04 ff ff ff ff 00 00 00 00 00 00 88", // unprogrammed angle row
+  "08 00 00 b5 06 01 54 0c 49 00 55 00 00 00 00 8b", // Basic sensor mode, read on firmware 1.30
 ].map(hexFrame);
+
+/** The 0x00b5 row as ATK HUB left it in Competitive mode, identical over cable and receiver. */
+const A9_PLUS_NEARLINK_COMPETITIVE = hexFrame("08 00 00 b5 06 01 54 0c 49 01 54 00 00 00 00 8b");
 
 test("A9 Plus Nearlink capture decodes as PAW3395 with a 1K polling ceiling", async () => {
   const fake = device(0x1115, "ATK A9 Plus Nearlink");
@@ -862,6 +866,7 @@ test("A9 Plus Nearlink capture decodes as PAW3395 with a 1K polling ceiling", as
   assert.equal(status.rippleControl, false);
   // Straight-line correction is advanced offset 6, not the unprogrammed angle row.
   assert.equal(status.angleSnapping, false);
+  assert.equal(status.performanceMode, false);
   assert.deepEqual(status.firmware, ["Mouse 1.20"]);
   assert.equal(client.isR1(), false);
   assert.equal(client.maxDpi(), 30000);
@@ -889,6 +894,7 @@ test(`A9 Plus Nearlink through "${dongleName}" reads as the same mouse, wireless
   assert.equal(status.dpi, 1600);
   assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
   assert.deepEqual(status.supportedLiftOffDistances, ["Low", "High"]);
+  assert.equal(status.performanceMode, false);
 });
 }
 
@@ -901,6 +907,7 @@ test("A9 Plus Nearlink on firmware 1.30 keeps its identity and straight-line sou
   replies[7] = hexFrame("08 00 00 bd 04 00 55 00 55 00 00 00 00 00 00 da");
   // Straight-line on (advanced offset 6) while the rotation switch stays off.
   replies[6] = reply(0x08, 0xa9, [0x02, 0x53, 0x00, 0x55, 0x0c, 0x49, 0x01, 0x54, 0x00, 0x55]);
+  replies[8] = [...A9_PLUS_NEARLINK_COMPETITIVE];
   (fake as unknown as FakeAtkDevice).replies = replies;
   const status = await new AtkHidClient(fake).readStatus();
   assert.equal(status.name, "ATK A9 Plus Nearlink");
@@ -908,6 +915,41 @@ test("A9 Plus Nearlink on firmware 1.30 keeps its identity and straight-line sou
   assert.deepEqual(status.firmware, ["Mouse 1.30"]);
   assert.equal(status.angleSnapping, true);
   assert.equal(status.angleTuning, 0);
+  assert.equal(status.performanceMode, true);
+});
+
+test("A9 Plus Nearlink hides the sensor mode when its row fails the checksum", async () => {
+  const fake = device(0x1115, "ATK A9 Plus Nearlink");
+  const replies = A9_PLUS_NEARLINK_STATUS.map((frame) => [...frame]);
+  replies[8] = reply(0x08, 0xb5, [0x01, 0x54, 0x0c, 0x49, 0x01, 0x55]);
+  (fake as unknown as FakeAtkDevice).replies = replies;
+  assert.equal((await new AtkHidClient(fake).readStatus()).performanceMode, null);
+});
+
+for (const [productId, productName] of [[0x1115, "ATK A9 PLUS 2.0 NK"], [0x10c9, "NK mouse NANO dongle"]] as const) {
+test(`A9 Plus Nearlink writes the sensor mode through ${productName}, keeping the sensor-sleep pairs`, async () => {
+  const basic = [0x01, 0x54, 0x0c, 0x49, 0x00, 0x55];
+  const competitive = [0x01, 0x54, 0x0c, 0x49, 0x01, 0x54];
+  for (const [enabled, before, after] of [[true, basic, competitive], [false, competitive, basic]] as const) {
+    const fake = device(productId, productName);
+    (fake as unknown as FakeAtkDevice).replies = [
+      reply(0x10, 0, [2, 83]), reply(0x08, 0xb5, [...before]), reply(0x08, 0xb5, [...after]),
+    ];
+    assert.equal(await new AtkHidClient(fake).setPerformanceMode(enabled), enabled);
+    const frame = wrote(fake);
+    assert.deepEqual(Array.from(frame.subarray(2, 11)), [0, 0xb5, 6, ...after]);
+    assert.equal(sumFrame(8, frame), 0x55);
+  }
+});
+}
+
+test("A9 Plus Nearlink reports a sensor mode the mouse did not keep", async () => {
+  const fake = device(0x1115, "ATK A9 Plus Nearlink");
+  const basic = [0x01, 0x54, 0x0c, 0x49, 0x00, 0x55];
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0, [2, 83]), reply(0x08, 0xb5, basic), reply(0x08, 0xb5, basic),
+  ];
+  await assert.rejects(new AtkHidClient(fake).setPerformanceMode(true), /left performance mode off/);
 });
 
 test("A9 Plus Nearlink offers ATK HUB's debounce and sleep lists", async () => {

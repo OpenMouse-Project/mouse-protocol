@@ -1,0 +1,41 @@
+{
+  "device": {
+    "vendorId": "0x373b",
+    "model": "ATK A9 Plus Nearlink (CID/MID 2,83)",
+    "firmware": [
+      "Mouse 1.30",
+      "Receiver 1.23"
+    ],
+    "method": "Sensor Sampling Rate set in ATK HUB, then the 6-byte 0x00b5 row read over report 08 from the browser console"
+  },
+  "reads": [
+    {
+      "hubMode": "Basic Mode",
+      "connection": "Wired USB",
+      "productId": "0x1115",
+      "request": "08 08 00 00 b5 06 00 00 00 00 00 00 00 00 00 00 8a",
+      "reply": "08 08 00 00 b5 06 01 54 0c 49 00 55 00 00 00 00 8b"
+    },
+    {
+      "hubMode": "Basic Mode",
+      "connection": "NearLink receiver",
+      "productId": "0x10c9",
+      "request": "08 08 00 00 b5 06 00 00 00 00 00 00 00 00 00 00 8a",
+      "reply": "08 08 00 00 b5 06 01 54 0c 49 00 55 00 00 00 00 8b"
+    },
+    {
+      "hubMode": "ATK Shard Competitive Firmware",
+      "connection": "Wired USB",
+      "productId": "0x1115",
+      "request": "08 08 00 00 b5 06 00 00 00 00 00 00 00 00 00 00 8a",
+      "reply": "08 08 00 00 b5 06 01 54 0c 49 01 54 00 00 00 00 8b"
+    },
+    {
+      "hubMode": "ATK Shard Competitive Firmware",
+      "connection": "NearLink receiver",
+      "productId": "0x10c9",
+      "request": "08 08 00 00 b5 06 00 00 00 00 00 00 00 00 00 00 8a",
+      "reply": "08 08 00 00 b5 06 01 54 0c 49 01 54 00 00 00 00 8b"
+    }
+  ]
+}
