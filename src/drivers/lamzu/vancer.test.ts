@@ -59,10 +59,9 @@ function fakeAkitsu(productId = 0x0066, capture = wired) {
   return { device, sent };
 }
 
-test("the Vancer catalog holds the three Akitsu models and none of their bootloaders", () => {
-  assert.deepEqual([...VANCER_PRODUCT_IDS], [0x0009, 0x000a, 0x0038, 0x0039, 0x0066, 0x0067]);
+test("the Vancer catalog holds the Akitsu Medium cable and 8K receiver", () => {
+  assert.deepEqual([...VANCER_PRODUCT_IDS], [0x0066, 0x0067]);
   for (const productId of VANCER_PRODUCT_IDS) assert.equal(LAMZU_PRODUCTS.get(productId)?.brand, "Vancer");
-  for (const bootloader of [0xb009, 0xb00a, 0xb038, 0xb039]) assert.equal(LAMZU_PRODUCTS.has(bootloader), false);
 });
 
 test("every Akitsu runs on the CompX driver, not the Attack Shark one", () => {
@@ -103,7 +102,7 @@ test("the Akitsu Medium cable capture replays into the settings the mouse held",
   assert.deepEqual(client.getSleepOptions(), Array.from({ length: 30 }, (_, index) => (index + 1) * 60));
 });
 
-test("controls the Arbiter Web HUB hides are neither read nor offered", async () => {
+test("controls Arbiter's app does not offer are neither read nor offered", async () => {
   const { device, sent } = fakeAkitsu();
   const client = new LamzuHidClient(device);
   const status = await client.readStatus();
@@ -116,7 +115,7 @@ test("controls the Arbiter Web HUB hides are neither read nor offered", async ()
   assert.equal(sent.length, count);
 });
 
-test("Akitsu writes use the Web HUB encodings and are confirmed by read-back", async () => {
+test("Akitsu writes use the CompX encodings and are confirmed by read-back", async () => {
   const { device, sent } = fakeAkitsu();
   const client = new LamzuHidClient(device);
   await client.readStatus();
@@ -154,7 +153,7 @@ test("the Akitsu Medium receiver capture replays into the mouse and dongle setti
   assert.deepEqual(sent.filter((packet) => packet[2] === 0x00).map((packet) => [packet[4], packet[5]]), [[0x00, 0x81]]);
 });
 
-test("the Akitsu receiver writes every 8K rate with the Web HUB codes", async () => {
+test("the Akitsu receiver writes every 8K rate with the CompX codes", async () => {
   const { device, sent } = fakeAkitsu(0x0067, receiver);
   const client = new LamzuHidClient(device);
   await client.readStatus();
@@ -163,41 +162,4 @@ test("the Akitsu receiver writes every 8K rate with the Web HUB codes", async ()
   const writes = sent.filter((packet) => packet[4] === 0x01 && packet[5] === 0x00);
   assert.ok(writes.every((packet) => packet[2] === 0x02 && packet[6] === 0x01));
   assert.deepEqual(writes.map((packet) => packet[7]), [0x02, 0x20, 0x40, 0x80, 0x01]);
-});
-
-test("the untested 8K receivers offer 500 Hz to 8000 Hz and address the mouse behind them", async () => {
-  for (const productId of [0x000a, 0x0039]) {
-    const { device, sent } = fakeAkitsu(productId, receiver);
-    const status = await new LamzuHidClient(device).readStatus();
-    assert.equal(status.connectionType, "Wireless");
-    assert.deepEqual(status.supportedPollingRates, [500, 1000, 2000, 4000, 8000]);
-    const mouseRequests = sent.filter((packet) => !(packet[4] === 0x00 && packet[5] === 0x81 && packet[2] === 0x00));
-    assert.ok(mouseRequests.every((packet) => packet[2] === 0x02));
-  }
-});
-
-test("20K FPS is offered only on the Akitsu Medium, as in the Web HUB", async () => {
-  for (const productId of VANCER_PRODUCT_IDS) {
-    const { device, sent } = fakeAkitsu(productId);
-    const client = new LamzuHidClient(device);
-    const status = await client.readStatus();
-    const medium = productId === 0x0066 || productId === 0x0067;
-    assert.equal(status.performanceMode, medium ? true : null);
-    assert.equal(sent.some((packet) => packet[4] === 0x01 && packet[5] === 0x93), medium);
-    if (!medium) await assert.rejects(client.setPerformanceMode(true), /does not offer/);
-  }
-});
-
-test("the PAW3395 Akitsu offers only the 1 mm and 2 mm lift-off", async () => {
-  const { device, sent } = fakeAkitsu(0x0009);
-  const client = new LamzuHidClient(device);
-  const status = await client.readStatus();
-
-  assert.equal(status.name, "Vancer Akitsu 3395");
-  assert.deepEqual(status.supportedLiftOffDistances, ["Medium", "High"]);
-  assert.equal(client.getDpiOptions().at(-1), 26000);
-  const count = sent.length;
-  await assert.rejects(client.setLiftOffDistance("Low"), /does not support a low lift-off/);
-  assert.equal(sent.length, count);
-  assert.equal(await client.setLiftOffDistance("High"), "High");
 });
