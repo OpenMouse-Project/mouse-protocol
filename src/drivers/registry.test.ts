@@ -16,6 +16,7 @@ import {
   DELUX_OEM_VENDOR_ID,
 } from "@openmouse/protocol/delux";
 import { COOLERMASTER_PRODUCT_IDS } from "@openmouse/protocol/coolermaster";
+import { BLOODY_PRODUCT_IDS } from "../bloody/index.ts";
 
 const DEVICES_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -119,6 +120,7 @@ function candidateProductIds(): number[] {
     // Claimed by id alone and defined outside src/drivers, so the source
     // scan below would not find it.
     DELUX_M600_PRO_WIRED_PID,
+    ...BLOODY_PRODUCT_IDS,
   ]);
   for (const filter of SUPPORTED_HID_FILTERS) {
     if (filter.productId !== undefined) ids.add(filter.productId);

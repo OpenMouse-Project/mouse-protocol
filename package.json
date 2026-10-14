@@ -221,6 +221,10 @@
     "./coolermaster": {
       "types": "./dist/coolermaster/index.d.ts",
       "import": "./dist/coolermaster/index.js"
+    },
+    "./bloody": {
+      "types": "./dist/bloody/index.d.ts",
+      "import": "./dist/bloody/index.js"
     }
   },
   "scripts": {

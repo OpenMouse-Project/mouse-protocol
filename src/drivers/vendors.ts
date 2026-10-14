@@ -145,6 +145,7 @@ import {
   COOLERMASTER_VENDOR_ID,
 } from "@openmouse/protocol/coolermaster";
 import { AJAZZ_AK820_WIRED_PID } from "../ajazz/ak820.ts";
+import { BLOODY_VENDOR_ID } from "../bloody/index.ts";
 
 export const VENDOR_ID = {
   coolermaster: COOLERMASTER_VENDOR_ID,
@@ -209,6 +210,7 @@ export const VENDOR_ID = {
   incott: INCOTT_VENDOR_ID,
   hyperxKingston: HYPERX_VENDOR_ID_KINGSTON,
   hyperxHp: HYPERX_VENDOR_ID_HP,
+  bloody: BLOODY_VENDOR_ID,
 } as const;
 
 /**
@@ -868,6 +870,10 @@ export const VAXEE_HID_FILTERS: HIDDeviceFilter[] = VAXEE_PRODUCT_IDS.map((produ
   vendorId: VAXEE_VENDOR_ID, productId, usagePage: VAXEE_USAGE_PAGE, usage: VAXEE_USAGE,
 }));
 
+export const BLOODY_HID_FILTERS: HIDDeviceFilter[] = [
+  { vendorId: BLOODY_VENDOR_ID },
+];
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...VAXEE_HID_FILTERS,
   ...ASUS_HID_FILTERS,
@@ -997,4 +1003,5 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.coolermaster, usagePage: COOLERMASTER_USAGE_PAGE, usage: COOLERMASTER_USAGE },
   { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff00 },
   { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff60 },
+  ...BLOODY_HID_FILTERS,
 ];
