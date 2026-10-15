@@ -9,7 +9,6 @@ import {
   ROCCAT_PACKET_LENGTH,
   ROCCAT_PERFORMANCE_CLASS,
   ROCCAT_STATUS_COMMAND_ID,
-  roccatDecodeBattery,
   roccatDecodeSettingsReply,
   roccatEncodeApply,
   roccatEncodeLighting,
@@ -50,9 +49,16 @@ test("the apply commit tail and query are the recorded frames", () => {
 test("DPI is stored per 50 and validates scale and step", () => {
   assert.equal(roccatStagedDpi(800), 16);
   assert.equal(roccatStagedDpi(1000), 20);
-  assert.equal(ROCCAT_DPI_MAX / ROCCAT_DPI_STEP, 380);
+  assert.equal(ROCCAT_DPI_MAX / ROCCAT_DPI_STEP, 255, "the advertised max fills the slot byte");
+  assert.equal(roccatStagedDpi(ROCCAT_DPI_MAX), 255);
   assert.throws(() => roccatStagedDpi(801), RangeError);
   assert.throws(() => roccatStagedDpi(ROCCAT_DPI_MIN - 50), RangeError);
+});
+
+test("the advertised maximum DPI encodes without throwing", () => {
+  const view = roccatEncodePerformanceWrite(pad([ROCCAT_DPI_MAX, ROCCAT_DPI_MAX, ROCCAT_DPI_MAX, ROCCAT_DPI_MAX, ROCCAT_DPI_MAX]));
+  assert.deepEqual([...view.subarray(8, 18)], [255, 255, 255, 255, 255, 255, 255, 255, 255, 255]);
+  assert.throws(() => roccatEncodePerformanceWrite(pad([ROCCAT_DPI_MAX + 50, 800, 800, 800, 800])), RangeError);
 });
 
 test("settings writes validate every driven field", () => {
@@ -124,14 +130,10 @@ test("an all-zero stage table decodes as no-data, the sleeper echo", () => {
   assert.deepEqual(roccatDecodeSettingsReply(one)?.dpi.stages, [800, 0, 0, 0, 0]);
 });
 
-test("battery decodes from the status echo recorded on hardware", () => {
+test("the status probe reply is recognized but never decoded as a battery percent", () => {
   assert.equal(roccatIsStatusReply(new Uint8Array([0x90, 0x0a])), true);
+  assert.equal(roccatIsStatusReply(new Uint8Array([0x90, 0x0a, 0x04, 0x00, 0x00, 0x1e])), true);
   assert.equal(roccatIsStatusReply(new Uint8Array([0x10, 0x50, 0x03])), false);
-  // The echo every poll of this unit returned; byte 5 held 0x1e.
-  assert.equal(roccatDecodeBattery(new Uint8Array([0x90, 0x0a, 0x04, 0x00, 0x00, 0x1e])), 0x1e);
-  assert.equal(roccatDecodeBattery(new Uint8Array([0x90, 0x0a, 0x04, 0x00, 0x00])), null);
-  assert.equal(roccatDecodeBattery(new Uint8Array([0x90, 0x0a, 0x04, 0x00, 0x00, 101])), null);
-  assert.equal(roccatDecodeBattery(new Uint8Array([0x10, 0x50, 0x03])), null);
   assert.equal(ROCCAT_STATUS_COMMAND_ID, 0x90);
 });
 

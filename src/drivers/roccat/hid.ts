@@ -13,14 +13,14 @@ import {
   ROCCAT_PRODUCT_NAMES,
   ROCCAT_REPORT_ID,
   ROCCAT_VENDOR_ID,
-  roccatDecodeBattery,
   roccatDecodeSettingsReply,
   roccatEncodeApply,
   roccatEncodeLighting,
   roccatEncodePerformanceWrite,
   roccatEncodeSettingsQuery,
-  roccatEncodeStatus,
+  type RoccatDpiStages,
   type RoccatSettings,
+  type RoccatSettingsReply,
 } from "../../roccat/index.ts";
 
 /**
@@ -33,11 +33,19 @@ import {
  * every frame here was replayed against the dongle and accepted, the status
  * stream answers `90 0a 04 …`, and a settings echo carried a full stage table
  * once the mouse was awake (an asleep mouse echoes a zero body, which the
- * decoder has to treat as no-data). What is deliberately not faked: the
- * echo's polling/LOD/debounce positions and the battery-to-percent mapping
- * are not established, so the UI surfaces those values only from the
- * driver's own last write and labels the read as unknown — exactly how the
- * Razer driver surfaces write-only fields.
+ * decoder has to treat as no-data).
+ *
+ * Writes follow the repo's read-patch-write-confirm cycle (as in the AJAZZ
+ * driver): the settings write replaces the whole block, so every setter reads
+ * the mouse's current table first, patches the one field, writes and commits,
+ * then reads the table back and refuses to report success unless the mouse
+ * kept it. The pre-read is also what preserves the stored DPI stages: a
+ * non-DPI setter (polling rate, LOD, …) would otherwise substitute defaults
+ * and silently re-scale the mouse. What stays deliberately unfolded: the
+ * echo's polling/LOD/debounce positions are not established, so the UI
+ * surfaces those values only from the driver's own last write, exactly how
+ * the Razer driver handles write-only fields, and no battery reading is
+ * surfaced at all because the status byte's mapping is unresolved.
  */
 export class RoccatHidClient {
   readonly device: HIDDevice;
@@ -103,6 +111,15 @@ export class RoccatHidClient {
     return next;
   }
 
+  /**
+   * A read runs through the same queue as writes: the settings query and the
+   * settings write share class byte 1 (0x50), so an unserialized read could
+   * accept a concurrent write's echo as its reply.
+   */
+  private read(payload: Uint8Array): Promise<Uint8Array | null> {
+    return this.run(() => this.transact(payload));
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => { setTimeout(resolve, ms); });
   }
@@ -141,29 +158,20 @@ export class RoccatHidClient {
     return echo;
   }
 
-  /** Battery percent, or null when the status probe goes unanswered. */
-  async readBattery(): Promise<number | null> {
-    const echo = await this.transact(roccatEncodeStatus());
-    return echo ? roccatDecodeBattery(echo) : null;
-  }
-
   /** The DPI table read. Null when the mouse never answers the query. */
-  async readDpiTable(): Promise<ReturnType<typeof roccatDecodeSettingsReply>> {
-    const echo = await this.transact(roccatEncodeSettingsQuery());
+  async readDpiTable(): Promise<RoccatSettingsReply | null> {
+    const echo = await this.read(roccatEncodeSettingsQuery());
     return echo ? roccatDecodeSettingsReply(echo) : null;
   }
 
   /**
-   * Status snapshot. Battery is a verified read; the DPI table is a verified
-   * read; polling rate, LOD, angle snapping and debounce are reported from the
-   * driver's last write (or neutral defaults before one), matching how the
-   * Razer driver surfaces write-only fields.
+   * Status snapshot. The DPI table is a verified read; polling rate, LOD,
+   * angle snapping and debounce are reported from the driver's last write (or
+   * neutral defaults before one), matching how the Razer driver surfaces
+   * write-only fields. No battery reading is surfaced: the status byte's
+   * meaning is unresolved (see the codec).
    */
   async readStatus(): Promise<MouseStatus> {
-    // Serial, not Promise.all: concurrent transactions would race each
-    // other's input-report listeners on a link that answers one echo at a
-    // time.
-    const battery = await this.readBattery();
     const dpiTable = await this.readDpiTable();
     const name = this.displayName();
     const connection = this.connectionType();
@@ -174,23 +182,21 @@ export class RoccatHidClient {
       ui: {
         family: "roccat",
         settingsReady: dpiTable !== null,
-        valuesVerified: dpiTable !== null || battery !== null,
+        valuesVerified: dpiTable !== null,
         hideLodLow: false,
         hideUnsupportedPollingRates: true,
         hideMotionSync: true,
         hideRippleControl: true,
         hideSleepCard: true,
-        forceShowBattery: connection === "Wireless",
+        forceShowBattery: false,
         showAdvancedSection: true,
         pollingNote: "Polling changes write and stick, but the echo does not yet decode a rate, so the value shown is the last one written.",
         statusNote: dpiTable === null
           ? "The mouse did not answer its settings query, so DPI could not be read."
           : undefined,
       },
-      batteryPercent: battery,
-     batteryState: connection === "Wired"
-        ? (battery === 100 ? "Full" : "Charging")
-        : "Discharging",
+      batteryPercent: null,
+      batteryState: "Unknown",
       dpi: (dpiTable?.dpi.stages[0] ?? last?.dpi.stages[0] ?? 0),
       dpiY: dpiTable?.dpi.stagesY[0] ?? last?.dpi.stagesY[0],
       supportsSeparateDpiAxes: true,
@@ -220,51 +226,67 @@ export class RoccatHidClient {
     if (stages.length !== ROCCAT_DPI_STAGE_COUNT || stagesY.length !== ROCCAT_DPI_STAGE_COUNT) {
       throw new RangeError("The settings write carries five stages per axis.");
     }
-    const settings: RoccatSettings = {
-      ...(this.lastWrite ?? DEFAULT_SETTINGS),
-      dpi: { stages: [...stages], stagesY: [...stagesY] },
-    };
-    await this.commit(settings);
+    await this.patchSettings(
+      (current) => ({ ...current, dpi: { stages: [...stages], stagesY: [...stagesY] } }),
+      `DPI stages ${stages.join("/")}`,
+    );
   }
 
   async setPollingRateHz(rateHz: number): Promise<void> {
     if (!ROCCAT_HZ_TO_POLLING_CODE.has(rateHz)) throw new RangeError(`Unsupported polling rate: ${rateHz} Hz.`);
-    const settings: RoccatSettings = { ...(this.lastWrite ?? DEFAULT_SETTINGS), pollingRateHz: rateHz };
-    await this.commit(settings);
+    await this.patchSettings((current) => ({ ...current, pollingRateHz: rateHz }), `polling rate ${rateHz} Hz`);
   }
 
   async setAngleSnapping(enabled: boolean): Promise<void> {
-    const settings: RoccatSettings = { ...(this.lastWrite ?? DEFAULT_SETTINGS), angleSnapping: enabled };
-    await this.commit(settings);
+    await this.patchSettings((current) => ({ ...current, angleSnapping: enabled }), `angle snapping ${enabled ? "on" : "off"}`);
   }
 
   async setLiftOffDistance(lod: "Low" | "High"): Promise<void> {
     if (!ROCCAT_LOD_TO_CODE.has(lod)) throw new RangeError(`Unsupported lift-off distance: ${lod}`);
-    const settings: RoccatSettings = { ...(this.lastWrite ?? DEFAULT_SETTINGS), lod };
-    await this.commit(settings);
+    await this.patchSettings((current) => ({ ...current, lod }), `lift-off distance ${lod}`);
   }
 
   async setDebounceMs(ms: number): Promise<void> {
-    const settings: RoccatSettings = { ...(this.lastWrite ?? DEFAULT_SETTINGS), debounceMs: ms };
-    await this.commit(settings);
+    await this.patchSettings((current) => ({ ...current, debounceMs: ms }), `debounce ${ms} ms`);
   }
 
   async setLedTimeout(minutes: number): Promise<void> {
-    const settings: RoccatSettings = { ...(this.lastWrite ?? DEFAULT_SETTINGS), ledTimeoutMinutes: minutes };
-    await this.commit(settings);
+    await this.patchSettings((current) => ({ ...current, ledTimeoutMinutes: minutes }), `LED timeout ${minutes} min`);
   }
 
   /**
-   * Writes the replays-and-commits sequence: the 0x…50 0x14 settings write
-   * followed by the `…50 18 04` commit tail.
+   * Read the current table, patch one field, write and commit, then read the
+   * table back and confirm the mouse kept it — the same read-patch-write-
+   * confirm cycle the AJAZZ driver uses. The pre-read also preserves the
+   * stored DPI stages across a single-field change; if the mouse will not
+   * report its table, the write is refused rather than overwriting it with
+   * defaults. The frame is encoded before any state changes, so an invalid
+   * value throws without poisoning `lastWrite`.
    */
-  private async commit(settings: RoccatSettings): Promise<void> {
-    this.lastWrite = settings;
+  private async patchSettings(
+    patch: (current: RoccatSettings) => RoccatSettings,
+    describe: string,
+  ): Promise<void> {
+    const current = await this.readDpiTable();
+    if (!current) {
+      throw new Error("Could not read the mouse's current settings, so the write was refused rather than overwrite the stored DPI stages.");
+    }
+    const settings = patch({ ...(this.lastWrite ?? DEFAULT_SETTINGS), dpi: current.dpi });
+    const frame = roccatEncodePerformanceWrite(settings);
+    const apply = roccatEncodeApply();
     await this.run(async () => {
-      await this.write(roccatEncodePerformanceWrite(settings));
+      await this.write(frame);
       await this.delay(50);
-      await this.write(roccatEncodeApply());
+      await this.write(apply);
     });
+    const confirmed = await this.readDpiTable();
+    if (!confirmed) {
+      throw new Error(`The mouse did not answer after the write, so ${describe} could not be confirmed.`);
+    }
+    if (!sameStages(confirmed.dpi, settings.dpi)) {
+      throw new Error(`The mouse kept DPI ${formatStages(confirmed.dpi)} instead of the requested ${describe}.`);
+    }
+    this.lastWrite = settings;
   }
 
   /**
@@ -294,4 +316,15 @@ function parseRgb(hex: string): [number, number, number] {
   if (!match) throw new RangeError(`Colour must be #rrggbb, received ${hex}`);
   const value = Number.parseInt(match[1]!, 16);
   return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
+}
+
+function sameStages(a: RoccatDpiStages, b: RoccatDpiStages): boolean {
+  return a.stages.length === b.stages.length
+    && a.stagesY.length === b.stagesY.length
+    && a.stages.every((value, index) => value === b.stages[index])
+    && a.stagesY.every((value, index) => value === b.stagesY[index]);
+}
+
+function formatStages(dpi: RoccatDpiStages): string {
+  return `${dpi.stages.join("/")} (X) ${dpi.stagesY.join("/")} (Y)`;
 }

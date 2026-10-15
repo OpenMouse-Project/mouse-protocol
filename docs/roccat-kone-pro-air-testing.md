@@ -57,8 +57,10 @@ axes interleaved.
 - **The status probe answers every poll**: `90 0a 04 00 00 <b5> <b6> 00
   <u16> <b10>`, where byte 5 moved `0x1e → 0x14` between sessions and bytes
   8–9 *increased* (2720 → 2884) — falsifying the "estimated minutes
-  remaining" reading of that word. Byte 5 is the number the decode surfaces,
-  with an explicit unconfirmed-mapping caveat in the code.
+  remaining" reading of that word. Byte 5's meaning stays unresolved
+  (a battery percent, a signal strength and an elapsed counter all fit), so
+  the driver surfaces **no battery reading at all** rather than a guess;
+  `roccatIsStatusReply` still identifies the reply.
 - **The lighting write is idempotent** on repeat (three identical writes
   returned identical answers), and leaves the mouse's LEDs stable. There is
   no known read-back, so the codec ships lighting write-only.
@@ -69,6 +71,19 @@ Polling rate read-back, lift-off, angle snapping and debounce have no
 established echo positions, so those UI values surface from the driver's own
 last write and the shared cards stay consistent with other
 write-only-cached drivers (this mirrors the Razer driver's approach).
+
+## Write path
+
+The settings frame replaces the whole block, so each setter runs the repo's
+read-patch-write-confirm cycle (as in the AJAZZ driver): read the mouse's
+current table, patch the one field, write and commit, then read the table back
+and confirm the mouse kept it. The pre-read preserves the stored DPI stages —
+a polling-only change must not silently re-scale the mouse — and a write is
+refused if the mouse will not report its table rather than substituting
+defaults. A read-back that disagrees is reported as a failure, not success.
+DPI is capped at 12,750 (255 × 50), the largest value the single slot byte can
+carry; the vendor software's higher numbers were never captured and do not fit
+this byte.
 
 ## Open questions (any owner can settle these with a replug)
 

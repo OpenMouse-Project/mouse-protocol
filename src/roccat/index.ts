@@ -15,7 +15,9 @@
  * - `0x10 0x50 <sub>` 鈥?performance class: the settings write / query (0x14),
  *   the commit tail `0x10 0x50 0x18 0x04`, and the commit (0x19);
  * - `0x10 0x10 <sub>` 鈥?the lighting write (`0x0b` + two RGB zones);
- * - `0x90 0x0a` 鈥?the unnamed status probe, answered `0x90 0x0a 04 00 00 <batt>`.
+ * - `0x90 0x0a` 鈥?the unnamed status probe, answered `0x90 0x0a 04 00 00 鈥?`
+ *   with a body whose meaning is unresolved (see the note by
+ *   `roccatIsStatusReply`).
  *
  * This is the protocol the vendor software replays; the DPI table write, the
  * commit tail, the status probe and the lighting write were exercised on this
@@ -86,9 +88,14 @@ export const ROCCAT_HZ_TO_POLLING_CODE: ReadonlyMap<number, number> = new Map([
   [125, 0x03],
 ]);
 
-/** DPI is stored per 50. Vendor scale: 50 鈥?19,000. */
+/**
+ * DPI is stored per 50 in a single byte slot, so the encodable ceiling is
+ * 255 x 50 = 12,750. The vendor software advertises higher numbers, but that
+ * encoding was never captured and does not fit this byte, so it is not
+ * claimed here.
+ */
 export const ROCCAT_DPI_MIN = 50;
-export const ROCCAT_DPI_MAX = 19000;
+export const ROCCAT_DPI_MAX = 12750;
 export const ROCCAT_DPI_STEP = 50;
 /** The settings write carries five stages of each axis. */
 export const ROCCAT_DPI_STAGE_COUNT = 5;
@@ -128,8 +135,9 @@ export interface RoccatSettings {
 }
 
 /**
- * DPI value to its 50-step slot byte. The wire carries dpi/50; 19,000/50 is
- * 380, which fits, so the whole documented scale encodes losslessly.
+ * DPI value to its 50-step slot byte. The wire carries dpi/50 in one byte, so
+ * the encodable ceiling is 255 x 50 = 12,750 DPI; higher vendor numbers are
+ * not reachable through this slot and were never captured.
  */
 export function roccatStagedDpi(dpi: number): number {
   if (!Number.isInteger(dpi / ROCCAT_DPI_STEP)) {
@@ -243,26 +251,12 @@ export function roccatIsStatusReply(reply: Uint8Array): boolean {
   return reply.length >= 2 && reply[0] === ROCCAT_STATUS_COMMAND[0] && reply[1] === ROCCAT_STATUS_COMMAND[1];
 }
 
-export interface RoccatStatus {
-  batteryPercent: number | null;
-}
-
-/**
- * The one number the status echo plausibly reports for the UI. On this unit
- * every poll answered `90 0a 04 00 00 1e 00 00 <word> 1e` 鈥?bytes 5 and 10
- * both held 0x1e while bytes 8鈥? carried a slowly decreasing u16 (2720 鈫? * 2714 鈫?2711, shaped like an estimated-use-remaining counter). Neither byte
- * is confirmed as the battery percent: signal strength and elapsed session
- * time fit the same bytes. Byte 5 is decoded here the same way SignalRGB
- * reads this frame ("batt/signal guessing" is its own comment); its byte-moves
- * (0x1e -> 0x14) stay unexplained, so the mapping stays flagged until someone
- * watches it drain. Values above 100 are refused rather than wrapped.
- */
-export function roccatDecodeBattery(reply: Uint8Array): number | null {
-  if (!roccatIsStatusReply(reply)) return null;
-  const percent = reply[5];
-  if (percent === undefined || percent > 100) return null;
-  return percent;
-}
+// The status echo `90 0a 04 00 00 1e 00 00 <word> 1e` was recorded on this
+// unit, but byte 5's meaning is unresolved: it moved 0x1e -> 0x14 across
+// sessions while the trailing u16 decremented (2720 -> 2884), so a battery
+// percent, a signal strength and an elapsed counter all fit. It is
+// deliberately NOT decoded as a percent; no battery reading is surfaced until
+// a capture establishes the mapping.
 
 /**
  * Reply to a settings query / the echo after a write, on this unit:
