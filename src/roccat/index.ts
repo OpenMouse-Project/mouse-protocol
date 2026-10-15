@@ -253,7 +253,7 @@ export function roccatIsStatusReply(reply: Uint8Array): boolean {
 
 // The status echo `90 0a 04 00 00 1e 00 00 <word> 1e` was recorded on this
 // unit, but byte 5's meaning is unresolved: it moved 0x1e -> 0x14 across
-// sessions while the trailing u16 decremented (2720 -> 2884), so a battery
+// sessions while the trailing u16 increased (2720 -> 2884), so a battery
 // percent, a signal strength and an elapsed counter all fit. It is
 // deliberately NOT decoded as a percent; no battery reading is surfaced until
 // a capture establishes the mapping.

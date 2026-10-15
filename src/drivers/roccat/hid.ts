@@ -38,14 +38,17 @@ import {
  * Writes follow the repo's read-patch-write-confirm cycle (as in the AJAZZ
  * driver): the settings write replaces the whole block, so every setter reads
  * the mouse's current table first, patches the one field, writes and commits,
- * then reads the table back and refuses to report success unless the mouse
- * kept it. The pre-read is also what preserves the stored DPI stages: a
- * non-DPI setter (polling rate, LOD, …) would otherwise substitute defaults
- * and silently re-scale the mouse. What stays deliberately unfolded: the
- * echo's polling/LOD/debounce positions are not established, so the UI
- * surfaces those values only from the driver's own last write, exactly how
- * the Razer driver handles write-only fields, and no battery reading is
- * surfaced at all because the status byte's mapping is unresolved.
+   * then reads the table back and refuses to report success unless the mouse
+   * kept it. The pre-read is also what preserves the stored DPI stages: a
+   * non-DPI setter (polling rate, LOD, …) would otherwise substitute defaults
+   * and silently re-scale the mouse. An asleep mouse answers the query with an
+   * empty body, so a setter falls back to the last table this driver wrote, and
+   * only a write with no table at all (before the first successful one) is
+   * refused. What stays deliberately unfolded: the echo carries no established
+   * polling/LOD/angle/debounce positions, so the UI surfaces those values only
+   * from the driver's own last write, exactly how the Razer driver handles
+   * write-only fields, and no battery reading is surfaced at all because the
+   * status byte's mapping is unresolved.
  */
 export class RoccatHidClient {
   readonly device: HIDDevice;
@@ -111,15 +114,6 @@ export class RoccatHidClient {
     return next;
   }
 
-  /**
-   * A read runs through the same queue as writes: the settings query and the
-   * settings write share class byte 1 (0x50), so an unserialized read could
-   * accept a concurrent write's echo as its reply.
-   */
-  private read(payload: Uint8Array): Promise<Uint8Array | null> {
-    return this.run(() => this.transact(payload));
-  }
-
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => { setTimeout(resolve, ms); });
   }
@@ -158,9 +152,23 @@ export class RoccatHidClient {
     return echo;
   }
 
-  /** The DPI table read. Null when the mouse never answers the query. */
+  /**
+   * The DPI table read. Null when the mouse never answers the query. It runs
+   * through the same queue as writes: the settings query and the settings
+   * write share class byte 1 (0x50), so an unserialized read could accept a
+   * concurrent write's echo as its reply.
+   */
   async readDpiTable(): Promise<RoccatSettingsReply | null> {
-    const echo = await this.read(roccatEncodeSettingsQuery());
+    return this.run(() => this.readTable());
+  }
+
+  /**
+   * Sends the settings query and decodes the echo, without queueing. For
+   * callers already inside a queue task: a nested `run()` from inside
+   * `patchSettings` would deadlock behind the task it is already in.
+   */
+  private async readTable(): Promise<RoccatSettingsReply | null> {
+    const echo = await this.transact(roccatEncodeSettingsQuery());
     return echo ? roccatDecodeSettingsReply(echo) : null;
   }
 
@@ -257,36 +265,45 @@ export class RoccatHidClient {
   /**
    * Read the current table, patch one field, write and commit, then read the
    * table back and confirm the mouse kept it — the same read-patch-write-
-   * confirm cycle the AJAZZ driver uses. The pre-read also preserves the
-   * stored DPI stages across a single-field change; if the mouse will not
-   * report its table, the write is refused rather than overwriting it with
-   * defaults. The frame is encoded before any state changes, so an invalid
-   * value throws without poisoning `lastWrite`.
+   * confirm cycle the AJAZZ driver uses. The frame is encoded before any state
+   * changes, so an invalid value throws without poisoning `lastWrite`.
+   *
+   * An asleep mouse answers the settings query with an empty body, so the
+   * stages come from the live read when there is one and otherwise from this
+   * driver's own last write. A first-ever write has neither and is refused:
+   * the write replaces the whole block, so inventing the stages would silently
+   * re-scale the sensor. When the table could not be read the write still goes
+   * out, but the confirm step is skipped — there is nothing to compare
+   * against — and `readStatus` keeps deriving `valuesVerified` from whether a
+   * table was readable, not from the write.
+   *
+   * The whole cycle is a single queue task, and its reads call `transact`
+   * directly rather than `readDpiTable`: two concurrent setters must not
+   * interleave read/patch/write, or one setter's pre-read could observe the
+   * other's half-applied write. A nested `run()` here would instead deadlock.
    */
   private async patchSettings(
     patch: (current: RoccatSettings) => RoccatSettings,
     describe: string,
   ): Promise<void> {
-    const current = await this.readDpiTable();
-    if (!current) {
-      throw new Error("Could not read the mouse's current settings, so the write was refused rather than overwrite the stored DPI stages.");
-    }
-    const settings = patch({ ...(this.lastWrite ?? DEFAULT_SETTINGS), dpi: current.dpi });
-    const frame = roccatEncodePerformanceWrite(settings);
-    const apply = roccatEncodeApply();
     await this.run(async () => {
+      const current = await this.readTable();
+      const dpi = current?.dpi ?? this.lastWrite?.dpi;
+      if (!dpi) {
+        throw new Error("Could not read the mouse's current settings (an asleep mouse answers with an empty table), so the write was refused rather than overwrite the stored DPI stages. Wake the mouse and try again.");
+      }
+      const settings = patch({ ...(this.lastWrite ?? DEFAULT_SETTINGS), dpi });
+      const frame = roccatEncodePerformanceWrite(settings);
+      const apply = roccatEncodeApply();
       await this.write(frame);
       await this.delay(50);
       await this.write(apply);
+      const confirmed = await this.readTable();
+      if (confirmed && !sameStages(confirmed.dpi, settings.dpi)) {
+        throw new Error(`The mouse kept DPI ${formatStages(confirmed.dpi)} instead of the requested ${describe}.`);
+      }
+      this.lastWrite = settings;
     });
-    const confirmed = await this.readDpiTable();
-    if (!confirmed) {
-      throw new Error(`The mouse did not answer after the write, so ${describe} could not be confirmed.`);
-    }
-    if (!sameStages(confirmed.dpi, settings.dpi)) {
-      throw new Error(`The mouse kept DPI ${formatStages(confirmed.dpi)} instead of the requested ${describe}.`);
-    }
-    this.lastWrite = settings;
   }
 
   /**

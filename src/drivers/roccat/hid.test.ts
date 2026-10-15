@@ -32,8 +32,8 @@ function fakeDevice(options: FakeOptions = {}) {
     usagePage = ROCCAT_CONFIG_USAGE_PAGE,
     usage = ROCCAT_CONFIG_USAGE,
     locksTable = false,
-    silent = false,
   } = options;
+  let silent = options.silent ?? false;
   let stored = Uint8Array.from(options.table ?? STORED_TABLE);
   const sent: Uint8Array[] = [];
   let listener: ((event: HIDInputReportEvent) => void) | null = null;
@@ -67,7 +67,7 @@ function fakeDevice(options: FakeOptions = {}) {
       }
     },
   } as unknown as HIDDevice;
-  return { device, sent, storedTable: () => [...stored] };
+  return { device, sent, storedTable: () => [...stored], setSilent: (value: boolean) => { silent = value; } };
 }
 
 test("isSupported needs the ROCCAT VID, a known PID and the 0xFF00 vendor collection", () => {
@@ -151,9 +151,20 @@ test("a mouse that ignores the write is not reported as success", async () => {
   );
 });
 
-test("a setter refuses to guess when the mouse will not report its table", async () => {
+test("a first write with an unreadable table is refused rather than invent stages", async () => {
   const { device } = fakeDevice({ silent: true });
-  await assert.rejects(() => new RoccatHidClient(device).setPollingRateHz(125), /refused/);
+  await assert.rejects(() => new RoccatHidClient(device).setPollingRateHz(125), /Wake the mouse/);
+});
+
+test("a setter still writes when the mouse stops answering, reusing its own last table", async () => {
+  const { device, sent, setSilent } = fakeDevice();
+  const client = new RoccatHidClient(device);
+  await client.setPollingRateHz(500);
+  setSilent(true); // the mouse sleeps and answers the query with an empty body
+  await client.setPollingRateHz(125);
+  const write = sent.filter((frame) => frame[1] === 0x50 && frame[2] === 0x14 && frame[4] === 0x01).at(-1);
+  assert.equal(write![5], 0x03, "125 Hz -> 0x03");
+  assert.deepEqual([...write!.subarray(8, 18)], STORED_TABLE, "the stages come from the last write, not from defaults");
 });
 
 test("setLighting writes one frame with both zones", async () => {
