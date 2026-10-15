@@ -3,30 +3,30 @@
  * wired) and sibling Kone Pro firmware.
  *
  * Transport: the mouse speaks on the composite's vendor interface (usage page
- * 0xFF00, usage 0x0001 鈥?interface 2 of the dongle, interface 1 wired) with
+ * 0xFF00, usage 0x0001 — interface 2 of the dongle, interface 1 wired) with
  * plain unnumbered output reports. WebHID callers send
  * `sendReport(0, payload64)`; the mouse answers on the same interface's
- * interrupt-IN stream. There is no feature report here 鈥?a full 0x00鈥?xFF
+ * interrupt-IN stream. There is no feature report here — a full 0x00–0xFF
  * GET sweep on this unit answered nothing (2026-10-14, Windows node-hid,
  * `captures/roccat-kone-pro-air/`).
  *
  * Payload frame layout (device coordinates, ahead of no report id):
  *
- * - `0x10 0x50 <sub>` 鈥?performance class: the settings write / query (0x14),
+ * - `0x10 0x50 <sub>` — performance class: the settings write / query (0x14),
  *   the commit tail `0x10 0x50 0x18 0x04`, and the commit (0x19);
- * - `0x10 0x10 <sub>` 鈥?the lighting write (`0x0b` + two RGB zones);
- * - `0x90 0x0a` 鈥?the unnamed status probe, answered `0x90 0x0a 04 00 00 鈥?`
+ * - `0x10 0x10 <sub>` — the lighting write (`0x0b` + two RGB zones);
+ * - `0x90 0x0a` — the unnamed status probe, answered `0x90 0x0a 04 00 00 — `
  *   with a body whose meaning is unresolved (see the note by
  *   `roccatIsStatusReply`).
  *
  * This is the protocol the vendor software replays; the DPI table write, the
  * commit tail, the status probe and the lighting write were exercised on this
  * unit (see `captures/roccat-kone-pro-air/`). What is proven on hardware: the
- * frames are accepted, the background status stream answers `90 0a 04 鈥, and
+ * frames are accepted, the background status stream answers `90 0a 04 …`, and
  * a settings echo carried a full stage table on one session with the mouse
  * awake. What is not: a byte-precise before/after proof that the stage table
  * write applies another read-back than the sleeper echoes an empty body for.
- * The fields carry their known/unknown state through 鈥?unknown bytes stay
+ * The fields carry their known/unknown state through — unknown bytes stay
  * unknown rather than guessed.
  */
 
@@ -159,7 +159,7 @@ export function roccatStagedDpi(dpi: number): number {
  *   <lod> 00 80 <ledTimeoutMin> 00 <debounce>
  * ```
  *
- * The DPI slots land at payload bytes 8..17 鈥?even bytes for the stage list
+ * The DPI slots land at payload bytes 8..17 — even bytes for the stage list
  * SignalRGB drives from its DPI entries, odd bytes for the other axis. On this
  * unit the axis-byte assignment reads back symmetrically (both lists held the
  * same five values from the factory), so the codec writes both axes and marks
@@ -223,13 +223,14 @@ export function roccatEncodePerformanceWrite(settings: RoccatSettings): Uint8Arr
 /** The commit tail the vendor software sends after a settings write. */
 export const ROCCAT_APPLY_FRAME: readonly number[] = [ROCCAT_FRAME_PREFIX, ROCCAT_PERFORMANCE_CLASS, ROCCAT_PERFORMANCE_COMMAND.applyGroup, 0x04];
 
+/** The `10 50 18 04` apply frame the vendor software sends after a settings write. */
 export function roccatEncodeApply(): Uint8Array<ArrayBuffer> {
   const view = new Uint8Array(ROCCAT_PACKET_LENGTH);
   [...ROCCAT_APPLY_FRAME].forEach((byte, index) => { view[index] = byte; });
   return view;
 }
 
-/** The status probe, answered `90 0a 鈥 on the input stream. */
+/** The status probe, answered `90 0a …` on the input stream. */
 export function roccatEncodeStatus(): Uint8Array<ArrayBuffer> {
   const view = new Uint8Array(ROCCAT_PACKET_LENGTH);
   view[0] = ROCCAT_STATUS_COMMAND[0]!;
@@ -237,7 +238,7 @@ export function roccatEncodeStatus(): Uint8Array<ArrayBuffer> {
   return view;
 }
 
-/** The empty settings query 鈥?a 0x14 frame with no arguments. */
+/** The empty settings query — a 0x14 frame with no arguments. */
 export function roccatEncodeSettingsQuery(): Uint8Array<ArrayBuffer> {
   const view = new Uint8Array(ROCCAT_PACKET_LENGTH);
   view[0] = ROCCAT_FRAME_PREFIX;
@@ -246,7 +247,7 @@ export function roccatEncodeSettingsQuery(): Uint8Array<ArrayBuffer> {
   return view;
 }
 
-/** Reply to the status probe recorded on this unit: `90 0a 04 00 00 <byte5 鈥?`. */
+/** Reply to the status probe recorded on this unit: `90 0a 04 00 00 <byte5 — `. */
 export function roccatIsStatusReply(reply: Uint8Array): boolean {
   return reply.length >= 2 && reply[0] === ROCCAT_STATUS_COMMAND[0] && reply[1] === ROCCAT_STATUS_COMMAND[1];
 }
@@ -260,16 +261,17 @@ export function roccatIsStatusReply(reply: Uint8Array): boolean {
 
 /**
  * Reply to a settings query / the echo after a write, on this unit:
- * `10 50 03 00 <word hi> <word lo> <seq> 00 <dpi table 8..17> 鈥. The class
+ * `10 50 03 00 <word hi> <word lo> <seq> 00 <dpi table 8..17> …`. The class
  * byte 2 was 0x03 on every observed variant; frames that echo the driven
  * command (`0x14` writes) carry it at byte 2 as well. Only the frame prefix
- * and the DPI table are decoded 鈥?the remaining bytes (the device word, the
+ * and the DPI table are decoded — the remaining bytes (the device word, the
  * sequence marker, LOD/angle positions in the echo) are not established.
  */
 export interface RoccatSettingsReply {
   dpi: RoccatDpiStages;
 }
 
+/** Decodes a settings echo into its DPI table, or null when the reply is not a settings frame or carries an empty (asleep) body. */
 export function roccatDecodeSettingsReply(reply: Uint8Array): RoccatSettingsReply | null {
   if (
     reply.length < 18
@@ -320,6 +322,7 @@ export const ROCCAT_LIGHTING_PREFIX: readonly number[] = [
   0x06,
 ];
 
+/** The lighting write frame: one raw RGB triple per zone. */
 export function roccatEncodeLighting(left: readonly [number, number, number], right: readonly [number, number, number]): Uint8Array<ArrayBuffer> {
   const view = new Uint8Array(ROCCAT_PACKET_LENGTH);
   [...ROCCAT_LIGHTING_PREFIX].forEach((byte, index) => { view[index] = byte; });

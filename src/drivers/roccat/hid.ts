@@ -55,10 +55,12 @@ export class RoccatHidClient {
   private queue: Promise<unknown> = Promise.resolve();
   private lastWrite: RoccatSettings | null = null;
 
+  /** Wraps a device the registry has already matched. */
   constructor(device: HIDDevice) {
     this.device = device;
   }
 
+  /** Matches a Kone Pro (Air) that exposes the 0xFF00:0x0001 vendor collection. */
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== ROCCAT_VENDOR_ID) return false;
     if (!ROCCAT_PRODUCT_IDS.includes(device.productId)) return false;
@@ -68,39 +70,48 @@ export class RoccatHidClient {
     return device.collections.some(search);
   }
 
+  /** No discrete list: the five-stage editor drives DPI instead. */
   getDpiOptions(): number[] {
     return [];
   }
 
+  /** Opens the device if the vendor link is still closed. */
   async open(): Promise<void> {
     if (!this.device.opened) await this.device.open();
   }
 
+  /** Forgets the cached table and closes the device. */
   async close(): Promise<void> {
     this.lastWrite = null;
     if (this.device.opened) await this.device.close();
   }
 
+  /** Product label for the UI. */
   displayName(): string {
     return ROCCAT_PRODUCT_NAMES.get(this.device.productId) ?? "ROCCAT mouse";
   }
 
+  /** Brand tag reported in MouseStatus. */
   deviceBrand(): MouseStatus["brand"] {
     return "ROCCAT";
   }
 
+  /** Wireless on the dongle pid, wired otherwise. */
   connectionType(): "Wired" | "Wireless" {
     return this.device.productId === ROCCAT_KONE_PRO_AIR_WIRELESS_PID ? "Wireless" : "Wired";
   }
 
+  /** The four rates the polling byte can encode. */
   getSupportedPollingRates(): number[] {
     return [...ROCCAT_HZ_TO_POLLING_CODE.keys()];
   }
 
+  /** Largest debounce the settings byte accepts. */
   getDebounceMaxMs(): number {
     return ROCCAT_DEBOUNCE_MAX_MS;
   }
 
+  /** Every whole-millisecond debounce in range. */
   getDebounceOptions(): number[] {
     return Array.from(
       { length: ROCCAT_DEBOUNCE_MAX_MS - ROCCAT_DEBOUNCE_MIN_MS + 1 },
@@ -108,12 +119,14 @@ export class RoccatHidClient {
     );
   }
 
+  /** Serializes device work so transactions cannot interleave. */
   private run<T>(task: () => Promise<T>): Promise<T> {
     const next = this.queue.then(task, task);
     this.queue = next.catch(() => undefined);
     return next;
   }
 
+  /** Sleeps for the echo window. */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => { setTimeout(resolve, ms); });
   }
@@ -198,7 +211,7 @@ export class RoccatHidClient {
         hideSleepCard: true,
         forceShowBattery: false,
         showAdvancedSection: true,
-        pollingNote: "Polling changes write and stick, but the echo does not yet decode a rate, so the value shown is the last one written.",
+        pollingNote: "Polling is write-only here: the echo does not yet decode a rate, so the value shown is the last one written, not a value read back.",
         statusNote: dpiTable === null
           ? "The mouse did not answer its settings query, so DPI could not be read."
           : undefined,
@@ -240,24 +253,29 @@ export class RoccatHidClient {
     );
   }
 
+  /** Setter for the polling byte; rejects rates the table lacks. */
   async setPollingRateHz(rateHz: number): Promise<void> {
     if (!ROCCAT_HZ_TO_POLLING_CODE.has(rateHz)) throw new RangeError(`Unsupported polling rate: ${rateHz} Hz.`);
     await this.patchSettings((current) => ({ ...current, pollingRateHz: rateHz }), `polling rate ${rateHz} Hz`);
   }
 
+  /** Setter for the angle-snapping flag. */
   async setAngleSnapping(enabled: boolean): Promise<void> {
     await this.patchSettings((current) => ({ ...current, angleSnapping: enabled }), `angle snapping ${enabled ? "on" : "off"}`);
   }
 
+  /** Setter for the lift-off distance. */
   async setLiftOffDistance(lod: "Low" | "High"): Promise<void> {
     if (!ROCCAT_LOD_TO_CODE.has(lod)) throw new RangeError(`Unsupported lift-off distance: ${lod}`);
     await this.patchSettings((current) => ({ ...current, lod }), `lift-off distance ${lod}`);
   }
 
+  /** Setter for the debounce byte. */
   async setDebounceMs(ms: number): Promise<void> {
     await this.patchSettings((current) => ({ ...current, debounceMs: ms }), `debounce ${ms} ms`);
   }
 
+  /** Setter for the LED-off timeout. */
   async setLedTimeout(minutes: number): Promise<void> {
     await this.patchSettings((current) => ({ ...current, ledTimeoutMinutes: minutes }), `LED timeout ${minutes} min`);
   }
@@ -328,6 +346,7 @@ const DEFAULT_SETTINGS: RoccatSettings = {
   dpi: { stages: [400, 800, 1200, 1600, 3200], stagesY: [400, 800, 1200, 1600, 3200] },
 };
 
+/** Parses `#rrggbb` into an RGB triple. */
 function parseRgb(hex: string): [number, number, number] {
   const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   if (!match) throw new RangeError(`Colour must be #rrggbb, received ${hex}`);
@@ -335,6 +354,7 @@ function parseRgb(hex: string): [number, number, number] {
   return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
 }
 
+/** True when both stage tables match on both axes. */
 function sameStages(a: RoccatDpiStages, b: RoccatDpiStages): boolean {
   return a.stages.length === b.stages.length
     && a.stagesY.length === b.stagesY.length
@@ -342,6 +362,7 @@ function sameStages(a: RoccatDpiStages, b: RoccatDpiStages): boolean {
     && a.stagesY.every((value, index) => value === b.stagesY[index]);
 }
 
+/** Renders a stage table for error messages. */
 function formatStages(dpi: RoccatDpiStages): string {
   return `${dpi.stages.join("/")} (X) ${dpi.stagesY.join("/")} (Y)`;
 }
