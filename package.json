@@ -18,6 +18,10 @@
     "CONTRIBUTING.md"
   ],
   "exports": {
+    "./redgear": {
+      "types": "./dist/redgear/index.d.ts",
+      "import": "./dist/redgear/index.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"

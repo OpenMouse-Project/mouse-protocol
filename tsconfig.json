@@ -19,6 +19,7 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "paths": {
+      "@openmouse/protocol/redgear": ["./src/redgear/index.ts"],
       "@openmouse/protocol": ["./src/index.ts"],
       "@openmouse/protocol/atk": ["./src/atk/index.ts"],
       "@openmouse/protocol/endgame-gear-we": ["./src/endgame-gear/wireless.ts"],

@@ -59,6 +59,8 @@ function collection(
  */
 function collectionShapes(): HIDCollectionInfo[][] {
   const shapes: HIDCollectionInfo[][] = [[]];
+  // Native descriptor of the X13 Pro: report 3, 39 payload bytes + report ID.
+  shapes.push([{ ...collection(0xff00, 1), featureReports: [report(3, 39)] } as HIDCollectionInfo]);
   // Dareu's receiver exposes a service collection beside its report-8 command
   // channel; retain both so strict multi-collection drivers are exercisable.
   shapes.push([

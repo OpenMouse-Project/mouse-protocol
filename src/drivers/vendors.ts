@@ -147,6 +147,7 @@ import {
 import { AJAZZ_AK820_WIRED_PID } from "../ajazz/ak820.ts";
 
 export const VENDOR_ID = {
+  redgear: 0x1b80,
   coolermaster: COOLERMASTER_VENDOR_ID,
   ajazz: 0x1a2c,
   vaxee: VAXEE_VENDOR_ID,
@@ -869,6 +870,7 @@ export const VAXEE_HID_FILTERS: HIDDeviceFilter[] = VAXEE_PRODUCT_IDS.map((produ
 }));
 
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
+  { vendorId: VENDOR_ID.redgear, productId: 0xb412, usagePage: 0xff00, usage: 1 },
   ...VAXEE_HID_FILTERS,
   ...ASUS_HID_FILTERS,
   ...DAREU_HID_FILTERS,
