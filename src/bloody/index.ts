@@ -12,9 +12,11 @@
 
 export const BLOODY_VENDOR_ID = 0x09da; // A4Tech Co., Ltd.
 export const BLOODY_W70_MAX_PRODUCT_ID = 0x1865;
+export const BLOODY_W70_MAX_ALT_PRODUCT_ID = 0x79ef;
 
 export const BLOODY_PRODUCT_NAMES: ReadonlyMap<number, string> = new Map([
   [BLOODY_W70_MAX_PRODUCT_ID, "Bloody W70 Max"],
+  [BLOODY_W70_MAX_ALT_PRODUCT_ID, "Bloody W70 Max"],
 ]);
 
 export const BLOODY_PRODUCT_IDS: readonly number[] = [...BLOODY_PRODUCT_NAMES.keys()];
@@ -42,6 +44,12 @@ export const BLOODY_POLLING_CODE_MAP = {
   125: 0x08,
 } as const;
 
+/**
+ * Converts a Bloody protocol polling code byte to Hertz.
+ *
+ * @param code - Raw protocol code byte (e.g. 0x01 for 1000 Hz).
+ * @returns Polling frequency in Hz, or null if code is unrecognized.
+ */
 export function bloodyPollingCodeToHz(code: number): number | null {
   switch (code) {
     case 0x01: return 1000;
@@ -52,6 +60,12 @@ export function bloodyPollingCodeToHz(code: number): number | null {
   }
 }
 
+/**
+ * Converts a polling frequency in Hertz to the Bloody protocol code byte.
+ *
+ * @param hz - Polling frequency in Hz (125, 250, 500, or 1000).
+ * @returns Corresponding Bloody protocol byte (defaults to 0x01 for 1000 Hz).
+ */
 export function bloodyHzToPollingCode(hz: number): number {
   switch (hz) {
     case 125: return 0x08;
@@ -62,7 +76,11 @@ export function bloodyHzToPollingCode(hz: number): number {
   }
 }
 
-/** Builds the 72-byte query report for sensitivity / DPI stages. */
+/**
+ * Builds the 63-byte query report for sensitivity / DPI stages (command 0x02).
+ *
+ * @returns HID feature report payload buffer.
+ */
 export function bloodyBuildSensitivityQuery(): Uint8Array {
   const buffer = new Uint8Array(BLOODY_REPORT_SIZE);
   buffer[0] = 0x02;
@@ -71,21 +89,33 @@ export function bloodyBuildSensitivityQuery(): Uint8Array {
   return buffer;
 }
 
-/** Builds the 72-byte query report for current polling rate and operational status. */
+/**
+ * Builds the 63-byte query report for current polling rate and operational status (command 0x0e).
+ *
+ * @returns HID feature report payload buffer.
+ */
 export function bloodyBuildPollingQuery(): Uint8Array {
   const buffer = new Uint8Array(BLOODY_REPORT_SIZE);
   buffer[0] = 0x0e;
   return buffer;
 }
 
-/** Builds the 72-byte query report for device ID / model info. */
+/**
+ * Builds the 63-byte query report for device ID and model info (command 0x05).
+ *
+ * @returns HID feature report payload buffer.
+ */
 export function bloodyBuildDeviceQuery(): Uint8Array {
   const buffer = new Uint8Array(BLOODY_REPORT_SIZE);
   buffer[0] = 0x05;
   return buffer;
 }
 
-/** Builds the 72-byte query report for backlight brightness. */
+/**
+ * Builds the 63-byte query report for backlight brightness (command 0x11).
+ *
+ * @returns HID feature report payload buffer.
+ */
 export function bloodyBuildBacklightQuery(): Uint8Array {
   const buffer = new Uint8Array(BLOODY_REPORT_SIZE);
   buffer[0] = 0x11;
@@ -93,8 +123,10 @@ export function bloodyBuildBacklightQuery(): Uint8Array {
 }
 
 /**
- * Builds the 72-byte command to set backlight brightness level.
- * @param level 0: Off, 1: 25%, 2: 50%, 3: 100% (max).
+ * Builds the 63-byte command to set backlight brightness level (command 0x11).
+ *
+ * @param level - Brightness level (0: Off, 1: 25%, 2: 50%, 3: 100%).
+ * @returns HID feature report payload buffer.
  */
 export function bloodyBuildSetBacklight(level: number): Uint8Array {
   const buffer = new Uint8Array(BLOODY_REPORT_SIZE);
@@ -104,13 +136,23 @@ export function bloodyBuildSetBacklight(level: number): Uint8Array {
   return buffer;
 }
 
-/** Builds the 63-byte command to commit/save current settings to mouse memory. */
+/**
+ * Builds the 63-byte command to commit and save current settings to mouse memory (command 0x0a).
+ *
+ * @returns HID feature report payload buffer.
+ */
 export function bloodyBuildSaveCommand(): Uint8Array {
   const buffer = new Uint8Array(BLOODY_REPORT_SIZE);
   buffer[0] = 0x0a;
   return buffer;
 }
 
+/**
+ * Converts a DPI value to the Bloody protocol raw step code byte.
+ *
+ * @param dpi - Sensitivity in DPI (e.g. 1000).
+ * @returns Raw step code byte used in Bloody sensitivity tables and commands.
+ */
 export function bloodyDpiToRawStep(dpi: number): number {
   const input = Math.max(1, Math.min(100, Math.round(dpi / 100)));
   let x = 0;
@@ -122,12 +164,13 @@ export function bloodyDpiToRawStep(dpi: number): number {
 }
 
 /**
- * Builds the 63-byte command to set current DPI stage, active stage, and polling rate.
- * Byte 7 (wire byte 8): modes enabled (totalStages - 1)
- * Byte 8 (wire byte 9): active stage index
- * Bytes 9-10 (wire bytes 10-11): 0x40 0x40 base config word
- * Byte 11 (wire byte 12): target DPI step code
- * Byte 12 (wire byte 13): polling rate code
+ * Builds the 63-byte command to set current DPI stage, active stage, and polling rate (command 0x0d).
+ *
+ * @param dpi - Sensitivity in DPI for the active stage.
+ * @param activeStage - Zero-based index of the active stage (0..4).
+ * @param totalStages - Total number of enabled stages (1..5).
+ * @param pollingHz - Operational polling rate in Hz (125, 250, 500, or 1000).
+ * @returns HID feature report payload buffer.
  */
 export function bloodyBuildSetDpi(
   dpi: number,
@@ -153,7 +196,10 @@ export interface BloodyDeviceStatus {
 }
 
 /**
- * Decodes active DPI, stage, and modes count from command 0x05 response.
+ * Decodes active DPI, stage index, and enabled stage count from command 0x05 response.
+ *
+ * @param reply - Raw HID response buffer from command 0x05.
+ * @returns Parsed device status, or null if the response is invalid or not command 0x05.
  */
 export function bloodyDecodeDeviceStatus(reply: Uint8Array): BloodyDeviceStatus | null {
   const bytes = reply.length > 0 && reply[0] === BLOODY_REPORT_ID ? reply.subarray(1) : reply;
@@ -167,7 +213,12 @@ export function bloodyDecodeDeviceStatus(reply: Uint8Array): BloodyDeviceStatus 
 }
 
 /**
- * Builds the 63-byte command to update the sensitivity stages in flash memory (command 0x02).
+ * Builds the 63-byte command to update legacy sensitivity stages in mouse memory (command 0x02).
+ *
+ * @param stages - Array of DPI values for each stage.
+ * @param activeStageIndex - Zero-based index of the active stage.
+ * @param baseBuffer - Optional base report buffer to preserve unrelated fields.
+ * @returns HID feature report payload buffer.
  */
 export function bloodyBuildSensitivitySet(
   stages: readonly number[],
@@ -208,7 +259,10 @@ export function bloodyBuildSensitivitySet(
 }
 
 /**
- * Builds the 63-byte command to unlock/lock flash programming mode (command 0x20).
+ * Builds the 63-byte command to unlock or lock flash programming mode (command 0x20).
+ *
+ * @param unlock - True to unlock flash programming mode (0x01), false to lock (0x00).
+ * @returns HID feature report payload buffer.
  */
 export function bloodyBuildFlashUnlock(unlock: boolean): Uint8Array {
   const buffer = new Uint8Array(BLOODY_REPORT_SIZE);
@@ -219,6 +273,11 @@ export function bloodyBuildFlashUnlock(unlock: boolean): Uint8Array {
 
 /**
  * Builds the 63-byte command to write a 32-byte chunk to flash memory (command 0x2f 0x01).
+ *
+ * @param sectorOffset - Byte offset within the sector (0, 32, 64, ..., 224).
+ * @param chunk32 - 32-byte slice of sector data to write.
+ * @param sectorAddr - Target sector base address code (defaults to 0xe0 for sector 0xe000).
+ * @returns HID feature report payload buffer.
  */
 export function bloodyBuildFlashChunk(
   sectorOffset: number,
@@ -237,6 +296,9 @@ export function bloodyBuildFlashChunk(
 
 /**
  * Builds the 63-byte magic commit packet for flash memory (command 0x2f 0x01 with 0xa4a4a4a4).
+ *
+ * @param sectorAddr - Target sector base address code (defaults to 0xe0).
+ * @returns HID feature report payload buffer.
  */
 export function bloodyBuildFlashMagicCommit(sectorAddr = 0xe0): Uint8Array {
   const buffer = new Uint8Array(BLOODY_REPORT_SIZE);
@@ -254,6 +316,8 @@ export function bloodyBuildFlashMagicCommit(sectorAddr = 0xe0): Uint8Array {
 
 /**
  * Builds the 63-byte notification/reset packet after flash commit (command 0x13).
+ *
+ * @returns HID feature report payload buffer.
  */
 export function bloodyBuildFlashReset(): Uint8Array {
   const buffer = new Uint8Array(BLOODY_REPORT_SIZE);
@@ -266,6 +330,11 @@ export function bloodyBuildFlashReset(): Uint8Array {
 /**
  * Builds the 256-byte flash profile sector for W70/W90 Max (sector 0xe000).
  * If baseSector is provided, preserves existing bytes and modifies only stage count and DPI stages.
+ *
+ * @param stages - Array of DPI values for each stage.
+ * @param enabledStageCount - Number of enabled stages (1..5).
+ * @param baseSector - Optional existing 256-byte sector data to preserve non-DPI configuration.
+ * @returns 256-byte profile sector ready for chunked flash programming.
  */
 export function bloodyBuildFlashSector(
   stages: readonly number[],
@@ -326,6 +395,9 @@ export interface BloodySensitivityInfo {
 
 /**
  * Decodes the sensitivity feature report response (command 0x02).
+ *
+ * @param reply - Raw HID response buffer from command 0x02 query.
+ * @returns Parsed sensitivity information, or null if empty or invalid.
  */
 export function bloodyDecodeSensitivity(reply: Uint8Array): BloodySensitivityInfo | null {
   const bytes = reply.length > 0 && reply[0] === BLOODY_REPORT_ID ? reply.subarray(1) : reply;
@@ -362,6 +434,9 @@ export function bloodyDecodeSensitivity(reply: Uint8Array): BloodySensitivityInf
 
 /**
  * Decodes polling rate from response to command 0x0e.
+ *
+ * @param reply - Raw HID response buffer from command 0x0e query.
+ * @returns Polling rate in Hz, or null if unrecognized or invalid.
  */
 export function bloodyDecodePollingRate(reply: Uint8Array): number | null {
   const bytes = reply.length > 0 && reply[0] === BLOODY_REPORT_ID ? reply.subarray(1) : reply;
@@ -371,6 +446,9 @@ export function bloodyDecodePollingRate(reply: Uint8Array): number | null {
 
 /**
  * Decodes backlight level (0..3) from response to command 0x11.
+ *
+ * @param reply - Raw HID response buffer from command 0x11 query.
+ * @returns Brightness level (0..3), or null if invalid.
  */
 export function bloodyDecodeBacklight(reply: Uint8Array): number | null {
   const bytes = reply[0] === BLOODY_REPORT_ID ? reply.subarray(1) : reply;
@@ -382,6 +460,8 @@ export function bloodyDecodeBacklight(reply: Uint8Array): number | null {
 
 /**
  * Returns available DPI options in 50-DPI steps up to 16,000.
+ *
+ * @returns Array of supported DPI values.
  */
 export function bloodyGetDpiOptions(): number[] {
   const options: number[] = [];
@@ -390,3 +470,4 @@ export function bloodyGetDpiOptions(): number[] {
   }
   return options;
 }
+

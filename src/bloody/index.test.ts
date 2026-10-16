@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   BLOODY_POLLING_RATES,
+  BLOODY_PRODUCT_IDS,
   BLOODY_REPORT_ID,
   BLOODY_REPORT_SIZE,
   BLOODY_VENDOR_ID,
+  BLOODY_W70_MAX_ALT_PRODUCT_ID,
   BLOODY_W70_MAX_PRODUCT_ID,
   bloodyBuildBacklightQuery,
   bloodyBuildDeviceQuery,
@@ -31,6 +33,8 @@ import {
 test("Bloody constants are defined correctly", () => {
   assert.equal(BLOODY_VENDOR_ID, 0x09da);
   assert.equal(BLOODY_W70_MAX_PRODUCT_ID, 0x1865);
+  assert.equal(BLOODY_W70_MAX_ALT_PRODUCT_ID, 0x79ef);
+  assert.deepEqual(BLOODY_PRODUCT_IDS, [0x1865, 0x79ef]);
   assert.equal(BLOODY_REPORT_ID, 0x07);
   assert.equal(BLOODY_REPORT_SIZE, 63);
   assert.deepEqual(BLOODY_POLLING_RATES, [125, 250, 500, 1000]);
