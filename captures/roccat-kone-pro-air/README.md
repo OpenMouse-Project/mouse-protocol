@@ -2,10 +2,12 @@
 
 Hardware reference material for `src/roccat/` and `src/drivers/roccat/`.
 Captured from this reporter's own unit — one ROCCAT Kone Pro Air on its
-Stellar Wireless dongle (USB `1e7d:2c8e`), Windows, driverless node-hid
-session on 2026-10-14 with ROCCAT Swarm fully uninstalled. The mouse's
-product string carries no serial number, the vendor frames carry no account
-data, and no capture here includes personal data.
+Stellar Wireless dongle (USB `1e7d:2c8e`), Windows. The first session
+(2026-10-14) was a driverless node-hid session with ROCCAT Swarm
+uninstalled; a later session (2026-10-16, the last file in the table) ran
+with Swarm installed and operating the mouse. The mouse's product string
+carries no serial number, the vendor frames carry no account data, and no
+capture here includes personal data.
 
 | File | What it is |
 |-|-|
@@ -13,6 +15,7 @@ data, and no capture here includes personal data.
 | `feature-sweep.txt` | The negative result: GET for every report id 0x00–0xFF on every interface times out or answers zero. The whole protocol lives on output reports, which is why the frames are `sendReport`-shaped. |
 | `session-2026-10-14.txt` | A byte-precise transcript: status probe, settings query, the vendor-replayed settings write + commit tail, a second query, the lighting write, and the echoes to each. One session earlier the query echo carried a full stage table (the mouse awake); in this session the mouse was idle and the same frame echoed an empty body — both are in the file. |
 | `transcript-earlier-session.txt` | The earlier, still byte-precise outline of the same frames from the discovery session, included because it is the capture where the stage table WAS returned (`10 50 03 … 10 10 18 18 20 20 40 40 64 64 01 02 00 00` — both slot lists identical, five entries 800/1200/1600/3200/5000, which matches this unit's then-current Swarm settings rather than factory defaults). |
+| `profiles-and-write-path-2026-10-16.txt` | A second session, this one with Swarm installed and driving the mouse. Identifies the five `90 00 26` reply pages as the five onboard profiles (polling at `b11`, stage table at `b14-23`, lift-off at `b24`), shows a UI polling change moving exactly that byte, aligns the read page to the plugin's write frame at +5, and records that hand-sent settings writes on interface 2 are echoed but never change the stored tables. |
 
 ## What settles
 
