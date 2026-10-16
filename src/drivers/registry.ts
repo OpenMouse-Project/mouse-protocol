@@ -81,9 +81,10 @@ import { RapooHidClient } from "./rapoo/hid.ts";
 import { CoolerMasterHidClient } from "./coolermaster/hid.ts";
 import { AjazzHidClient } from "./ajazz/hid.ts";
 import { AjazzAk820HidClient } from "./ajazz/ak820-hid.ts";
+import { BloodyHidClient } from "./bloody/hid.ts";
 
 export type PulsarClient = PulsarHidClient | PulsarProHidClient | PulsarXs1HidClient;
-export type SupportedClient = RawmHidClient | MotospeedHidClient | LogitechHidppClient | PulsarClient | EggOp1HidClient | EggOtHidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | WLMouseBeastX4kHidClient | LamzuHidClient | LamzuAtlantisHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | AtkBitmouseHidClient | VgnF2HidClient | VaxeeHidClient | Keychron8kHidClient | Keychron1kHidClient | Keychron4kHidClient | Keychron8kNordicHidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | CorsairHidClient | CorsairBragiHidClient | AttackSharkHidClient | FantechHidClient | GearHubHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | GWolvesXviHidClient | GWolvesXviNewHidClient | SteelSeriesRival3HidClient | SteelSeriesAerox3HidClient | SteelSeriesAerox3WirelessHidClient | SteelSeriesRival3WirelessHidClient | SteelSeriesAerox5HidClient | SteelSeriesAerox5WirelessHidClient | SteelSeriesRival650HidClient | SteelSeriesAerox9WirelessHidClient | SteelSeriesRival310HidClient | SteelSeriesPrimePlusHidClient | SteelSeriesPrimeMiniWirelessHidClient | SteelSeriesSenseiTenHidClient | GloriousHidClient | GloriousClassicHidClient | GloriousCore2HidClient | MchoseHidClient | MchoseDockHidClient | MchoseA5ProMaxHidClient | KsnakeHidClient | MicrosoftHidClient | DareuHidClient | RedragonHidClient | RedragonM690ProHidClient | IncottHidClient | HyperXHidClient | MchoseV3HidClient | AsusHidClient | KyuProMx1Client | DeluxHidClient | BytechHidClient | RapooHidClient | FaterHidClient | CoolerMasterHidClient | AjazzHidClient | AjazzAk820HidClient;
+export type SupportedClient = RawmHidClient | MotospeedHidClient | LogitechHidppClient | PulsarClient | EggOp1HidClient | EggOtHidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | WLMouseBeastX4kHidClient | LamzuHidClient | LamzuAtlantisHidClient | OrbitalHidClient | RazerHidClient | RazerViperHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | RazerCobraHidClient | TeevolutionHidClient | AtkHidClient | AtkBitmouseHidClient | VgnF2HidClient | VaxeeHidClient | Keychron8kHidClient | Keychron1kHidClient | Keychron4kHidClient | Keychron8kNordicHidClient | KeychronNapeHidClient | ModdoHidClient | NinjutsoHidClient | ZaunkoenigHidClient | CorsairHidClient | CorsairBragiHidClient | AttackSharkHidClient | FantechHidClient | GearHubHidClient | WootingHidClient | WallhackMouseHidClient | WallhackKeyboardHidClient | GWolvesHidClient | GWolvesXviHidClient | GWolvesXviNewHidClient | SteelSeriesRival3HidClient | SteelSeriesAerox3HidClient | SteelSeriesAerox3WirelessHidClient | SteelSeriesRival3WirelessHidClient | SteelSeriesAerox5HidClient | SteelSeriesAerox5WirelessHidClient | SteelSeriesRival650HidClient | SteelSeriesAerox9WirelessHidClient | SteelSeriesRival310HidClient | SteelSeriesPrimePlusHidClient | SteelSeriesPrimeMiniWirelessHidClient | SteelSeriesSenseiTenHidClient | GloriousHidClient | GloriousClassicHidClient | GloriousCore2HidClient | MchoseHidClient | MchoseDockHidClient | MchoseA5ProMaxHidClient | KsnakeHidClient | MicrosoftHidClient | DareuHidClient | RedragonHidClient | RedragonM690ProHidClient | IncottHidClient | HyperXHidClient | MchoseV3HidClient | AsusHidClient | KyuProMx1Client | DeluxHidClient | BytechHidClient | RapooHidClient | FaterHidClient | CoolerMasterHidClient | AjazzHidClient | AjazzAk820HidClient | BloodyHidClient;
 
 export interface DeviceDriver {
   brand: string;
@@ -202,6 +203,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Rapoo", supports: (device) => RapooHidClient.isSupported(device), create: (device) => new RapooHidClient(device), score: () => 7 },
   { brand: "Cooler Master", supports: (device) => CoolerMasterHidClient.isSupported(device), create: (device) => new CoolerMasterHidClient(device), score: () => 7 },
   { brand: "AJAZZ", supports: (device) => AjazzAk820HidClient.isSupported(device), create: (device) => new AjazzAk820HidClient(device), score: () => 7 },
+  { brand: "Bloody", supports: (device) => BloodyHidClient.isSupported(device), create: (device) => new BloodyHidClient(device), score: () => 8 },
 ];
 
 function driverFor(device: HIDDevice): DeviceDriver | undefined {
@@ -217,6 +219,7 @@ export function clientSupportScore(device: HIDDevice): number {
 }
 
 export function deviceBrand(client: SupportedClient): string {
+  if (client instanceof BloodyHidClient) return "Bloody";
   if (client instanceof EggOp1HidClient || client instanceof EggOtHidClient || isEggWeClient(client)) return "Endgame Gear";
   if (client instanceof LamzuHidClient) return client.deviceBrand();
   if (client instanceof AtkHidClient) return client.deviceBrand();
