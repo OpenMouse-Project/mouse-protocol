@@ -129,7 +129,7 @@ export class BloodyHidClient {
       ui: {
         family: "bloody",
         settingsReady: true,
-        valuesVerified: true,
+        valuesVerified: Boolean(sens),
         hidePollingCard: true,
         hideUnsupportedPollingRates: true,
         dpiStageEditor: {
@@ -157,6 +157,12 @@ export class BloodyHidClient {
     return status;
   }
 
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(operation, operation);
+    this.queue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
   private async writeFlashSector(
     stages: readonly number[],
     enabledStageCount: number,
@@ -164,41 +170,45 @@ export class BloodyHidClient {
     activeStageIndex: number,
     pollingHz = 1000,
   ): Promise<void> {
-    const sector = bloodyBuildFlashSector(stages, enabledStageCount);
+    return this.enqueue(async () => {
+      const sector = bloodyBuildFlashSector(stages, enabledStageCount);
 
-    // 1. Unlock flash programming mode (command 0x20 0x01)
-    await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashUnlock(true)));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+      // 1. Unlock flash programming mode (command 0x20 0x01)
+      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashUnlock(true)));
+      await new Promise((resolve) => setTimeout(resolve, 30));
 
-    // 2. Write 8 chunks of 32 bytes to sector 0xe000 (command 0x2f 0x01)
-    for (let c = 0; c < 8; c++) {
-      const offset = c * 32;
-      const chunk = sector.subarray(offset, offset + 32);
-      const chunkPkt = bloodyBuildFlashChunk(offset, chunk, 0xe0);
-      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(chunkPkt));
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
+      try {
+        // 2. Write 8 chunks of 32 bytes to sector 0xe000 (command 0x2f 0x01)
+        for (let c = 0; c < 8; c++) {
+          const offset = c * 32;
+          const chunk = sector.subarray(offset, offset + 32);
+          const chunkPkt = bloodyBuildFlashChunk(offset, chunk, 0xe0);
+          await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(chunkPkt));
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
 
-    // 3. Magic commit packet to finalize sector write (0xa4a4a4a4)
-    await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashMagicCommit(0xe0)));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+        // 3. Magic commit packet to finalize sector write (0xa4a4a4a4)
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashMagicCommit(0xe0)));
+        await new Promise((resolve) => setTimeout(resolve, 30));
 
-    // 4. Reset notification packet (command 0x13)
-    await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashReset()));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+        // 4. Reset notification packet (command 0x13)
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashReset()));
+        await new Promise((resolve) => setTimeout(resolve, 30));
 
-    // 5. Set live runtime active DPI & stage count (command 0x0d)
-    const dpiPacket = bloodyBuildSetDpi(activeDpi, activeStageIndex, enabledStageCount, pollingHz);
-    await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+        // 5. Set live runtime active DPI & stage count (command 0x0d)
+        const dpiPacket = bloodyBuildSetDpi(activeDpi, activeStageIndex, enabledStageCount, pollingHz);
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      } finally {
+        // 6. Lock flash programming mode (command 0x20 0x00)
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashUnlock(false)));
+        await new Promise((resolve) => setTimeout(resolve, 30));
 
-    // 6. Lock flash programming mode (command 0x20 0x00)
-    await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashUnlock(false)));
-    await new Promise((resolve) => setTimeout(resolve, 30));
-
-    // 7. Commit / save settings (command 0x0a)
-    await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
-    await new Promise((resolve) => setTimeout(resolve, 40));
+        // 7. Commit / save settings (command 0x0a)
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      }
+    });
   }
 
   async setActiveDpiStage(stage: number): Promise<number> {
@@ -213,16 +223,18 @@ export class BloodyHidClient {
 
     if (this.lastSensRaw) {
       // Legacy Bloody models (supporting 0x02 sensitivity table)
-      const flashPacket = bloodyBuildSensitivitySet(this.currentStages, this.activeStageIndex, this.lastSensRaw);
-      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(flashPacket));
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await this.enqueue(async () => {
+        const flashPacket = bloodyBuildSensitivitySet(this.currentStages, this.activeStageIndex, this.lastSensRaw!);
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(flashPacket));
+        await new Promise((resolve) => setTimeout(resolve, 30));
 
-      const dpiPacket = bloodyBuildSetDpi(dpi, this.activeStageIndex, total, pollingHz);
-      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
-      await new Promise((resolve) => setTimeout(resolve, 30));
+        const dpiPacket = bloodyBuildSetDpi(dpi, this.activeStageIndex, total, pollingHz);
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
+        await new Promise((resolve) => setTimeout(resolve, 30));
 
-      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
-      await new Promise((resolve) => setTimeout(resolve, 30));
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
     } else {
       // Modern models (W70 / W90 Max with 512KB flash memory sector 0xe000)
       await this.writeFlashSector(this.currentStages, total, dpi, stage, pollingHz);
@@ -251,19 +263,21 @@ export class BloodyHidClient {
 
     if (this.lastSensRaw) {
       // Legacy Bloody models (supporting 0x02 sensitivity table)
-      const flashPacket = bloodyBuildSensitivitySet(this.currentStages, this.activeStageIndex, this.lastSensRaw);
-      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(flashPacket));
-      await new Promise((resolve) => setTimeout(resolve, 30));
-
-      if (stage === this.activeStageIndex) {
-        const dpiPacket = bloodyBuildSetDpi(dpi, this.activeStageIndex, total, pollingHz);
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
+      await this.enqueue(async () => {
+        const flashPacket = bloodyBuildSensitivitySet(this.currentStages, this.activeStageIndex, this.lastSensRaw!);
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(flashPacket));
         await new Promise((resolve) => setTimeout(resolve, 30));
-        this.activeDpi = dpi;
-      }
 
-      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
-      await new Promise((resolve) => setTimeout(resolve, 30));
+        if (stage === this.activeStageIndex) {
+          const dpiPacket = bloodyBuildSetDpi(dpi, this.activeStageIndex, total, pollingHz);
+          await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          this.activeDpi = dpi;
+        }
+
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
     } else {
       // Modern models (W70 / W90 Max with 512KB flash memory sector 0xe000)
       if (stage === this.activeStageIndex) {
@@ -296,16 +310,18 @@ export class BloodyHidClient {
 
     if (this.lastSensRaw) {
       // Legacy Bloody models (supporting 0x02 sensitivity table)
-      const flashPacket = bloodyBuildSensitivitySet(this.currentStages, this.activeStageIndex, this.lastSensRaw);
-      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(flashPacket));
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await this.enqueue(async () => {
+        const flashPacket = bloodyBuildSensitivitySet(this.currentStages, this.activeStageIndex, this.lastSensRaw!);
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(flashPacket));
+        await new Promise((resolve) => setTimeout(resolve, 30));
 
-      const dpiPacket = bloodyBuildSetDpi(activeDpi, this.activeStageIndex, clamped, pollingHz);
-      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
-      await new Promise((resolve) => setTimeout(resolve, 30));
+        const dpiPacket = bloodyBuildSetDpi(activeDpi, this.activeStageIndex, clamped, pollingHz);
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
+        await new Promise((resolve) => setTimeout(resolve, 30));
 
-      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
-      await new Promise((resolve) => setTimeout(resolve, 30));
+        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
     } else {
       // Modern models (W70 / W90 Max with 512KB flash memory sector 0xe000)
       await this.writeFlashSector(this.currentStages, clamped, activeDpi, this.activeStageIndex, pollingHz);
@@ -332,13 +348,15 @@ export class BloodyHidClient {
 
   async setBacklight(level: number): Promise<number> {
     await this.open();
-    const packet = bloodyBuildSetBacklight(level);
-    await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(packet));
-    return level;
+    return this.enqueue(async () => {
+      const packet = bloodyBuildSetBacklight(level);
+      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(packet));
+      return level;
+    });
   }
 
   private query(request: Uint8Array): Promise<Uint8Array | null> {
-    const run = this.queue.then(async () => {
+    return this.enqueue(async () => {
       try {
         await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(request));
         // Give microcontroller time to process command and populate response
@@ -354,7 +372,5 @@ export class BloodyHidClient {
         return null;
       }
     });
-    this.queue = run.catch(() => undefined);
-    return run;
   }
 }
