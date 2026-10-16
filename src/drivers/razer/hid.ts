@@ -213,7 +213,6 @@ export class RazerHidClient {
   /** Same cache, one entry per led, for the extended-matrix family. */
   private lightingZones: MouseLighting[] | null = null;
   private perLedLighting: MouseLighting[] | null = null;
-  private customFrameActive = false;
   private lightingQueue: Promise<unknown> = Promise.resolve();
 
   readonly device: HIDDevice;
@@ -583,7 +582,6 @@ export class RazerHidClient {
     // Cached before the brightness step so a refused brightness cannot leave
     // the panel showing an effect the mouse is no longer running.
     this.lighting = { ...lighting, brightness: previous.brightness };
-    this.customFrameActive = false;
     // A whole-mouse effect overrides every individual cell on screen. Its
     // custom frame buffer remains on the device, but cannot be read back.
     for (const cell of this.perLedLightingFromCache()) cell.mode = null;
@@ -611,12 +609,20 @@ export class RazerHidClient {
     if (lighting.mode === "Static" && lighting.color === null) {
       throw new Error("An individual LED needs a colour.");
     }
-    await this.request(razerSetOneRowCustomFrameCommand(index, [lighting.mode === "Off" ? "#000000" : lighting.color!]));
-    if (!this.customFrameActive) await this.request(razerSetStandardCustomEffectCommand());
-    this.customFrameActive = true;
-    // Custom colours have no getter. Only cache an acknowledged frame, and
-    // never imply that untouched LEDs or their physical order were read back.
-    cells[index] = { ...previous, mode: lighting.mode, color: lighting.color };
+    // Match OpenRGB's Diamondback path: upload the entire row from column 0,
+    // then latch custom mode on every edit. Single-cell uploads were accepted
+    // but the ticket reporter only saw LED 0 change. Unknown cells start black
+    // because this model cannot read its current custom-frame colours.
+    const colors = cells.map((cell) => cell.mode === "Static" ? cell.color ?? "#000000" : "#000000");
+    colors[index] = lighting.mode === "Off" ? "#000000" : lighting.color!;
+    await this.request(razerSetOneRowCustomFrameCommand(0, colors));
+    await this.request(razerSetStandardCustomEffectCommand());
+    // Commit the entire write-only cache only after upload and activation.
+    for (let i = 0; i < cells.length; i++) {
+      cells[i] = i === index
+        ? { ...previous, mode: lighting.mode, color: lighting.color }
+        : { ...cells[i], mode: cells[i].mode ?? "Off" };
+    }
     this.lighting = { ...this.lightingFromCache(), mode: null };
     return { ...cells[index] };
   }
