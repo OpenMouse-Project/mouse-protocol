@@ -265,21 +265,38 @@ export function bloodyBuildFlashReset(): Uint8Array {
 
 /**
  * Builds the 256-byte flash profile sector for W70/W90 Max (sector 0xe000).
+ * If baseSector is provided, preserves existing bytes and modifies only stage count and DPI stages.
  */
 export function bloodyBuildFlashSector(
   stages: readonly number[],
   enabledStageCount = 5,
+  baseSector?: Uint8Array,
 ): Uint8Array {
   const sector = new Uint8Array(256);
-  // Header: ff ff ff ff d4 92 45 97
-  sector[0] = 0xff;
-  sector[1] = 0xff;
-  sector[2] = 0xff;
-  sector[3] = 0xff;
-  sector[4] = 0xd4;
-  sector[5] = 0x92;
-  sector[6] = 0x45;
-  sector[7] = 0x97;
+  if (baseSector && baseSector.length >= 256) {
+    sector.set(baseSector.subarray(0, 256));
+  } else {
+    // Header: ff ff ff ff d4 92 45 97
+    sector[0] = 0xff;
+    sector[1] = 0xff;
+    sector[2] = 0xff;
+    sector[3] = 0xff;
+    sector[4] = 0xd4;
+    sector[5] = 0x92;
+    sector[6] = 0x45;
+    sector[7] = 0x97;
+
+    // Polling / LOD config indicator
+    sector[0x3c] = 0x02;
+
+    // Standard button mapping table
+    const defaultButtons = [
+      0x07, 0x00, 0x40, 0x00, 0x40, 0x01, 0x40, 0x02, 0x40, 0x04, 0x40, 0x05, 0x40, 0x06, 0x40, 0x07,
+      0x40, 0x08, 0x40, 0x09, 0x40, 0x0a, 0x40, 0x0c, 0x40, 0x0d, 0x40, 0x0e, 0x40, 0x0f, 0x40, 0x10,
+      0x40, 0x11,
+    ];
+    sector.set(defaultButtons, 0x48);
+  }
 
   // Enabled stage count - 1 (32-bit LE)
   const count = Math.max(1, Math.min(5, Math.round(enabledStageCount)));
@@ -296,17 +313,6 @@ export function bloodyBuildFlashSector(
     sector[offset + 4] = bloodyDpiToRawStep(dpi);
     sector[offset + 5] = 0x00;
   }
-
-  // Polling / LOD config indicator
-  sector[0x3c] = 0x02;
-
-  // Standard button mapping table
-  const defaultButtons = [
-    0x07, 0x00, 0x40, 0x00, 0x40, 0x01, 0x40, 0x02, 0x40, 0x04, 0x40, 0x05, 0x40, 0x06, 0x40, 0x07,
-    0x40, 0x08, 0x40, 0x09, 0x40, 0x0a, 0x40, 0x0c, 0x40, 0x0d, 0x40, 0x0e, 0x40, 0x0f, 0x40, 0x10,
-    0x40, 0x11,
-  ];
-  sector.set(defaultButtons, 0x48);
 
   return sector;
 }

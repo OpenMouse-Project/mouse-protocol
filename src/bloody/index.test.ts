@@ -261,3 +261,27 @@ test("bloodyBuildFlashSector formats 256-byte sector with stage counts and raw s
   assert.equal(sector[0x4b], 0x00);
 });
 
+test("bloodyBuildFlashSector preserves base sector contents when provided", () => {
+  const base = new Uint8Array(256);
+  base.fill(0xee);
+  base[0x3c] = 0x77;
+  base[0x48] = 0x99;
+
+  const sector = bloodyBuildFlashSector([800, 1600], 2, base);
+  assert.equal(sector.length, 256);
+  // Preserved custom values
+  assert.equal(sector[0], 0xee);
+  assert.equal(sector[0x3c], 0x77);
+  assert.equal(sector[0x48], 0x99);
+  assert.equal(sector[200], 0xee);
+
+  // Updated stage count: 2 stages -> 2 - 1 = 1
+  assert.equal(sector[8], 1);
+  // Updated Stage 0: 800 DPI (raw step 18)
+  assert.equal(sector[12], 0x40);
+  assert.equal(sector[16], 18);
+  // Updated Stage 1: 1600 DPI (raw step 36)
+  assert.equal(sector[18], 0x40);
+  assert.equal(sector[22], 36);
+});
+
