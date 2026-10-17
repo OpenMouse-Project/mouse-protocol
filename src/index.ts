@@ -39,3 +39,4 @@ export * as rapoo from "./rapoo/index.js";
 export * as fater from "./fater/index.js";
 export * as coolermaster from "./coolermaster/index.js";
 export * as ajazz from "./ajazz/index.js";
+export * as roccat from "./roccat/index.js";
