@@ -1,0 +1,22 @@
+Corsair SCIMITAR RGB ELITE (wired), VID 0x1b1c PID 0x1be3
+bcdUSB 2.00, bcdDevice 1.02, iProduct "CORSAIR SCIMITAR RGB ELITE Gaming Mouse"
+(No serial number is recorded here.)
+
+Interface 0  HID, boot protocol Mouse     EP 0x82 IN  64 bytes, bInterval 4   report descriptor 66 bytes
+Interface 1  HID, no boot protocol        EP 0x84 IN / EP 0x04 OUT 128 bytes, bInterval 4   report descriptor 27 bytes   <- Bragi
+Interface 2  HID, no boot protocol        EP 0x83 IN  64 bytes, bInterval 4   report descriptor 21 bytes
+Interface 3  HID, boot protocol Keyboard  EP 0x81 IN  64 bytes, bInterval 4   report descriptor 62 bytes
+
+HID report descriptors (hex, from /sys/class/hidraw/*/device/report_descriptor):
+
+interface 0 (Generic Desktop / Mouse, 5 buttons, 16-bit X/Y, wheel; no report id)
+05010902a1010901a100050919012905150025019505750181029503750181037510950205010930093116018026ff7f810675089501050109381581257f8106c0c0
+
+interface 1 (vendor page 0xFF42, usage 0x01: 128-byte input and 128-byte output, no report id)
+0642ff0901a101150026ff007508958009018102958009019102c0
+
+interface 2 (vendor page 0xFF42, usage 0x02: 64-byte input only)
+0642ff0902a101150026ff007508954009028102c0
+
+interface 3 (Keyboard with report id 1, plus Consumer Control with report id 2)
+05010906a10185010507750119e029e79508810219002967956881021987298e95088102c0050c0901a101850295017510150026ff0319002aff038100c0
