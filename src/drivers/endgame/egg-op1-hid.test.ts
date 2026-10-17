@@ -237,3 +237,43 @@ test("writes over the shared dongle wait until the paired mouse identifies itsel
   sleepy.state.pairedPid = 0x1984;
   assert.equal(await client.setDpi(800), 800);
 });
+
+test("a stale handle that rejects the first write is closed, reopened and retried once", async () => {
+  const mouse = fake4kV2();
+  const device = mouse.device as unknown as {
+    opened: boolean;
+    open(): Promise<void>;
+    close(): Promise<void>;
+    sendFeatureReport(reportId: number, data: BufferSource): Promise<void>;
+  };
+  const send = device.sendFeatureReport.bind(device);
+  let stale = true;
+  const calls: string[] = [];
+  device.open = async () => { calls.push("open"); device.opened = true; stale = false; };
+  device.close = async () => { calls.push("close"); device.opened = false; };
+  device.sendFeatureReport = async (reportId, data) => {
+    if (stale) throw new DOMException("Failed to write the feature report.", "NetworkError");
+    return send(reportId, data);
+  };
+
+  const status = await new EggOp1HidClient(mouse.device).readStatus();
+  assert.equal(status.firmware[0], "Firmware V1.07");
+  assert.deepEqual(calls.slice(0, 2), ["close", "open"]);
+});
+
+test("a write that still fails after the reopen surfaces the error", async () => {
+  const mouse = fake4kV2();
+  const device = mouse.device as unknown as { sendFeatureReport(): Promise<void> };
+  device.sendFeatureReport = async () => { throw new Error("Failed to write the feature report."); };
+  await assert.rejects(new EggOp1HidClient(mouse.device).readStatus(), /Failed to write the feature report/);
+});
+
+test("a non-stale write error is not closed and reopened", async () => {
+  const mouse = fake4kV2();
+  const device = mouse.device as unknown as { close(): Promise<void>; sendFeatureReport(): Promise<void> };
+  const calls: string[] = [];
+  device.close = async () => { calls.push("close"); };
+  device.sendFeatureReport = async () => { throw new DOMException("Rejected by device.", "NotAllowedError"); };
+  await assert.rejects(new EggOp1HidClient(mouse.device).readStatus(), /Rejected by device/);
+  assert.deepEqual(calls, []);
+});

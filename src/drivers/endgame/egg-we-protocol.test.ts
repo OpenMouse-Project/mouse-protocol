@@ -155,3 +155,110 @@ test("DPI patch refuses corrupt source stages", () => {
 test("WE mice expose battery, DPI, polling, and lift-off distance", () => {
   assert.deepEqual(weExposedFeatures(), ["battery", "dpi", "polling-rate", "lift-off-distance"]);
 });
+
+test("a stale command channel is closed, reopened and the OP1we write retried once", async () => {
+  let stale = true;
+  const calls: string[] = [];
+  const device = {
+    vendorId: 0x3367,
+    productId: 0x1962,
+    productName: "OP1we",
+    opened: true,
+    collections: [
+      { usagePage: 0xff02, usage: 0, featureReports: [{ reportId: WE_REPORT_ID, items: [] }], inputReports: [], outputReports: [], children: [] },
+      { usagePage: 0xff01, usage: 0, featureReports: [], inputReports: [{ reportId: 0x09, items: [] }], outputReports: [], children: [] },
+    ],
+    async open() { calls.push("open"); this.opened = true; stale = false; },
+    async close() { calls.push("close"); this.opened = false; },
+    addEventListener() {},
+    removeEventListener() {},
+    async sendFeatureReport() {
+      if (stale) throw new DOMException("Failed to write the feature report.", "NetworkError");
+      calls.push("sent");
+    },
+  } as unknown as HIDDevice;
+  const client = new EggWeHidClient(device);
+  const send = (client as unknown as {
+    sendReportRecovering(channels: { cmd: HIDDevice; notify: HIDDevice }, data: ArrayBuffer): Promise<void>;
+  }).sendReportRecovering.bind(client);
+  await send({ cmd: device, notify: device }, new ArrayBuffer(16));
+  assert.deepEqual(calls, ["close", "open", "sent"]);
+});
+
+type WeListener = (event: unknown) => void;
+
+function transactDevice(sendFeatureReport: (self: { opened: boolean }, calls: string[]) => Promise<void>) {
+  const calls: string[] = [];
+  const listeners = new Set<WeListener>();
+  const device = {
+    vendorId: 0x3367,
+    productId: 0x1962,
+    productName: "OP1we",
+    opened: true,
+    collections: [
+      { usagePage: 0xff02, usage: 0, featureReports: [{ reportId: WE_REPORT_ID, items: [] }], inputReports: [], outputReports: [], children: [] },
+      { usagePage: 0xff01, usage: 0, featureReports: [], inputReports: [{ reportId: 0x09, items: [] }], outputReports: [], children: [] },
+    ],
+    async open() { calls.push("open"); this.opened = true; },
+    async close() { calls.push("close"); this.opened = false; },
+    addEventListener(_type: string, listener: WeListener) { listeners.add(listener); },
+    removeEventListener(_type: string, listener: WeListener) { listeners.delete(listener); },
+    async sendFeatureReport() { await sendFeatureReport(this, calls); },
+  } as unknown as HIDDevice;
+  const client = new EggWeHidClient(device);
+  client.bindPeers([device]);
+  const reply = (command: number) => {
+    for (const listener of [...listeners]) {
+      listener({ reportId: 0x09, data: new DataView(new Uint8Array([command, 0, 0, 0, 0, 0, 0, 0]).buffer) });
+    }
+  };
+  const transact = (client as unknown as {
+    transact(channels: { cmd: HIDDevice; notify: HIDDevice }, command: number, payload: Uint8Array): Promise<Uint8Array>;
+  }).transact.bind(client);
+  return { client, device, calls, reply, run: () => transact({ cmd: device, notify: device }, 0x04, new Uint8Array(16)) };
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+(globalThis as { window?: unknown }).window ??= globalThis;
+
+test("transact keeps the reply window after a slow stale-handle recovery", async () => {
+  let stale = true;
+  const t = transactDevice(async (self, calls) => {
+    if (stale) {
+      await wait(1000); // longer than the 900 ms response timeout
+      stale = false;
+      throw new DOMException("Failed to write the feature report.", "NetworkError");
+    }
+    calls.push("sent");
+  });
+  const pending = t.run();
+  await wait(1100);
+  t.reply(0x04);
+  assert.equal((await pending)[0], 0x04);
+  assert.deepEqual(t.calls, ["close", "open", "sent"]);
+});
+
+test("transact surfaces the error when the retry after reopen also fails", async () => {
+  const t = transactDevice(async () => { throw new DOMException("Failed to write the feature report.", "NetworkError"); });
+  await assert.rejects(t.run(), /Failed to write the feature report/);
+  assert.deepEqual(t.calls, ["close", "open"]);
+});
+
+test("transact does not resend after close() during recovery", async () => {
+  let writes = 0;
+  const t = transactDevice(async () => { writes += 1; throw new DOMException("Failed to write the feature report.", "NetworkError"); });
+  const original = t.device.open.bind(t.device);
+  t.device.open = async () => { await wait(20); await original(); };
+  const pending = t.run();
+  const outcome = assert.rejects(pending, /cancelled|closed/);
+  await wait(5);
+  await t.client.close();
+  await outcome;
+  assert.equal(writes, 1);
+});
+
+test("transact does not retry a non-stale write error", async () => {
+  const t = transactDevice(async () => { throw new DOMException("Rejected by device.", "NotAllowedError"); });
+  await assert.rejects(t.run(), /Rejected by device/);
+  assert.deepEqual(t.calls, []);
+});
