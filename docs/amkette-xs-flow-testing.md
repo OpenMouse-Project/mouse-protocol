@@ -12,7 +12,9 @@ brands have separate drivers:
   configuration collection is on usage `0x00`, which is what an XS Flow 2 Speed
   publishes on all three paths. It reads telemetry and writes settings.
 - `src/drivers/ryunix/kyu-pro-mx1-hid.ts` (`KyuProMx1Client`) keeps the Kyu Pro
-  MX1's collection on usage `0xC7` and is unchanged: read-only telemetry. None
+  MX1's collection on usage `0xC7` and stays read-only. Its only change: the
+  shared decoder now accepts battery status 2, which it shows as full at 100%
+  rather than discharging. None
   of the writes below have been checked on a Kyu Pro MX1, so they are not
   enabled for it, the same way the Noir Gear M2-NEX was added without changing
   the K-snake X11's behaviour.
@@ -139,16 +141,18 @@ independently.
   by a fresh status report, and a Breathe lighting write is applied (the mouse
   reports lighting mode 2 afterwards);
 - lift-off writes are acknowledged over Bluetooth and the receiver, and lighting
-  effect writes over the receiver (probe tool, see the sections below).
+  effect writes over the receiver (probe tool, see the sections below);
+- DPI over USB: choosing a stage in OpenMouse writes the stage table and
+  switches stage, confirmed by the status report and the mouse's stage light,
+  and pressing the mouse's DPI button is followed in OpenMouse.
 
 ## Not yet verified
 
 These are encoded from the vendor app and covered by codec tests, but have not
-been checked against the mouse: the DPI table and stage colours, active stage
-switching, auto sleep, angle snapping, motion sync, ripple control and button
-remapping. Whether lift-off, brightness and effect speed change anything
+been checked against the mouse: editing a single stage's value, stage colours,
+auto sleep, angle snapping, motion sync, ripple control and button remapping. Whether lift-off, brightness and effect speed change anything
 physically has not been recorded. Writes through OpenMouse over the receiver and
-Bluetooth, polling rates above 1000 Hz, and the XS Flow Plus and XS Natural Plus
+Bluetooth (including DPI), polling rates above 1000 Hz, and the XS Flow Plus and XS Natural Plus
 models are untested. Bluetooth is claimed on the strength of read-only probes
 plus acknowledged lift-off writes from one unit on slot 2; slots 1 and 3, and
 whether they keep PID `0x026D`, are unchecked.

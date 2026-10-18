@@ -108,6 +108,9 @@ test("DPI colour frames carry eight RGB triples", () => {
   assert.deepEqual([...frame.subarray(4, 10)], [255, 0, 0, 0, 102, 255]);
   assert.equal(frame.length, RYUNIX_COMMAND_FRAME_LENGTH);
   assert.throws(() => ryunixSetDpiColorsFrame(4, ["red"]), RangeError);
+  // Missing slots take their own defaults: stage 3 is blue, stage 7 white.
+  assert.deepEqual([...frame.subarray(10, 13)], [0, 0, 255]);
+  assert.deepEqual([...frame.subarray(22, 25)], [255, 255, 255]);
 });
 
 test("lighting frames only carry the controls an effect has", () => {
