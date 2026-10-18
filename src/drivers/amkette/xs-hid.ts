@@ -521,7 +521,8 @@ export class AmketteXsHidClient {
       ui: {
         family: "amkette-xs",
         settingsReady: true,
-        valuesVerified: telemetry !== null,
+        // Polling and the active stage are read, but DPI values never are.
+        valuesVerified: false,
         hideUnsupportedPollingRates: true,
         hideSignalCard: true,
         forceShowBattery: true,

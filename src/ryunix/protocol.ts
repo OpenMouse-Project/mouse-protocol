@@ -243,7 +243,7 @@ export function ryunixParseColor(color: string): [number, number, number] {
 export function ryunixSetDpiColorsFrame(sequence: number, colors: readonly string[]): Uint8Array {
   const payload: number[] = [];
   for (let slot = 0; slot < RYUNIX_DPI_SLOTS; slot++) {
-    payload.push(...ryunixParseColor(colors[slot] ?? RYUNIX_DEFAULT_DPI_COLORS[0]!));
+    payload.push(...ryunixParseColor(colors[slot] ?? RYUNIX_DEFAULT_DPI_COLORS[slot]!));
   }
   return ryunixFrame(RYUNIX_COMMAND.dpiColors, sequence, 1, payload);
 }
