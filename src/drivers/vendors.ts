@@ -109,6 +109,7 @@ import {
   RYUNIX_USAGE_PAGE,
   RYUNIX_VENDOR_ID,
 } from "@openmouse/protocol/ryunix";
+import { AMKETTE_XS_PRODUCT_IDS, AMKETTE_XS_USAGE } from "@openmouse/protocol/amkette";
 import {
   RAPOO_CONFIG_USAGE,
   RAPOO_CONFIG_USAGE_PAGE,
@@ -152,6 +153,9 @@ export const VENDOR_ID = {
   vaxee: VAXEE_VENDOR_ID,
   asus: ASUS_VENDOR_ID,
   ryunix: RYUNIX_VENDOR_ID,
+  // Amkette's XS series shares the 0x04F3 OEM firmware and IDs with Ryunix; the
+  // two drivers are kept apart by the configuration collection's usage.
+  amkette: RYUNIX_VENDOR_ID,
   rapoo: RAPOO_VENDOR_ID,
   motospeed: MOTOSPEED_VENDOR_ID,
   pulsar: 0x3710,
@@ -848,6 +852,14 @@ export const RYUNIX_HID_FILTERS: HIDDeviceFilter[] = [...RYUNIX_PRODUCT_IDS].map
   usagePage: RYUNIX_USAGE_PAGE,
   usage: RYUNIX_USAGE,
 }));
+// Same product IDs as Ryunix plus Bluetooth (0x026D); the XS firmware publishes
+// its configuration collection on usage 0x00 instead of 0xC7.
+export const AMKETTE_XS_HID_FILTERS: HIDDeviceFilter[] = [...AMKETTE_XS_PRODUCT_IDS].map((productId) => ({
+  vendorId: RYUNIX_VENDOR_ID,
+  productId,
+  usagePage: RYUNIX_USAGE_PAGE,
+  usage: AMKETTE_XS_USAGE,
+}));
 
 // Both the 2.4 GHz receiver and the mouse on its cable answer on the same
 // usage page and usage, so one filter per product id covers the family.
@@ -993,6 +1005,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...INCOTT_HID_FILTERS,
   ...HYPERX_HID_FILTERS,
   ...RYUNIX_HID_FILTERS,
+  ...AMKETTE_XS_HID_FILTERS,
   ...RAPOO_HID_FILTERS,
   { vendorId: VENDOR_ID.coolermaster, usagePage: COOLERMASTER_USAGE_PAGE, usage: COOLERMASTER_USAGE },
   { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff00 },
