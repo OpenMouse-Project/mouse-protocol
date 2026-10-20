@@ -21,6 +21,8 @@ import { sep } from "node:path";
 
 /** Test files that assert real elapsed timing and must keep real timers. */
 const TIMING_ASSERTING = [
+  // Delayed acknowledgements must arrive before the driver's reply timeout.
+  "ajazz/aj200p-hid.test.ts",
   // Receiver writes must keep a minimum real gap between overlapping calls.
   "attackshark/hid.test.ts",
   // Magnetic-button calibration follows live readings across a settle window.

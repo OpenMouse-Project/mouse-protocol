@@ -42,6 +42,8 @@ export interface MouseUiHints {
    * invisible without this. Set it only when a card in there will show.
    */
   showAdvancedSection?: boolean;
+  /** Keep RGB controls in the Lighting tab without duplicating them under Advanced. */
+  hideAdvancedLighting?: boolean;
   /** Always show battery column (even wired with null %). */
   forceShowBattery?: boolean;
   /** Group the device's battery, DPI-indicator, and sleep controls on Overview. */
@@ -53,6 +55,8 @@ export interface MouseUiHints {
   statusNote?: string;
   /** Override the polling-rate footnote. */
   pollingNote?: string;
+  /** Explain coupled sleep settings when applying the timeout also changes another timer. */
+  sleepNote?: string;
   /** Sidebar name before first status read. */
   defaultDisplayName?: string;
   /**

@@ -26,20 +26,71 @@ The PAW3955 `fc1e` nano receiver is named AJ200P NL AI ULTRA and advertises
 8 kHz, whereas `ed1e` advertises 4 kHz. ULTRA+ excludes 125 Hz wirelessly.
 These differences are retained rather than inferred from model names.
 
+## Packet layout
+
+The report ID is separate from the body. Outgoing bodies are zero-padded to 127
+bytes: `[command, payloadLength, ...payload]`. Incoming bodies start with
+`[command, length, status, ...payload]`; zero status means success. Reply length
+includes the status byte except for DPI tables, where it counts data only.
+
+| Command | Operation | Payload bytes |
+| --- | --- | --- |
+| `0x13` | Read identity, firmware, battery and active bank | 54 |
+| `0x15` / `0x16` | Read / write button map | 21 or 33 |
+| `0x17` / `0x18` | Read / write settings | 30, 31 or 39 for the listed products |
+| `0x19` / `0x1a` | Read / write all eight DPI slots | 48 for legacy sensors; 64 for PAW3955 |
+| `0x21` | Select active onboard bank | One zero-based bank index, `0..4` |
+
+Read requests have no payload. Writes return an acknowledgement; settings, key
+maps and DPI tables are then read back in full. Offsets below refer to payloads,
+without report ID, command, length or status.
+
+| Settings offset | Meaning |
+| --- | --- |
+| 0 / 1 | Wireless / wired polling-rate code |
+| 2 / 3 | Enabled DPI count / zero-based active slot |
+| 6 | LOD code, constrained by the product catalogue |
+| 7 | Debounce in milliseconds, `0..20` |
+| 8 / 10 | Motion Sync / angle snapping |
+| 11 | Three-state ripple control, preserved |
+| 15 | Sensor power saving: `1` enabled, `0` performance |
+| 21–23 | DPI lighting theme RGB, separate from DPI-slot colours |
+| 25 / 26 | Normal / deep sleep in 10-second units |
+| 27 / 28 / 29 | DPI theme effect / brightness / speed |
+| 30 | Optional BLE setting, preserved |
+| 31–38 | Optional flywheel settings, preserved |
+
+Button entries are three bytes: `[actionType, argument1, argument2]`. The seventh
+wire entry (`key7`, zero-based slot 6, bytes 18–20) is retained without assigning
+it a physical button. Wheel entries follow it on flywheel models.
+
+Legacy DPI entries are six bytes. They pack two 10-bit, 50-DPI-unit axis values
+minus one plus RGB; unused bits in the packed byte are preserved. PAW3955 entries
+are eight bytes, with a shared high-nibble byte, two 16-bit little-endian axis
+values and RGB. Both encodings are decoded and patched by the pure codec.
+
 ## Supported settings
 
 - Five firmware-managed onboard banks; edit the active bank after selecting it.
-- Seven button entries; ULTRA+ and MASTER add four wheel/tilt entries.
-- Mouse buttons, keyboard keys/modifiers, consumer controls, DPI actions and
+- Six physical button entries; ULTRA+ and MASTER add four wheel/tilt entries.
+  Wire slot 7 (`key7`) has no corresponding control in the vendor UI and is
+  preserved without exposing a fictitious AI button. The vendor's separate
+  AI features attach to the forward/back buttons instead.
+- Mouse buttons, keyboard keys/modifiers including the numpad, consumer/system
+  controls (media, volume, brightness, browser and app launch), DPI actions and
   disabled buttons. Existing shortcuts, macros and unknown actions are preserved.
 - Eight DPI slots, active slot and enabled slot count, separate X/Y values and
   per-slot RGB colours. Legacy sensors use six-byte/50-DPI entries. PAW3955 uses
   eight-byte entries with independent 20-bit axes, 1–80000 DPI.
-- Model/connection-specific polling rates, LOD where supported, debounce,
-  Motion Sync, angle snapping and normal sleep timeout.
+- Model/connection-specific polling rates, LOD where supported, 0–20 ms debounce,
+  Motion Sync, angle snapping and sensor performance/power-saving mode.
+- One sleep control writes both normal and deep-sleep timers in the same settings
+  block. Deep sleep is set to normal sleep plus 60 seconds, in the protocol's
+  10-second units (including 1800/1860 seconds at the upper end). Reading does not
+  change existing independent timers. The UI explains the coupling before saving.
 - A separate DPI lighting theme colour, off/static/breathing, brightness and speed.
 
-Three-state ripple control, deep sleep, BLE options and flywheel tuning are
+Three-state ripple control, BLE options and flywheel tuning are
 preserved byte-for-byte. They are not reduced to unrelated generic controls.
 Macro bodies, AI service features, receiver lighting, pairing, reset and firmware
 update are outside this change.
@@ -72,8 +123,30 @@ Key maps are 21 or 33 bytes; DPI tables are 48 or 64. Unknown layouts are
 rejected. Input length includes status except for the DPI-table response.
 Status reads do not switch profiles or write configuration.
 
-The MASTER receiver has been read through this driver on Windows, including
-identity, battery, all eleven mappings, DPI, lighting and settings. Earlier
-hardware configuration experiments verified stored bank cycling and both kinds
-of RGB data across all five banks, with the configurator closed. Further write
-validation and OpenMouse integration checks are in progress for this draft.
+The MASTER receiver has been exercised through this driver on Windows, including
+identity, battery, the full eleven-slot key map, DPI, lighting and settings.
+Write/read-back checks cover key assignment, separate DPI axes, stage values,
+colours and count, active stage, polling, LOD, debounce (including 0 ms), Motion
+Sync, angle snapping, sensor performance/power-saving mode and lighting.
+Coupled normal/deep sleep was accepted at 10/70, 180/240 and 1800/1860 seconds.
+These checks verify stored timer bytes, not elapsed sleep/wake timing.
+The values survived closing and reopening the HID connection; power cycling has
+not been verified. Tests restored fresh snapshots of the user's settings.
+
+Earlier hardware experiments verified stored bank cycling and both kinds of RGB
+data across all five banks, with the configurator closed. Other listed interfaces
+remain catalogue-based and covered by simulated transport tests only.
+
+## OpenMouse integration
+
+The public `@openmouse/protocol/ajazz/aj200p` subpath exports codecs and the
+catalogue. The root namespace is `ajazzAj200p`; the registered WebHID client is
+`AjazzAj200pHidClient`. Settings use existing `MouseStatus` fields and setters.
+Two optional, declarative `MouseUiHints` additions let consumers keep lighting
+controls in one place (`hideAdvancedLighting`) and explain coupled sleep timers
+(`sleepNote`). Consumers that do not use these hints remain compatible.
+
+The OpenMouse companion changes enable this family's generic settings cards,
+editable per-DPI-stage colours and staged-edit protection when the physical
+button switches banks. They are being tested locally and have not yet been
+submitted as a separate application PR.
