@@ -218,6 +218,10 @@
       "types": "./dist/ajazz/index.d.ts",
       "import": "./dist/ajazz/index.js"
     },
+    "./ajazz/aj200p": {
+      "types": "./dist/ajazz/aj200p.d.ts",
+      "import": "./dist/ajazz/aj200p.js"
+    },
     "./coolermaster": {
       "types": "./dist/coolermaster/index.d.ts",
       "import": "./dist/coolermaster/index.js"
