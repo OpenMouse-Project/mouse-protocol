@@ -221,6 +221,10 @@
     "./coolermaster": {
       "types": "./dist/coolermaster/index.d.ts",
       "import": "./dist/coolermaster/index.js"
+    },
+    "./roccat": {
+      "types": "./dist/roccat/index.d.ts",
+      "import": "./dist/roccat/index.js"
     }
   },
   "scripts": {

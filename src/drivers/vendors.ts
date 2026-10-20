@@ -10,6 +10,13 @@ import { ATK_COMPX_PRODUCT_IDS } from "./atk/products.ts";
 import { MICROSOFT_PRODUCT_CLASSIC, MICROSOFT_PRODUCT_PRO, MICROSOFT_VENDOR_ID, MICROSOFT_CLASSIC_USAGE_PAGE, MICROSOFT_CLASSIC_USAGE, MICROSOFT_PRO_USAGE_PAGE, MICROSOFT_PRO_USAGE } from "../microsoft/index.ts";
 import { FINALMOUSE_SLX_DONGLE_PRODUCT_IDS } from "../finalmouse/index.ts";
 import { INCOTT_PRODUCT_IDS, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../incott/index.ts";
+import {
+  ROCCAT_CONFIG_USAGE,
+  ROCCAT_CONFIG_USAGE_PAGE,
+  ROCCAT_KONE_PRO_AIR_WIRELESS_PID,
+  ROCCAT_KONE_PRO_AIR_WIRED_PID,
+  ROCCAT_VENDOR_ID,
+} from "../roccat/index.ts";
 import { GLORIOUS_CORE2_PRODUCTS, GLORIOUS_CORE2_USAGE_PAGE, GLORIOUS_CORE2_VENDOR_ID } from "../glorious-core2/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { VAXEE_PRODUCT_IDS, VAXEE_USAGE, VAXEE_USAGE_PAGE, VAXEE_VENDOR_ID } from "@openmouse/protocol/vaxee";
@@ -209,6 +216,7 @@ export const VENDOR_ID = {
   incott: INCOTT_VENDOR_ID,
   hyperxKingston: HYPERX_VENDOR_ID_KINGSTON,
   hyperxHp: HYPERX_VENDOR_ID_HP,
+  roccat: ROCCAT_VENDOR_ID,
 } as const;
 
 /**
@@ -842,6 +850,14 @@ export const HYPERX_HID_FILTERS: HIDDeviceFilter[] = [
   ...HYPERX_KINGSTON_HID_FILTERS,
   ...HYPERX_HP_HID_FILTERS,
 ];
+
+// The Kone Pro family exposes one 0xFF00:0x0001 vendor interface across the
+// whole composite (interface 2 of the dongle, interface 1 wired). There is no
+// feature report on it, so the filter cannot pin a report id.
+export const ROCCAT_HID_FILTERS: HIDDeviceFilter[] = [
+  { vendorId: ROCCAT_VENDOR_ID, productId: ROCCAT_KONE_PRO_AIR_WIRELESS_PID, usagePage: ROCCAT_CONFIG_USAGE_PAGE, usage: ROCCAT_CONFIG_USAGE },
+  { vendorId: ROCCAT_VENDOR_ID, productId: ROCCAT_KONE_PRO_AIR_WIRED_PID, usagePage: ROCCAT_CONFIG_USAGE_PAGE, usage: ROCCAT_CONFIG_USAGE },
+];
 export const RYUNIX_HID_FILTERS: HIDDeviceFilter[] = [...RYUNIX_PRODUCT_IDS].map((productId) => ({
   vendorId: RYUNIX_VENDOR_ID,
   productId,
@@ -992,6 +1008,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...MICROSOFT_HID_FILTERS,
   ...INCOTT_HID_FILTERS,
   ...HYPERX_HID_FILTERS,
+  ...ROCCAT_HID_FILTERS,
   ...RYUNIX_HID_FILTERS,
   ...RAPOO_HID_FILTERS,
   { vendorId: VENDOR_ID.coolermaster, usagePage: COOLERMASTER_USAGE_PAGE, usage: COOLERMASTER_USAGE },
