@@ -72,6 +72,7 @@ checklist.
 | Rapoo VT9 Pro | `@openmouse/protocol/rapoo` |
 | Razer V4 | `@openmouse/protocol/razer-v4` |
 | Ryunix | `@openmouse/protocol/ryunix` |
+| Amkette XS series | `@openmouse/protocol/amkette` |
 | SteelSeries Rival 3 (Gen 1) | `@openmouse/protocol/steelseries` |
 | Teevolution | `@openmouse/protocol/teevolution` |
 | VGN | `@openmouse/protocol/vgn` |
