@@ -58,6 +58,7 @@ import {
   ZAUNKOENIG_VENDOR_ID,
 } from "@openmouse/protocol/zaunkoenig";
 import {
+  CORSAIR_BRAGI_MICE,
   CORSAIR_BRAGI_PRODUCT_IDS,
   CORSAIR_BRAGI_USAGE_PAGE,
   CORSAIR_CONFIG_USAGE,
@@ -798,14 +799,20 @@ export const CORSAIR_HID_FILTERS: HIDDeviceFilter[] = CORSAIR_PRODUCT_IDS.map((p
 /**
  * Bragi mice and their receivers. Interface 2 of the receiver is 0xFF42 as
  * well (input only), so the picker may list two entries; the driver claims
- * only the one that takes output reports. The HID report descriptor, and with
- * it the usage that would tell the two apart here, has not been captured yet.
+ * only the one that takes output reports. Where the descriptor was captured
+ * (the SCIMITAR RGB ELITE: command collection usage 0x01, input-only usage 0x02)
+ * the filter also pins the usage; elsewhere the usage that would tell the two
+ * apart has not been captured yet.
  */
-export const CORSAIR_BRAGI_HID_FILTERS: HIDDeviceFilter[] = CORSAIR_BRAGI_PRODUCT_IDS.map((productId) => ({
-  vendorId: CORSAIR_VENDOR_ID,
-  productId,
-  usagePage: CORSAIR_BRAGI_USAGE_PAGE,
-}));
+export const CORSAIR_BRAGI_HID_FILTERS: HIDDeviceFilter[] = CORSAIR_BRAGI_PRODUCT_IDS.map((productId) => {
+  const usage = CORSAIR_BRAGI_MICE.get(productId)?.commandUsage;
+  return {
+    vendorId: CORSAIR_VENDOR_ID,
+    productId,
+    usagePage: CORSAIR_BRAGI_USAGE_PAGE,
+    ...(usage === undefined ? {} : { usage }),
+  };
+});
 
 export const MICROSOFT_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.microsoft, productId: MICROSOFT_PRODUCT_CLASSIC, usagePage: MICROSOFT_CLASSIC_USAGE_PAGE, usage: MICROSOFT_CLASSIC_USAGE }, // Classic
