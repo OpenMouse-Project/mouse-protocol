@@ -16,11 +16,20 @@ test("a Diamondback partial frame carries inclusive columns, RGB bytes and the f
   assert.equal(packet[88], razerChecksum(packet));
 });
 
-test("the maximum frame fills the declared payload without spilling into padding", () => {
-  const packet = encodeRazerRequest(razerSetOneRowCustomFrameCommand(0, Array(16).fill("#123456")), 0xff);
-  assert.deepEqual([...packet.slice(8, 10)], [0, 15]);
-  assert.deepEqual([...packet.slice(55, 58)], [18, 52, 86]);
-  assert.ok(packet.slice(58, 88).every((byte) => byte === 0));
+test("the full 21-LED Diamondback row matches OpenRGB despite the fixed 0x32 header", () => {
+  const packet = encodeRazerRequest(razerSetOneRowCustomFrameCommand(0, Array(21).fill("#123456")), 0xff);
+  assert.equal(packet[5], 0x32);
+  assert.deepEqual([...packet.slice(8, 10)], [0, 20]);
+  assert.deepEqual([...packet.slice(70, 73)], [18, 52, 86]);
+  assert.ok(packet.slice(73, 88).every((byte) => byte === 0));
+  assert.equal(packet[88], razerChecksum(packet));
+});
+
+test("the maximum row fills the argument area without overwriting the checksum", () => {
+  const packet = encodeRazerRequest(razerSetOneRowCustomFrameCommand(0, Array(26).fill("#123456")), 0xff);
+  assert.deepEqual([...packet.slice(85, 88)], [18, 52, 86]);
+  assert.equal(packet[88], razerChecksum(packet));
+  assert.equal(packet[89], 0);
 });
 
 test("a custom effect activates the volatile frame on class 03 command 0a", () => {
@@ -32,7 +41,7 @@ test("a custom effect activates the volatile frame on class 03 command 0a", () =
 test("invalid frame ranges and colours are rejected", () => {
   for (const start of [-1, 0.5, 256, NaN]) assert.throws(() => razerSetOneRowCustomFrameCommand(start, ["#123456"]));
   assert.throws(() => razerSetOneRowCustomFrameCommand(0, []));
-  assert.throws(() => razerSetOneRowCustomFrameCommand(0, Array(17).fill("#123456")));
+  assert.throws(() => razerSetOneRowCustomFrameCommand(0, Array(27).fill("#123456")));
   assert.throws(() => razerSetOneRowCustomFrameCommand(255, ["#123456", "#abcdef"]));
   assert.throws(() => razerSetOneRowCustomFrameCommand(0, ["#12"]));
 });
