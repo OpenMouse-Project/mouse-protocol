@@ -336,6 +336,17 @@ describe("AjazzHidClient", () => {
     assert.equal((await client.readStatus()).connectionType, "Wired");
   });
 
+  it("reports sleepMinutes 0 as a 0-second timeout so the sleep card stays enabled", async () => {
+    // The vendor panel's 0 means "never sleep" and is a settable option, so it
+    // must come back as 0 ("Never") rather than null — null disables the card.
+    const { client, block } = fakeMouse();
+    block[51] = 0; // sleep_light
+    const status = await client.readStatus();
+    assert.equal(status.sleepTimeout, 0);
+    await client.setSleepTimeout(300);
+    assert.equal(ajazzDecodeConfig(Uint8Array.from([0x0e, ...block.slice(1)]))!.sleepMinutes, 5);
+  });
+
   it("falls back to identity only when the mouse stays silent", async () => {
     const { client } = fakeMouse({ silent: true });
     const status = await client.readStatus();
