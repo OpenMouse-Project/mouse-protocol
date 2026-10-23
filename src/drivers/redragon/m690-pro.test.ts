@@ -30,10 +30,26 @@ import {
   redragonM690ProWithStageColor,
   redragonM690ProWithStageDpi,
 } from "@openmouse/protocol/redragon";
+import { sinowealthDecodeKilonovaConfig } from "@openmouse/protocol/sinowealth";
 import type { MouseLighting } from "../mouse-types.ts";
 import { RedragonM690ProHidClient } from "./m690-pro-hid.ts";
 
 const bytes = (text: string): Uint8Array => Uint8Array.from(text.replace(/\s+/g, "").match(/../g)!.map((byte) => parseInt(byte, 16)));
+
+test("sinowealthDecodeKilonovaConfig decodes the Kilonova bank correctly", () => {
+  const block = bytes(`
+    08210000000000006411043600030007000f001f003f009f0000000000000000
+    00000000000000000000000000ff000000ff000000ffffff0000ffffff00ff00
+    00000000000543004000ff004207ff000000ff000000ff00ffffffff00fa00fa
+    ffffff034240ff000000ff000000ffffff0000ffffffffff0000000000000000
+    000000004200ff00ff0000424202ff000000000000ff0000a500`);
+  const result = sinowealthDecodeKilonovaConfig(block);
+  assert.deepEqual(result, {
+    stageCount: 6,
+    activeStage: 2,
+    dpiStages: [400, 800, 1600, 3200, 6400, 16000],
+  });
+});
 
 /**
  * A cable settings block (firmware 2.95) as the vendor app read it at startup
@@ -399,20 +415,23 @@ const KILONOVA_RECEIVER_CONFIG = bytes(`
   ffffff034240ff000000ff000000ffffff0000ffffffffff0000000000000000
   000000004200ff00ff0000424202ff000000000000ff0000a500`);
 
-test("recognizes the Cosmic Byte Kilonova 3335IC and reads it without touching its bank", async () => {
+test("recognizes the Cosmic Byte Kilonova 3335IC and reads its DPI from the bank", async () => {
   const fake = new FakeM690Pro(REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID, { config: KILONOVA_RECEIVER_CONFIG, battery: 0x46 });
   const status = await client(fake).readStatus();
   assert.equal(status.brand, "Cosmic Byte");
   assert.equal(status.name, "Cosmic Byte Kilonova 3335IC");
   assert.equal(status.ui?.family, "sinowealth-kilonova-3335ic");
   assert.equal(status.ui?.settingsReady, false);
-  assert.match(status.ui?.statusNote ?? "", /leaves its settings untouched/);
+  assert.match(status.ui?.statusNote ?? "", /reads this Cosmic Byte Kilonova 3335IC's DPI/);
+  assert.equal(status.ui?.valuesVerified, true);
   assert.equal(status.batteryPercent, 70);
   assert.equal(status.batteryState, "Unknown");
   assert.equal(status.connectionType, "Wireless");
   assert.equal(status.connectionDetail, "2.4 GHz receiver");
-  assert.equal(status.dpi, 0);
-  assert.equal(status.dpiStages, undefined);
+  assert.deepEqual(status.dpiStages, [400, 800, 1600, 3200, 6400, 16000]);
+  assert.equal(status.dpi, 1600);
+  assert.equal(status.activeDpiStage, 2);
+  assert.equal(status.pollingRateHz, 0);
   assert.equal(status.buttonMappings, undefined);
   assert.equal(status.lighting, undefined);
   assert.equal(fake.blockWrites.length, 0);

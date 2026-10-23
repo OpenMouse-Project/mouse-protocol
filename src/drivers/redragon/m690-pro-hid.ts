@@ -41,8 +41,10 @@ import {
 import {
   SINOWEALTH_CMD_LINK,
   SINOWEALTH_CMD_STATUS,
+  SINOWEALTH_CONFIG_LENGTH,
   SINOWEALTH_KILONOVA_3335IC,
   SINOWEALTH_M690_PRO,
+  sinowealthDecodeKilonovaConfig,
   sinowealthDecodeLink,
   sinowealthDecodeStatus,
   sinowealthDeviceOfBlock,
@@ -266,11 +268,11 @@ export class RedragonM690ProHidClient {
   }
 
   /**
-   * The Kilonova 3335IC's status: identity, battery and link, no settings.
-   * Its framing answers link and battery like the M690 PRO's receiver (see
-   * `sinowealthDecodeStatus`), and its settings bank is left alone
-   * deliberately: nothing past the model byte is decoded, and writing an
-   * M690 PRO layout onto it would corrupt its settings.
+   * The Kilonova 3335IC's status: identity, battery, link, and read-only DPI.
+   * Its settings bank uses the same SiNoWealth framing as the M690 PRO but a
+   * different interior layout (byte 9 = 0x11 vs 0x13, identify "2315" vs
+   * "2945"). The DPI stage table is decoded as read-only data; writes are
+   * still refused because the full bank layout is not understood.
    */
   private async kilonovaStatus(): Promise<MouseStatus> {
     const wireless = this.product().connection === "Wireless";
@@ -278,9 +280,24 @@ export class RedragonM690ProHidClient {
     const linked = wireless ? (linkReply ? sinowealthDecodeLink(linkReply) : null) : true;
     const statusReply = await this.shortCommand(SINOWEALTH_CMD_STATUS);
     const status = statusReply ? sinowealthDecodeStatus(statusReply) : null;
+
+    // Read the settings bank for DPI decode (0x21 command on wireless).
+    let dpi = 0;
+    let dpiStages: number[] = [];
+    let activeDpiStage = 0;
+    try {
+      const block = await this.readBlock(0x21, SINOWEALTH_CONFIG_LENGTH);
+      const config = sinowealthDecodeKilonovaConfig(block);
+      dpiStages = config.dpiStages;
+      activeDpiStage = config.activeStage;
+      dpi = dpiStages[activeDpiStage] ?? dpiStages[0] ?? 0;
+    } catch {
+      // Bank read failed; leave DPI at 0 and keep valuesVerified false.
+    }
+
     const name = `${SINOWEALTH_KILONOVA_3335IC.brand} ${SINOWEALTH_KILONOVA_3335IC.name}`;
     const notes = [
-      "OpenMouse recognizes this receiver as a Cosmic Byte Kilonova 3335IC and leaves its settings untouched: the settings layout is not decoded yet.",
+      "OpenMouse reads this Cosmic Byte Kilonova 3335IC's DPI from its onboard memory; other settings are not decoded and changes are refused.",
     ];
     if (linked === false) notes.push("The mouse is off or asleep; the receiver shows its last values.");
     else if (wireless && linked === null) notes.push("The battery and awake check need OpenMouse Bridge.");
@@ -291,7 +308,7 @@ export class RedragonM690ProHidClient {
       ui: {
         family: "sinowealth-kilonova-3335ic",
         settingsReady: false,
-        valuesVerified: false,
+        valuesVerified: dpiStages.length > 0,
         forceShowBattery: true,
         hideProcessingCard: true,
         defaultDisplayName: name,
@@ -299,7 +316,9 @@ export class RedragonM690ProHidClient {
       },
       batteryPercent: linked === false ? null : status?.batteryPercent ?? null,
       batteryState: linked !== false && status?.charge ? status.charge : "Unknown",
-      dpi: 0,
+      dpi,
+      dpiStages,
+      activeDpiStage,
       pollingRateHz: 0,
       activeProfile: null,
       connectionType: this.product().connection,

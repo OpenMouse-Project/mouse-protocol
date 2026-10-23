@@ -169,3 +169,35 @@ export function sinowealthDecodeStatus(reply: Uint8Array): SinowealthStatus {
 function replyHex(bytes: ArrayLike<number>): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(" ");
 }
+
+/**
+ * The Kilonova 3335IC's DPI stage table lives in the settings bank at
+ * OFFSET_KILONOVA_STAGE_DPI (0x0d): six 16-bit little-endian values that are
+ * 0-based indexes; the DPI is `(index + 1) * 100`. The active stage is the
+ * high nibble of byte 0x0b (1-based, same as the M690 PRO), and the stage
+ * count is the low nibble of 0x0b.
+ *
+ * Captured bank: 0x0b=0x36 (6 stages, active=3), 0x0d..0x18 LE16=[3,7,15,31,63,159]
+ * -> stages 1..6 = 400, 800, 1600, 3200, 6400, 16000 DPI.
+ * Mouse power-on boots to the saved active stage (3); the first DPI-button
+ * press reports stage 4 (report 7: [11 04 04 1f ...]), confirming 1-based
+ * active stage semantics.
+ */
+const KILONOVA_STAGE_COUNT = 6;
+const KILONOVA_STAGE_DPI_OFFSETS = [0x0d, 0x0f, 0x11, 0x13, 0x15, 0x17];
+
+export function sinowealthDecodeKilonovaConfig(block: Uint8Array): { stageCount: number; activeStage: number; dpiStages: number[] } {
+  if (block.length < SINOWEALTH_CONFIG_LENGTH) throw new Error("Kilonova block too short");
+  const stageCount = block[0x0b]! & 0x0f;
+  if (stageCount === 0 || stageCount > KILONOVA_STAGE_COUNT) throw new Error(`Kilonova stage count ${stageCount} invalid`);
+  const activeStage = (block[0x0b]! >> 4) - 1;
+  if (activeStage < 0 || activeStage >= stageCount) throw new Error(`Kilonova active stage ${activeStage} out of range`);
+  const dpiStages: number[] = [];
+  for (let i = 0; i < stageCount; i++) {
+    const offset = KILONOVA_STAGE_DPI_OFFSETS[i]!;
+    const index = block[offset]! | (block[offset + 1]! << 8);
+    if (index > 0xffff) throw new Error(`Kilonova stage ${i} index ${index} out of range`);
+    dpiStages.push((index + 1) * 100);
+  }
+  return { stageCount, activeStage, dpiStages };
+}
