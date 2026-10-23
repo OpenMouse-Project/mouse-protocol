@@ -26,7 +26,6 @@ import {
   redragonM690ProDecodeStatus,
   redragonM690ProEncodeBlockWrite,
   redragonM690ProEncodeCommand,
-  redragonM690ProIsModelBlock,
   redragonM690ProNearestDpi,
   redragonM690ProWithActiveStage,
   redragonM690ProWithButtonAction,
@@ -39,6 +38,15 @@ import {
   type RedragonM690ProProduct,
   type RedragonM690ProRgb,
 } from "@openmouse/protocol/redragon";
+import {
+  SINOWEALTH_CMD_LINK,
+  SINOWEALTH_CMD_STATUS,
+  SINOWEALTH_KILONOVA_3335IC,
+  SINOWEALTH_M690_PRO,
+  sinowealthDecodeLink,
+  sinowealthDecodeStatus,
+  sinowealthDeviceOfBlock,
+} from "@openmouse/protocol/sinowealth";
 
 /** The vendor app reads an answer 50-60 ms after sending its command; match it. */
 const COMMAND_DELAY_MS = 60;
@@ -130,11 +138,22 @@ class NotM690ProError extends Error {
  * those answers can be unreadable. The mouse is therefore identified from its
  * settings block, and link and battery are read when the transport allows it
  * and otherwise reported as unknown.
+ *
+ * The receiver's ids are shared across SiNoWealth designs. The Cosmic Byte
+ * Kilonova 3335IC's dongle presents the same collections and answers the same
+ * framing with its own footprints: byte 9 of its settings block is 0x11 (the
+ * M690 PRO's is 0x13) and identify answers "2315" ("2945"). Its bank layout
+ * differs from the M690 PRO's where decoding matters, so recognize-and-read
+ * applies: link, battery and identity, no decoded settings, no writes (one
+ * receiver verified, docs/kilonova-3335ic.md; the Kilonova's cable id is not
+ * known).
  */
 export class RedragonM690ProHidClient {
   readonly device: HIDDevice;
   private queue: Promise<unknown> = Promise.resolve();
   private identified = false;
+  /** True once the settings block proves a Kilonova 3335IC rather than an M690 PRO. */
+  private kilonova = false;
   /** Whether report-5 answers can be read here: null until the first try. */
   private shortAnswers: boolean | null = null;
 
@@ -183,7 +202,9 @@ export class RedragonM690ProHidClient {
   }
 
   private async readFullStatus(): Promise<MouseStatus> {
-    const block = await this.identify() ?? await this.readConfig();
+    const identityBlock = await this.identify();
+    if (this.kilonova) return await this.kilonovaStatus();
+    const block = identityBlock ?? await this.readConfig();
     const product = this.product();
     const wireless = product.connection === "Wireless";
     const linked = wireless ? await this.readLink() : true;
@@ -239,6 +260,75 @@ export class RedragonM690ProHidClient {
       lighting: this.lighting(config),
       connectionType: product.connection,
       connectionDetail: wireless ? (linked === false ? "2.4 GHz receiver, mouse off or asleep" : "2.4 GHz receiver") : "USB cable",
+      liftOffDistance: null,
+      firmware: [],
+    };
+  }
+
+  /**
+   * The Kilonova 3335IC's status: identity, battery and link, no settings.
+   * Its framing answers link and battery like the M690 PRO's receiver (see
+   * `sinowealthDecodeStatus`), and its settings bank is left alone
+   * deliberately: nothing past the model byte is decoded, and writing an
+   * M690 PRO layout onto it would corrupt its settings.
+   */
+  private async kilonovaStatus(): Promise<MouseStatus> {
+    const wireless = this.product().connection === "Wireless";
+    const linkReply = wireless ? await this.shortCommand(SINOWEALTH_CMD_LINK) : null;
+    const linked = wireless ? (linkReply ? sinowealthDecodeLink(linkReply) : null) : true;
+    const statusReply = await this.shortCommand(SINOWEALTH_CMD_STATUS);
+    const status = statusReply ? sinowealthDecodeStatus(statusReply) : null;
+    const name = `${SINOWEALTH_KILONOVA_3335IC.brand} ${SINOWEALTH_KILONOVA_3335IC.name}`;
+    const notes = [
+      "OpenMouse recognizes this receiver as a Cosmic Byte Kilonova 3335IC and leaves its settings untouched: the settings layout is not decoded yet.",
+    ];
+    if (linked === false) notes.push("The mouse is off or asleep; the receiver shows its last values.");
+    else if (wireless && linked === null) notes.push("The battery and awake check need OpenMouse Bridge.");
+    else if (!wireless && status === null) notes.push("Charging status needs OpenMouse Bridge.");
+    return {
+      brand: SINOWEALTH_KILONOVA_3335IC.brand,
+      name,
+      ui: {
+        family: "sinowealth-kilonova-3335ic",
+        settingsReady: false,
+        valuesVerified: false,
+        forceShowBattery: true,
+        hideProcessingCard: true,
+        defaultDisplayName: name,
+        statusNote: notes.join(" "),
+      },
+      batteryPercent: linked === false ? null : status?.batteryPercent ?? null,
+      batteryState: linked !== false && status?.charge ? status.charge : "Unknown",
+      dpi: 0,
+      pollingRateHz: 0,
+      activeProfile: null,
+      connectionType: this.product().connection,
+      connectionDetail: wireless ? (linked === false ? "2.4 GHz receiver, mouse off or asleep" : "2.4 GHz receiver") : "USB cable",
+      liftOffDistance: null,
+      firmware: [],
+    };
+  }
+
+  private kilonovaUnavailableStatus(error: unknown): MouseStatus {
+    const name = `${SINOWEALTH_KILONOVA_3335IC.brand} ${SINOWEALTH_KILONOVA_3335IC.name}`;
+    return {
+      brand: SINOWEALTH_KILONOVA_3335IC.brand,
+      name,
+      ui: {
+        family: "sinowealth-kilonova-3335ic",
+        settingsReady: false,
+        valuesVerified: false,
+        forceShowBattery: true,
+        hideProcessingCard: true,
+        defaultDisplayName: name,
+        statusNote: `The Cosmic Byte Kilonova 3335IC's settings could not be read (${error instanceof Error ? error.message : String(error)}); OpenMouse keeps trying.`,
+      },
+      batteryPercent: null,
+      batteryState: "Unknown",
+      dpi: 0,
+      pollingRateHz: 0,
+      activeProfile: null,
+      connectionType: this.product().connection,
       liftOffDistance: null,
       firmware: [],
     };
@@ -372,9 +462,11 @@ export class RedragonM690ProHidClient {
 
   /**
    * Opens the device and, once per connection, checks that its settings block
-   * is the M690 PRO's before anything is written (`258a:002f` is a generic
-   * SinoWealth receiver id). Returns the settings block it read for that,
-   * or null once the device is known.
+   * is a bank-framing device it knows before anything is written
+   * (`258a:002f` is a generic SinoWealth receiver id): the M690 PRO itself,
+   * or a sibling such as the Kilonova 3335IC, which narrows this client to
+   * reads. Returns the settings block it read for that, or null once the
+   * device is known.
    */
   private async prepare(): Promise<Uint8Array | null> {
     await this.open();
@@ -384,12 +476,15 @@ export class RedragonM690ProHidClient {
   private async identify(): Promise<Uint8Array | null> {
     if (this.identified) return null;
     const block = await this.readConfig();
-    if (!redragonM690ProIsModelBlock(block)) throw new NotM690ProError();
+    const device = sinowealthDeviceOfBlock(block);
+    if (device === null) throw new NotM690ProError();
+    this.kilonova = device !== SINOWEALTH_M690_PRO;
     this.identified = true;
     return block;
   }
 
   private unavailableStatus(error: unknown): MouseStatus {
+    if (this.kilonova) return this.kilonovaUnavailableStatus(error);
     const product = this.product();
     const name = `Redragon ${product.name}`;
     const statusNote = error instanceof NotM690ProError
@@ -457,6 +552,9 @@ export class RedragonM690ProHidClient {
   ): Promise<void> {
     await this.run(async () => {
       await this.prepare();
+      if (this.kilonova) {
+        throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
+      }
       await this.ensureLinked();
       const config = changeConfig(await this.readConfig());
       const buttons = changeButtons(await this.readButtons());

@@ -110,8 +110,10 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Dareu", supports: (device) => DareuHidClient.isSupported(device), create: (device) => new DareuHidClient(device), score: () => 9 },
   { brand: "Redragon", supports: (device) => RedragonHidClient.isSupported(device), create: (device) => new RedragonHidClient(device), score: () => 9 },
   // Shares SinoWealth's 0x258a with the Glorious classic line; disjoint by
-  // product id, and the client refuses a settings block that is not the
-  // M690 PRO's.
+  // product id, and the client refuses a settings block that belongs to no
+  // bank-framing device it knows (M690 PRO, Cosmic Byte Kilonova 3335IC).
+  // The registry label stays the M690 PRO's brand; a Kilonova wearing it
+  // briefly before its own status arrives is the GearHub situation below.
   { brand: "Redragon", supports: (device) => RedragonM690ProHidClient.isSupported(device), create: (device) => new RedragonM690ProHidClient(device), score: () => 9 },
   // Shares Holtek's 0x04d9 with Redragon; disjoint by product id and by usage
   // page (0xff00 here, 0xffa0 there).

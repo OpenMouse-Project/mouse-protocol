@@ -243,6 +243,8 @@ class FakeM690Pro {
   readonly blockWrites: Uint8Array[] = [];
   /** Fail this many reads with Chrome's error, as a transport that could not complete them. */
   failReceives = 0;
+  /** The status command's battery byte. */
+  private battery: number;
   /**
    * Chrome reads every feature report with the device's largest length (520),
    * which the firmware STALLs on report 5, so report-5 answers never arrive.
@@ -251,14 +253,15 @@ class FakeM690Pro {
   readonly shortReads: number[] = [];
   private lastCommand = 0;
 
-  constructor(public productId: number) {
+  constructor(public productId: number, options: { config?: Uint8Array; battery?: number } = {}) {
     const wireless = productId === REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID;
-    const config = Uint8Array.from(CABLE_CONFIG);
+    const config = options.config ? Uint8Array.from(options.config) : Uint8Array.from(CABLE_CONFIG);
     const buttons = Uint8Array.from(CABLE_BUTTONS);
     config[1] = wireless ? 0x21 : 0x11;
     buttons[1] = wireless ? 0x22 : 0x12;
     this.banks.set(config[1]!, config);
     this.banks.set(buttons[1]!, buttons);
+    this.battery = options.battery ?? (wireless ? 0x64 : 0x01);
   }
 
   async open(): Promise<void> { this.opened = true; }
@@ -300,7 +303,7 @@ class FakeM690Pro {
     reply.set([REDRAGON_M690_PRO_COMMAND_REPORT_ID, this.lastCommand]);
     if (this.lastCommand === 0x80) reply.set([this.linked ? 0x01 : 0x00, 0x01], 2);
     if (this.lastCommand === 0x90) {
-      reply.set(this.productId === REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID ? [0x11, 0x64] : [0x10, 0x01], 2);
+      reply.set(this.productId === REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID ? [0x11, this.battery] : [0x10, 0x01], 2);
     }
     return new DataView(reply.buffer);
   }
@@ -380,6 +383,64 @@ test("refuses a 0x258a receiver whose settings block is not the M690 PRO's", asy
   assert.equal(status.dpiStages, undefined);
   await assert.rejects(client(fake).setPollingRate(250), /not the Redragon M690 PRO's/);
   assert.equal(fake.blockWrites.length, 0);
+});
+
+/**
+ * The Cosmic Byte Kilonova 3335IC's receiver bank (docs/kilonova-3335ic.md):
+ * the same bank framing as the M690 PRO's (154 bytes, `a5 00` footer), its
+ * own model byte 0x11, and a stage table that does not name the M690 PRO's
+ * DPI list — so OpenMouse recognizes the device and reads only identity,
+ * link and battery from it.
+ */
+const KILONOVA_RECEIVER_CONFIG = bytes(`
+  08210000000000006411043600030007000f001f003f009f0000000000000000
+  00000000000000000000000000ff000000ff000000ffffff0000ffffff00ff00
+  00000000000543004000ff004207ff000000ff000000ff00ffffffff00fa00fa
+  ffffff034240ff000000ff000000ffffff0000ffffffffff0000000000000000
+  000000004200ff00ff0000424202ff000000000000ff0000a500`);
+
+test("recognizes the Cosmic Byte Kilonova 3335IC and reads it without touching its bank", async () => {
+  const fake = new FakeM690Pro(REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID, { config: KILONOVA_RECEIVER_CONFIG, battery: 0x46 });
+  const status = await client(fake).readStatus();
+  assert.equal(status.brand, "Cosmic Byte");
+  assert.equal(status.name, "Cosmic Byte Kilonova 3335IC");
+  assert.equal(status.ui?.family, "sinowealth-kilonova-3335ic");
+  assert.equal(status.ui?.settingsReady, false);
+  assert.match(status.ui?.statusNote ?? "", /leaves its settings untouched/);
+  assert.equal(status.batteryPercent, 70);
+  assert.equal(status.batteryState, "Unknown");
+  assert.equal(status.connectionType, "Wireless");
+  assert.equal(status.connectionDetail, "2.4 GHz receiver");
+  assert.equal(status.dpi, 0);
+  assert.equal(status.dpiStages, undefined);
+  assert.equal(status.buttonMappings, undefined);
+  assert.equal(status.lighting, undefined);
+  assert.equal(fake.blockWrites.length, 0);
+});
+
+test("refuses to write to the Kilonova 3335IC instead of guessing its layout", async () => {
+  const fake = new FakeM690Pro(REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID, { config: KILONOVA_RECEIVER_CONFIG, battery: 0x46 });
+  const mouse = client(fake);
+  await assert.rejects(mouse.setPollingRate(1000), /read-only/);
+  await assert.rejects(mouse.setButtonMapping("Left (1)", "Disabled"), /read-only/);
+  assert.equal(fake.blockWrites.length, 0);
+});
+
+test("the Kilonova 3335IC keeps the M690 PRO battery caveat in a browser transport", async () => {
+  const fake = new FakeM690Pro(REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID, { config: KILONOVA_RECEIVER_CONFIG, battery: 0x46 });
+  fake.chromeReads = true;
+  const status = await client(fake).readStatus();
+  assert.equal(status.batteryPercent, null);
+  assert.match(status.ui?.statusNote ?? "", /need OpenMouse Bridge/);
+});
+
+test("a Kilonova 3335IC whose mouse is asleep reports no battery", async () => {
+  const fake = new FakeM690Pro(REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID, { config: KILONOVA_RECEIVER_CONFIG, battery: 0x46 });
+  fake.linked = false;
+  const status = await client(fake).readStatus();
+  assert.equal(status.batteryPercent, null);
+  assert.equal(status.connectionDetail, "2.4 GHz receiver, mouse off or asleep");
+  assert.match(status.ui?.statusNote ?? "", /off or asleep/);
 });
 
 test("works where report-5 answers cannot be read, and stops asking", async () => {

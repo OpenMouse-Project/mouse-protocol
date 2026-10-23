@@ -36,6 +36,7 @@
       "@openmouse/protocol/orbital": ["./src/orbital/index.ts"],
       "@openmouse/protocol/pulsar": ["./src/pulsar/index.ts"],
       "@openmouse/protocol/redragon": ["./src/redragon/index.ts"],
+      "@openmouse/protocol/sinowealth": ["./src/sinowealth/index.ts"],
       "@openmouse/protocol/razer": ["./src/razer/index.ts"],
       "@openmouse/protocol/razer-devices": ["./src/razer/devices.ts"],
       "@openmouse/protocol/razer-v4": ["./src/razer/v4.ts"],
