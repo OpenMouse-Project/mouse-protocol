@@ -330,6 +330,8 @@ const FEATURE = {
   hostsInfo: 0x1815,
   changeHost: 0x1814,
   reprogControls: 0x1b04,
+  hostBunnyHop: 0x80e0,
+  buttonListener: 0x8110,
 } as const;
 
 /**
@@ -447,6 +449,8 @@ export class LogitechHidppClient {
   private reportRateFeatureIndex: number | null = null;
   private analogButtonsFeatureIndex: number | null = null;
   private readonly analogPressListeners = new Set<(left: number, right: number) => void>();
+  private buttonListenerFeatureIndex: number | null = null;
+  private readonly buttonChangeListeners = new Set<(buttons: number) => void>();
   private supportedPollingRatesCache: number[] | null = null;
   private livePollingRateHz: number | null = null;
   /** Discovered by resolveDeviceIndex; null until the mouse has answered. */
@@ -510,6 +514,10 @@ export class LogitechHidppClient {
     // HITS pushes the live press depth of each button (0..10) as event 0 while one is held.
     if (report[0] === this.deviceIndex && report[1] === this.analogButtonsFeatureIndex && report[2] === 0x00) {
       this.analogPressListeners.forEach((listener) => listener(report[3] ?? 0, report[4] ?? 0));
+    }
+    // The button listener pushes the buttons held right now as a bitmask in event 0.
+    if (report[0] === this.deviceIndex && report[1] === this.buttonListenerFeatureIndex && report[2] === 0x00) {
+      this.buttonChangeListeners.forEach((listener) => listener(report[4] ?? 0));
     }
     const matchingIndex = this.waiters.findIndex(
       (waiter) => report[0] === this.deviceIndex
@@ -965,6 +973,7 @@ export class LogitechHidppClient {
   }
 
   async close(): Promise<void> {
+    this.buttonListenerFeatureIndex = null;
     if (this.rgbClaimed) {
       const rgb = await this.getFeature(FEATURE.rgbEffects).catch(() => ({ index: 0, version: 0 }));
       if (rgb.index) await this.request(rgb.index, 0x50, 0x01, 0x00, 0x00).catch(() => undefined);
@@ -1349,6 +1358,51 @@ export class LogitechHidppClient {
     const feature = await this.getFeature(FEATURE.analogButtons);
     if (!feature.index) return;
     await this.request(feature.index, 0x30, 0x00, 0x00, 0x00).catch(() => undefined);
+  }
+
+  /**
+   * Pressed buttons as a bitmask, pushed on every press and release while the
+   * button listener is on: 0x01 left, 0x02 right, 0x04 middle, 0x08 the back side
+   * button, 0x10 the front side button (PRO X 3 Superstrike, from G HUB's
+   * capture and a hardware run). Returns the unsubscribe.
+   */
+  onButtonChange(listener: (buttons: number) => void): () => void {
+    this.buttonChangeListeners.add(listener);
+    return () => this.buttonChangeListeners.delete(listener);
+  }
+
+  /**
+   * Starts the button events the way G HUB does when it takes over a mouse
+   * running from software (Host mode): getCount (function 0), getList (3),
+   * start (1), then setList (4) with every button the mouse listed. The mouse
+   * stays silent until this has run. What function 1 does is read from its
+   * place in the capture, not documented; it is replayed as sent. Returns the
+   * button numbers being reported.
+   */
+  async startButtonListener(): Promise<number[]> {
+    const feature = await this.getFeature(FEATURE.buttonListener);
+    if (!feature.index) throw new Error("This Logitech mouse does not report its buttons.");
+    this.buttonListenerFeatureIndex = feature.index;
+    const count = (await this.request(feature.index, 0x00))[3] ?? 0;
+    const list = [...(await this.request(feature.index, 0x30)).slice(3, 3 + count)];
+    await this.request(feature.index, 0x10);
+    try {
+      await this.requestLong(feature.index, 0x40, list);
+    } catch (error) {
+      // The mouse was already told to start, so stop it again rather than leave it half set up.
+      this.buttonListenerFeatureIndex = null;
+      await this.request(feature.index, 0x20).catch(() => undefined);
+      throw error;
+    }
+    return list;
+  }
+
+  /** Stops the button events: function 2, as G HUB sends when it quits. */
+  async stopButtonListener(): Promise<void> {
+    this.buttonListenerFeatureIndex = null;
+    const feature = await this.getFeature(FEATURE.buttonListener);
+    if (!feature.index) return;
+    await this.request(feature.index, 0x20).catch(() => undefined);
   }
 
   private assertAnalogTuningInRange(
@@ -1835,6 +1889,25 @@ export class LogitechHidppClient {
 
   async setBunnyHoppingMs(milliseconds: number): Promise<void> {
     await this.writeActiveProfile({ bunnyHoppingMs: milliseconds });
+  }
+
+  /**
+   * Sets bunny hop on a mouse running from software (Host mode): a single write
+   * to feature 0x80E0, function 2, whose one byte is the time in 10 ms units and
+   * 0 turns it off. Captured from G HUB on a PRO X 3 Superstrike (0x0a, 0x14, then
+   * 0x00); the reading of the byte as ms / 10 follows the onboard profile's
+   * encoding and is not confirmed. G HUB sends 0 when it enters Host mode, so the
+   * setting starts off there. No read for it has been seen, so the caller keeps
+   * track of the value it wrote. Nothing is stored in the mouse's profile.
+   */
+  async setHostBunnyHopMs(milliseconds: number): Promise<void> {
+    const invalid = validateBunnyHoppingMs(milliseconds);
+    if (invalid) throw new Error(invalid);
+    const feature = await this.getFeature(FEATURE.hostBunnyHop);
+    if (!feature.index) {
+      throw new Error("This mouse does not expose a Host mode bunny hop setting.");
+    }
+    await this.request(feature.index, 0x20, milliseconds / 10);
   }
 
   async setProfileDpiStages(plan: DpiStagePlan): Promise<void> {

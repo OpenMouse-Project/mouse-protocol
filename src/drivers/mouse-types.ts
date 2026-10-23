@@ -216,6 +216,21 @@ export interface MouseStatus {
   dpi: number;
   dpiY?: number;
   supportsSeparateDpiAxes?: boolean;
+  /**
+   * Logitech bunny hop on a mouse running from software (Host mode), in ms, 0 for
+   * off. The mouse has no known read for it, so the driver never sets this: the
+   * control panel fills it in from the last value it wrote.
+   */
+  hostBunnyHopMs?: number;
+  /**
+   * What a game profile makes the side buttons of a Logitech mouse running from
+   * software do, by the button's bit in the mouse's report (8 the back side
+   * button, 16 the front one): a HID keyboard usage and a modifier mask, or a
+   * media key by its HID consumer usage. A button with no entry keeps its normal
+   * Back or Forward click. The mouse holds none of this; Bridge presses the keys
+   * while the game runs.
+   */
+  hostButtons?: Record<number, { key: number; modifiers: number } | { consumer: number }>;
   /** Hall-effect primary-button tuning exposed by Logitech's 0x1B0C HID++ feature. */
   analogButtonTuning?: {
     maxActuation: number;
@@ -237,6 +252,13 @@ export interface MouseStatus {
   magneticButtons?: MagneticButtonsStatus;
   pollingRateHz: number;
   supportedPollingRates?: number[];
+  /**
+   * The report rate for one connection, for a game profile that sets wired and
+   * wireless apart. The mouse only has the rate of the connection it is on, so
+   * the driver never sets these: the control panel fills in the current link's.
+   */
+  pollingRateWirelessHz?: number;
+  pollingRateWiredHz?: number;
   activeProfile: number | null;
   /** Number of firmware-managed ATK configuration banks, when readable. */
   atkProfileCount?: number;
