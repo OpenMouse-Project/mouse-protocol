@@ -142,10 +142,15 @@ test("30K models read and write the 0.7 mm lift-off as 7", async () => {
 });
 
 test("26K models keep the 1 mm / 2 mm lift-off pair", async () => {
-  const { device } = xviDevice(0x2717);
+  const { device, state } = xviDevice(0x2717, { lod: 2 });
   const client = new GWolvesXviHidClient(device);
   assert.deepEqual((await client.readStatus()).supportedLiftOffDistances, ["Low", "High"]);
+  assert.equal(await client.setLiftOffDistance("Low"), "Low");
+  assert.equal(state.lod, 1);
+  assert.equal(await client.setLiftOffDistance("High"), "High");
+  assert.equal(state.lod, 2);
   await assert.rejects(client.setLiftOffDistance("Medium"), /only the 1 mm and 2 mm/);
+  assert.equal(state.lod, 2);
 });
 
 test("reads and writes sleep, debounce, the sensor toggles and the buttons", async () => {
