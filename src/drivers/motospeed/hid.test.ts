@@ -183,8 +183,8 @@ it("reads settings with listener attached before send, ignoring unrelated input"
   assert.equal(device.opened, false);
 });
 
-it("accepts 60-byte B3 reports and rejects unsupported lengths", async () => {
-  for (const length of [60, 61, 63]) {
+it("accepts 60- and 63-byte B3 reports and rejects unsupported lengths", async () => {
+  for (const length of [0, 59, 60, 61, 62, 63, 64]) {
     const device = new X6Device();
     device.collections = [
       {
@@ -196,17 +196,35 @@ it("accepts 60-byte B3 reports and rejects unsupported lengths", async () => {
       },
     ];
     const client = new MotospeedHidClient(device);
-    if (length !== 60) {
+    if (length !== 0 && length !== 60 && length !== 63) {
       await assert.rejects(client.readStatus(), /payload length/);
+      await assert.rejects(
+        client.setButtonMapping(0, { kind: "disabled" }),
+        /payload length/,
+      );
+      assert.equal(device.sent.length, 0);
       assert.equal(device.listeners.size, 0);
       continue;
     }
     await client.readStatus();
     await client.setButtonMapping(0, { kind: "disabled" });
+    await client.setDebounceTime(7);
+    const settingsLength = length || 63;
     assert.deepEqual(
-      device.sent.map((p) => p.data.length),
-      [length, length],
+      device.sent.map((p) => [p.reportId, p.data.length]),
+      [
+        [0xb3, settingsLength],
+        [0xb3, settingsLength],
+        [0xb5, 20],
+        [0xb3, settingsLength],
+      ],
     );
+    assert.deepEqual(device.sent[0].data, [
+      6, ...new Array(settingsLength - 1).fill(0),
+    ]);
+    assert.deepEqual(device.sent[1].data, [
+      0x52, 0, 0, 9, ...new Array(settingsLength - 4).fill(0),
+    ]);
   }
 });
 
