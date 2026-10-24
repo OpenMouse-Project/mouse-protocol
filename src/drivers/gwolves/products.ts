@@ -29,6 +29,11 @@ export interface GWolvesProduct {
   protocol: "gwolves" | "xvi" | "xvi-new";
   /** Left and right buttons are magnetic switches with trigger point and rapid trigger (HTS Plus Pro). */
   magnetic?: boolean;
+  /**
+   * XVI models whose env-models.json "LOD" is "0.7;1;2" (the 30,000 DPI
+   * sensors) rather than "1;2": Low is 0.7 mm, Medium 1 mm, High 2 mm.
+   */
+  shortLiftOff?: boolean;
 }
 
 export const GWOLVES_VENDOR_ID = 0x33e4;
@@ -74,20 +79,24 @@ export const GWOLVES_PRODUCTS: ReadonlyMap<number, GWolvesProduct> = new Map([
   [0x5617, { model: "HTXU", wireless: true, verified: false, protocol: "xvi-new" }],
   [0x3608, { model: "Fenrir Pro", wireless: false, verified: false, protocol: "xvi-new" }],
   [0x3617, { model: "Fenrir Pro", wireless: true, verified: false, protocol: "xvi-new" }],
-  [0x3908, { model: "VUK", wireless: false, verified: false, protocol: "xvi" }],
-  [0x3917, { model: "VUK", wireless: true, verified: false, protocol: "xvi" }],
+  [0x3908, { model: "VUK", wireless: false, verified: false, protocol: "xvi", shortLiftOff: true }],
+  [0x3917, { model: "VUK", wireless: true, verified: false, protocol: "xvi", shortLiftOff: true }],
   [0x7904, { model: "HT-S2", wireless: false, verified: false, protocol: "xvi" }],
   [0x7913, { model: "HT-S2", wireless: true, verified: false, protocol: "xvi" }],
-  [0x3708, { model: "Fenir Max", wireless: false, verified: false, protocol: "xvi" }],
-  [0x3717, { model: "Fenir Max", wireless: true, verified: false, protocol: "xvi" }],
-  [0x5308, { model: "HTS Ultra", wireless: false, verified: false, protocol: "xvi" }],
-  [0x5317, { model: "HTS Ultra", wireless: true, verified: false, protocol: "xvi" }],
+  [0x3708, { model: "Fenir Max", wireless: false, verified: false, protocol: "xvi", shortLiftOff: true }],
+  [0x3717, { model: "Fenir Max", wireless: true, verified: false, protocol: "xvi", shortLiftOff: true }],
+  [0x5308, { model: "HTS Ultra", wireless: false, verified: false, protocol: "xvi", shortLiftOff: true }],
+  [0x5317, { model: "HTS Ultra", wireless: true, verified: false, protocol: "xvi", shortLiftOff: true }],
   [0x7704, { model: "HTR", wireless: false, verified: false, protocol: "xvi" }],
   [0x7713, { model: "HTR", wireless: true, verified: false, protocol: "xvi" }],
-  [0x3508, { model: "Fenrir", wireless: false, verified: false, protocol: "xvi" }],
-  [0x3517, { model: "Fenrir", wireless: true, verified: false, protocol: "xvi" }],
-  [0x7908, { model: "HT-S2 Pro", wireless: false, verified: false, protocol: "xvi" }],
-  [0x7917, { model: "HT-S2 Pro", wireless: true, verified: false, protocol: "xvi" }],
+  // Verified wired and through its 8K receiver on a unit whose USB product
+  // string is "G-Wolves Fenrir Asym 8K Wireless Mouse-N" (mouse and receiver
+  // firmware 1.0.39.0): G-Wolves' config lists it as "Fenrir" with UIFolder
+  // "Fenir_asym".
+  [0x3508, { model: "Fenrir", wireless: false, verified: true, protocol: "xvi", shortLiftOff: true }],
+  [0x3517, { model: "Fenrir", wireless: true, verified: true, protocol: "xvi", shortLiftOff: true }],
+  [0x7908, { model: "HT-S2 Pro", wireless: false, verified: false, protocol: "xvi", shortLiftOff: true }],
+  [0x7917, { model: "HT-S2 Pro", wireless: true, verified: false, protocol: "xvi", shortLiftOff: true }],
   [0x5808, { model: "HSK Pro", wireless: false, verified: false, protocol: "xvi" }],
   [0x5817, { model: "HSK Pro", wireless: true, verified: false, protocol: "xvi" }],
   [0x2708, { model: "HTX Mini", wireless: false, verified: false, protocol: "xvi" }],

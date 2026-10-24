@@ -10,9 +10,9 @@ if (typeof (globalThis as { window?: unknown }).window === "undefined") {
 
 // Answers like the XVI firmware as the web driver reads it: the reply is the
 // request with status 0xa1 in slot 0 and the values written in place.
-function xviDevice(productId: number, { prefixReplies = false, pollingCode = 128 } = {}) {
+function xviDevice(productId: number, { prefixReplies = false, pollingCode = 128, lod = 1 } = {}) {
   const state = {
-    pollingCode, lod: 1, active: 2, stages: [[400, 400], [800, 800], [1600, 1600]],
+    pollingCode, lod, active: 2, stages: [[400, 400], [800, 800], [1600, 1600]],
     sleep: 60, debounce: [2, 5, 35, 10], motionSync: 0, angleSnap: 1,
     // Left, Right, Middle, Back, Forward, DPI; Forward holds a macro.
     buttons: [1, 1, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0, 24, 3, 0, 1, 1, 0, 11, 1, 0, 0, 0, 0],
@@ -122,6 +122,30 @@ test("over the cable the web driver's 64 reads as 1 kHz and faster rates are ref
   const client = new GWolvesXviHidClient(device);
   assert.equal((await client.readStatus()).pollingRateHz, 1000);
   await assert.rejects(client.setPollingRate(8000), /does not support 8000 Hz/);
+});
+
+test("30K models read and write the 0.7 mm lift-off as 7", async () => {
+  // Fenrir 0x3508 over the cable, as captured from a unit set to 0.7 mm in
+  // the web driver: the 0x86 read answers a1 01 86 00 07.
+  const { device, state } = xviDevice(0x3508, { pollingCode: 1, lod: 7 });
+  const client = new GWolvesXviHidClient(device);
+
+  const status = await client.readStatus();
+  assert.equal(status.liftOffDistance, "Low");
+  assert.deepEqual(status.supportedLiftOffDistances, ["Low", "Medium", "High"]);
+  assert.equal(await client.setLiftOffDistance("Medium"), "Medium");
+  assert.equal(state.lod, 1);
+  assert.equal(await client.setLiftOffDistance("High"), "High");
+  assert.equal(state.lod, 2);
+  assert.equal(await client.setLiftOffDistance("Low"), "Low");
+  assert.equal(state.lod, 7);
+});
+
+test("26K models keep the 1 mm / 2 mm lift-off pair", async () => {
+  const { device } = xviDevice(0x2717);
+  const client = new GWolvesXviHidClient(device);
+  assert.deepEqual((await client.readStatus()).supportedLiftOffDistances, ["Low", "High"]);
+  await assert.rejects(client.setLiftOffDistance("Medium"), /only the 1 mm and 2 mm/);
 });
 
 test("reads and writes sleep, debounce, the sensor toggles and the buttons", async () => {
