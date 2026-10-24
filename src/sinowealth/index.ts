@@ -182,11 +182,21 @@ function replyHex(bytes: ArrayLike<number>): string {
  * Mouse power-on boots to the saved active stage (3); the first DPI-button
  * press reports stage 4 (report 7: [11 04 04 1f ...]), confirming 1-based
  * active stage semantics.
+ *
+ * Polling rate: byte 0x0a low nibble matches the M690 PRO's codes
+ * (1=125, 2=250, 3=500, 4=1000) based on captured bank (0x04 -> 1000 Hz).
  */
 const KILONOVA_STAGE_COUNT = 6;
 const KILONOVA_STAGE_DPI_OFFSETS = [0x0d, 0x0f, 0x11, 0x13, 0x15, 0x17];
+export const KILONOVA_POLLING_CODES: Readonly<Record<number, number>> = {
+  125: 0x01,
+  250: 0x02,
+  500: 0x03,
+  1000: 0x04,
+};
+export const KILONOVA_POLLING_RATES = [125, 250, 500, 1000] as const;
 
-export function sinowealthDecodeKilonovaConfig(block: Uint8Array): { stageCount: number; activeStage: number; dpiStages: number[] } {
+export function sinowealthDecodeKilonovaConfig(block: Uint8Array): { stageCount: number; activeStage: number; dpiStages: number[]; pollingHz: number | null } {
   if (block.length < SINOWEALTH_CONFIG_LENGTH) throw new Error("Kilonova block too short");
   const stageCount = block[0x0b]! & 0x0f;
   if (stageCount === 0 || stageCount > KILONOVA_STAGE_COUNT) throw new Error(`Kilonova stage count ${stageCount} invalid`);
@@ -199,5 +209,43 @@ export function sinowealthDecodeKilonovaConfig(block: Uint8Array): { stageCount:
     if (index > 0xffff) throw new Error(`Kilonova stage ${i} index ${index} out of range`);
     dpiStages.push((index + 1) * 100);
   }
-  return { stageCount, activeStage, dpiStages };
+  const pollingCode = block[0x0a]! & 0x0f;
+  const pollingHz = pollingCode === 0x01 ? 125 : pollingCode === 0x02 ? 250 : pollingCode === 0x03 ? 500 : pollingCode === 0x04 ? 1000 : null;
+  return { stageCount, activeStage, dpiStages, pollingHz };
+}
+
+export function sinowealthWithKilonovaPollingRate(block: Uint8Array, hz: number): Uint8Array {
+  const code = KILONOVA_POLLING_CODES[hz];
+  if (code === undefined) throw new Error(`Kilonova polling rate ${hz} Hz is not one of ${KILONOVA_POLLING_RATES.join(", ")}.`);
+  const next = Uint8Array.from(block.subarray(0, SINOWEALTH_CONFIG_LENGTH));
+  next[0x0a] = (next[0x0a]! & 0xf0) | code;
+  return next;
+}
+
+export function sinowealthWithKilonovaActiveStage(block: Uint8Array, stage: number): Uint8Array {
+  if (!Number.isInteger(stage) || stage < 0 || stage >= KILONOVA_STAGE_COUNT) {
+    throw new Error(`Kilonova DPI stage ${stage} is outside 0-${KILONOVA_STAGE_COUNT - 1}.`);
+  }
+  const next = Uint8Array.from(block.subarray(0, SINOWEALTH_CONFIG_LENGTH));
+  const stageCount = next[0x0b]! & 0x0f;
+  if (stage >= stageCount) throw new Error(`Kilonova DPI stage ${stage} is outside active stages.`);
+  next[0x0b] = ((stage + 1) << 4) | (next[0x0b]! & 0x0f);
+  return next;
+}
+
+// Kilonova uses index+1 formula: DPI = (index+1)*100, so index = (DPI/100)-1
+const KILONOVA_DPI_INDEX_MAP: Record<number, number> = {
+  400: 3, 800: 7, 1600: 15, 3200: 31, 6400: 63, 16000: 159,
+};
+export function sinowealthWithKilonovaStageDpi(block: Uint8Array, stage: number, dpi: number): Uint8Array {
+  if (!Number.isInteger(stage) || stage < 0 || stage >= KILONOVA_STAGE_COUNT) {
+    throw new Error(`Kilonova DPI stage ${stage} is outside 0-${KILONOVA_STAGE_COUNT - 1}.`);
+  }
+  const index = KILONOVA_DPI_INDEX_MAP[dpi];
+  if (index === undefined) throw new Error(`Kilonova DPI ${dpi} is not a supported value.`);
+  const next = Uint8Array.from(block.subarray(0, SINOWEALTH_CONFIG_LENGTH));
+  const offset = KILONOVA_STAGE_DPI_OFFSETS[stage]!;
+  next[offset] = index & 0xff;
+  next[offset + 1] = (index >> 8) & 0xff;
+  return next;
 }

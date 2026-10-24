@@ -39,6 +39,7 @@ import {
   type RedragonM690ProRgb,
 } from "@openmouse/protocol/redragon";
 import {
+  KILONOVA_POLLING_CODES,
   SINOWEALTH_CMD_LINK,
   SINOWEALTH_CMD_STATUS,
   SINOWEALTH_CONFIG_LENGTH,
@@ -48,6 +49,9 @@ import {
   sinowealthDecodeLink,
   sinowealthDecodeStatus,
   sinowealthDeviceOfBlock,
+  sinowealthWithKilonovaActiveStage,
+  sinowealthWithKilonovaPollingRate,
+  sinowealthWithKilonovaStageDpi,
 } from "@openmouse/protocol/sinowealth";
 
 /** The vendor app reads an answer 50-60 ms after sending its command; match it. */
@@ -281,23 +285,27 @@ export class RedragonM690ProHidClient {
     const statusReply = await this.shortCommand(SINOWEALTH_CMD_STATUS);
     const status = statusReply ? sinowealthDecodeStatus(statusReply) : null;
 
-    // Read the settings bank for DPI decode (0x21 command on wireless).
+    // Read the settings bank for DPI/polling decode (0x21 command on wireless).
     let dpi = 0;
     let dpiStages: number[] = [];
     let activeDpiStage = 0;
+    let pollingRateHz = 0;
+    let supportedPollingRates: number[] | undefined;
     try {
       const block = await this.readBlock(0x21, SINOWEALTH_CONFIG_LENGTH);
       const config = sinowealthDecodeKilonovaConfig(block);
       dpiStages = config.dpiStages;
       activeDpiStage = config.activeStage;
       dpi = dpiStages[activeDpiStage] ?? dpiStages[0] ?? 0;
+      pollingRateHz = config.pollingHz ?? 0;
+      supportedPollingRates = [125, 250, 500, 1000];
     } catch {
       // Bank read failed; leave DPI at 0 and keep valuesVerified false.
     }
 
     const name = `${SINOWEALTH_KILONOVA_3335IC.brand} ${SINOWEALTH_KILONOVA_3335IC.name}`;
     const notes = [
-      "OpenMouse reads this Cosmic Byte Kilonova 3335IC's DPI from its onboard memory; other settings are not decoded and changes are refused.",
+      "OpenMouse reads and can change this Cosmic Byte Kilonova 3335IC's DPI and polling rate from its onboard memory; other settings are not decoded.",
     ];
     if (linked === false) notes.push("The mouse is off or asleep; the receiver shows its last values.");
     else if (wireless && linked === null) notes.push("The battery and awake check need OpenMouse Bridge.");
@@ -307,7 +315,7 @@ export class RedragonM690ProHidClient {
       name,
       ui: {
         family: "sinowealth-kilonova-3335ic",
-        settingsReady: false,
+        settingsReady: dpiStages.length > 0,
         valuesVerified: dpiStages.length > 0,
         forceShowBattery: true,
         hideProcessingCard: true,
@@ -319,7 +327,8 @@ export class RedragonM690ProHidClient {
       dpi,
       dpiStages,
       activeDpiStage,
-      pollingRateHz: 0,
+      pollingRateHz,
+      ...(supportedPollingRates ? { supportedPollingRates } : {}),
       activeProfile: null,
       connectionType: this.product().connection,
       connectionDetail: wireless ? (linked === false ? "2.4 GHz receiver, mouse off or asleep" : "2.4 GHz receiver") : "USB cable",
@@ -355,6 +364,11 @@ export class RedragonM690ProHidClient {
 
   /** Snaps to the nearest vendor DPI value, writes it, and returns that value. */
   async setDpiStageValue(stage: number, dpi: number): Promise<number> {
+    if (this.kilonova) {
+      const label = redragonM690ProNearestDpi(dpi);
+      await this.writeBlocks((block) => sinowealthWithKilonovaStageDpi(block, stage, label), (block) => block);
+      return label;
+    }
     const label = redragonM690ProNearestDpi(dpi);
     await this.writeConfig((block) => redragonM690ProWithStageDpi(block, stage, label));
     return label;
@@ -362,11 +376,19 @@ export class RedragonM690ProHidClient {
 
   /** Selects the active DPI stage (0-based), as the mouse's DPI buttons do. */
   async setActiveDpiStage(stage: number): Promise<number> {
+    if (this.kilonova) {
+      await this.writeBlocks((block) => sinowealthWithKilonovaActiveStage(block, stage), (block) => block);
+      return stage;
+    }
     await this.writeConfig((block) => redragonM690ProWithActiveStage(block, stage));
     return stage;
   }
 
   async setPollingRate(hz: number): Promise<number> {
+    if (this.kilonova) {
+      await this.writeBlocks((block) => sinowealthWithKilonovaPollingRate(block, hz), (block) => block);
+      return hz;
+    }
     await this.writeConfig((block) => redragonM690ProWithPollingRate(block, hz));
     return hz;
   }
@@ -572,7 +594,38 @@ export class RedragonM690ProHidClient {
     await this.run(async () => {
       await this.prepare();
       if (this.kilonova) {
-        throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
+        // Kilonova: only allow DPI/polling changes if the change only touches known bytes
+        await this.ensureLinked();
+        const originalConfig = await this.readConfig();
+        const config = changeConfig(originalConfig.slice());
+        // Check if only DPI/polling bytes changed (0x0a low nibble, 0x0b, and DPI stages 0x0d-0x18)
+        let onlyDpiPolling = true;
+        for (let i = 0; i < config.length; i++) {
+          if (originalConfig[i] !== config[i]) {
+            // Allow changes to: 0x0a (polling in low nibble), 0x0b (active stage), DPI stage areas
+            if (i === 0x0a) {
+              // Only low nibble can change for polling
+              if ((originalConfig[i] & 0xf0) !== (config[i] & 0xf0)) { onlyDpiPolling = false; break; }
+            } else if (i === 0x0b) {
+              // Only high nibble changes for active stage
+              if ((originalConfig[i] & 0x0f) !== (config[i] & 0x0f)) { onlyDpiPolling = false; break; }
+            } else if (i >= 0x0d && i <= 0x18) {
+              // DPI stage bytes allowed
+            } else {
+              onlyDpiPolling = false;
+              break;
+            }
+          }
+        }
+        if (!onlyDpiPolling) {
+          throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
+        }
+        await this.sendBlock(redragonM690ProEncodeBlockWrite(config, SINOWEALTH_CONFIG_LENGTH));
+        const configBack = await this.readConfig();
+        if (!sameBytes(configBack.subarray(0, SINOWEALTH_CONFIG_LENGTH), config.subarray(0, SINOWEALTH_CONFIG_LENGTH))) {
+          throw new Error("The Cosmic Byte Kilonova 3335IC did not keep the new settings (read-back differs).");
+        }
+        return;
       }
       await this.ensureLinked();
       const config = changeConfig(await this.readConfig());
