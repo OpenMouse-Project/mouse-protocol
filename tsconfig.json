@@ -19,7 +19,6 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "paths": {
-      "@openmouse/protocol/hitscan": ["./src/hitscan/index.ts"],
       "@openmouse/protocol": ["./src/index.ts"],
       "@openmouse/protocol/atk": ["./src/atk/index.ts"],
       "@openmouse/protocol/endgame-gear-we": ["./src/endgame-gear/wireless.ts"],
@@ -53,7 +52,8 @@
       "@openmouse/protocol/rapoo": ["./src/rapoo/index.ts"],
       "@openmouse/protocol/fater": ["./src/fater/index.ts"],
       "@openmouse/protocol/coolermaster": ["./src/coolermaster/index.ts"],
-      "@openmouse/protocol/ajazz": ["./src/ajazz/index.ts"]
+      "@openmouse/protocol/ajazz": ["./src/ajazz/index.ts"],
+      "@openmouse/protocol/hitscan": ["./src/hitscan/index.ts"]
     }
   },
   "include": ["src/**/*"],

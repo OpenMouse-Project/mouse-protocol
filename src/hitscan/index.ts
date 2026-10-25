@@ -238,3 +238,26 @@ export class HitscanConfig {
     return start + 384 <= this.data.length ? hitscanDecodeMacro(this.data.subarray(start, start + 384)) : null;
   }
 }
+
+/**
+ * GetBatteryLevel (0x04) returns payload[5], payload[6] and BE16 payload[7..8].
+ * The DLL does not name them; this is the same reply shape CompX mice use
+ * (percent, charging flag, millivolts), and this command table, framing and
+ * flash layout match CompX's byte for byte. Unverified on Hitscan hardware.
+ */
+export function hitscanDecodeBattery(reply: Bytes): { percent: number | null; charging: boolean; millivolts: number | null } | null {
+  if (!hitscanChecksumIsValid(reply) || reply[0] !== HITSCAN_COMMAND.battery) return null;
+  const percent = reply[5]!, millivolts = (reply[7]! << 8) | reply[8]!;
+  return { percent: percent <= 100 ? percent : null, charging: reply[6] === 1, millivolts: millivolts || null };
+}
+
+/** GetVersion (0x12) / GetSlaveVersion (0xb3): BE16 at payload[5..6]. */
+export function hitscanDecodeVersion(reply: Bytes, command: number = HITSCAN_COMMAND.firmware): number | null {
+  if (!hitscanChecksumIsValid(reply) || reply[0] !== command) return null;
+  return (reply[5]! << 8) | reply[6]!;
+}
+
+/** Same "v<major>.<minor hex>" form the CompX drivers display. */
+export function hitscanFormatVersion(version: number): string {
+  return `v${version >> 8}.${(version & 255).toString(16).padStart(2, "0")}`;
+}

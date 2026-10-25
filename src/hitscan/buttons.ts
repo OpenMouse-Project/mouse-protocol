@@ -59,3 +59,38 @@ export function hitscanDecodeButton(values: ArrayLike<number>): HitscanButtonAct
   }
   return { kind: "unknown", bytes: raw };
 }
+
+/**
+ * Physical buttons, in key-record order (`0x60 + 4*i`). `KeyNumber=6` in the
+ * shipped Config.ini. The order follows the CompX key table this layout shares
+ * with Teevolution; shipped defaults corroborate Left, Right and Back.
+ */
+export const HITSCAN_BUTTON_NAMES = ["Left", "Right", "Middle", "Back", "Forward", "DPI"] as const;
+
+/** UI labels for the named actions, in display order. Shortcut and macro stay read-only. */
+export const HITSCAN_BUTTON_OPTIONS: ReadonlyArray<readonly [string, HitscanButtonAction]> = [
+  ["Left Click", { kind: "mouse", button: "left" }],
+  ["Right Click", { kind: "mouse", button: "right" }],
+  ["Middle Click", { kind: "mouse", button: "middle" }],
+  ["Backward", { kind: "mouse", button: "back" }],
+  ["Forward", { kind: "mouse", button: "forward" }],
+  ["DPI Loop", { kind: "dpi", action: "loop" }],
+  ["DPI+", { kind: "dpi", action: "up" }],
+  ["DPI-", { kind: "dpi", action: "down" }],
+  ["Polling Rate Switch", { kind: "pollingSwitch" }],
+  ["Disable", { kind: "disabled" }],
+];
+
+export function hitscanButtonActionForLabel(label: string): HitscanButtonAction | null {
+  return HITSCAN_BUTTON_OPTIONS.find(([name]) => name === label)?.[1] ?? null;
+}
+
+/** Label for a decoded action; shortcut, macro and unknown triples get descriptive names. */
+export function hitscanButtonLabel(action: HitscanButtonAction): string {
+  if (action.kind === "shortcut") return "Shortcut";
+  if (action.kind === "macro") return "Macro";
+  if (action.kind === "unknown") return `Unknown (${action.bytes.map(b => b.toString(16).padStart(2, "0")).join(" ")})`;
+  const encoded = hitscanEncodeButton(action);
+  return HITSCAN_BUTTON_OPTIONS.find(([, option]) =>
+    hitscanEncodeButton(option).every((byte, index) => byte === encoded[index]))?.[0] ?? "Unknown";
+}

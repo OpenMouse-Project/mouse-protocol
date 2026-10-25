@@ -61,7 +61,27 @@ Flash writes take an explicit address and complete encoded record. Preserve unkn
 
 `HITSCAN_SETTING_ADDRESS` names confirmed settings: polling, stage count/selection, LOD, debounce, Motion Sync, angle snapping, ripple control, auto-sleep and sensor mode. Polling encodes 125/250/500/1000/2000/4000/8000 Hz as 8/4/2/1/16/32/64; availability still depends on transport and model. Debounce uses 0..8 milliseconds. Sleep selection values are retained as raw codes because code and translation strings do not establish one consistent physical-duration mapping. `HID-SETTINGS.md` supplies the handler and setter evidence.
 
-This is a protocol codec and standalone transport client. It is not yet registered as an OpenMouse settings/UI adapter. Runtime model identification, capability limits, and safe UI semantics should be confirmed before registering such an adapter. Hardware tests are still required for all three transports and both MIDs.
+## OpenMouse adapter
+
+`HitscanHidClient` is registered in `src/drivers/registry.ts` under the brand `Hitscan`, and the picker offers the three product IDs on vendor `0x3770` without a usage-page filter (no descriptor has been captured). `readStatus()` reads the `0xC0` base block in one pass and decodes it through `HitscanConfig`; the live poll re-reads only the first three records (polling rate, stage count, active stage) and the battery.
+
+| Control | Flash | Exposed as |
+| --- | --- | --- |
+| Polling rate | `0x00` | 125–4000 Hz; 8000 Hz only on the `0300` 8K receiver (`SensorRateB`) |
+| DPI stages | `0x02`, `0x04`, `0x0C + 4i` | Up to four stages, 50–26000 DPI; `getDpiOptions()` lists only representable values |
+| Stage colours | `0x2C + 4i` | `#rrggbb` per stage |
+| Lift-off | `0x0A` | Code 1 = 1 mm (`Low`), code 2 = 2 mm (`High`) |
+| Debounce | `0xA9` | 0–8 ms |
+| Motion Sync, angle snapping, ripple control | `0xAB`, `0xAF`, `0xB1` | Switches |
+| Buttons | `0x60 + 4i` | Named mouse/DPI/polling/disable actions on Right, Middle, Back, Forward and DPI |
+
+Every setter writes one checksummed record, requires the full write echo, and reads the bytes back. The left button is never remapped, and a button holding a shortcut, macro, or unrecognized triple is listed in `fixedButtons` rather than overwritten. Button order follows the CompX key table this layout shares with Teevolution; the shipped defaults corroborate Left, Right and Back.
+
+Battery (`04`) and firmware (`12`) replies are decoded with the CompX shapes — percent, charging flag, big-endian millivolts; big-endian version — because the command table, framing, checksum and flash layout match CompX's exactly and the DLL extracts exactly those fields. The battery is only queried through a receiver, and an unrecognized reply reports an unknown battery rather than failing the read.
+
+Deliberately not exposed: auto-sleep and its timer (`0xB5`/`0xB7`, units unresolved), sensor mode (`0xB9`), the unnamed scalars at `0x06`, `0x08`, `0xAD` and `0xB3`, LEDs, shortcuts and macro editing, profiles (`0E`/`0F`), pairing, factory reset, VID/PID and firmware commands. Unsolicited `0A` notifications are not decoded, so the app polls.
+
+Hardware tests are still required for all three transports and both MIDs before any of this is marked verified.
 
 ## Full recovered material
 

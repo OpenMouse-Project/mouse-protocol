@@ -74,3 +74,24 @@ export function hitscanDecode3395Dpi(bytes: Uint8Array | readonly number[]): num
 
 /** Exact dropdown-index mapping; physical duration units remain unverified. */
 export const HITSCAN_SLEEP_SELECTION_VALUES = [3, 6, 30, 60, 90, 120, 150, 180, 210, 240] as const;
+
+/** Menu handlers write 0..8 ms; see HID-SETTINGS.md. Spinbox variants are not modelled. */
+export const HITSCAN_DEBOUNCE_MAX_MS = 8;
+
+/**
+ * LOD is stored as the combo index + 1. The variant widget names its two
+ * buttons `mm1Button`/`mm2Button`, so code 1 is 1 mm and code 2 is 2 mm.
+ */
+export const HITSCAN_LIFT_OFF_MILLIMETRES = [1, 2] as const;
+
+export function hitscanDecodeLiftOff(code: number): 1 | 2 | null {
+  return code === 1 || code === 2 ? code : null;
+}
+
+/**
+ * The `SensorRate` widget offers 125..4000 Hz; `SensorRateB` adds 8000 Hz.
+ * Only the 8K receiver is assumed to use the latter.
+ */
+export function hitscanPollingRatesFor(transport: "wired" | "receiver" | "8k-receiver"): readonly HitscanPollingRate[] {
+  return transport === "8k-receiver" ? HITSCAN_POLLING_RATES : HITSCAN_POLLING_RATES.slice(0, 6);
+}

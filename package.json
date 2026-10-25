@@ -18,10 +18,6 @@
     "CONTRIBUTING.md"
   ],
   "exports": {
-    "./hitscan": {
-      "types": "./dist/hitscan/index.d.ts",
-      "import": "./dist/hitscan/index.js"
-    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
@@ -229,6 +225,10 @@
     "./scyrox": {
       "types": "./dist/scyrox/index.d.ts",
       "import": "./dist/scyrox/index.js"
+    },
+    "./hitscan": {
+      "types": "./dist/hitscan/index.d.ts",
+      "import": "./dist/hitscan/index.js"
     }
   },
   "scripts": {

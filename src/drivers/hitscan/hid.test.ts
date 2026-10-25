@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { HitscanHidClient } from "./hid.js";
-import { hitscanBuildCommand, hitscanBuildReadPayload, hitscanChecksum } from "../../hitscan/index.js";
+import { HitscanHidClient } from "./hid.ts";
+import {
+  hitscanBuildCommand, hitscanBuildReadPayload, hitscanChecksum, hitscanEncode3395Dpi, hitscanEncodeRecord,
+  hitscanEncodeScalar,
+} from "@openmouse/protocol/hitscan";
+import { createSupportedClient, deviceBrand } from "../registry.ts";
 
 class FakeDevice implements HIDDevice {
   vendorId = 0x3770;
@@ -18,6 +22,8 @@ class FakeDevice implements HIDDevice {
   respond = true;
   corruptReadback = false;
   beforeReply?: (request: Uint8Array) => void;
+  /** Data bytes (payload[5..]) answered for non-flash commands, keyed by opcode. */
+  replies = new Map<number, number[]>();
   async open() { this.opened = true; }
   async close() { this.opened = false; }
   addEventListener(_type: "inputreport", listener: (event: HIDInputReportEvent) => void) { this.listeners.add(listener); }
@@ -43,6 +49,8 @@ class FakeDevice implements HIDDevice {
       if (this.corruptReadback) reply[5] ^= 1;
       reply[15] = hitscanChecksum([8, ...reply.subarray(0, 15)]);
     }
+    const canned = this.replies.get(request[0]!);
+    if (canned) { reply.set(canned, 5); reply[15] = hitscanChecksum([8, ...reply.subarray(0, 15)]); }
     this.emit(reply); // Deliberately before the send promise resolves.
   }
   async sendFeatureReport(): Promise<void> { throw new Error("Feature transport must not be used."); }
@@ -114,4 +122,162 @@ test("closing a client rejects an active waiter and removes its listener", async
   await result;
   assert.equal(device.opened, false);
   assert.equal(device.listeners.size, 0);
+});
+
+/** A plausible flash image: 1000 Hz, three stages on stage 2, 2 mm LOD, shortcut on Forward. */
+function seeded(productId = 0x0200): FakeDevice {
+  const device = new FakeDevice();
+  device.productId = productId;
+  const put = (address: number, bytes: Uint8Array) => device.flash.set(bytes, address);
+  put(0x00, hitscanEncodeScalar(0x01));
+  put(0x02, hitscanEncodeScalar(3));
+  put(0x04, hitscanEncodeScalar(1));
+  put(0x0a, hitscanEncodeScalar(2));
+  [400, 800, 6000].forEach((dpi, stage) => put(0x0c + stage * 4, hitscanEncode3395Dpi(dpi).record));
+  [[255, 0, 0], [0, 255, 0], [0, 0, 255]].forEach((rgb, stage) => put(0x2c + stage * 4, hitscanEncodeRecord(rgb)));
+  [[1, 1, 0], [1, 2, 0], [1, 4, 0], [1, 8, 0], [5, 0, 0], [2, 1, 0]]
+    .forEach((action, index) => put(0x60 + index * 4, hitscanEncodeRecord(action)));
+  put(0xa9, hitscanEncodeScalar(4));
+  put(0xab, hitscanEncodeScalar(1));
+  put(0xaf, hitscanEncodeScalar(0));
+  put(0xb1, hitscanEncodeScalar(1));
+  device.replies.set(0x04, [87, 0, 0x0f, 0xa0]);
+  device.replies.set(0x12, [1, 0x05]);
+  return device;
+}
+
+test("the registry creates the Hitscan client under the Hitscan brand", () => {
+  const client = createSupportedClient(new FakeDevice());
+  assert.ok(client instanceof HitscanHidClient);
+  assert.equal(deviceBrand(client), "Hitscan");
+});
+
+test("status decodes the config block, battery and firmware", async () => {
+  const client = new HitscanHidClient(seeded());
+  const status = await client.readStatus();
+  assert.equal(status.brand, "Hitscan");
+  assert.equal(status.pollingRateHz, 1000);
+  assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000, 2000, 4000]);
+  assert.deepEqual(status.dpiStages, [400, 800, 6000]);
+  assert.equal(status.activeDpiStage, 1);
+  assert.equal(status.dpi, 800);
+  assert.deepEqual(status.dpiStageColors, ["#ff0000", "#00ff00", "#0000ff"]);
+  assert.equal(status.liftOffDistance, "High");
+  assert.equal(status.liftOffScale?.millimetres, 2);
+  assert.equal(status.debounceMs, 4);
+  assert.equal(status.motionSync, true);
+  assert.equal(status.angleSnapping, false);
+  assert.equal(status.rippleControl, true);
+  assert.equal(status.batteryPercent, 87);
+  assert.equal(status.batteryVoltageMv, 4000);
+  assert.equal(status.batteryState, "Discharging");
+  assert.equal(status.connectionType, "Wireless");
+  assert.deepEqual(status.firmware, ["Mouse v1.05"]);
+  assert.deepEqual(status.buttonMappings, {
+    Left: "Left Click", Right: "Right Click", Middle: "Middle Click", Back: "Backward", Forward: "Shortcut", DPI: "DPI Loop",
+  });
+  assert.deepEqual(status.fixedButtons, ["Left", "Forward"]);
+  assert.equal(status.ui?.hideSleepCard, true);
+  await client.close();
+});
+
+test("a wired mouse is not asked for its battery", async () => {
+  const device = seeded(0x0100);
+  const client = new HitscanHidClient(device);
+  const status = await client.readStatus();
+  assert.equal(status.batteryPercent, null);
+  assert.equal(status.connectionType, "Wired");
+  assert.ok(!device.sent.some(request => request[0] === 0x04));
+  await client.close();
+});
+
+test("a corrupt DPI stage fails the read instead of inventing a value", async () => {
+  const device = seeded();
+  device.flash[0x0c + 4 + 3] ^= 1;
+  const client = new HitscanHidClient(device);
+  await assert.rejects(client.readStatus(), /DPI stage 2/);
+  await client.close();
+});
+
+test("the live poll re-reads the active stage and polling rate", async () => {
+  const device = seeded();
+  const client = new HitscanHidClient(device);
+  await client.readStatus();
+  device.flash.set(hitscanEncodeScalar(2), 0x04);
+  device.flash.set(hitscanEncodeScalar(0x20), 0x00);
+  const live = await client.readStatus(true);
+  assert.equal(live.activeDpiStage, 2);
+  assert.equal(live.dpi, 6000);
+  assert.equal(live.pollingRateHz, 4000);
+  await client.close();
+});
+
+test("setters write checksummed records and keep the cache current", async () => {
+  const device = seeded(0x0300);
+  const client = new HitscanHidClient(device);
+  await client.readStatus();
+  assert.equal(await client.setPollingRate(8000), 8000);
+  assert.deepEqual([...device.flash.subarray(0, 2)], [0x40, 0x15]);
+  assert.equal(await client.setDpiStageValue(2, 4100), 4100);
+  assert.deepEqual([...device.flash.subarray(0x14, 0x18)], [0x28, 0x28, 0x11, 0xf4]);
+  await assert.rejects(client.setDpiStageValue(2, 4150), /100-DPI steps/);
+  assert.equal(await client.setDpi(1600), 1600);
+  assert.equal(await client.setActiveDpiStage(0), 0);
+  assert.equal(await client.setDpiStageColor(0, "#12ABef"), "#12abef");
+  assert.equal(await client.setLiftOffDistance("Low"), "Low");
+  assert.equal(await client.setDebounceTime(8), 8);
+  await assert.rejects(client.setDebounceTime(9), /between 0 and 8/);
+  assert.equal(await client.setMotionSync(false), false);
+  assert.equal(await client.setAngleSnapping(true), true);
+  assert.equal(await client.setRippleControl(false), false);
+  await client.setButtonMapping("DPI", "Polling Rate Switch");
+  assert.deepEqual([...device.flash.subarray(0x74, 0x78)], [7, 0, 0, 0x4e]);
+  await assert.rejects(client.setButtonMapping("Left", "Right Click"), /cannot be remapped/);
+  await assert.rejects(client.setButtonMapping("Back", "Macro"), /not an action/);
+  const status = await client.readStatus(true);
+  assert.equal(status.pollingRateHz, 8000);
+  assert.deepEqual(status.dpiStages, [400, 1600, 4100]);
+  assert.equal(status.dpi, 400);
+  assert.equal(status.dpiStageColors?.[0], "#12abef");
+  assert.equal(status.liftOffDistance, "Low");
+  assert.equal(status.debounceMs, 8);
+  assert.equal(status.buttonMappings?.DPI, "Polling Rate Switch");
+  await client.close();
+});
+
+test("8000 Hz is refused on the wired mouse and the normal receiver", async () => {
+  for (const productId of [0x0100, 0x0200]) {
+    const client = new HitscanHidClient(seeded(productId));
+    await assert.rejects(client.setPollingRate(8000), /8000 Hz/);
+    await client.close();
+  }
+});
+
+test("shrinking the stage list moves the active stage first", async () => {
+  const device = seeded();
+  device.flash.set(hitscanEncodeScalar(2), 0x04);
+  const client = new HitscanHidClient(device);
+  await client.readStatus();
+  device.sent = [];
+  assert.equal(await client.setDpiStageCount(2), 2);
+  const writes = device.sent.filter(request => request[0] === 7).map(request => request[3]);
+  assert.deepEqual(writes, [0x04, 0x02]);
+  const status = await client.readStatus();
+  assert.equal(status.activeDpiStage, 1);
+  assert.deepEqual(status.dpiStages, [400, 800]);
+  await client.close();
+});
+
+test("closing while the device is still opening leaves no listener behind", async () => {
+  const device = new FakeDevice();
+  let finishOpen!: () => void;
+  device.open = () => new Promise<void>(resolve => { finishOpen = () => { device.opened = true; resolve(); }; });
+  const client = new HitscanHidClient(device);
+  const opening = client.open();
+  const closing = client.close();
+  finishOpen();
+  await assert.rejects(opening, /closed/);
+  await closing;
+  assert.equal(device.listeners.size, 0);
+  assert.equal(device.opened, false);
 });

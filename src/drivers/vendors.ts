@@ -12,6 +12,7 @@ import { FINALMOUSE_SLX_DONGLE_PRODUCT_IDS } from "../finalmouse/index.ts";
 import { INCOTT_PRODUCT_IDS, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../incott/index.ts";
 import { GLORIOUS_CORE2_PRODUCTS, GLORIOUS_CORE2_USAGE_PAGE, GLORIOUS_CORE2_VENDOR_ID } from "../glorious-core2/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
+import { HITSCAN_PRODUCTS, HITSCAN_VENDOR_ID } from "@openmouse/protocol/hitscan";
 import { VAXEE_PRODUCT_IDS, VAXEE_USAGE, VAXEE_USAGE_PAGE, VAXEE_VENDOR_ID } from "@openmouse/protocol/vaxee";
 import {
   GEARHUB_BLUETOOTH_USAGE,
@@ -209,6 +210,7 @@ export const VENDOR_ID = {
   incott: INCOTT_VENDOR_ID,
   hyperxKingston: HYPERX_VENDOR_ID_KINGSTON,
   hyperxHp: HYPERX_VENDOR_ID_HP,
+  hitscan: HITSCAN_VENDOR_ID,
 } as const;
 
 /**
@@ -997,4 +999,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.coolermaster, usagePage: COOLERMASTER_USAGE_PAGE, usage: COOLERMASTER_USAGE },
   { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff00 },
   { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff60 },
+  // No HID descriptor has been captured, so the usage page is unknown; the
+  // driver selects the report-8 input/output collection by shape.
+  ...[...HITSCAN_PRODUCTS.keys()].map((productId) => ({ vendorId: VENDOR_ID.hitscan, productId })),
 ];

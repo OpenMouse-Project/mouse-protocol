@@ -8,6 +8,7 @@ import { DEVICE_DRIVERS } from "./registry.ts";
 import { SUPPORTED_HID_FILTERS, VENDOR_ID } from "./vendors.ts";
 import { LAMZU_ATLANTIS_PRODUCTS, LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
 import { SCYROX_PRODUCTS } from "@openmouse/protocol/scyrox";
+import { HITSCAN_PRODUCTS } from "@openmouse/protocol/hitscan";
 import { ORBITAL_DEVICES } from "@openmouse/protocol/orbital";
 import { MCHOSE_V3_PRODUCT_IDS } from "@openmouse/protocol/mchose";
 import { KEYCHRON_8K_NORDIC_PRODUCT_IDS } from "@openmouse/protocol/keychron";
@@ -112,6 +113,8 @@ function candidateProductIds(): number[] {
     // Scyrox's ids live in the codec package, not under src/drivers/, so the
     // source scan below would not find them.
     ...SCYROX_PRODUCTS.keys(),
+    // Likewise defined in src/hitscan/.
+    ...HITSCAN_PRODUCTS.keys(),
     ...ORBITAL_DEVICES.keys(),
     // The MCHOSE V3 driver matches on an id allowlist and shares its usage
     // page with the V2, so the probe needs a real one to reach it at all.
