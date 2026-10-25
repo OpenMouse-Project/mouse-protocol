@@ -162,6 +162,10 @@
       "types": "./dist/redragon/index.d.ts",
       "import": "./dist/redragon/index.js"
     },
+    "./sinowealth": {
+      "types": "./dist/sinowealth/index.d.ts",
+      "import": "./dist/sinowealth/index.js"
+    },
     "./drivers": {
       "types": "./dist/drivers/index.d.ts",
       "import": "./dist/drivers/index.js"
