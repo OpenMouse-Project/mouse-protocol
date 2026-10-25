@@ -268,6 +268,39 @@ test("shrinking the stage list moves the active stage first", async () => {
   await client.close();
 });
 
+test("shrinking the stage list without a prior status read still reads the active stage", async () => {
+  const device = seeded();
+  device.flash.set(hitscanEncodeScalar(2), 0x04);
+  const client = new HitscanHidClient(device);
+  assert.equal(await client.setDpiStageCount(2), 2);
+  assert.deepEqual([...device.flash.subarray(0x04, 0x06)], [...hitscanEncodeScalar(1)]);
+  await client.close();
+});
+
+test("setDpi writes the stage the mouse is on, not the cached one", async () => {
+  const device = seeded();
+  const client = new HitscanHidClient(device);
+  await client.readStatus();
+  // A DPI-button press moves the mouse from stage 2 to stage 3.
+  device.flash.set(hitscanEncodeScalar(2), 0x04);
+  assert.equal(await client.setDpi(3200), 3200);
+  assert.deepEqual([...device.flash.subarray(0x14, 0x18)], [...hitscanEncode3395Dpi(3200).record]);
+  assert.deepEqual([...device.flash.subarray(0x10, 0x14)], [...hitscanEncode3395Dpi(800).record]);
+  const status = await client.readStatus(true);
+  assert.equal(status.activeDpiStage, 2);
+  assert.equal(status.dpi, 3200);
+  await client.close();
+});
+
+test("a corrupt active-stage record fails setDpi instead of writing stage 1", async () => {
+  const device = seeded();
+  device.flash[0x05] ^= 1;
+  const client = new HitscanHidClient(device);
+  await assert.rejects(client.setDpi(1600), /corrupt active DPI stage/);
+  assert.ok(!device.sent.some(request => request[0] === 7));
+  await client.close();
+});
+
 test("closing while the device is still opening leaves no listener behind", async () => {
   const device = new FakeDevice();
   let finishOpen!: () => void;

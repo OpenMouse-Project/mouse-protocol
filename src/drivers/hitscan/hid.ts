@@ -341,6 +341,13 @@ export class HitscanHidClient {
     return new HitscanConfig(padded);
   }
 
+  /** Unqueued: callers hold the queue. A corrupt record fails rather than guessing stage 1. */
+  private async readActiveStage(): Promise<number> {
+    const stage = (await this.readHead()).scalar(HITSCAN_SETTING_ADDRESS.activeDpiStage);
+    if (stage === null) throw new Error("The mouse returned a corrupt active DPI stage.");
+    return stage;
+  }
+
   /**
    * Wireless only. The reply layout is inferred from CompX, so an unanswered
    * or unrecognized query reports an unknown battery instead of failing the read.
@@ -380,8 +387,10 @@ export class HitscanHidClient {
 
   setDpi(dpi: number): Promise<number> {
     return this.run(async () => {
-      const stage = this.lastStatus?.activeDpiStage
-        ?? (await this.readHead()).scalar(HITSCAN_SETTING_ADDRESS.activeDpiStage) ?? 0;
+      // The DPI button moves the active stage without telling the client, so
+      // the cached index may already be stale.
+      const stage = await this.readActiveStage();
+      this.patch({ activeDpiStage: stage });
       return await this.writeStage(stage, dpi);
     });
   }
@@ -423,7 +432,7 @@ export class HitscanHidClient {
       if (!Number.isInteger(count) || count < 1 || count > MODEL.maxDpiStages) {
         throw new Error(`This mouse supports between 1 and ${MODEL.maxDpiStages} DPI stages.`);
       }
-      const active = this.lastStatus?.activeDpiStage ?? 0;
+      const active = await this.readActiveStage();
       // The stage list changes shape; the next read rebuilds it.
       this.lastStatus = null;
       // The utility rejects an active index at or past the count, so move it first.
