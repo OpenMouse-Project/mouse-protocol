@@ -18,6 +18,10 @@
     "CONTRIBUTING.md"
   ],
   "exports": {
+    "./hitscan": {
+      "types": "./dist/hitscan/index.d.ts",
+      "import": "./dist/hitscan/index.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
