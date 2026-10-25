@@ -39,7 +39,6 @@ import {
   type RedragonM690ProRgb,
 } from "@openmouse/protocol/redragon";
 import {
-  KILONOVA_POLLING_CODES,
   SINOWEALTH_CMD_LINK,
   SINOWEALTH_CMD_STATUS,
   SINOWEALTH_CONFIG_LENGTH,
@@ -175,10 +174,16 @@ export class RedragonM690ProHidClient {
   }
 
   get supportedPollingRates(): number[] {
+    if (this.kilonova) return [125, 250, 500, 1000];
     return [...REDRAGON_M690_PRO_POLLING_RATES];
   }
 
   getDpiOptions(): number[] {
+    if (this.kilonova) {
+      const options: number[] = [];
+      for (let dpi = 400; dpi <= 16000; dpi += 100) options.push(dpi);
+      return options;
+    }
     return [...REDRAGON_M690_PRO_DPI_LABELS];
   }
 
@@ -321,6 +326,13 @@ export class RedragonM690ProHidClient {
         hideProcessingCard: true,
         defaultDisplayName: name,
         statusNote: notes.join(" "),
+        dpiStageEditor: dpiStages.length > 0 ? {
+          maxStages: dpiStages.length,
+          countEditable: false,
+          minDpi: 400,
+          maxDpi: 16000,
+          stepDpi: 100,
+        } : undefined,
       },
       batteryPercent: linked === false ? null : status?.batteryPercent ?? null,
       batteryState: linked !== false && status?.charge ? status.charge : "Unknown",
@@ -449,6 +461,15 @@ export class RedragonM690ProHidClient {
    * unable to click.
    */
   async setButtonMapping(button: string, action: string): Promise<void> {
+    // Try to detect kilonova if not identified
+    if (!this.kilonova) {
+      try {
+        await this.identify();
+      } catch {}
+    }
+    if (this.kilonova) {
+      throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
+    }
     await this.writeButtons((block) => {
       const next = redragonM690ProWithButtonAction(block, button, action);
       if (!Object.values(redragonM690ProDecodeButtons(next)).includes("Left click")) {
@@ -593,11 +614,37 @@ export class RedragonM690ProHidClient {
   ): Promise<void> {
     await this.run(async () => {
       await this.prepare();
+      // Also detect Kilonova if not already detected
+      if (!this.kilonova) {
+        try {
+          const b = await this.readBlock(this.product().configCommand, 32).catch(() => null);
+          if (b && b.length > 9 && b[9] === 0x11 && (b[0] === 0x08 || b[1] === 0x08)) {
+            this.kilonova = true;
+          }
+        } catch {}
+      }
       if (this.kilonova) {
         // Kilonova: only allow DPI/polling changes if the change only touches known bytes
         await this.ensureLinked();
         const originalConfig = await this.readConfig();
         const config = changeConfig(originalConfig.slice());
+        const originalButtons = await this.readButtons().catch(() => null);
+        const buttons = originalButtons ? changeButtons(originalButtons.slice()) : originalButtons;
+        if (originalButtons && buttons && !sameBytes(originalButtons.subarray(0, Math.min(originalButtons.length, buttons.length)), buttons.subarray(0, Math.min(originalButtons.length, buttons.length)))) {
+          throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
+        }
+        // Check if buttons would be changed via the passed change function by comparing original vs result
+        // For Kilonova, any button change is refused
+        let buttonsChanged = false;
+        if (originalButtons) {
+          const testButtons = changeButtons(originalButtons.slice());
+          if (!sameBytes(originalButtons.subarray(0, testButtons.length), testButtons.subarray(0, originalButtons.length))) {
+            buttonsChanged = true;
+          }
+        }
+        if (buttonsChanged) {
+          throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
+        }
         // Check if only DPI/polling bytes changed (0x0a low nibble, 0x0b, and DPI stages 0x0d-0x18)
         let onlyDpiPolling = true;
         for (let i = 0; i < config.length; i++) {
@@ -619,6 +666,10 @@ export class RedragonM690ProHidClient {
         }
         if (!onlyDpiPolling) {
           throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
+        }
+        if (onlyDpiPolling && sameBytes(originalConfig.subarray(0, SINOWEALTH_CONFIG_LENGTH), config.subarray(0, SINOWEALTH_CONFIG_LENGTH))) {
+          // No config changes and no button changes
+          return;
         }
         await this.sendBlock(redragonM690ProEncodeBlockWrite(config, SINOWEALTH_CONFIG_LENGTH));
         const configBack = await this.readConfig();

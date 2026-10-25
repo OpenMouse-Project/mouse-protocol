@@ -48,6 +48,7 @@ test("sinowealthDecodeKilonovaConfig decodes the Kilonova bank correctly", () =>
     stageCount: 6,
     activeStage: 2,
     dpiStages: [400, 800, 1600, 3200, 6400, 16000],
+    pollingHz: 1000,
   });
 });
 
@@ -421,8 +422,8 @@ test("recognizes the Cosmic Byte Kilonova 3335IC and reads its DPI from the bank
   assert.equal(status.brand, "Cosmic Byte");
   assert.equal(status.name, "Cosmic Byte Kilonova 3335IC");
   assert.equal(status.ui?.family, "sinowealth-kilonova-3335ic");
-  assert.equal(status.ui?.settingsReady, false);
-  assert.match(status.ui?.statusNote ?? "", /reads this Cosmic Byte Kilonova 3335IC's DPI/);
+  assert.equal(status.ui?.settingsReady, true);
+  assert.match(status.ui?.statusNote ?? "", /reads and can change this Cosmic Byte Kilonova 3335IC's DPI and polling rate/);
   assert.equal(status.ui?.valuesVerified, true);
   assert.equal(status.batteryPercent, 70);
   assert.equal(status.batteryState, "Unknown");
@@ -431,7 +432,8 @@ test("recognizes the Cosmic Byte Kilonova 3335IC and reads its DPI from the bank
   assert.deepEqual(status.dpiStages, [400, 800, 1600, 3200, 6400, 16000]);
   assert.equal(status.dpi, 1600);
   assert.equal(status.activeDpiStage, 2);
-  assert.equal(status.pollingRateHz, 0);
+  assert.equal(status.pollingRateHz, 1000);
+  assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
   assert.equal(status.buttonMappings, undefined);
   assert.equal(status.lighting, undefined);
   assert.equal(fake.blockWrites.length, 0);
@@ -440,7 +442,6 @@ test("recognizes the Cosmic Byte Kilonova 3335IC and reads its DPI from the bank
 test("refuses to write to the Kilonova 3335IC instead of guessing its layout", async () => {
   const fake = new FakeM690Pro(REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID, { config: KILONOVA_RECEIVER_CONFIG, battery: 0x46 });
   const mouse = client(fake);
-  await assert.rejects(mouse.setPollingRate(1000), /read-only/);
   await assert.rejects(mouse.setButtonMapping("Left (1)", "Disabled"), /read-only/);
   assert.equal(fake.blockWrites.length, 0);
 });

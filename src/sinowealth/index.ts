@@ -234,15 +234,15 @@ export function sinowealthWithKilonovaActiveStage(block: Uint8Array, stage: numb
 }
 
 // Kilonova uses index+1 formula: DPI = (index+1)*100, so index = (DPI/100)-1
-const KILONOVA_DPI_INDEX_MAP: Record<number, number> = {
-  400: 3, 800: 7, 1600: 15, 3200: 31, 6400: 63, 16000: 159,
-};
 export function sinowealthWithKilonovaStageDpi(block: Uint8Array, stage: number, dpi: number): Uint8Array {
   if (!Number.isInteger(stage) || stage < 0 || stage >= KILONOVA_STAGE_COUNT) {
     throw new Error(`Kilonova DPI stage ${stage} is outside 0-${KILONOVA_STAGE_COUNT - 1}.`);
   }
-  const index = KILONOVA_DPI_INDEX_MAP[dpi];
-  if (index === undefined) throw new Error(`Kilonova DPI ${dpi} is not a supported value.`);
+  if (dpi % 100 !== 0 || dpi < 400 || dpi > 16000) {
+    throw new Error(`Kilonova DPI ${dpi} is not supported.`);
+  }
+  const index = (dpi / 100) - 1;
+  if (index < 0 || index > 0xffff) throw new Error(`Kilonova DPI ${dpi} is out of range.`);
   const next = Uint8Array.from(block.subarray(0, SINOWEALTH_CONFIG_LENGTH));
   const offset = KILONOVA_STAGE_DPI_OFFSETS[stage]!;
   next[offset] = index & 0xff;
