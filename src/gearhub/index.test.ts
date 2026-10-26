@@ -30,7 +30,7 @@ it("keeps AJ179 model quirks in its profile without changing sibling button layo
   assert.equal(AJAZZ_AJ179_PRO_PROFILE.buttons?.find((button) => button.name === "Forward")?.slot, 3);
   assert.equal(AJAZZ_AJ179_PRO_PROFILE.dpiStageCountIsCapacity, true);
   assert.equal(AJAZZ_AJ179_PRO_PROFILE.batteryPercentageOnly, true);
-  for (const id of [2285, 1893, 1643, 3310, 0]) {
+  for (const id of [2285, 1893, 1643, 3310, 1660, 0]) {
     const profile = gearHubProfileFor(id);
     assert.equal(profile.buttons, undefined);
     assert.equal(profile.dpiStageCountIsCapacity, undefined);
