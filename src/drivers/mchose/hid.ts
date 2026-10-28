@@ -10,6 +10,7 @@ import {
   MCHOSE_SLEEP_OPTIONS,
   MCHOSE_DEBOUNCE_MAX_MS,
   MCHOSE_DOCK_PRODUCT_ID,
+  MCHOSE_REALTEK_PRODUCT_IDS,
   MCHOSE_ANGLE_TUNING_MAX,
   MCHOSE_SHORT_REPORT_ID,
   MCHOSE_SHORT_TOKENS,
@@ -97,7 +98,10 @@ export class MchoseHidClient {
       (collection.usagePage === MCHOSE_CONFIG_USAGE_PAGE
         && collection.usage === MCHOSE_CONFIG_USAGE)
       || collection.children.some(search);
-    return device.vendorId === VENDOR_ID.mchose
+    const vendorMatches = device.vendorId === VENDOR_ID.mchose
+      || (device.vendorId === VENDOR_ID.mchoseRealtek
+        && MCHOSE_REALTEK_PRODUCT_IDS.includes(device.productId));
+    return vendorMatches
       // The MagDock is the same vendor but a different protocol entirely, and
       // has its own driver; it must never be claimed as a mouse.
       && device.productId !== MCHOSE_DOCK_PRODUCT_ID

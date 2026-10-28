@@ -5,6 +5,7 @@ import {
   MCHOSE_COMMAND,
   MCHOSE_LONG_REPORT_ID,
   MCHOSE_SHORT_REPORT_ID,
+  MCHOSE_SHORT_TOKENS,
 } from "@openmouse/protocol/mchose";
 
 /**
@@ -41,6 +42,27 @@ function wireReply(reportId: number, command: number, payload: number[]): DataVi
  * id, and a config that a 0x57 write actually mutates, so a setter's read-back
  * check is exercised rather than stubbed.
  */
+/**
+ * An A7 Ultra on a `5253:1020` receiver, captured at 2000 Hz on stage 1. Its
+ * receiver answers 0x04 and 0x06 with an all-zero payload.
+ */
+const A7_ULTRA_CONFIG = [
+  0x00, 0x31, 0x31, 0x01, 0x20, 0x03, 0x80, 0x0c, 0x40, 0x06,
+  0x80, 0x0c, 0x00, 0x19, 0x10, 0xa4, 0x02, 0x81, 0x08, 0x03,
+  ...CONFIG.slice(20),
+];
+
+function a7UltraDevice() {
+  const fake = fakeDevice({
+    vendorId: 0x5253,
+    productId: 0x1020,
+    productName: "MCHOSE A7 Ultra",
+  } as Partial<HIDDevice>);
+  fake.state.config = [...A7_ULTRA_CONFIG];
+  fake.state.emptyShortReplies = [MCHOSE_COMMAND.version, MCHOSE_COMMAND.battery];
+  return fake;
+}
+
 /** Profile 2 as captured from the same mouse: 1000 Hz on stage 2. */
 const PROFILE_2 = [
   0x02, 0x32, 0x22, 0x00, 0x40, 0x06, 0x20, 0x03, 0x40, 0x06,
@@ -49,7 +71,14 @@ const PROFILE_2 = [
 ];
 
 function fakeDevice(overrides?: Partial<HIDDevice>) {
-  const state = { config: [...CONFIG], writes: [] as number[][], profile: 0, sleepEnabled: 0, mouseProductId: 0x4021 };
+  const state = {
+    config: [...CONFIG],
+    writes: [] as number[][],
+    profile: 0,
+    sleepEnabled: 0,
+    mouseProductId: 0x4021,
+    emptyShortReplies: [] as number[],
+  };
   let pendingShort = MCHOSE_COMMAND.identity;
   let pendingLong = MCHOSE_COMMAND.config;
 
@@ -123,6 +152,9 @@ function fakeDevice(overrides?: Partial<HIDDevice>) {
     },
     receiveFeatureReport: async (id: number) => {
       if (id === MCHOSE_SHORT_REPORT_ID) {
+        if (state.emptyShortReplies.includes(pendingShort)) {
+          return wireReply(id, pendingShort, new Array(MCHOSE_SHORT_TOKENS - 1).fill(0));
+        }
         const payload = pendingShort === MCHOSE_COMMAND.identity ? IDENTITY
           : pendingShort === MCHOSE_COMMAND.version ? VERSION
             : pendingShort === MCHOSE_COMMAND.battery
@@ -150,6 +182,38 @@ describe("MchoseHidClient", () => {
   it("rejects another vendor on the same usage page", () => {
     const { device } = fakeDevice({ vendorId: 0x046d } as Partial<HIDDevice>);
     assert.equal(MchoseHidClient.isSupported(device), false);
+  });
+
+  it("matches the A7 Ultra receiver under vendor id 0x5253", () => {
+    assert.equal(MchoseHidClient.isSupported(a7UltraDevice().device), true);
+  });
+
+  it("rejects other 0x5253 product ids on the same usage page", () => {
+    const { device } = fakeDevice({ vendorId: 0x5253, productId: 0x1234 } as Partial<HIDDevice>);
+    assert.equal(MchoseHidClient.isSupported(device), false);
+  });
+
+  it("reads an A7 Ultra whose receiver leaves battery and version empty", async () => {
+    const status = await new MchoseHidClient(a7UltraDevice().device).readStatus();
+    assert.equal(status.name, "MCHOSE A7 Ultra", "identified by the product string");
+    assert.equal(status.batteryPercent, null);
+    assert.deepEqual(status.firmware, []);
+    assert.equal(status.pollingRateHz, 2000, "wireless byte 0x31 -> rate index 3");
+    assert.equal(status.dpi, 3200, "stage 1");
+    assert.deepEqual(status.supportedPollingRates, [125, 500, 1000, 2000, 4000, 8000]);
+    assert.equal(status.ui?.dpiStageEditor?.maxDpi, 42000);
+  });
+
+  it("sets the A7 Ultra's polling rate through the same config write", async () => {
+    const { device, state } = a7UltraDevice();
+    const client = new MchoseHidClient(device);
+    await client.readStatus();
+    await client.setPollingRate(1000);
+    assert.equal(state.config[2], 0x21);
+    assert.deepEqual(
+      state.config.filter((_, index) => index !== 2),
+      A7_ULTRA_CONFIG.filter((_, index) => index !== 2),
+    );
   });
 
   it("rejects an MCHOSE device with only the firmware-update collection", () => {

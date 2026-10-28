@@ -225,6 +225,33 @@ used directly when the mouse is on a cable:
 MCHOSE's own firmware-version table cross-checks this: the Ultra reports
 `5.44.2.4` and the Ultra+ `5.46.2.4`. The test hardware reported `5.46.2.4`.
 
+### Receivers under VID `0x5253`
+
+Some **A7 Ultra** units enumerate as `5253:1020`, manufacturer string
+"RealTek", product string "MCHOSE A7 Ultra". The interface is identical to
+the A7 V2's — same five collections, same report ids and sizes, byte-identical
+`0xff01` report descriptor — and it speaks the same inverted feature-report
+protocol. `0x1011` is the same mouse on its cable, per a user report; it has not
+been exercised here.
+
+Observed on an 8K receiver (macOS, `node-hid`):
+
+- `0x11 0x03` answers `01 53 52 20 10 01 00` — bonded, the receiver's own ids,
+  connected.
+- `0x11 0x04` and `0x11 0x06` echo the command but every payload byte is zero,
+  across 60 polls with the mouse awake. There is therefore no battery, firmware
+  string or mouse PID, and the model is identified by the product string.
+- `0x12 0x67` returns a plausible config:
+  `00 31 31 01 20 03 80 0c 40 06 80 0c 00 19 10 a4 02 81 08 03` — 2000 Hz on
+  both links, stage 1 of 800/3200/1600/3200/6400/42000, two stages, 8 ms
+  debounce, 3 min sleep.
+- A `0x57` write of the wireless byte `0x31 → 0x21` read back as 1000 Hz with
+  no other byte of the 63 changed, and writing `0x31` back restored a
+  byte-identical config.
+
+Because `0x5253` is not an MCHOSE-owned id, the picker filter and the driver
+match it only together with these two PIDs.
+
 ## Dead ends, so the next person can skip them
 
 - **The `0x4d`-magic framing in the same bundle is a different *generation*.**

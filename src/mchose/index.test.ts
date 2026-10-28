@@ -155,6 +155,7 @@ test("the product string disambiguates when the mouse id is unknown", () => {
   assert.equal(mchoseFindProduct(null, "MCHOSE A7 V2 Ultra+")?.name, "A7 V2 Ultra+");
   // The plus model must not be swallowed by the shorter name.
   assert.equal(mchoseFindProduct(null, "MCHOSE A7 V2 Ultra")?.name, "A7 V2 Ultra");
+  assert.equal(mchoseFindProduct(null, "MCHOSE A7 Ultra")?.name, "A7 Ultra");
   assert.equal(mchoseFindProduct(null, "Some Other Mouse"), null);
   assert.equal(mchoseFindProduct(null, null), null);
 });

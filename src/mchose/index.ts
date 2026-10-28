@@ -20,6 +20,14 @@
 
 export const MCHOSE_VENDOR_ID = 0x3837;
 
+/**
+ * Some A7 Ultra receivers enumerate as manufacturer "RealTek" under this vendor
+ * id, with the family's link product ids and the same configuration channel.
+ * Not an MCHOSE-owned id, so it is only ever matched together with these PIDs.
+ */
+export const MCHOSE_REALTEK_VENDOR_ID = 0x5253;
+export const MCHOSE_REALTEK_PRODUCT_IDS: readonly number[] = [0x1020, 0x1011];
+
 /** Vendor configuration collection. */
 export const MCHOSE_CONFIG_USAGE_PAGE = 0xff01;
 export const MCHOSE_CONFIG_USAGE = 0x0001;
@@ -486,8 +494,8 @@ export const MCHOSE_LINK_PRODUCT_IDS = {
 
 export interface MchoseProduct {
   name: string;
-  /** The mouse's own product id, model-specific. */
-  productId: number;
+  /** The mouse's own product id, model-specific; absent when the mouse never reports it. */
+  productId?: number;
   dpiMax: number;
   /** Lift-off steps in millimetres, in firmware index order. */
   liftOffDistances: readonly number[];
@@ -501,6 +509,8 @@ export const MCHOSE_PRODUCTS: readonly MchoseProduct[] = [
   { name: "A7 V2 Pro+", productId: 0x4023, dpiMax: 26000, liftOffDistances: [1, 2], maxPollingRate: 8000 },
   { name: "A7 V2 Ultra", productId: 0x4019, dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
   { name: "A7 V2 Ultra+", productId: 0x4021, dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
+  // The 0x5253 receiver leaves the 0x06 reply empty, so this is found by name.
+  { name: "A7 Ultra", dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
 ];
 
 /** Rate lists the firmware exposes, keyed by the model's maximum rate. */
