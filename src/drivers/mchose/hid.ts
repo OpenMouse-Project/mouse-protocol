@@ -11,6 +11,7 @@ import {
   MCHOSE_DEBOUNCE_MAX_MS,
   MCHOSE_DOCK_PRODUCT_ID,
   MCHOSE_REALTEK_PRODUCT_IDS,
+  MCHOSE_REALTEK_WIRED_PRODUCT_ID,
   MCHOSE_ANGLE_TUNING_MAX,
   MCHOSE_SHORT_REPORT_ID,
   MCHOSE_SHORT_TOKENS,
@@ -142,6 +143,9 @@ export class MchoseHidClient {
    * is live decides which half of the config byte pair applies.
    */
   private isWired(): boolean {
+    if (this.device.vendorId === VENDOR_ID.mchoseRealtek) {
+      return this.device.productId === MCHOSE_REALTEK_WIRED_PRODUCT_ID;
+    }
     return MCHOSE_PRODUCTS.some((entry) => entry.productId === this.device.productId);
   }
 

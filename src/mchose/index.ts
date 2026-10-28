@@ -26,7 +26,8 @@ export const MCHOSE_VENDOR_ID = 0x3837;
  * Not an MCHOSE-owned id, so it is only ever matched together with these PIDs.
  */
 export const MCHOSE_REALTEK_VENDOR_ID = 0x5253;
-export const MCHOSE_REALTEK_PRODUCT_IDS: readonly number[] = [0x1020, 0x1011];
+export const MCHOSE_REALTEK_WIRED_PRODUCT_ID = 0x1011;
+export const MCHOSE_REALTEK_PRODUCT_IDS: readonly number[] = [0x1020, MCHOSE_REALTEK_WIRED_PRODUCT_ID];
 
 /** Vendor configuration collection. */
 export const MCHOSE_CONFIG_USAGE_PAGE = 0xff01;

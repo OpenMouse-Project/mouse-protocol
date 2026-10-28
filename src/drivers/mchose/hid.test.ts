@@ -52,10 +52,10 @@ const A7_ULTRA_CONFIG = [
   ...CONFIG.slice(20),
 ];
 
-function a7UltraDevice() {
+function a7UltraDevice(productId = 0x1020) {
   const fake = fakeDevice({
     vendorId: 0x5253,
-    productId: 0x1020,
+    productId,
     productName: "MCHOSE A7 Ultra",
   } as Partial<HIDDevice>);
   fake.state.config = [...A7_ULTRA_CONFIG];
@@ -643,6 +643,20 @@ describe("MchoseHidClient", () => {
     assert.equal(state.config[1] >> 4, 1, "wired rate index moved");
     assert.equal(state.config[2], wirelessBefore, "wireless byte untouched");
     assert.equal((await client.readStatus()).pollingRateHz, 500);
+  });
+
+  it("treats the A7 Ultra's 0x5253:0x1011 cable link as wired", async () => {
+    const { device, state } = a7UltraDevice(0x1011);
+    state.config[1] = 0x10; // wired: rate index 1 (500 Hz), stage 0
+    state.config[2] = 0x33; // wireless: rate index 3, stage 3
+    const client = new MchoseHidClient(device);
+    const status = await client.readStatus();
+    assert.equal(status.connectionType, "Wired");
+    assert.equal(status.pollingRateHz, 500, "the wired byte, not the wireless one");
+
+    await client.setPollingRate(1000);
+    assert.equal(state.config[1] >> 4, 2, "wired rate index moved");
+    assert.equal(state.config[2], 0x33, "wireless byte untouched");
   });
 
   it("degrades to identity-only when the mouse never answers", async () => {
