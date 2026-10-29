@@ -68,7 +68,7 @@ test("isSupported needs the ROCCAT VID, a known PID and the 0xFF00 vendor collec
   assert.equal(RoccatHidClient.isSupported(fakeDevice({ productId: 0x2de6 }).device), false);
 });
 
-test("readStatus surfaces the stored DPI table and claims no battery", async () => {
+test("readStatus surfaces the stored DPI table without claiming a current stage", async () => {
   const { device } = fakeDevice();
   const status = await new RoccatHidClient(device).readStatus();
   assert.equal(status.brand, "ROCCAT");
@@ -78,9 +78,10 @@ test("readStatus surfaces the stored DPI table and claims no battery", async () 
   assert.equal(status.connectionType, "Wireless");
   assert.deepEqual(status.dpiStages, [800, 1200, 1600, 3200, 5000]);
   assert.deepEqual(status.dpiStagesY, [800, 1200, 1600, 3200, 5000]);
-  assert.equal(status.dpi, 800);
-  assert.equal(status.dpiY, 800);
-  assert.equal(status.ui?.valuesVerified, true);
+  assert.equal(status.dpi, 0, "the reply names no active stage, so no current DPI is claimed");
+  assert.equal(status.dpiY, undefined);
+  assert.equal(status.activeDpiStage, undefined, "a stored preset is not the stage in use");
+  assert.equal(status.ui?.valuesVerified, false, "a stored table is not a verified current reading");
 });
 
 test("readStatus keeps the settings grid hidden and the polling control read-only", async () => {

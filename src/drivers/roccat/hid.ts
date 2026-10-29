@@ -150,10 +150,12 @@ export class RoccatHidClient {
   }
 
   /**
-   * Status snapshot. The DPI table is the only field read from the mouse.
-   * Polling rate, LOD, angle snapping, debounce and battery are not reported:
-   * the echo carries no established position for the first four, and the
-   * status byte's meaning is unresolved for the last.
+   * Status snapshot. The stored DPI table is the only field read from the
+   * mouse. Which stage the mouse is currently using is not in the reply, so
+   * the current DPI, the active stage, the polling rate, LOD, angle snapping,
+   * debounce and battery all stay unknown: the echo carries no established
+   * position for the first six, and the status byte's meaning is unresolved
+   * for the last.
    */
   async readStatus(): Promise<MouseStatus> {
     const dpiTable = await this.readDpiTable();
@@ -165,20 +167,26 @@ export class RoccatHidClient {
       ui: {
         family: "roccat",
         settingsReady: false,
-        valuesVerified: dpiTable !== null,
+        // Neither the current DPI nor the polling rate is read, so nothing here
+        // is worth reporting as verified. The stage table is reported through
+        // `dpiStages`, which is a list of what the mouse stores, not of what it
+        // is using.
+        valuesVerified: false,
         pollingReadOnly: true,
         hideProcessingCard: true,
         hideSleepCard: true,
         hideSignalCard: true,
-        pollingNote: "This driver reports the polling rate but cannot change it: no capture has shown a settings write landing on this mouse.",
+        pollingNote: "This driver cannot report the polling rate: no capture has shown a settings write landing on this mouse.",
         statusNote: dpiTable === null
-          ? "The mouse did not answer its settings query, so DPI could not be read."
-          : "Read-only for now: the DPI table reads back, but no settings write has been observed taking effect on this model.",
+          ? "The mouse did not answer its settings query, so the DPI stages could not be read."
+          : "Read-only for now: the five stored DPI stages read back, but the mouse does not report which one is active, so the current DPI stays unknown. No settings write has been observed taking effect on this model.",
       },
       batteryPercent: null,
       batteryState: "Unknown",
-      dpi: dpiTable?.dpi.stages[0] ?? 0,
-      dpiY: dpiTable?.dpi.stagesY[0],
+      // The reply has no byte for the active stage, so stages[0] is a stored
+      // preset, not the DPI in use. Claiming it would show a stored value as
+      // the current one.
+      dpi: 0,
       supportsSeparateDpiAxes: true,
       pollingRateHz: 0,
       supportedPollingRates: this.getSupportedPollingRates(),
@@ -193,7 +201,6 @@ export class RoccatHidClient {
       rippleControl: null,
       dpiStages: dpiTable?.dpi.stages ? [...dpiTable.dpi.stages] : undefined,
       dpiStagesY: dpiTable?.dpi.stagesY ? [...dpiTable.dpi.stagesY] : undefined,
-      activeDpiStage: 0,
       firmware: [],
     };
   }

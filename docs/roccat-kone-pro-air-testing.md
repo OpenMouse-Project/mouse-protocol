@@ -99,6 +99,15 @@ four is established, so there is no read to report, and the driver ships no
 setter, so there is no write to remember. The polling control is marked
 read-only instead of disabled-with-stale-value.
 
+The **current DPI** and the **active DPI stage** are unknown for the same
+reason. The settings reply carries the five stored slots of each axis
+(offsets 8..17) and no byte naming the stage in use, so `stages[0]` is a stored
+preset, not the DPI the mouse is applying — it is only the first slot. The
+driver therefore reports `dpiStages` / `dpiStagesY` as the table it read, and
+leaves `dpi`, `dpiY`, `activeDpiStage` and `valuesVerified` unset. Reporting
+`stages[0]` as the current DPI would show a stored preset as a measured value,
+which is the same class of mistake as the setters that were held back.
+
 ## Write path
 
 **Not implemented.** The frame is known — it replaces the whole block, so any
