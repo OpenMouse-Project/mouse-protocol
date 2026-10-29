@@ -653,6 +653,29 @@ test("identity finds the PAW3950 whichever slot the receiver puts it in", () => 
   assert.equal(cableOnly?.is8KReceiver, false, "no dongle, so no 8K receiver");
 });
 
+// An original G23 Pro (not V2), captured 2026-10-29 through the OpenMouse
+// hardware test, one report per link: captures/incott-g23-pro/. The first
+// hardware sighting of model code 0x02.
+const IDENTITY_G23_PRO_CABLE = frame(0x8f, 0x01, 0x02, 0x00, 0xf1, 0x00, 0x00, 0x00);
+const IDENTITY_G23_PRO_DONGLE = frame(0x8f, 0x01, 0x02, 0x02, 0xf0, 0xf1, 0x00, 0x02);
+
+test("identity decodes an original G23 Pro on both links, hardware-verified 2026-10-29", () => {
+  const cable = incottDecodeIdentity(IDENTITY_G23_PRO_CABLE);
+  assert.equal(cable?.model, "G23");
+  assert.equal(cable?.modelCode, 0x02);
+  assert.equal(cable?.sensorId, INCOTT_SENSOR_PAW3950);
+  assert.equal(cable?.displayName, "G23 Pro");
+  assert.equal(cable?.is8KReceiver, false);
+
+  // Behind the 8K receiver the 0xF1 moves to byte 6, as on the G23V2.
+  const dongle = incottDecodeIdentity(IDENTITY_G23_PRO_DONGLE);
+  assert.equal(dongle?.model, "G23");
+  assert.equal(dongle?.sensorId, INCOTT_SENSOR_PAW3950);
+  assert.equal(dongle?.displayName, "G23 Pro");
+  assert.equal(dongle?.is8KReceiver, true);
+  assert.equal(dongle?.raw, "01 02 02 f0 f1 00 02");
+});
+
 test("identity reports the PAW3395 only when no slot carries 0xf1", () => {
   const identity = incottDecodeIdentity(frame(0x8f, 0x01, 0x0e, 0x02, 0xf0, 0xf0, 0x00, 0xff));
   assert.equal(identity?.sensorId, INCOTT_SENSOR_PAW3395);

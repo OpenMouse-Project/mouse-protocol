@@ -938,10 +938,11 @@ Model codes, and the names the vendor's `text_en` bundle gives them:
 | `0x09` | `FM23` | Zero 39 (零39) |
 | `0x0E` | `G23V2` | G23V2 |
 
-`0x08` and `0x0E` are both G23V2 — the vendor tests them in one branch. Only
-the `0x0E` row is confirmed against hardware here; the rest are transcribed
-from a dispatch table that is authoritative for models this contributor does
-not own.
+`0x08` and `0x0E` are both G23V2 — the vendor tests them in one branch. The
+`0x0E` row and, since 2026-10-29, the `0x02` row are confirmed against
+hardware (see "A second model on hardware" below); the rest are transcribed
+from a dispatch table that is authoritative for models no contributor here
+owns.
 
 The sensor decides the "Pro" suffix: the vendor appends `Pro` when the sensor
 is `0x3950`, which is how `G23V2Pro` appears for a device whose HID product
@@ -1023,6 +1024,55 @@ Two independent confirmations:
 - [IncottHIDApp](https://github.com/romkazor/IncottHIDApp)'s compatibility
   table lists Ghero, G23, G24, G23V2, Zero 29 and Zero 39 against the same
   two ids, with three constants in `device.go` and no per-model table.
+
+### A second model on hardware: the original G23 Pro (2026-10-29)
+
+A different contributor ran the OpenMouse hardware test against a white,
+first-generation G23 Pro, once per link. Both reports are in
+`captures/incott-g23-pro/`; every report sent was a query, nothing was
+written.
+
+```
+cable only, no dongle:  09 8f 01 02 00 f1 00 00 00
+dongle only, no cable:  09 8f 01 02 02 f0 f1 00 02
+```
+
+What this confirms:
+
+- **Model code `0x02` is the G23.** Byte 3 read `0x02` on both links, and
+  the wired product string, `incott Esports G23 Pro mouse`, names the same
+  model independently. The decoder already maps it; this is its first
+  hardware sighting.
+- **The sensor slot moves the same way on a second model.** `0xF1` sits at
+  byte 5 with no receiver and at byte 6 behind the 8K receiver (byte 4
+  `0x02`), exactly as the G23V2 captures above show. The dongle-only frame
+  also matches the G23V2's cable-plus-dongle layout, so it is the receiver's
+  presence, not the cable, that shifts the slot. Both decode to "G23 Pro".
+
+Observed on this unit, not yet explained:
+
+- **Byte 8 is not identity data on the dongle.** It read `0x02` on 69 of the
+  70 full 9-byte replies in the wireless report, whatever the command
+  (`09 81 04 1f 00 00 00 00 02`, `09 84 01 02 00 00 00 00 02`, ...). The
+  G23V2's `ff` at the same position in `query-sweep-0x80-0x8f.hex` may be the
+  same kind of per-link trailer rather than part of the identity reply.
+- **The read after the identity reply is shifted by one byte.** In the
+  wireless report, every `0x8F` exchange (4 of 4) returned the correct frame
+  first, and the next `GET_FEATURE`, the transaction queue's discard read
+  before the following command, returned `09 8f 01 02 02 f0 f0 f1 02`: `0xF1`
+  pushed from byte 6 to byte 7. The driver never decodes that read, so the
+  name is unaffected, but anything that did would see no `0xF1` in bytes 5-6
+  and report a PAW3395. Another case for the "Read-only transaction
+  discipline" above.
+- **Stale bytes reach the payload, not only the header.** Over the dongle the
+  `0x85`/`0x02` (Fire Key) reply was `09 85 02 03 0a f1 00 00 02`; over the
+  cable it was `09 85 02 03 0a 00 00 00`. The `0xF1` at byte 5 is left over
+  from the identity reply sent earlier.
+- **Lift-off read hw `2`** on both links, which the app labels "Low". This
+  does not settle the millimetre mapping in "Unresolved unknowns".
+- **No colour.** Nothing in either report identifies the shell colour (this
+  unit is white). Telling whether bytes 7-8 ever do would need a second G23
+  Pro in another colour.
 
 ### Leads recovered from the same source, not yet implemented
 
