@@ -26,19 +26,21 @@ capture here includes personal data.
   performance/settings group, `0x10` the lighting group, and the status
   probe is the two-byte `90 0a`. Echoes come back on the same interface's
   input stream and repeat byte 1 verbatim.
-- **Settings write.** `10 50 14 00 01 <polling> <angle> 00 <five stage
-  pairs, offsets 8..17> <lod 18> 00 80 <led timeout 21> 00 <debounce 23>`
-  followed by the commit tail `10 50 18 04` — byte-for-byte the sequence the
-  vendor software replays (SignalRGB's WhirlwindFX plugin is public evidence
-  of that replay).
+- **Settings write (captured, not implemented).** `10 50 14 00 01 <polling>
+  <angle> 00 <five stage pairs, offsets 8..17> <lod 18> 00 80 <led timeout 21>
+  00 <debounce 23>` followed by the commit tail `10 50 18 04` — byte-for-byte
+  the sequence the vendor software replays (SignalRGB's WhirlwindFX plugin is
+  public evidence of that replay). The frames are echoed and accepted, but no
+  hand-sent write ever changed a stored table read back afterwards, so the
+  driver ships no setter and `src/roccat/` has no encoder for them.
 - **Status probe.** `90 0a` answers `90 0a 04 00 00 <b5> <b6> <b7> <w8> <b10>`:
   byte 5 was 0x1e across one session and 0x14 across another. Bytes 8–9
   (0x0aa0 = 2720, later 0x0b44 = 2884) go up as well as down, so the
   "estimated minutes remaining" reading stands falsified. Whether byte 5 is
   the battery percent has to be settled by watching it drain.
-- **Lighting write.** `10 10 0b 00 09 64 64 64 06 <r g b> <r g b>` for the two
-  inner zones, echoed `10 10 03 …`. No read-back is known, so the codec ships
-  it write-only.
+- **Lighting write (captured, not implemented).** `10 10 0b 00 09 64 64 64 06
+  <r g b> <r g b>` for the two inner zones, echoed `10 10 03 …`. No read-back
+  is known, so nothing about lighting ships.
 
 ## What does not settle
 

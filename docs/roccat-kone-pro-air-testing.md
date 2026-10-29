@@ -4,6 +4,12 @@ How the `src/roccat/` protocol and the `src/drivers/roccat/` driver were put
 together, what was proven on hardware, and what stays open. The captures live
 in `captures/roccat-kone-pro-air/`.
 
+**The driver is read-only.** It reads the stored DPI stage table and reports
+what it could verify; it ships no setter. The reason is in "Write path" below:
+a user-mode settings write to this unit is acknowledged without being applied.
+The protocol bytes for the write are transcribed here for whoever settles it,
+but no encoder for them exists in `src/roccat/`.
+
 ## Device
 
 One ROCCAT Kone Pro Air, firmware as shipped, wireless mode on its Stellar
@@ -30,11 +36,11 @@ Frame vocabulary, all in device coordinates (the vendor's 64-byte frames,
 report id excluded):
 
 ```text
-10 50 14 00 01 <polling> <angle> 00 <stage table 8..17> <lod> 00 80 <ledTimeout> 00 <debounce>   settings write
-10 50 14                                                                                            settings query (no args)
-10 50 18 04                                                                                         commit tail
-10 10 0b 00 09 64 64 64 06 <r g b> <r g b>                                                          lighting write (two zones)
-90 0a                                                                                               status probe
+10 50 14                                                                                            settings query (no args) — implemented
+90 0a                                                                                               status probe — implemented
+10 50 14 00 01 <polling> <angle> 00 <stage table 8..17> <lod> 00 80 <ledTimeout> 00 <debounce>   settings write — not implemented
+10 50 18 04                                                                                         commit tail — not implemented
+10 10 0b 00 09 64 64 64 06 <r g b> <r g b>                                                          lighting write (two zones) — not implemented
 ```
 
 Echoes repeat frame byte 1 (the class byte) verbatim, which is how the driver
@@ -59,11 +65,13 @@ mouse's stored tables and is superseded.
 
 ## What is verified on hardware
 
-- **The vendor-replayed settings write and its commit tail are accepted** and
-  echo the expected class frame (`10 50 03 …`). Acceptance is all the echo
-  shows: no settings write sent by hand — this plugin layout or the earlier
-  interleaved guess — ever changed a stored stage table in a reply read back
-  afterwards. See "Write path" below.
+- **The settings query reads the stored stage table** once the mouse is awake,
+  and an asleep mouse answers with an empty body that the decoder treats as no
+  data. **The settings write is not in that list.** The vendor-replayed frame
+  and its commit tail are accepted and echo the expected class frame
+  (`10 50 03 …`), but acceptance is all the echo shows: no settings write sent
+  by hand — this plugin layout or the earlier interleaved guess — ever changed
+  a stored stage table in a reply read back afterwards. See "Write path".
 - **The mouse's reply pages are the five onboard profiles**, decoded in the
   2026-10-16 capture: polling at `b11`, five u16 stage slots at `b14-23`,
   lift-off at `b24`, LED timeout at `b27`, profile index at `b10`, and a
@@ -78,42 +86,53 @@ mouse's stored tables and is superseded.
   battery reading: the success runs are from Swarm's log rather than from this
   capture, and the asleep body must not be read as 0 %.
 - **The lighting write is idempotent** on repeat (three identical writes
-  returned identical answers), and leaves the mouse's LEDs stable. There is
-  no known read-back, so the codec ships lighting write-only — and the
-  2026-10-16 reply pages also carry per-zone lighting frames (`90 01 0b …`),
-  which may or may not be a usable read-back and are not decoded.
+  returned identical answers), and leaves the mouse's LEDs stable. There is no
+  known read-back, so nothing about lighting ships — and the 2026-10-16 reply
+  pages also carry per-zone lighting frames (`90 01 0b …`), which may or may
+  not be a usable read-back and are not decoded.
 
 ## Deliberately not shown on the UI
 
-Polling rate read-back, lift-off, angle snapping and debounce have no
-established echo positions, so those UI values surface from the driver's own
-last write and the shared cards stay consistent with other
-write-only-cached drivers (this mirrors the Razer driver's approach).
+Polling rate, lift-off, angle snapping, debounce and battery are reported as
+unknown rather than filled in from a cache: no echo position for the first
+four is established, so there is no read to report, and the driver ships no
+setter, so there is no write to remember. The polling control is marked
+read-only instead of disabled-with-stale-value.
 
 ## Write path
 
-The settings frame replaces the whole block, so each setter runs the repo's
-read-patch-write-confirm cycle (as in the AJAZZ driver): read the mouse's
-current table, patch the one field, write and commit, then read the table back
-and confirm the mouse kept it. The pre-read preserves the stored DPI stages —
-a polling-only change must not silently re-scale the mouse — and a write is
-refused if the mouse will not report its table rather than substituting
-defaults. A read-back that disagrees is reported as a failure, not success.
+**Not implemented.** The frame is known — it replaces the whole block, so any
+setter would have to read the mouse's current table first, patch one field,
+write, commit and read the table back. That machinery is the right shape and
+the codec's decoder is the read half of it, but nothing below the line was
+ever observed to work, so no encoder for it ships.
+
+On the 2026-10-16 session, frames sent by hand on interface 2 with stage 1 set
+to 500 were accepted and echoed, but the reply pages afterwards still read the
+stored stage 1 at 400 in every profile, and a listener on all four interfaces
+during Swarm edits saw the vendor's read polls but no settings write on any of
+them. The vendor's device DLL is a hidapi fork with no settings-write code —
+its `hid_write` is used only by the calibration module. The honest reading is
+that a user-mode HID write to this unit is acknowledged but not applied, and
+the vendor applies settings over a channel a user-mode capture cannot see.
+
+Two consequences shaped the ship/no-ship call:
+
+- A whole-block write that is not applied still costs the user their settings.
+  With no read-back that establishes the other fields (the query returns the
+  stage table only), a polling-rate change would have to send defaults for
+  lift-off, LED timeout, debounce and angle snapping — replacing values it
+  never read.
+- Acceptance is not confirmation. A setter that reports success after an echo,
+  or worse after an unreadable read-back, tells the user their mouse changed
+  when the capture says it did not.
+
+The read side is unaffected: the query, the decoder and the DPI table are all
+backed by captures, and the driver reports only those.
+
 DPI is capped at 12,750 (255 × 50), the largest value the single slot byte can
 carry; the vendor software's higher numbers were never captured and do not fit
 this byte.
-
-**Hardware status of the write path.** On the 2026-10-16 session, frames sent
-by hand on interface 2 with stage 1 set to 500 were accepted and echoed, but
-the reply pages afterwards still read the stored stage 1 at 400 in every
-profile, and a listener on all four interfaces during Swarm edits saw the
-vendor's read polls but no settings write on any of them. The vendor's device
-DLL is a hidapi fork with no settings-write code — its `hid_write` is used
-only by the calibration module. The honest reading is that a user-mode HID
-write to this unit is acknowledged but not applied, and the vendor applies
-settings over a channel a user-mode capture cannot see. The write path is
-therefore best treated as **unverified on hardware**; the read-patch-write
-machinery is the right shape, but nobody has watched a write land.
 
 ## Open questions (any owner can settle these with a replug)
 
