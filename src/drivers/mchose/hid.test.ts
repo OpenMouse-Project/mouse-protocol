@@ -4,7 +4,9 @@ import { MchoseHidClient } from "./hid.ts";
 import {
   MCHOSE_COMMAND,
   MCHOSE_LONG_REPORT_ID,
+  MCHOSE_LONG_TOKENS,
   MCHOSE_SHORT_REPORT_ID,
+  MCHOSE_SHORT_TOKENS,
 } from "@openmouse/protocol/mchose";
 
 /**
@@ -41,6 +43,40 @@ function wireReply(reportId: number, command: number, payload: number[]): DataVi
  * id, and a config that a 0x57 write actually mutates, so a setter's read-back
  * check is exercised rather than stubbed.
  */
+/**
+ * An A7 Ultra on a `5253:1020` receiver, captured at 2000 Hz on stage 1. Its
+ * receiver answers 0x04 and 0x06 with an all-zero payload.
+ */
+const A7_ULTRA_CONFIG = [
+  0x00, 0x31, 0x31, 0x01, 0x20, 0x03, 0x80, 0x0c, 0x40, 0x06,
+  0x80, 0x0c, 0x00, 0x19, 0x10, 0xa4, 0x02, 0x81, 0x08, 0x03,
+  ...CONFIG.slice(20),
+];
+
+function a7UltraDevice(productId = 0x1020) {
+  const fake = fakeDevice({
+    vendorId: 0x5253,
+    productId,
+    productName: "MCHOSE A7 Ultra",
+  } as Partial<HIDDevice>);
+  fake.state.config = [...A7_ULTRA_CONFIG];
+  fake.state.emptyShortReplies = [MCHOSE_COMMAND.version, MCHOSE_COMMAND.battery];
+  return fake;
+}
+
+/** Counts how often each command is sent, keyed by the un-inverted command byte. */
+function countCommands(device: HIDDevice): Map<number, number> {
+  const counts = new Map<number, number>();
+  const send = device.sendFeatureReport;
+  device.sendFeatureReport = async (id: number, data: BufferSource) => {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
+    const command = (~bytes[0]!) & 0xff;
+    counts.set(command, (counts.get(command) ?? 0) + 1);
+    return send(id, data);
+  };
+  return counts;
+}
+
 /** Profile 2 as captured from the same mouse: 1000 Hz on stage 2. */
 const PROFILE_2 = [
   0x02, 0x32, 0x22, 0x00, 0x40, 0x06, 0x20, 0x03, 0x40, 0x06,
@@ -49,7 +85,17 @@ const PROFILE_2 = [
 ];
 
 function fakeDevice(overrides?: Partial<HIDDevice>) {
-  const state = { config: [...CONFIG], writes: [] as number[][], profile: 0, sleepEnabled: 0, mouseProductId: 0x4021 };
+  const state = {
+    config: [...CONFIG],
+    writes: [] as number[][],
+    profile: 0,
+    sleepEnabled: 0,
+    mouseProductId: 0x4021,
+    emptyShortReplies: [] as number[],
+    buttonNames: {} as Record<number, string>,
+    unansweredButtonNames: [] as number[],
+  };
+  let pendingButton = 0;
   let pendingShort = MCHOSE_COMMAND.identity;
   let pendingLong = MCHOSE_COMMAND.config;
 
@@ -119,10 +165,14 @@ function fakeDevice(overrides?: Partial<HIDDevice>) {
         pendingLong = MCHOSE_COMMAND.setButton;
         return;
       }
+      if (command === MCHOSE_COMMAND.readButtonName) pendingButton = tokens[1]!;
       pendingLong = command;
     },
     receiveFeatureReport: async (id: number) => {
       if (id === MCHOSE_SHORT_REPORT_ID) {
+        if (state.emptyShortReplies.includes(pendingShort)) {
+          return wireReply(id, pendingShort, new Array(MCHOSE_SHORT_TOKENS - 1).fill(0));
+        }
         const payload = pendingShort === MCHOSE_COMMAND.identity ? IDENTITY
           : pendingShort === MCHOSE_COMMAND.version ? VERSION
             : pendingShort === MCHOSE_COMMAND.battery
@@ -133,6 +183,13 @@ function fakeDevice(overrides?: Partial<HIDDevice>) {
       // A write leaves no readable answer; the driver must re-issue 0x67.
       if (pendingLong === MCHOSE_COMMAND.writeConfig || pendingLong === MCHOSE_COMMAND.setButton) {
         return wireReply(id, pendingLong, []);
+      }
+      if (pendingLong === MCHOSE_COMMAND.readButtonName) {
+        if (state.unansweredButtonNames.includes(pendingButton)) {
+          return wireReply(id, pendingLong, new Array(MCHOSE_LONG_TOKENS - 1).fill(0));
+        }
+        const name = state.buttonNames[pendingButton] ?? "";
+        return wireReply(id, pendingLong, [pendingButton, name.length, ...[...name].map((c) => c.charCodeAt(0))]);
       }
       return wireReply(id, MCHOSE_COMMAND.config, state.config);
     },
@@ -150,6 +207,92 @@ describe("MchoseHidClient", () => {
   it("rejects another vendor on the same usage page", () => {
     const { device } = fakeDevice({ vendorId: 0x046d } as Partial<HIDDevice>);
     assert.equal(MchoseHidClient.isSupported(device), false);
+  });
+
+  it("matches the A7 Ultra receiver under vendor id 0x5253", () => {
+    assert.equal(MchoseHidClient.isSupported(a7UltraDevice().device), true);
+  });
+
+  it("rejects other 0x5253 product ids on the same usage page", () => {
+    const { device } = fakeDevice({ vendorId: 0x5253, productId: 0x1234 } as Partial<HIDDevice>);
+    assert.equal(MchoseHidClient.isSupported(device), false);
+  });
+
+  it("reads an A7 Ultra whose receiver leaves battery and version empty", async () => {
+    const status = await new MchoseHidClient(a7UltraDevice().device).readStatus();
+    assert.equal(status.name, "MCHOSE A7 Ultra", "identified by the product string");
+    assert.equal(status.batteryPercent, null);
+    assert.deepEqual(status.firmware, []);
+    assert.equal(status.pollingRateHz, 2000, "wireless byte 0x31 -> rate index 3");
+    assert.equal(status.dpi, 3200, "stage 1");
+    assert.deepEqual(status.supportedPollingRates, [125, 500, 1000, 2000, 4000, 8000]);
+    assert.equal(status.ui?.dpiStageEditor?.maxDpi, 42000);
+  });
+
+  it("stops polling commands the 0x5253 receiver only ever answers empty", async () => {
+    const { device } = a7UltraDevice();
+    const counts = countCommands(device);
+    const client = new MchoseHidClient(device);
+    await client.readStatus();
+    assert.ok((counts.get(MCHOSE_COMMAND.battery) ?? 0) > 1, "the first read polls in full");
+
+    counts.clear();
+    const status = await client.readStatus();
+    assert.equal(counts.get(MCHOSE_COMMAND.battery), undefined);
+    assert.equal(counts.get(MCHOSE_COMMAND.version), undefined);
+    assert.ok(counts.get(MCHOSE_COMMAND.config), "config is still read");
+    assert.equal(status.pollingRateHz, 2000);
+  });
+
+  it("keeps polling empty replies in full on a 0x3837 receiver", async () => {
+    const { device, state } = fakeDevice();
+    state.emptyShortReplies = [MCHOSE_COMMAND.battery];
+    const counts = countCommands(device);
+    const client = new MchoseHidClient(device);
+    await client.readStatus();
+    const firstPoll = counts.get(MCHOSE_COMMAND.battery);
+
+    assert.ok((firstPoll ?? 0) > 1, "the first read polls in full");
+
+    counts.clear();
+    await client.readStatus();
+    assert.equal(counts.get(MCHOSE_COMMAND.battery), firstPoll);
+  });
+
+  it("one unanswered macro name on 0x5253 does not stop the others being read", async () => {
+    const { device, state } = a7UltraDevice();
+    state.config[24] = 0x14;
+    state.config[28] = 0x24;
+    state.unansweredButtonNames = [1];
+    state.buttonNames = { 2: "Spray" };
+    const status = await new MchoseHidClient(device).readStatus();
+    assert.ok(Object.values(status.buttonMappings ?? {}).includes("Macro: Spray"));
+  });
+
+  it("identifies an L7 Pro on the shared 5253:1020 receiver by its mouse id", async () => {
+    const { device, state } = fakeDevice({
+      vendorId: 0x5253,
+      productId: 0x1020,
+      productName: "MCHOSE 8K Receiver",
+    } as Partial<HIDDevice>);
+    state.mouseProductId = 0x00b0;
+    const status = await new MchoseHidClient(device).readStatus();
+    assert.equal(status.name, "MCHOSE L7 Pro");
+    assert.deepEqual(status.supportedPollingRates, [125, 500, 1000, 2000, 4000, 8000]);
+    assert.equal(status.ui?.dpiStageEditor?.maxDpi, 26000);
+    assert.equal(status.supportedLiftOffDistances?.length, 2);
+  });
+
+  it("sets the A7 Ultra's polling rate through the same config write", async () => {
+    const { device, state } = a7UltraDevice();
+    const client = new MchoseHidClient(device);
+    await client.readStatus();
+    await client.setPollingRate(1000);
+    assert.equal(state.config[2], 0x21);
+    assert.deepEqual(
+      state.config.filter((_, index) => index !== 2),
+      A7_ULTRA_CONFIG.filter((_, index) => index !== 2),
+    );
   });
 
   it("rejects an MCHOSE device with only the firmware-update collection", () => {
@@ -579,6 +722,20 @@ describe("MchoseHidClient", () => {
     assert.equal(state.config[1] >> 4, 1, "wired rate index moved");
     assert.equal(state.config[2], wirelessBefore, "wireless byte untouched");
     assert.equal((await client.readStatus()).pollingRateHz, 500);
+  });
+
+  it("treats the A7 Ultra's 0x5253:0x1011 cable link as wired", async () => {
+    const { device, state } = a7UltraDevice(0x1011);
+    state.config[1] = 0x10; // wired: rate index 1 (500 Hz), stage 0
+    state.config[2] = 0x33; // wireless: rate index 3, stage 3
+    const client = new MchoseHidClient(device);
+    const status = await client.readStatus();
+    assert.equal(status.connectionType, "Wired");
+    assert.equal(status.pollingRateHz, 500, "the wired byte, not the wireless one");
+
+    await client.setPollingRate(1000);
+    assert.equal(state.config[1] >> 4, 2, "wired rate index moved");
+    assert.equal(state.config[2], 0x33, "wireless byte untouched");
   });
 
   it("degrades to identity-only when the mouse never answers", async () => {

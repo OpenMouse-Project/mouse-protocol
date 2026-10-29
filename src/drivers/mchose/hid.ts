@@ -10,6 +10,7 @@ import {
   MCHOSE_SLEEP_OPTIONS,
   MCHOSE_DEBOUNCE_MAX_MS,
   MCHOSE_DOCK_PRODUCT_ID,
+  MCHOSE_REALTEK_PRODUCT_IDS,
   MCHOSE_ANGLE_TUNING_MAX,
   MCHOSE_SHORT_REPORT_ID,
   MCHOSE_SHORT_TOKENS,
@@ -87,6 +88,7 @@ export class MchoseHidClient {
 
   private queue: Promise<unknown> = Promise.resolve();
   private cachedProduct: ReturnType<typeof mchoseFindProduct> = null;
+  private readonly unansweredCommands = new Set<string>();
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -97,7 +99,10 @@ export class MchoseHidClient {
       (collection.usagePage === MCHOSE_CONFIG_USAGE_PAGE
         && collection.usage === MCHOSE_CONFIG_USAGE)
       || collection.children.some(search);
-    return device.vendorId === VENDOR_ID.mchose
+    const vendorMatches = device.vendorId === VENDOR_ID.mchose
+      || (device.vendorId === VENDOR_ID.mchoseRealtek
+        && MCHOSE_REALTEK_PRODUCT_IDS.includes(device.productId));
+    return vendorMatches
       // The MagDock is the same vendor but a different protocol entirely, and
       // has its own driver; it must never be claimed as a mouse.
       && device.productId !== MCHOSE_DOCK_PRODUCT_ID
@@ -157,9 +162,12 @@ export class MchoseHidClient {
     accept: (payload: Uint8Array) => boolean,
     extraTokens: readonly number[] = [],
   ): Promise<Uint8Array | null> {
+    const key = [reportId, command, ...extraTokens].join(":");
     const run = async (): Promise<Uint8Array | null> => {
+      if (this.unansweredCommands.has(key)) return null;
       const body = mchoseEncodeCommand([command, ...extraTokens], tokenCount);
       let previous: Uint8Array | null = null;
+      let onlyEmptyEchoes = true;
       for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
         await this.device.sendFeatureReport(reportId, body);
         await delay(POLL_DELAY_MS);
@@ -167,15 +175,27 @@ export class MchoseHidClient {
         try {
           raw = await this.device.receiveFeatureReport(reportId);
         } catch {
+          onlyEmptyEchoes = false;
           continue;
         }
         const reply = mchoseDecodeReply(new Uint8Array(raw.buffer));
+        const empty = reply?.command === command
+          && reply.payload.subarray(0, tokenCount - 1).every((byte) => byte === 0);
+        if (!empty) onlyEmptyEchoes = false;
         if (!reply || reply.command !== command) continue;
         if (!accept(reply.payload)) continue;
         if (previous && reply.payload.every((byte, index) => byte === previous![index])) {
           return reply.payload;
         }
         previous = Uint8Array.from(reply.payload);
+      }
+      // The A7 Ultra's 0x5253 receiver acknowledges some commands with an
+      // empty payload every time. Once it has done so for a whole poll, skip
+      // that command for the rest of the session instead of polling it again.
+      // The 0x3837 receivers answer empty while waiting on the RF link, so
+      // they keep the full poll every time.
+      if (onlyEmptyEchoes && this.device.vendorId === VENDOR_ID.mchoseRealtek) {
+        this.unansweredCommands.add(key);
       }
       return null;
     };

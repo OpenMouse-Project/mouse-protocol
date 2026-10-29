@@ -31,6 +31,8 @@ import {
   MCHOSE_A5_GEN1_PRODUCTS,
   MCHOSE_A5_GEN1_USAGE_PAGE,
   MCHOSE_A5_GEN1_VENDOR_ID,
+  MCHOSE_REALTEK_PRODUCT_IDS,
+  MCHOSE_REALTEK_VENDOR_ID,
 } from "@openmouse/protocol/mchose";
 import {
   HIDPP_BLUETOOTH_USAGE_PAGE,
@@ -194,6 +196,7 @@ export const VENDOR_ID = {
   gloriousClassicIWired: 0x320f, // Model O V2 / Model I 2 wired
   gloriousO3: 0x3794, // Model O3 Wireless / receiver (newer CORE-v2 generation)
   mchose: 0x3837,
+  mchoseRealtek: MCHOSE_REALTEK_VENDOR_ID,
   mchoseA5Gen1: MCHOSE_A5_GEN1_VENDOR_ID,
   ksnakeUsb: 0xa8a4, // K-snake X11 wired
   ksnakeDongle: 0xa8a5, // K-snake X11 2.4 GHz dongle
@@ -924,6 +927,12 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // feature reports, the A7 V3 with its own output-report protocol — so one
   // filter offers the whole mouse line and the drivers split it by product id.
   { vendorId: VENDOR_ID.mchose, usagePage: MCHOSE_CONFIG_USAGE_PAGE, usage: MCHOSE_CONFIG_USAGE },
+  ...MCHOSE_REALTEK_PRODUCT_IDS.map((productId) => ({
+    vendorId: VENDOR_ID.mchoseRealtek,
+    productId,
+    usagePage: MCHOSE_CONFIG_USAGE_PAGE,
+    usage: MCHOSE_CONFIG_USAGE,
+  })),
   // The MagDock is a separate device on its own usage page; it carries the RGB.
   { vendorId: VENDOR_ID.mchose, productId: MCHOSE_DOCK_PRODUCT_ID, usagePage: MCHOSE_DOCK_USAGE_PAGE, usage: MCHOSE_DOCK_USAGE },
   ...TEEVOLUTION_PRODUCT_IDS.map((productId) => ({ vendorId: VENDOR_ID.teevolution, productId })),
