@@ -1,6 +1,10 @@
 # Hitscan Utility 1.0.2 HID protocol
 
-Recovered from the installed Windows executable, its `HIDUsb.dll`, and `usersetting/Config.ini`. This reference covers every device entry in that installed version. It does not establish support for later utilities or firmware generations.
+Recovered from the installed Windows executable, its `HIDUsb.dll`, and `usersetting/Config.ini`. This reference covers every device entry in that installed version. It does not
+establish support for later utilities or firmware generations; the current
+web generation (`control.hitscan.com`, vendor `0x3770`, products `0x0136` and
+`0x0194`) is documented separately in
+[`hitscan-web-protocol.md`](hitscan-web-protocol.md).
 
 ## Device selection
 
