@@ -88,7 +88,7 @@ export class MchoseHidClient {
 
   private queue: Promise<unknown> = Promise.resolve();
   private cachedProduct: ReturnType<typeof mchoseFindProduct> = null;
-  private readonly unansweredCommands = new Set<number>();
+  private readonly unansweredCommands = new Set<string>();
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -162,7 +162,7 @@ export class MchoseHidClient {
     accept: (payload: Uint8Array) => boolean,
     extraTokens: readonly number[] = [],
   ): Promise<Uint8Array | null> {
-    const key = (reportId << 8) | command;
+    const key = [reportId, command, ...extraTokens].join(":");
     const run = async (): Promise<Uint8Array | null> => {
       if (this.unansweredCommands.has(key)) return null;
       const body = mchoseEncodeCommand([command, ...extraTokens], tokenCount);

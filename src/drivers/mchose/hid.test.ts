@@ -4,6 +4,7 @@ import { MchoseHidClient } from "./hid.ts";
 import {
   MCHOSE_COMMAND,
   MCHOSE_LONG_REPORT_ID,
+  MCHOSE_LONG_TOKENS,
   MCHOSE_SHORT_REPORT_ID,
   MCHOSE_SHORT_TOKENS,
 } from "@openmouse/protocol/mchose";
@@ -91,7 +92,10 @@ function fakeDevice(overrides?: Partial<HIDDevice>) {
     sleepEnabled: 0,
     mouseProductId: 0x4021,
     emptyShortReplies: [] as number[],
+    buttonNames: {} as Record<number, string>,
+    unansweredButtonNames: [] as number[],
   };
+  let pendingButton = 0;
   let pendingShort = MCHOSE_COMMAND.identity;
   let pendingLong = MCHOSE_COMMAND.config;
 
@@ -161,6 +165,7 @@ function fakeDevice(overrides?: Partial<HIDDevice>) {
         pendingLong = MCHOSE_COMMAND.setButton;
         return;
       }
+      if (command === MCHOSE_COMMAND.readButtonName) pendingButton = tokens[1]!;
       pendingLong = command;
     },
     receiveFeatureReport: async (id: number) => {
@@ -178,6 +183,13 @@ function fakeDevice(overrides?: Partial<HIDDevice>) {
       // A write leaves no readable answer; the driver must re-issue 0x67.
       if (pendingLong === MCHOSE_COMMAND.writeConfig || pendingLong === MCHOSE_COMMAND.setButton) {
         return wireReply(id, pendingLong, []);
+      }
+      if (pendingLong === MCHOSE_COMMAND.readButtonName) {
+        if (state.unansweredButtonNames.includes(pendingButton)) {
+          return wireReply(id, pendingLong, new Array(MCHOSE_LONG_TOKENS - 1).fill(0));
+        }
+        const name = state.buttonNames[pendingButton] ?? "";
+        return wireReply(id, pendingLong, [pendingButton, name.length, ...[...name].map((c) => c.charCodeAt(0))]);
       }
       return wireReply(id, MCHOSE_COMMAND.config, state.config);
     },
@@ -240,9 +252,21 @@ describe("MchoseHidClient", () => {
     await client.readStatus();
     const firstPoll = counts.get(MCHOSE_COMMAND.battery);
 
+    assert.ok((firstPoll ?? 0) > 1, "the first read polls in full");
+
     counts.clear();
     await client.readStatus();
     assert.equal(counts.get(MCHOSE_COMMAND.battery), firstPoll);
+  });
+
+  it("one unanswered macro name on 0x5253 does not stop the others being read", async () => {
+    const { device, state } = a7UltraDevice();
+    state.config[24] = 0x14;
+    state.config[28] = 0x24;
+    state.unansweredButtonNames = [1];
+    state.buttonNames = { 2: "Spray" };
+    const status = await new MchoseHidClient(device).readStatus();
+    assert.ok(Object.values(status.buttonMappings ?? {}).includes("Macro: Spray"));
   });
 
   it("identifies an L7 Pro on the shared 5253:1020 receiver by its mouse id", async () => {
