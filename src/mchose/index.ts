@@ -21,13 +21,13 @@
 export const MCHOSE_VENDOR_ID = 0x3837;
 
 /**
- * Some A7 Ultra receivers enumerate as manufacturer "RealTek" under this vendor
- * id, with the family's link product ids and the same configuration channel.
- * Not an MCHOSE-owned id, so it is only ever matched together with these PIDs.
+ * MCHOSE's older id, manufacturer string "RealTek", still used by L7 and some
+ * A7 units with the same configuration channel. Other MCHOSE product lines sit
+ * under it too, so it is only ever matched together with these PIDs: the 8K
+ * receiver and the A7 Ultra's cable link.
  */
 export const MCHOSE_REALTEK_VENDOR_ID = 0x5253;
-export const MCHOSE_REALTEK_WIRED_PRODUCT_ID = 0x1011;
-export const MCHOSE_REALTEK_PRODUCT_IDS: readonly number[] = [0x1020, MCHOSE_REALTEK_WIRED_PRODUCT_ID];
+export const MCHOSE_REALTEK_PRODUCT_IDS: readonly number[] = [0x1020, 0x1011];
 
 /** Vendor configuration collection. */
 export const MCHOSE_CONFIG_USAGE_PAGE = 0xff01;
@@ -495,8 +495,8 @@ export const MCHOSE_LINK_PRODUCT_IDS = {
 
 export interface MchoseProduct {
   name: string;
-  /** The mouse's own product id, model-specific; absent when the mouse never reports it. */
-  productId?: number;
+  /** The mouse's own product id, model-specific. */
+  productId: number;
   dpiMax: number;
   /** Lift-off steps in millimetres, in firmware index order. */
   liftOffDistances: readonly number[];
@@ -510,8 +510,11 @@ export const MCHOSE_PRODUCTS: readonly MchoseProduct[] = [
   { name: "A7 V2 Pro+", productId: 0x4023, dpiMax: 26000, liftOffDistances: [1, 2], maxPollingRate: 8000 },
   { name: "A7 V2 Ultra", productId: 0x4019, dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
   { name: "A7 V2 Ultra+", productId: 0x4021, dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
-  // The 0x5253 receiver leaves the 0x06 reply empty, so this is found by name.
-  { name: "A7 Ultra", dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
+  // Under VID 0x5253. Its receiver leaves the 0x06 reply empty, so it is found
+  // by name; 0x1011 is its cable link, which enumerates as the mouse's own id.
+  { name: "A7 Ultra", productId: 0x1011, dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
+  // Under VID 0x5253, per github.com/alexfrih/mchose-linux (verified on hardware).
+  { name: "L7 Pro", productId: 0x00b0, dpiMax: 26000, liftOffDistances: [1, 2], maxPollingRate: 8000 },
 ];
 
 /** Rate lists the firmware exposes, keyed by the model's maximum rate. */

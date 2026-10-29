@@ -149,6 +149,8 @@ test("the mouse id identifies the model, since host PIDs are shared", () => {
   assert.equal(mchoseFindProduct(0x4021)?.name, "A7 V2 Ultra+");
   assert.equal(mchoseFindProduct(0x4019)?.name, "A7 V2 Ultra");
   assert.equal(mchoseFindProduct(0x4018)?.dpiMax, 26000);
+  assert.equal(mchoseFindProduct(0x1011)?.name, "A7 Ultra");
+  assert.equal(mchoseFindProduct(0x00b0)?.name, "L7 Pro");
 });
 
 test("the product string disambiguates when the mouse id is unknown", () => {

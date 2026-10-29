@@ -63,6 +63,19 @@ function a7UltraDevice(productId = 0x1020) {
   return fake;
 }
 
+/** Counts how often each command is sent, keyed by the un-inverted command byte. */
+function countCommands(device: HIDDevice): Map<number, number> {
+  const counts = new Map<number, number>();
+  const send = device.sendFeatureReport;
+  device.sendFeatureReport = async (id: number, data: BufferSource) => {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
+    const command = (~bytes[0]!) & 0xff;
+    counts.set(command, (counts.get(command) ?? 0) + 1);
+    return send(id, data);
+  };
+  return counts;
+}
+
 /** Profile 2 as captured from the same mouse: 1000 Hz on stage 2. */
 const PROFILE_2 = [
   0x02, 0x32, 0x22, 0x00, 0x40, 0x06, 0x20, 0x03, 0x40, 0x06,
@@ -202,6 +215,48 @@ describe("MchoseHidClient", () => {
     assert.equal(status.dpi, 3200, "stage 1");
     assert.deepEqual(status.supportedPollingRates, [125, 500, 1000, 2000, 4000, 8000]);
     assert.equal(status.ui?.dpiStageEditor?.maxDpi, 42000);
+  });
+
+  it("stops polling commands the 0x5253 receiver only ever answers empty", async () => {
+    const { device } = a7UltraDevice();
+    const counts = countCommands(device);
+    const client = new MchoseHidClient(device);
+    await client.readStatus();
+    assert.ok((counts.get(MCHOSE_COMMAND.battery) ?? 0) > 1, "the first read polls in full");
+
+    counts.clear();
+    const status = await client.readStatus();
+    assert.equal(counts.get(MCHOSE_COMMAND.battery), undefined);
+    assert.equal(counts.get(MCHOSE_COMMAND.version), undefined);
+    assert.ok(counts.get(MCHOSE_COMMAND.config), "config is still read");
+    assert.equal(status.pollingRateHz, 2000);
+  });
+
+  it("keeps polling empty replies in full on a 0x3837 receiver", async () => {
+    const { device, state } = fakeDevice();
+    state.emptyShortReplies = [MCHOSE_COMMAND.battery];
+    const counts = countCommands(device);
+    const client = new MchoseHidClient(device);
+    await client.readStatus();
+    const firstPoll = counts.get(MCHOSE_COMMAND.battery);
+
+    counts.clear();
+    await client.readStatus();
+    assert.equal(counts.get(MCHOSE_COMMAND.battery), firstPoll);
+  });
+
+  it("identifies an L7 Pro on the shared 5253:1020 receiver by its mouse id", async () => {
+    const { device, state } = fakeDevice({
+      vendorId: 0x5253,
+      productId: 0x1020,
+      productName: "MCHOSE 8K Receiver",
+    } as Partial<HIDDevice>);
+    state.mouseProductId = 0x00b0;
+    const status = await new MchoseHidClient(device).readStatus();
+    assert.equal(status.name, "MCHOSE L7 Pro");
+    assert.deepEqual(status.supportedPollingRates, [125, 500, 1000, 2000, 4000, 8000]);
+    assert.equal(status.ui?.dpiStageEditor?.maxDpi, 26000);
+    assert.equal(status.supportedLiftOffDistances?.length, 2);
   });
 
   it("sets the A7 Ultra's polling rate through the same config write", async () => {

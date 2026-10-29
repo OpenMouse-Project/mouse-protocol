@@ -11,7 +11,6 @@ import {
   MCHOSE_DEBOUNCE_MAX_MS,
   MCHOSE_DOCK_PRODUCT_ID,
   MCHOSE_REALTEK_PRODUCT_IDS,
-  MCHOSE_REALTEK_WIRED_PRODUCT_ID,
   MCHOSE_ANGLE_TUNING_MAX,
   MCHOSE_SHORT_REPORT_ID,
   MCHOSE_SHORT_TOKENS,
@@ -89,6 +88,7 @@ export class MchoseHidClient {
 
   private queue: Promise<unknown> = Promise.resolve();
   private cachedProduct: ReturnType<typeof mchoseFindProduct> = null;
+  private readonly unansweredCommands = new Set<number>();
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -143,9 +143,6 @@ export class MchoseHidClient {
    * is live decides which half of the config byte pair applies.
    */
   private isWired(): boolean {
-    if (this.device.vendorId === VENDOR_ID.mchoseRealtek) {
-      return this.device.productId === MCHOSE_REALTEK_WIRED_PRODUCT_ID;
-    }
     return MCHOSE_PRODUCTS.some((entry) => entry.productId === this.device.productId);
   }
 
@@ -165,9 +162,12 @@ export class MchoseHidClient {
     accept: (payload: Uint8Array) => boolean,
     extraTokens: readonly number[] = [],
   ): Promise<Uint8Array | null> {
+    const key = (reportId << 8) | command;
     const run = async (): Promise<Uint8Array | null> => {
+      if (this.unansweredCommands.has(key)) return null;
       const body = mchoseEncodeCommand([command, ...extraTokens], tokenCount);
       let previous: Uint8Array | null = null;
+      let onlyEmptyEchoes = true;
       for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
         await this.device.sendFeatureReport(reportId, body);
         await delay(POLL_DELAY_MS);
@@ -175,15 +175,27 @@ export class MchoseHidClient {
         try {
           raw = await this.device.receiveFeatureReport(reportId);
         } catch {
+          onlyEmptyEchoes = false;
           continue;
         }
         const reply = mchoseDecodeReply(new Uint8Array(raw.buffer));
+        const empty = reply?.command === command
+          && reply.payload.subarray(0, tokenCount - 1).every((byte) => byte === 0);
+        if (!empty) onlyEmptyEchoes = false;
         if (!reply || reply.command !== command) continue;
         if (!accept(reply.payload)) continue;
         if (previous && reply.payload.every((byte, index) => byte === previous![index])) {
           return reply.payload;
         }
         previous = Uint8Array.from(reply.payload);
+      }
+      // The A7 Ultra's 0x5253 receiver acknowledges some commands with an
+      // empty payload every time. Once it has done so for a whole poll, skip
+      // that command for the rest of the session instead of polling it again.
+      // The 0x3837 receivers answer empty while waiting on the RF link, so
+      // they keep the full poll every time.
+      if (onlyEmptyEchoes && this.device.vendorId === VENDOR_ID.mchoseRealtek) {
+        this.unansweredCommands.add(key);
       }
       return null;
     };

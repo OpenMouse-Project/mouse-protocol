@@ -227,12 +227,18 @@ MCHOSE's own firmware-version table cross-checks this: the Ultra reports
 
 ### Receivers under VID `0x5253`
 
-Some **A7 Ultra** units enumerate as `5253:1020`, manufacturer string
-"RealTek", product string "MCHOSE A7 Ultra". The interface is identical to
-the A7 V2's — same five collections, same report ids and sizes, byte-identical
-`0xff01` report descriptor — and it speaks the same inverted feature-report
-protocol. `0x1011` is the same mouse on its cable, per a user report; it has not
-been exercised here.
+`0x5253` (manufacturer string "RealTek") is MCHOSE's older vendor id. Some
+**A7 Ultra** units enumerate under it as `5253:1020`, product string "MCHOSE A7
+Ultra". The interface is identical to the A7 V2's — same five collections, same
+report ids and sizes, byte-identical `0xff01` report descriptor — and it speaks
+the same inverted feature-report protocol. `0x1011` is the same mouse on its
+cable, per a user report, and is taken to be its mouse id because a cable link
+enumerates as the mouse itself; it has not been exercised here.
+
+The **L7 Pro** uses the same `5253:1020` receiver and reports mouse id `0x00b0`
+in `0x06`, with 26000 DPI, lift-off 1 mm / 2 mm and 8K on the receiver
+([alexfrih/mchose-linux](https://github.com/alexfrih/mchose-linux/blob/main/PROTOCOL.md),
+verified on that hardware and cross-checked against M HUB's model table).
 
 Observed on an 8K receiver (macOS, `node-hid`):
 
@@ -240,7 +246,11 @@ Observed on an 8K receiver (macOS, `node-hid`):
   connected.
 - `0x11 0x04` and `0x11 0x06` echo the command but every payload byte is zero,
   across 60 polls with the mouse awake. There is therefore no battery, firmware
-  string or mouse PID, and the model is identified by the product string.
+  string or mouse PID, and the model is identified by the product string. On
+  this vendor id the driver stops sending a command once a full poll has come
+  back as nothing but empty echoes, so later status reads skip the 3.6 s these
+  two would otherwise cost. `0x3837` receivers keep the full poll, because
+  their RF replies are empty until the mouse answers.
 - `0x12 0x67` returns a plausible config:
   `00 31 31 01 20 03 80 0c 40 06 80 0c 00 19 10 a4 02 81 08 03` — 2000 Hz on
   both links, stage 1 of 800/3200/1600/3200/6400/42000, two stages, 8 ms
@@ -249,8 +259,8 @@ Observed on an 8K receiver (macOS, `node-hid`):
   no other byte of the 63 changed, and writing `0x31` back restored a
   byte-identical config.
 
-Because `0x5253` is not an MCHOSE-owned id, the picker filter and the driver
-match it only together with these two PIDs.
+Because other MCHOSE product lines share `0x5253`, the picker filter and the
+driver match it only together with these two PIDs.
 
 ## Dead ends, so the next person can skip them
 
