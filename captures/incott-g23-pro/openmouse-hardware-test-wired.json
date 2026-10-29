@@ -1,0 +1,3056 @@
+{
+  "app": {
+    "build": "BETA · v2.0.59d",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+  },
+  "driver": {
+    "brand": "Incott",
+    "family": "incott",
+    "readOk": true,
+    "description": "incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff05:1 feat[none] | usage 0xff05:1 feat[0x9])"
+  },
+  "webhid": {
+    "productName": "incott Esports G23 Pro mouse",
+    "vendorId": "0x093A",
+    "productId": "0x622C",
+    "opened": true,
+    "collections": [
+      {
+        "usagePage": "0xFF05",
+        "usage": "0x0001",
+        "inputReports": [
+          "0x08"
+        ],
+        "outputReports": [
+          "0x08"
+        ],
+        "featureReports": [],
+        "children": []
+      },
+      {
+        "usagePage": "0xFF05",
+        "usage": "0x0001",
+        "inputReports": [
+          "0x09"
+        ],
+        "outputReports": [
+          "0x09"
+        ],
+        "featureReports": [
+          "0x09"
+        ],
+        "children": []
+      }
+    ]
+  },
+  "status": {
+    "brand": "Incott",
+    "name": "G23 Pro",
+    "ui": {
+      "family": "incott",
+      "showAdvancedSection": true,
+      "hideSignalCard": true,
+      "defaultDisplayName": "G23 Pro",
+      "settingsReady": true,
+      "valuesVerified": true,
+      "forceShowBattery": true,
+      "hideUnsupportedPollingRates": true,
+      "pollingNote": "Up to 1,000 Hz over the cable; 8,000 Hz needs the wireless dongle.",
+      "dpiStageEditor": {
+        "maxStages": 6,
+        "countEditable": true,
+        "minDpi": 50,
+        "maxDpi": 45000,
+        "stepDpi": 50
+      }
+    },
+    "dpi": 1600,
+    "dpiY": 1600,
+    "supportsSeparateDpiAxes": true,
+    "incottFireKeyTimes": 3,
+    "incottFireKeyIntervalMs": 10,
+    "dpiStages": [
+      400,
+      800,
+      1600,
+      2400,
+      3200,
+      6400
+    ],
+    "activeDpiStage": 2,
+    "pollingRateHz": 1000,
+    "supportedPollingRates": [
+      125,
+      250,
+      500,
+      1000
+    ],
+    "activeProfile": null,
+    "connectionType": "Wired",
+    "batteryPercent": 95,
+    "batteryState": "Discharging",
+    "liftOffDistance": "Low",
+    "supportedLiftOffDistances": [
+      "Low",
+      "Medium",
+      "High"
+    ],
+    "buttonMappings": {
+      "Left": "Left click",
+      "Right": "Right click",
+      "Middle": "Middle click",
+      "Forward": "Forward",
+      "Back": "Back",
+      "DPI": "DPI cycle"
+    },
+    "buttonOptions": [
+      "Left click",
+      "Right click",
+      "Middle click",
+      "Forward",
+      "Back",
+      "DPI cycle",
+      "DPI +",
+      "DPI -",
+      "Rapid fire",
+      "Profile switch",
+      "Media player",
+      "Play/Pause",
+      "Stop",
+      "Previous track",
+      "Next track",
+      "Volume up",
+      "Volume down",
+      "Mute",
+      "Email",
+      "Calculator",
+      "File explorer",
+      "Browser home",
+      "Browser refresh",
+      "Browser forward",
+      "Browser back",
+      "Browser search",
+      "Disabled",
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "M",
+      "N",
+      "O",
+      "P",
+      "Q",
+      "R",
+      "S",
+      "T",
+      "U",
+      "V",
+      "W",
+      "X",
+      "Y",
+      "Z",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "0",
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5",
+      "F6",
+      "F7",
+      "F8",
+      "F9",
+      "F10",
+      "F11",
+      "F12",
+      "Enter",
+      "Escape",
+      "Backspace",
+      "Tab",
+      "Space",
+      "Insert",
+      "Delete",
+      "Home",
+      "End",
+      "Page Up",
+      "Page Down",
+      "Up",
+      "Down",
+      "Left",
+      "Right",
+      "Caps Lock",
+      "Num Lock",
+      "Scroll Lock",
+      "Print Screen",
+      "Pause",
+      "Context Menu",
+      "Left Ctrl",
+      "Left Shift",
+      "Left Alt",
+      "Left Windows",
+      "Right Ctrl",
+      "Right Shift",
+      "Right Alt",
+      "Right Windows",
+      "Ctrl + A",
+      "Ctrl + C",
+      "Ctrl + V",
+      "Ctrl + X",
+      "Ctrl + Z",
+      "Ctrl + Y",
+      "Ctrl + S",
+      "Ctrl + O",
+      "Ctrl + N",
+      "Ctrl + T",
+      "Ctrl + W",
+      "Ctrl + F",
+      "Ctrl + Shift + Escape",
+      "Alt + Tab",
+      "Alt + F4",
+      "Alt + Left",
+      "Alt + Right",
+      "Win + D",
+      "Win + E",
+      "Win + L",
+      "Win + R",
+      "Win + S",
+      "Win + Tab"
+    ],
+    "motionSync": true,
+    "rippleControl": true,
+    "angleSnapping": true,
+    "debounceMs": 8,
+    "sleepTimeout": 30,
+    "powerMode": "Corded",
+    "powerModes": [
+      "HP",
+      "Corded",
+      "LP"
+    ],
+    "firmware": [
+      "Identity 01 02 00 f1 00 00 00"
+    ],
+    "pollingRateWiredHz": 1000
+  },
+  "diagnostics": {
+    "lastCommand": "Read device status",
+    "lastError": null
+  },
+  "logStart": "2026-10-29T16:58:37.417Z",
+  "log": [
+    {
+      "at": 0,
+      "kind": "event",
+      "label": "Bridge connecting",
+      "detail": "{\"url\":\"ws://127.0.0.1:17846/v1/hid\"}",
+      "failed": false
+    },
+    {
+      "at": 0.077,
+      "kind": "event",
+      "label": "Bridge socket error",
+      "detail": "{\"phase\":\"connecting\"}",
+      "failed": true
+    },
+    {
+      "at": 0.271,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "No authorized devices",
+      "failed": false
+    },
+    {
+      "at": 0.369,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "No authorized devices",
+      "failed": false
+    },
+    {
+      "at": 0.437,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "No authorized devices",
+      "failed": false
+    },
+    {
+      "at": 0.532,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "No authorized devices",
+      "failed": false
+    },
+    {
+      "at": 0.638,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "No authorized devices",
+      "failed": false
+    },
+    {
+      "at": 0.791,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "No authorized devices",
+      "failed": false
+    },
+    {
+      "at": 1.02,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "No authorized devices",
+      "failed": false
+    },
+    {
+      "at": 1.378,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "No authorized devices",
+      "failed": false
+    },
+    {
+      "at": 1.603,
+      "kind": "event",
+      "label": "WebHID permission request",
+      "detail": "[{\"vendorId\":12375,\"productId\":4097,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4098,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4099,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4100,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4101,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4102,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4103,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4104,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4105,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4112,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4113,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4114,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4115,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":5,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":8193,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4116,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":8194,\"usagePage\":65285,\"usage\":1},{\"vendorId\":12375,\"productId\":4117,\"usagePage\":65285,\"usage\":1},{\"vendorId\":2821,\"productId\":6213,\"usagePage\":65281,\"usage\":1},{\"vendorId\":2821,\"productId\":6365,\"usagePage\":65281,\"usage\":1},{\"vendorId\":2821,\"productId\":6296,\"usagePage\":65281,\"usage\":1},{\"vendorId\":2821,\"productId\":6416,\"usagePage\":65281,\"usage\":1},{\"vendorId\":2821,\"productId\":6792,\"usagePage\":65281,\"usage\":1},{\"vendorId\":2821,\"productId\":6802,\"usagePage\":65281,\"usage\":1},{\"vendorId\":2821,\"productId\":6804,\"usagePage\":65281,\"usage\":1},{\"vendorId\":2821,\"productId\":6862,\"usagePage\":65282,\"usage\":1},{\"vendorId\":9741,\"productId\":4375,\"usagePage\":65282,\"usage\":2},{\"vendorId\":9741,\"productId\":4372,\"usagePage\":65282,\"usage\":2},{\"vendorId\":1241,\"productId\":64634,\"usagePage\":65440,\"usage\":1},{\"vendorId\":1241,\"productId\":64609,\"usagePage\":65440,\"usage\":1},{\"vendorId\":9610,\"productId\":46,\"usagePage\":65280,\"usage\":1},{\"vendorId\":9610,\"productId\":47,\"usagePage\":65280,\"usage\":1},{\"vendorId\":1241,\"productId\":41119,\"usagePage\":65280,\"usage\":65280},{\"vendorId\":3034,\"productId\":65504,\"usagePage\":65473},{\"vendorId\":3034,\"productId\":65521,\"usagePage\":65473},{\"vendorId\":1155,\"productId\":42082,\"usagePage\":65280},{\"vendorId\":1155,\"productId\":41935,\"usagePage\":65280},{\"vendorId\":6940,\"productId\":7004,\"usagePage\":65474,\"usage\":4},{\"vendorId\":6940,\"productId\":6988,\"usagePage\":65346},{\"vendorId\":6940,\"productId\":7014,\"usagePage\":65346},{\"vendorId\":6940,\"productId\":7132,\"usagePage\":65346},{\"vendorId\":13853,\"productId\":256,\"usagePage\":65280,\"usage\":1},{\"vendorId\":13853,\"productId\":768,\"usagePage\":65280},{\"vendorId\":13853,\"productId\":769,\"usagePage\":65280},{\"vendorId\":14096},{\"vendorId\":14096,\"productId\":13316,\"usagePage\":65535,\"usage\":1},{\"vendorId\":14096,\"productId\":13321,\"usagePage\":65535,\"usage\":1},{\"vendorId\":14096,\"productId\":13328,\"usagePage\":65535,\"usage\":1},{\"vendorId\":14096,\"productId\":21506,\"usagePage\":65535,\"usage\":1},{\"vendorId\":14096,\"productId\":21507,\"usagePage\":65535,\"usage\":1},{\"vendorId\":13652},{\"vendorId\":13159},{\"vendorId\":13991},{\"vendorId\":14142},{\"vendorId\":14256,\"productId\":9,\"usagePage\":65535},{\"vendorId\":14256,\"productId\":15,\"usagePage\":65535},{\"vendorId\":14256,\"productId\":16,\"usagePage\":65535},{\"vendorId\":14256,\"productId\":7,\"usagePage\":65535},{\"vendorId\":14256,\"productId\":13,\"usagePage\":65535},{\"vendorId\":14256,\"productId\":14,\"usagePage\":65535},{\"vendorId\":14126,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"usagePage\":65290,\"usage\":1},{\"vendorId\":6421,\"productId\":9000,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9001,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9002,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9003,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9004,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9005,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9006,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9007,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9008,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9009,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9010,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9011,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9012,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9013,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9014,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9015,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9016,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6421,\"productId\":9017,\"usagePage\":65280,\"usage\":1},{\"vendorId\":8227,\"productId\":61465,\"usagePage\":65535},{\"vendorId\":8227,\"productId\":61459,\"usagePage\":65535},{\"vendorId\":8227,\"productId\":61461,\"usagePage\":65535},{\"vendorId\":14391,\"usagePage\":65281,\"usage\":1},{\"vendorId\":14391,\"productId\":4114,\"usagePage\":65280,\"usage\":1},{\"vendorId\":13652,\"productId\":62752},{\"vendorId\":13652,\"productId\":62755},{\"vendorId\":13652,\"productId\":62907},{\"vendorId\":13652,\"productId\":62754},{\"vendorId\":13652,\"productId\":62752,\"usagePage\":65288,\"usage\":2},{\"vendorId\":13652,\"productId\":62755,\"usagePage\":65288,\"usage\":2},{\"vendorId\":13652,\"productId\":62907,\"usagePage\":65288,\"usage\":2},{\"vendorId\":13652,\"productId\":62754,\"usagePage\":65288,\"usage\":2},{\"vendorId\":5426,\"productId\":164,\"usagePage\":1,\"usage\":2},{\"vendorId\":5426,\"productId\":165,\"usagePage\":1,\"usage\":2},{\"vendorId\":5426,\"productId\":166,\"usagePage\":1,\"usage\":2},{\"vendorId\":5426,\"productId\":192,\"usagePage\":1,\"usage\":2},{\"vendorId\":5426,\"productId\":193,\"usagePage\":1,\"usage\":2},{\"vendorId\":5426,\"productId\":120,\"usagePage\":1},{\"vendorId\":5426,\"productId\":120,\"usagePage\":12},{\"vendorId\":5426,\"productId\":122,\"usagePage\":1},{\"vendorId\":5426,\"productId\":122,\"usagePage\":12},{\"vendorId\":5426,\"productId\":124,\"usagePage\":1},{\"vendorId\":5426,\"productId\":124,\"usagePage\":12},{\"vendorId\":5426,\"productId\":125,\"usagePage\":1},{\"vendorId\":5426,\"productId\":125,\"usagePage\":12},{\"vendorId\":5426,\"productId\":158,\"usagePage\":1},{\"vendorId\":5426,\"productId\":158,\"usagePage\":12},{\"vendorId\":5426,\"productId\":159,\"usagePage\":1},{\"vendorId\":5426,\"productId\":159,\"usagePage\":12},{\"vendorId\":5426,\"productId\":184,\"usagePage\":1},{\"vendorId\":5426,\"productId\":184,\"usagePage\":12},{\"vendorId\":5426,\"productId\":194,\"usagePage\":1},{\"vendorId\":5426,\"productId\":194,\"usagePage\":12},{\"vendorId\":5426,\"productId\":195,\"usagePage\":1},{\"vendorId\":5426,\"productId\":195,\"usagePage\":12},{\"vendorId\":5426,\"productId\":182,\"usagePage\":1},{\"vendorId\":5426,\"productId\":182,\"usagePage\":12},{\"vendorId\":5426,\"productId\":183,\"usagePage\":1},{\"vendorId\":5426,\"productId\":183,\"usagePage\":12},{\"vendorId\":5426,\"productId\":196,\"usagePage\":1},{\"vendorId\":5426,\"productId\":196,\"usagePage\":12},{\"vendorId\":5426,\"productId\":197,\"usagePage\":1},{\"vendorId\":5426,\"productId\":197,\"usagePage\":12},{\"vendorId\":5426,\"productId\":170,\"usagePage\":1},{\"vendorId\":5426,\"productId\":170,\"usagePage\":12},{\"vendorId\":5426,\"productId\":171,\"usagePage\":1},{\"vendorId\":5426,\"productId\":171,\"usagePage\":12},{\"vendorId\":5426,\"productId\":204,\"usagePage\":1},{\"vendorId\":5426,\"productId\":204,\"usagePage\":12},{\"vendorId\":5426,\"productId\":205,\"usagePage\":1},{\"vendorId\":5426,\"productId\":205,\"usagePage\":12},{\"vendorId\":5426,\"productId\":214,\"usagePage\":1},{\"vendorId\":5426,\"productId\":214,\"usagePage\":12},{\"vendorId\":5426,\"productId\":215,\"usagePage\":1},{\"vendorId\":5426,\"productId\":215,\"usagePage\":12},{\"vendorId\":5426,\"productId\":190,\"usagePage\":1},{\"vendorId\":5426,\"productId\":190,\"usagePage\":12},{\"vendorId\":5426,\"productId\":191,\"usagePage\":1},{\"vendorId\":5426,\"productId\":191,\"usagePage\":12},{\"vendorId\":5426,\"productId\":239,\"usagePage\":1},{\"vendorId\":5426,\"productId\":239,\"usagePage\":12},{\"vendorId\":5426,\"productId\":240,\"usagePage\":1},{\"vendorId\":5426,\"productId\":240,\"usagePage\":12},{\"vendorId\":5426,\"productId\":138,\"usagePage\":1,\"usage\":2},{\"vendorId\":5426,\"productId\":120,\"usagePage\":1,\"usage\":2},{\"vendorId\":13652,\"productId\":64342},{\"vendorId\":13652,\"productId\":64343},{\"vendorId\":14139,\"usagePage\":65282,\"usage\":2},{\"vendorId\":14139,\"productId\":4436,\"usagePage\":65285,\"usage\":1},{\"vendorId\":14139,\"productId\":4437,\"usagePage\":65285,\"usage\":1},{\"vendorId\":13652,\"productId\":62858,\"usagePage\":65282,\"usage\":2},{\"vendorId\":13652,\"productId\":62860,\"usagePage\":65282,\"usage\":2},{\"vendorId\":13652,\"productId\":62862,\"usagePage\":65282,\"usage\":2},{\"vendorId\":13652,\"productId\":62863,\"usagePage\":65282,\"usage\":2},{\"vendorId\":9639},{\"vendorId\":7511},{\"vendorId\":5426,\"productId\":229,\"usagePage\":1},{\"vendorId\":5426,\"productId\":229,\"usagePage\":12},{\"vendorId\":5426,\"productId\":230,\"usagePage\":1},{\"vendorId\":5426,\"productId\":230,\"usagePage\":12},{\"vendorId\":5426,\"productId\":110},{\"vendorId\":5426,\"productId\":113},{\"vendorId\":5426,\"productId\":152},{\"vendorId\":5426,\"productId\":163},{\"vendorId\":13364,\"productId\":1088,\"usagePage\":65376,\"usage\":97},{\"vendorId\":13364,\"productId\":53286,\"usagePage\":65376,\"usage\":97},{\"vendorId\":13364,\"productId\":53289,\"usagePage\":65376,\"usage\":97},{\"vendorId\":13364,\"usagePage\":65473,\"usage\":1},{\"vendorId\":13364,\"usagePage\":140,\"usage\":1},{\"vendorId\":13364,\"usagePage\":65290,\"usage\":1},{\"vendorId\":5426,\"productId\":21},{\"vendorId\":5426,\"productId\":31},{\"vendorId\":5426,\"productId\":32},{\"vendorId\":5426,\"productId\":36},{\"vendorId\":5426,\"productId\":37},{\"vendorId\":5426,\"productId\":46},{\"vendorId\":5426,\"productId\":47},{\"vendorId\":5426,\"productId\":50},{\"vendorId\":5426,\"productId\":52},{\"vendorId\":5426,\"productId\":54},{\"vendorId\":5426,\"productId\":55},{\"vendorId\":5426,\"productId\":56},{\"vendorId\":5426,\"productId\":57},{\"vendorId\":5426,\"productId\":62},{\"vendorId\":5426,\"productId\":63},{\"vendorId\":5426,\"productId\":64},{\"vendorId\":5426,\"productId\":65},{\"vendorId\":5426,\"productId\":66},{\"vendorId\":5426,\"productId\":67},{\"vendorId\":5426,\"productId\":68},{\"vendorId\":5426,\"productId\":69},{\"vendorId\":5426,\"productId\":70},{\"vendorId\":5426,\"productId\":72},{\"vendorId\":5426,\"productId\":76},{\"vendorId\":5426,\"productId\":79},{\"vendorId\":5426,\"productId\":80},{\"vendorId\":5426,\"productId\":83},{\"vendorId\":5426,\"productId\":84},{\"vendorId\":5426,\"productId\":89},{\"vendorId\":5426,\"productId\":90},{\"vendorId\":5426,\"productId\":91},{\"vendorId\":5426,\"productId\":92},{\"vendorId\":5426,\"productId\":94},{\"vendorId\":5426,\"productId\":96},{\"vendorId\":5426,\"productId\":100},{\"vendorId\":5426,\"productId\":101},{\"vendorId\":5426,\"productId\":103},{\"vendorId\":5426,\"productId\":106},{\"vendorId\":5426,\"productId\":107},{\"vendorId\":5426,\"productId\":108},{\"vendorId\":5426,\"productId\":133},{\"vendorId\":5426,\"productId\":140},{\"vendorId\":5426,\"productId\":141},{\"vendorId\":5426,\"productId\":145},{\"vendorId\":5426,\"productId\":161},{\"vendorId\":5426,\"productId\":178},{\"vendorId\":5426,\"productId\":179},{\"vendorId\":5426,\"productId\":150},{\"vendorId\":5426,\"productId\":153},{\"vendorId\":5426,\"productId\":203},{\"vendorId\":5426,\"productId\":98},{\"vendorId\":5426,\"productId\":148},{\"vendorId\":5426,\"productId\":222},{\"vendorId\":5426,\"productId\":223},{\"vendorId\":5426,\"productId\":111},{\"vendorId\":5426,\"productId\":112},{\"vendorId\":5426,\"productId\":114},{\"vendorId\":5426,\"productId\":115},{\"vendorId\":5426,\"productId\":119},{\"vendorId\":5426,\"productId\":128},{\"vendorId\":5426,\"productId\":131},{\"vendorId\":5426,\"productId\":134},{\"vendorId\":5426,\"productId\":136},{\"vendorId\":5426,\"productId\":143},{\"vendorId\":5426,\"productId\":144},{\"vendorId\":5426,\"productId\":154},{\"vendorId\":5426,\"productId\":156},{\"vendorId\":5426,\"productId\":167},{\"vendorId\":5426,\"productId\":168},{\"vendorId\":5426,\"productId\":175},{\"vendorId\":5426,\"productId\":176},{\"vendorId\":5426,\"productId\":180},{\"vendorId\":5426,\"productId\":185},{\"vendorId\":5426,\"productId\":199},{\"vendorId\":5426,\"productId\":200},{\"vendorId\":5426,\"productId\":208},{\"vendorId\":5426,\"productId\":209},{\"vendorId\":5426,\"productId\":211},{\"vendorId\":5426,\"productId\":212},{\"vendorId\":5426,\"productId\":132},{\"vendorId\":13159,\"usagePage\":65282},{\"vendorId\":13159,\"usagePage\":65281},{\"vendorId\":13159,\"usagePage\":65284},{\"vendorId\":13159},{\"vendorId\":12259,\"usagePage\":255,\"usage\":1},{\"vendorId\":12259,\"usagePage\":255,\"usage\":2},{\"vendorId\":12771,\"productId\":4898,\"usagePage\":65365,\"usage\":1},{\"vendorId\":6421,\"productId\":44561},{\"vendorId\":6421,\"productId\":44562},{\"vendorId\":6421,\"productId\":44563},{\"vendorId\":6421,\"productId\":44564},{\"vendorId\":6421,\"productId\":44565},{\"vendorId\":6421,\"productId\":44566},{\"vendorId\":6421,\"productId\":44572},{\"vendorId\":6421,\"productId\":44684},{\"vendorId\":6421,\"productId\":44682},{\"vendorId\":2362,\"productId\":57376},{\"vendorId\":2362,\"productId\":57360},{\"vendorId\":2362,\"productId\":59905},{\"vendorId\":2362,\"productId\":60161},{\"vendorId\":2362,\"productId\":60162},{\"vendorId\":1133,\"usagePage\":65280,\"usage\":1},{\"vendorId\":1133,\"usagePage\":65280,\"usage\":2},{\"vendorId\":1133,\"usagePage\":65347},{\"vendorId\":12625,\"productId\":16429,\"usagePage\":65535,\"usage\":2},{\"vendorId\":12625,\"productId\":16422,\"usagePage\":65535,\"usage\":2},{\"vendorId\":12625,\"productId\":16428,\"usagePage\":65365,\"usage\":514},{\"vendorId\":12625,\"usagePage\":65535,\"usage\":2},{\"vendorId\":14457,\"productId\":4368,\"usagePage\":65308,\"usage\":146},{\"vendorId\":14457,\"productId\":2054,\"usagePage\":65440,\"usage\":1},{\"vendorId\":7338,\"productId\":2054,\"usagePage\":65440,\"usage\":1},{\"vendorId\":13284,\"productId\":22040,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":14420,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":21017,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":21528,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":18200,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":18201,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":22041,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":21529,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":13849,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":10009,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":16921,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":9753,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":13593,\"usagePage\":65282},{\"vendorId\":13284,\"productId\":14344},{\"vendorId\":13284,\"productId\":14359},{\"vendorId\":13284,\"productId\":26632},{\"vendorId\":13284,\"productId\":26647},{\"vendorId\":13284,\"productId\":22024},{\"vendorId\":13284,\"productId\":22039},{\"vendorId\":13284,\"productId\":13832},{\"vendorId\":13284,\"productId\":13847},{\"vendorId\":13284,\"productId\":14600},{\"vendorId\":13284,\"productId\":14615},{\"vendorId\":13284,\"productId\":30980},{\"vendorId\":13284,\"productId\":30995},{\"vendorId\":13284,\"productId\":14088},{\"vendorId\":13284,\"productId\":14103},{\"vendorId\":13284,\"productId\":21256},{\"vendorId\":13284,\"productId\":21271},{\"vendorId\":13284,\"productId\":30468},{\"vendorId\":13284,\"productId\":30483},{\"vendorId\":13284,\"productId\":13576},{\"vendorId\":13284,\"productId\":13591},{\"vendorId\":13284,\"productId\":30984},{\"vendorId\":13284,\"productId\":30999},{\"vendorId\":13284,\"productId\":22536},{\"vendorId\":13284,\"productId\":22551},{\"vendorId\":13284,\"productId\":9992},{\"vendorId\":13284,\"productId\":10007},{\"vendorId\":13284,\"productId\":29188},{\"vendorId\":13284,\"productId\":29187},{\"vendorId\":13284,\"productId\":22535},{\"vendorId\":13284,\"productId\":21511},{\"vendorId\":13284,\"productId\":22279},{\"vendorId\":13284,\"productId\":22791},{\"vendorId\":13284,\"productId\":21512},{\"vendorId\":13284,\"productId\":21527},{\"vendorId\":13284,\"productId\":22280},{\"vendorId\":13284,\"productId\":22295},{\"vendorId\":13284,\"productId\":22792},{\"vendorId\":13284,\"productId\":22807},{\"vendorId\":13284,\"productId\":30472},{\"vendorId\":13284,\"productId\":30487},{\"vendorId\":13284,\"productId\":22532},{\"vendorId\":13284,\"productId\":22531},{\"vendorId\":13284,\"productId\":21508},{\"vendorId\":13284,\"productId\":21507},{\"vendorId\":13284,\"productId\":22276},{\"vendorId\":13284,\"productId\":22275},{\"vendorId\":13284,\"productId\":22788},{\"vendorId\":13284,\"productId\":22787},{\"vendorId\":4152,\"productId\":5890},{\"vendorId\":4152,\"productId\":4969},{\"vendorId\":4152,\"productId\":5904},{\"vendorId\":4152,\"productId\":4962},{\"vendorId\":4152,\"productId\":5929},{\"vendorId\":4152,\"productId\":4973},{\"vendorId\":4152,\"productId\":5010},{\"vendorId\":4152,\"productId\":4975},{\"vendorId\":4152,\"productId\":5896},{\"vendorId\":4152,\"productId\":4992},{\"vendorId\":4152,\"productId\":5012},{\"vendorId\":4152,\"productId\":6166},{\"vendorId\":4152,\"productId\":5906},{\"vendorId\":4152,\"productId\":5898},{\"vendorId\":4152,\"productId\":5908},{\"vendorId\":4152,\"productId\":5899},{\"vendorId\":4152,\"productId\":5910},{\"vendorId\":4152,\"productId\":5900},{\"vendorId\":4152,\"productId\":5912},{\"vendorId\":4152,\"productId\":6164},{\"vendorId\":4152,\"productId\":5914},{\"vendorId\":4152,\"productId\":6160},{\"vendorId\":4152,\"productId\":5916},{\"vendorId\":4152,\"productId\":5008},{\"vendorId\":4152,\"productId\":6180},{\"vendorId\":4152,\"productId\":6220},{\"vendorId\":4152,\"productId\":6256},{\"vendorId\":4152,\"productId\":6198},{\"vendorId\":4152,\"productId\":6202},{\"vendorId\":4152,\"productId\":6266},{\"vendorId\":4152,\"productId\":6200},{\"vendorId\":4152,\"productId\":6290},{\"vendorId\":4152,\"productId\":6288},{\"vendorId\":4152,\"productId\":6264},{\"vendorId\":4152,\"productId\":6192},{\"vendorId\":4152,\"productId\":6258},{\"vendorId\":4152,\"productId\":6224},{\"vendorId\":4152,\"productId\":6228},{\"vendorId\":4152,\"productId\":6238},{\"vendorId\":4152,\"productId\":6242},{\"vendorId\":4152,\"productId\":6226},{\"vendorId\":4152,\"productId\":6236},{\"vendorId\":4152,\"productId\":6240},{\"vendorId\":4152,\"productId\":5931},{\"vendorId\":4152,\"productId\":5926},{\"vendorId\":4152,\"productId\":5924},{\"vendorId\":4152,\"productId\":5934},{\"vendorId\":4152,\"productId\":6234},{\"vendorId\":4152,\"productId\":6262},{\"vendorId\":4152,\"productId\":6232},{\"vendorId\":4152,\"productId\":6260},{\"vendorId\":4152,\"productId\":6188},{\"vendorId\":4152,\"productId\":6190},{\"vendorId\":4152,\"productId\":6186},{\"vendorId\":4152,\"productId\":6230},{\"vendorId\":4152,\"productId\":6221},{\"vendorId\":4152,\"productId\":5920},{\"vendorId\":4152,\"productId\":5918},{\"vendorId\":4152,\"productId\":5942},{\"vendorId\":4152,\"productId\":6218},{\"vendorId\":4152,\"productId\":6216},{\"vendorId\":4152,\"productId\":6210},{\"vendorId\":4152,\"productId\":6208},{\"vendorId\":4152,\"productId\":6194},{\"vendorId\":4152,\"productId\":6196},{\"vendorId\":4152,\"productId\":5922},{\"vendorId\":4152,\"productId\":6204},{\"vendorId\":4152,\"productId\":6272},{\"vendorId\":4152,\"productId\":6274},{\"vendorId\":2362},{\"vendorId\":9610,\"productId\":8209},{\"vendorId\":8916,\"productId\":8209},{\"vendorId\":12815,\"productId\":8209},{\"vendorId\":14228,\"productId\":8209},{\"vendorId\":9610,\"productId\":8226},{\"vendorId\":8916,\"productId\":8226},{\"vendorId\":12815,\"productId\":8226},{\"vendorId\":14228,\"productId\":8226},{\"vendorId\":9610,\"productId\":8210},{\"vendorId\":8916,\"productId\":8210},{\"vendorId\":12815,\"productId\":8210},{\"vendorId\":14228,\"productId\":8210},{\"vendorId\":9610,\"productId\":8227},{\"vendorId\":8916,\"productId\":8227},{\"vendorId\":12815,\"productId\":8227},{\"vendorId\":14228,\"productId\":8227},{\"vendorId\":9610,\"productId\":8211},{\"vendorId\":8916,\"productId\":8211},{\"vendorId\":12815,\"productId\":8211},{\"vendorId\":14228,\"productId\":8211},{\"vendorId\":9610,\"productId\":8228},{\"vendorId\":8916,\"productId\":8228},{\"vendorId\":12815,\"productId\":8228},{\"vendorId\":14228,\"productId\":8228},{\"vendorId\":9610,\"productId\":8212},{\"vendorId\":8916,\"productId\":8212},{\"vendorId\":12815,\"productId\":8212},{\"vendorId\":14228,\"productId\":8212},{\"vendorId\":9610,\"productId\":8229},{\"vendorId\":8916,\"productId\":8229},{\"vendorId\":12815,\"productId\":8229},{\"vendorId\":14228,\"productId\":8229},{\"vendorId\":9610,\"productId\":8217},{\"vendorId\":8916,\"productId\":8217},{\"vendorId\":12815,\"productId\":8217},{\"vendorId\":14228,\"productId\":8217},{\"vendorId\":9610,\"productId\":8243},{\"vendorId\":8916,\"productId\":8243},{\"vendorId\":12815,\"productId\":8243},{\"vendorId\":14228,\"productId\":8243},{\"vendorId\":9610,\"productId\":8221},{\"vendorId\":8916,\"productId\":8221},{\"vendorId\":12815,\"productId\":8221},{\"vendorId\":14228,\"productId\":8221},{\"vendorId\":9610,\"productId\":8249},{\"vendorId\":8916,\"productId\":8249},{\"vendorId\":12815,\"productId\":8249},{\"vendorId\":14228,\"productId\":8249},{\"vendorId\":9610,\"productId\":33338},{\"vendorId\":8916,\"productId\":33338},{\"vendorId\":12815,\"productId\":33338},{\"vendorId\":14228,\"productId\":33338},{\"vendorId\":9610,\"productId\":8213},{\"vendorId\":8916,\"productId\":8213},{\"vendorId\":12815,\"productId\":8213},{\"vendorId\":14228,\"productId\":8213},{\"vendorId\":9610,\"productId\":8231},{\"vendorId\":8916,\"productId\":8231},{\"vendorId\":12815,\"productId\":8231},{\"vendorId\":14228,\"productId\":8231},{\"vendorId\":9610,\"productId\":8216},{\"vendorId\":8916,\"productId\":8216},{\"vendorId\":12815,\"productId\":8216},{\"vendorId\":14228,\"productId\":8216},{\"vendorId\":9610,\"productId\":8241},{\"vendorId\":8916,\"productId\":8241},{\"vendorId\":12815,\"productId\":8241},{\"vendorId\":14228,\"productId\":8241},{\"vendorId\":9610,\"productId\":8218},{\"vendorId\":8916,\"productId\":8218},{\"vendorId\":12815,\"productId\":8218},{\"vendorId\":14228,\"productId\":8218},{\"vendorId\":9610,\"productId\":8244},{\"vendorId\":8916,\"productId\":8244},{\"vendorId\":12815,\"productId\":8244},{\"vendorId\":14228,\"productId\":8244},{\"vendorId\":9610,\"productId\":5379},{\"vendorId\":8916,\"productId\":5379},{\"vendorId\":12815,\"productId\":5379},{\"vendorId\":14228,\"productId\":5379},{\"vendorId\":9610,\"productId\":33306},{\"vendorId\":8916,\"productId\":33306},{\"vendorId\":12815,\"productId\":33306},{\"vendorId\":14228,\"productId\":33306},{\"vendorId\":9610,\"productId\":33562},{\"vendorId\":8916,\"productId\":33562},{\"vendorId\":12815,\"productId\":33562},{\"vendorId\":14228,\"productId\":33562},{\"vendorId\":9610,\"productId\":41746},{\"vendorId\":8916,\"productId\":41746},{\"vendorId\":12815,\"productId\":41746},{\"vendorId\":14228,\"productId\":41746},{\"vendorId\":9610,\"productId\":41728},{\"vendorId\":8916,\"productId\":41728},{\"vendorId\":12815,\"productId\":41728},{\"vendorId\":14228,\"productId\":41728},{\"vendorId\":9610,\"productId\":8219,\"usagePage\":65535},{\"vendorId\":9610,\"productId\":8245,\"usagePage\":65535},{\"vendorId\":9610,\"productId\":8220,\"usagePage\":65535},{\"vendorId\":9610,\"productId\":8246,\"usagePage\":65535},{\"vendorId\":43172,\"productId\":8789,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43173,\"productId\":8789,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43172,\"productId\":8535,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43173,\"productId\":8535,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43172,\"productId\":8536,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43173,\"productId\":8536,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43172,\"productId\":8551,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43173,\"productId\":8551,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43172,\"productId\":8552,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43173,\"productId\":8552,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43172,\"productId\":8567,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43173,\"productId\":8567,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43172,\"productId\":8568,\"usagePage\":65281,\"usage\":16},{\"vendorId\":43173,\"productId\":8568,\"usagePage\":65281,\"usage\":16},{\"vendorId\":1118,\"productId\":2083,\"usagePage\":12,\"usage\":1},{\"vendorId\":1118,\"productId\":2090,\"usagePage\":65287,\"usage\":530},{\"vendorId\":2362,\"productId\":21036,\"usagePage\":65285},{\"vendorId\":2362,\"productId\":25132,\"usagePage\":65285},{\"vendorId\":2385,\"productId\":5927,\"usagePage\":65280},{\"vendorId\":1008,\"productId\":3983,\"usagePage\":65280},{\"vendorId\":1008,\"productId\":1166,\"usagePage\":65280},{\"vendorId\":1008,\"productId\":654,\"usagePage\":65280},{\"vendorId\":1267,\"productId\":622,\"usagePage\":10,\"usage\":199},{\"vendorId\":1267,\"productId\":623,\"usagePage\":10,\"usage\":199},{\"vendorId\":9390,\"productId\":4613,\"usagePage\":65280,\"usage\":14},{\"vendorId\":9390,\"productId\":17413,\"usagePage\":65280,\"usage\":14},{\"vendorId\":9494,\"usagePage\":65280,\"usage\":1},{\"vendorId\":6700,\"productId\":38405,\"usagePage\":65280},{\"vendorId\":6700,\"productId\":38405,\"usagePage\":65376},{\"vendorId\":14192,\"productId\":256},{\"vendorId\":14192,\"productId\":512},{\"vendorId\":14192,\"productId\":768},{\"vendorId\":7334,\"productId\":6921,\"usagePage\":65456,\"usage\":1},{\"vendorId\":7334,\"productId\":6922,\"usagePage\":65456,\"usage\":1},{\"vendorId\":7334,\"productId\":6928,\"usagePage\":65456,\"usage\":1},{\"vendorId\":14005,\"productId\":30162,\"usagePage\":65456,\"usage\":1},{\"vendorId\":14005,\"productId\":30164,\"usagePage\":65456,\"usage\":1},{\"vendorId\":7330,\"productId\":2305,\"usagePage\":65440,\"usage\":1},{\"vendorId\":1678,\"productId\":172}]",
+      "failed": false
+    },
+    {
+      "at": 1.88,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "No authorized devices",
+      "failed": false
+    },
+    {
+      "at": 2.638,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "No authorized devices",
+      "failed": false
+    },
+    {
+      "at": 3.081,
+      "kind": "event",
+      "label": "WebHID permission result",
+      "detail": "incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff05:1 feat[none] | usage 0xff05:1 feat[0x9]) · incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff00:1 feat[0x3] | usage 0xc:1 feat[none])",
+      "failed": false
+    },
+    {
+      "at": 3.084,
+      "kind": "event",
+      "label": "Read device status",
+      "detail": null,
+      "failed": false
+    },
+    {
+      "at": 3.089,
+      "kind": "event",
+      "label": "WebHID open: incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff05:1 feat[none] | usage 0xff05:1 feat[0x9])",
+      "detail": null,
+      "failed": false
+    },
+    {
+      "at": 3.089,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 00 01 00 F0 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.091,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "8F 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.156,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 8F 01 02 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.159,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 8F 01 02 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.16,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "83 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.214,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 83 06 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.216,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 83 06 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.217,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.271,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.274,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.275,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.329,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.33,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.333,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.387,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.389,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.39,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.447,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.449,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.45,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.508,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.509,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.511,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.568,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.57,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.571,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 02 02 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.629,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 3.631,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 3.632,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "81 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.69,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 81 00 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.692,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 81 00 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.693,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.751,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 01 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.753,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 01 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.754,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.811,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 04 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.813,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 04 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.814,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.871,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 02 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.873,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 02 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.874,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.932,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 03 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.933,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 03 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.935,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 3.992,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 05 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.994,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 05 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 3.995,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 4.053,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 01 08 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.054,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 01 08 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.057,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 4.111,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 03 1E 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.112,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 03 1E 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.114,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "8F 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 4.17,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 8F 01 02 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.172,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 8F 01 02 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.173,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 4.23,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 02 03 0A 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.232,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 02 03 0A 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.233,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 4.289,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 00 01 00 F0 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.29,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 00 01 00 F0 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.292,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 4.334,
+      "kind": "report",
+      "dir": "IN",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "5F 20 08 00 1F 1F 21 00  (32B)",
+      "error": null
+    },
+    {
+      "at": 4.348,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 01 01 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.349,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 01 01 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.351,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 4.408,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 02 01 00 F2 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.41,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 02 01 00 F2 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.411,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 4.468,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 04 01 00 F4 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.468,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 04 01 00 F4 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.47,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 4.527,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 03 01 00 F3 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.529,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 03 01 00 F3 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.53,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 4.586,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 05 07 00 03 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 4.599,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff05:1 feat[none] | usage 0xff05:1 feat[0x9]) · incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff00:1 feat[0x3] | usage 0xc:1 feat[none])",
+      "failed": false
+    },
+    {
+      "at": 4.599,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff05:1 feat[none] | usage 0xff05:1 feat[0x9]) · incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff00:1 feat[0x3] | usage 0xc:1 feat[none])",
+      "failed": false
+    },
+    {
+      "at": 8.485,
+      "kind": "report",
+      "dir": "IN",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "5F 20 08 00 1F 1F 21 00  (32B)",
+      "error": null
+    },
+    {
+      "at": 9.627,
+      "kind": "event",
+      "label": "Background refresh",
+      "detail": null,
+      "failed": false
+    },
+    {
+      "at": 9.627,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 05 07 00 03 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.628,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "83 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 9.688,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 83 06 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.69,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 83 06 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.692,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 9.748,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.75,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.752,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 9.809,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.812,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.813,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 9.87,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.871,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.873,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 9.931,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.932,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.934,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 9.993,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.994,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 9.996,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.054,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.057,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.059,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 02 02 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.115,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 10.117,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 10.118,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "81 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.176,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 81 00 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.178,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 81 00 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.179,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.237,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 01 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.239,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 01 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.24,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.298,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 04 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.3,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 04 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.302,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.36,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 02 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.361,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 02 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.363,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.42,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 03 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.421,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 03 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.423,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.482,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 05 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.484,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 05 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.485,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.544,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "09 85 01 08 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.548,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 01 08 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.549,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.604,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 03 1E 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.605,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 03 1E 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.607,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "8F 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.661,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 8F 01 02 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.662,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 8F 01 02 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.665,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.725,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 02 03 0A 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.726,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 02 03 0A 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.729,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.786,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 00 01 00 F0 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.789,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 00 01 00 F0 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.79,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.844,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 01 01 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.845,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "09 86 01 01 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.848,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "86 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.908,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 02 01 00 F2 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.91,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 02 01 00 F2 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.912,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 10.968,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 04 01 00 F4 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.97,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 04 01 00 F4 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 10.971,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 11.03,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 03 01 00 F3 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 11.031,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 03 01 00 F3 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 11.033,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 11.09,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 05 07 00 03 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 11.11,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff05:1 feat[none] | usage 0xff05:1 feat[0x9]) · incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff00:1 feat[0x3] | usage 0xc:1 feat[none])",
+      "failed": false
+    },
+    {
+      "at": 269.622,
+      "kind": "event",
+      "label": "Background refresh",
+      "detail": null,
+      "failed": false
+    },
+    {
+      "at": 269.622,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 05 07 00 03 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.623,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "83 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 269.677,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 83 06 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.678,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 83 06 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.68,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 269.733,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.735,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.737,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 269.791,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.792,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.794,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 269.847,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.849,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.851,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 269.905,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.906,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.908,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 269.961,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.962,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 269.964,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.018,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.02,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.022,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 02 02 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.076,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 54,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 270.13,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 270.132,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 6,
+      "bytes": "81 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.189,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 81 00 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.19,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 81 00 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.192,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.246,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 01 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.247,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "09 84 01 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.25,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.304,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 04 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.305,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 04 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.307,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.361,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 02 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.362,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 02 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.364,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.417,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 03 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.419,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 03 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.421,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.475,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 05 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.476,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 05 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.478,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.531,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 01 08 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.533,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 01 08 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.535,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.589,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 85 03 1E 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.59,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 03 1E 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.592,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "8F 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.646,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 8F 01 02 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.647,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 8F 01 02 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.649,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.703,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "09 85 02 03 0A 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.705,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 02 03 0A 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.707,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.761,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 00 01 00 F0 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.762,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 00 01 00 F0 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.764,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.818,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 01 01 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.819,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 01 01 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.821,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.875,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 02 01 00 F2 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.876,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 02 01 00 F2 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.878,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.931,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 04 01 00 F4 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.933,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 04 01 00 F4 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.935,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 270.989,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 03 01 00 F3 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.99,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 03 01 00 F3 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 270.992,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 271.045,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 05 07 00 03 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 272.325,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff05:1 feat[none] | usage 0xff05:1 feat[0x9]) · incott Esports G23 Pro mouse (VID 0x93a PID 0x622c; usage 0xff00:1 feat[0x3] | usage 0xc:1 feat[none])",
+      "failed": false
+    },
+    {
+      "at": 289.623,
+      "kind": "event",
+      "label": "Background refresh",
+      "detail": null,
+      "failed": false
+    },
+    {
+      "at": 289.623,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 05 07 00 03 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.624,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "83 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 289.677,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 83 06 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.678,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 83 06 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.68,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 289.734,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.735,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.737,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 289.791,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.792,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.794,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 289.848,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.849,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.851,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 289.904,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.906,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.908,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 289.961,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.963,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 289.965,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.02,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.021,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.023,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "82 02 02 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.076,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 290.078,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 290.08,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "81 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.133,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 81 00 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.135,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 81 00 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.137,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.19,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 01 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.191,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 01 02 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.193,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.247,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 04 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.248,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 04 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.25,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.303,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 02 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.305,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 02 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.307,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.361,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 03 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.362,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 03 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.364,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "84 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.418,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 05 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.419,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 84 05 01 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.421,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.474,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 01 08 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.476,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 01 08 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.478,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.532,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 03 1E 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.533,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 03 1E 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.535,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "8F 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.589,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 8F 01 02 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.59,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 8F 01 02 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.592,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "85 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.645,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 02 03 0A 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.647,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 85 02 03 0A 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.649,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.702,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 00 01 00 F0 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.703,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 00 01 00 F0 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.705,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.759,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 01 01 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.76,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 01 01 00 F1 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.762,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.815,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 02 01 00 F2 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.816,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 02 01 00 F2 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.818,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.871,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 04 01 00 F4 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.873,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 04 01 00 F4 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.875,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.929,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 03 01 00 F3 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.93,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 03 01 00 F3 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 290.932,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 3,
+      "bytes": "86 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 290.986,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 05 07 00 03 00 00  (9B)",
+      "error": null
+    }
+  ]
+}
