@@ -188,7 +188,11 @@ export function gloriousSinowealthCheckCommandReply(reply: Uint8Array, command: 
 /** `[05 1a n ..]` -> n * 2 ms. */
 export function gloriousSinowealthDecodeDebounce(reply: Uint8Array): number {
   gloriousSinowealthCheckCommandReply(reply, GLORIOUS_SINOWEALTH_CMD_DEBOUNCE);
-  return reply[2]! * 2;
+  const milliseconds = reply[2]! * 2;
+  if (!(GLORIOUS_SINOWEALTH_DEBOUNCE_MS as readonly number[]).includes(milliseconds)) {
+    throw new Error(`The Glorious mouse reported a debounce of ${milliseconds} ms, outside ${GLORIOUS_SINOWEALTH_DEBOUNCE_MS[0]}-${GLORIOUS_SINOWEALTH_DEBOUNCE_MS[GLORIOUS_SINOWEALTH_DEBOUNCE_MS.length - 1]} ms.`);
+  }
+  return milliseconds;
 }
 
 export function gloriousSinowealthEncodeDebounce(milliseconds: number): Uint8Array {
@@ -321,7 +325,7 @@ export function gloriousSinowealthWithStageDpi(block: Uint8Array, stage: number,
   const next = editable(block);
   const offset = slotOffset(next, entry.slot);
   next[offset] = raw;
-  if (offset !== OFFSET_DPI + entry.slot) next[offset + 1] = raw;
+  if ((next[OFFSET_POLLING]! >> 4) & FLAG_XY_INDEPENDENT) next[offset + 1] = raw;
   return next;
 }
 

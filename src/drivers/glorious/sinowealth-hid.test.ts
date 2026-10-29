@@ -143,6 +143,8 @@ test("encodes the command and debounce frames libratbag and OpenRGB send", () =>
   assert.equal(gloriousSinowealthDecodeDebounce(Uint8Array.from([5, 0x1a, 6, 0, 0, 0])), 12);
   assert.throws(() => gloriousSinowealthEncodeDebounce(5), /not one of/);
   assert.throws(() => gloriousSinowealthDecodeDebounce(Uint8Array.from([5, 0x11, 6, 0, 0, 0])), /answered command/);
+  assert.throws(() => gloriousSinowealthDecodeDebounce(Uint8Array.from([5, 0x1a, 0xff, 0, 0, 0])), /510 ms/);
+  assert.throws(() => gloriousSinowealthDecodeDebounce(Uint8Array.from([5, 0x1a, 1, 0, 0, 0])), /2 ms/);
 });
 
 test("rejects truncated, mis-addressed or wrong-command settings blocks", () => {
@@ -223,6 +225,9 @@ test("writes both axes of an independent stage", () => {
   block[10] = 0x84;
   const changed = gloriousSinowealthWithStageDpi(block, 1, 2000);
   assert.deepEqual([...changed.subarray(15, 17)], [19, 19]);
+  // Slot 0 sits at the start of the table, so its Y byte must still be written.
+  const first = gloriousSinowealthWithStageDpi(block, 0, 2000);
+  assert.deepEqual([...first.subarray(13, 15)], [19, 19]);
 });
 
 test("selects the active stage among the enabled ones, keeping the stage count", () => {
@@ -390,4 +395,22 @@ test("writes debounce after confirming it can be read, and checks the read-back"
   await assert.rejects(new GloriousSinowealthHidClient(device).setDebounceTime(8.5), /not one of/);
   // The fake keeps answering 8 ms, so a requested 12 ms does not stick.
   await assert.rejects(new GloriousSinowealthHidClient(device).setDebounceTime(12), /did not keep/);
+});
+
+test("offers only the effects a short block can hold even when the reply is padded to 520 bytes", async () => {
+  const fake = fakeDevice({ size: 520, declared: 122 });
+  // A 123-byte block padded out to the interface's largest report.
+  const padded = fake.current();
+  padded.fill(0, 123);
+  const status = await new GloriousSinowealthHidClient(fake.device).readStatus();
+  assert.deepEqual(status.lighting?.modes, ["Off", "Static", "Cycling", "Breathing random"]);
+});
+
+test("offers the DPI choices of the sensor it read, none before", async () => {
+  const client = new GloriousSinowealthHidClient(fakeDevice().device);
+  assert.deepEqual(client.getDpiOptions(), []);
+  await client.readStatus();
+  const options = client.getDpiOptions();
+  assert.equal(options[0], 400);
+  assert.equal(options[options.length - 1], 12000);
 });

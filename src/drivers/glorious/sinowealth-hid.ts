@@ -115,6 +115,7 @@ export class GloriousSinowealthHidClient {
   private queue: Promise<unknown> = Promise.resolve();
   /** Whether report-5 answers can be read here: null until the first try. */
   private shortAnswers: boolean | null = null;
+  private dpiOptions: number[] = [];
   private readonly configReportId: number;
   /** Declared byte length (report id included) of the settings report, when the descriptor says. */
   private readonly declaredLength: number | null;
@@ -143,10 +144,9 @@ export class GloriousSinowealthHidClient {
     return this.supportedPollingRates;
   }
 
+  /** The sensor's DPI choices, known once a status has been read; empty before that. */
   getDpiOptions(): number[] {
-    const options: number[] = [];
-    for (let dpi = GLORIOUS_SINOWEALTH_DPI_MIN; dpi <= 12000; dpi += GLORIOUS_SINOWEALTH_DPI_STEP) options.push(dpi);
-    return options;
+    return [...this.dpiOptions];
   }
 
   async open(): Promise<void> {
@@ -181,6 +181,7 @@ export class GloriousSinowealthHidClient {
     const name = `Glorious ${product.name}`;
     const stages = config.stages.map((stage) => stage.dpi ?? 0);
     const options = gloriousSinowealthDpiOptions(block);
+    this.dpiOptions = options;
     return {
       brand: "Glorious",
       name,
@@ -307,7 +308,10 @@ export class GloriousSinowealthHidClient {
   }
 
   private lighting(block: Uint8Array, config: GloriousSinowealthConfig): MouseLighting | undefined {
-    const available = EFFECT_FOR_MODE.filter(([, effect]) => gloriousSinowealthSupportsEffect(block, effect));
+    // A block padded to the interface's largest report is checked at its true size.
+    const size = gloriousSinowealthConfigSize(block.length, this.declaredLength);
+    const settings = size === null ? block : block.subarray(0, size);
+    const available = EFFECT_FOR_MODE.filter(([, effect]) => gloriousSinowealthSupportsEffect(settings, effect));
     // Mice without LEDs report effect 0xff, and no effect is available.
     if (available.length <= 1) return undefined;
     const current = EFFECT_FOR_MODE.find(([, effect]) => effect === config.effect);
