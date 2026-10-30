@@ -131,16 +131,48 @@ export function thermaltakeNormalizeReply(reportId: number, reply: Uint8Array): 
   return full;
 }
 
+/**
+ * The mouse interface (interface 0, Generic Desktop Mouse) carries a second,
+ * unnumbered 8-byte vendor feature report (page 0xFF00, usage 0x80). Unlike
+ * the config collection it declares real items, so Chrome on Windows exposes
+ * it, and the firmware feeds it to the same command parser: `C4 08`, `DF xx`
+ * and `DE 0D` answer there exactly as on report 0x0C, truncated to 8 bytes.
+ * Profile blocks need the 2052-byte report and cannot travel this way.
+ */
+export const THERMALTAKE_SHORT_REPORT_ID = 0;
+export const THERMALTAKE_SHORT_REPORT_SIZE = 8;
+export const THERMALTAKE_SHORT_USAGE_PAGE = 0xff00;
+export const THERMALTAKE_SHORT_USAGE = 0x80;
+
+/** The first 8 bytes of a command, for the short channel. */
+export function thermaltakeShortCommand(payload: Uint8Array): Uint8Array<ArrayBuffer> {
+  if (payload.subarray(THERMALTAKE_SHORT_REPORT_SIZE).some((byte) => byte !== 0)) {
+    throw new RangeError("Thermaltake command does not fit the 8-byte report.");
+  }
+  return payload.slice(0, THERMALTAKE_SHORT_REPORT_SIZE);
+}
+
+/**
+ * A command reply with the status byte at index 0, whichever channel it came
+ * from: the 0x0C report writes its status over the report id slot, and the
+ * short report puts it first after an optional leading id byte.
+ */
+function commandFrame(reply: Uint8Array): Uint8Array | null {
+  if (reply.length === THERMALTAKE_SHORT_REPORT_SIZE + 1) return reply.subarray(1);
+  if (reply.length === THERMALTAKE_SHORT_REPORT_SIZE) return reply;
+  return thermaltakeNormalizeReply(THERMALTAKE_REPORT_ID.command, reply);
+}
+
 /** Firmware byte from a `C4 08` reply (`B0 55 AA <version>`), or null. */
 export function thermaltakeDecodeFirmware(reply: Uint8Array): number | null {
-  const full = thermaltakeNormalizeReply(THERMALTAKE_REPORT_ID.command, reply);
+  const full = commandFrame(reply);
   if (!full || full[1] !== 0x55 || full[2] !== 0xaa) return null;
   return full[3]!;
 }
 
 /** Zero-based active profile from a `DF 0D` reply, or null when it does not look like one. */
 export function thermaltakeDecodeActiveProfile(reply: Uint8Array): number | null {
-  const full = thermaltakeNormalizeReply(THERMALTAKE_REPORT_ID.command, reply);
+  const full = commandFrame(reply);
   if (!full || full[2] !== REGISTER_PROFILE) return null;
   const count = full[5]! >> 4;
   const active = full[5]! & 0x0f;

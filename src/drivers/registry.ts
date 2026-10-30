@@ -87,7 +87,7 @@ import { RedragonHidClient } from "./redragon/hid.ts";
 import { RedragonM690ProHidClient } from "./redragon/m690-pro-hid.ts";
 import { RedragonM719ProHidClient } from "./redragon/m719-pro-hid.ts";
 import { FaterHidClient } from "./fater/hid.ts";
-import { ThermaltakeHidClient, thermaltakeExposesConfigChannel } from "./thermaltake/hid.ts";
+import { ThermaltakeHidClient, thermaltakeChannel } from "./thermaltake/hid.ts";
 import { IncottHidClient } from "./incott/hid.ts";
 import { HyperXHidClient } from "./hyperx/hid.ts";
 import { MchoseV3HidClient } from "./mchose/v3-hid.ts";
@@ -258,10 +258,13 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   // output channel is claimed by product id so the wired generation can add
   // its own entry without contending.
   { brand: "ROCCAT", supports: (device) => RoccatHidClient.isSupported(device), create: (device) => new RoccatHidClient(device), score: () => 6 },
-  // Thermaltake owns vendor id 0x264a, which no other driver claims. A device
-  // without the config collection (Chrome on Windows) is status only.
-  { brand: "Thermaltake", supports: (device) => ThermaltakeHidClient.isSupported(device), create: (device) => new ThermaltakeHidClient(device), score: (device) => (thermaltakeExposesConfigChannel(device) ? 7 : 2) },
+  // Thermaltake owns vendor id 0x264a, which no other driver claims. Chrome on
+  // Windows hides the config collection; the mouse interface still switches
+  // profiles, and the keyboard interface alone is status only.
+  { brand: "Thermaltake", supports: (device) => ThermaltakeHidClient.isSupported(device), create: (device) => new ThermaltakeHidClient(device), score: (device) => THERMALTAKE_CHANNEL_SCORE[thermaltakeChannel(device) ?? "none"] },
 ];
+
+const THERMALTAKE_CHANNEL_SCORE = { config: 7, short: 5, none: 2 } as const;
 
 function driverFor(device: HIDDevice): DeviceDriver | undefined {
   return DEVICE_DRIVERS.find((driver) => driver.supports(device));
