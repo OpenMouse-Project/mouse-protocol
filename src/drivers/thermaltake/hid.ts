@@ -325,7 +325,7 @@ export class ThermaltakeHidClient {
   private async readFirmwareNow(): Promise<number | null> {
     try {
       await this.command(thermaltakeCommands.readFirmware(), DELAY_MS.firmware);
-      return thermaltakeDecodeFirmware(await this.receiveCommandReply());
+      return thermaltakeDecodeFirmware(await this.receiveCommandReply(), this.channel ?? "config");
     } catch {
       return null;
     }
@@ -333,7 +333,7 @@ export class ThermaltakeHidClient {
 
   private async readActiveProfileNow(): Promise<number> {
     await this.command(thermaltakeCommands.readActiveProfile(), DELAY_MS.register);
-    const profile = thermaltakeDecodeActiveProfile(await this.receiveCommandReply());
+    const profile = thermaltakeDecodeActiveProfile(await this.receiveCommandReply(), this.channel ?? "config");
     if (profile === null) throw new Error("The mouse did not report its active profile.");
     return profile;
   }
