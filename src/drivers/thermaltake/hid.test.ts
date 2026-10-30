@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ThermaltakeHidClient } from "./hid.ts";
+import { ThermaltakeHidClient, thermaltakeExposesConfigChannel } from "./hid.ts";
 import {
   THERMALTAKE_CONFIG_USAGE,
   THERMALTAKE_CONFIG_USAGE_PAGE,
@@ -210,12 +210,28 @@ function fakeMouse(): FakeMouse {
   };
 }
 
-test("isSupported needs the Thermaltake ids and the LED-page config collection", () => {
+test("isSupported claims the Iris ids; only the config collection makes it writable", () => {
   assert.equal(ThermaltakeHidClient.isSupported(fakeDevice(fakeMouse()).device), true);
-  assert.equal(ThermaltakeHidClient.isSupported(fakeDevice(fakeMouse(), 0xff00).device), false);
+  assert.equal(thermaltakeExposesConfigChannel(fakeDevice(fakeMouse()).device), true);
+  assert.equal(ThermaltakeHidClient.isSupported(fakeDevice(fakeMouse(), 0x0c).device), true);
+  assert.equal(thermaltakeExposesConfigChannel(fakeDevice(fakeMouse(), 0x0c).device), false);
   const other = fakeDevice(fakeMouse()).device as unknown as { productId: number };
   other.productId = 0x1020;
   assert.equal(ThermaltakeHidClient.isSupported(other as unknown as HIDDevice), false);
+});
+
+// What Chrome on Windows hands over: the config collection has no caps, so
+// only the consumer collection (usage 0x0C:0x01) survives.
+test("without the config collection the mouse is status only and sends nothing", async () => {
+  const { device, sent } = fakeDevice(fakeMouse(), 0x0c);
+  const client = new ThermaltakeHidClient(device);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Tt eSPORTS Iris Optical RGB");
+  assert.equal(status.ui?.settingsReady, false);
+  assert.match(status.ui?.statusNote ?? "", /OpenMouse Bridge/);
+  await assert.rejects(client.setPollingRate(500), /OpenMouse Bridge/);
+  await assert.rejects(client.setProfile(2), /OpenMouse Bridge/);
+  assert.deepEqual(sent, []);
 });
 
 test("readStatus reports the active profile's settings", async () => {

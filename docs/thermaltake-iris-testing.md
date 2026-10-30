@@ -17,8 +17,24 @@ Read with `HidP_GetCaps` on Windows 10 (bcdDevice `0x6901`):
 | 1 col03 | **LED page 0x08, usage 0x4B** | input 28, **feature 2053** |
 | 1 col04 | Generic Desktop Mouse | input 5 |
 
-Every feature report on col03 is 2052 bytes after the report id. The driver
-filters on that collection only.
+Every feature report on col03 is 2052 bytes after the report id. The picker
+filter targets that collection.
+
+## Windows
+
+col03 declares only Constant items: `HidP_GetButtonCaps` and
+`HidP_GetValueCaps` return nothing for input or feature, although
+`HidP_GetCaps` still gives the 28-byte input and 2053-byte feature lengths.
+Native `HidD_SetFeature` / `HidD_GetFeature` on it work (everything below was
+done that way).
+
+Chrome on Windows (checked on 156) builds `HIDDevice.collections` from those
+caps, so col03 ends up with no reports and is pruned; the page gets only the
+consumer collection (`0x0C/0x01`, input `0x02`). Chrome also routes a report
+id to the collection that declares it, so a feature report to `0x0C` or
+`0x05` has nowhere to go. This is the same wall as the Delux M600 Pro
+(`delux-m600-pro-testing.md`). The driver claims that consumer-only device
+as status only and points to OpenMouse Bridge, which lists col03 natively.
 
 ## Evidence
 
