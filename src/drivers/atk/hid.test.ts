@@ -4,6 +4,7 @@ import test from "node:test";
 import { atkDpiOptionsForSensor, atkPackDpiStage, atkPackDpiStageForSensor, atkUnpackDpiStageForSensor } from "@openmouse/protocol/atk";
 import { wePackScalarPair } from "@openmouse/protocol/endgame-gear-we";
 import { AtkHidClient } from "./hid.ts";
+import { atkCatalogDevice, atkCatalogSensorForCidMid } from "./products.ts";
 import { PulsarHidClient } from "../pulsar/pulsar-hid.ts";
 import { createSupportedClient, deviceBrand } from "../registry.ts";
 import { SUPPORTED_HID_FILTERS } from "../vendors.ts";
@@ -1277,4 +1278,33 @@ test("an unlisted mouse falls back to its USB product string", () => {
   const client = new AtkHidClient(device(0x1085, "Wireless mouse -1k dongle"));
   assert.equal(client.displayName(), "ATK Wireless mouse -1k dongle");
   assert.equal(client.deviceBrand(), "ATK");
+});
+
+test("a mouse behind the generic 8K dongle-L is decoded with the sensor its CID/MID names, not the generic codec", async () => {
+  const fake = device(0x1278, "Wireless mouse 8k dongle-L");
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [2, 77]),
+    reply(0x04, 0x0000, [0x5f, 0x01]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x000c, atkPackDpiStageForSensor("PAW3395SE", 900, 900)!),
+    reply(0x12, 0x0000, [0x05, 0x0a]),
+    reply(0x08, 0x000a, [0x04, 0x51]),
+    reply(0x08, 0x00a9, [0x08, 0x4d, 0x00, 0x55, 0x1e, 0x37, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00bd, [0x00, 0x55, 0x00, 0x55]),
+  ];
+
+  const status = await new AtkHidClient(fake).readStatus();
+  assert.equal(status.dpi, 900);
+  assert.equal(status.dpiY, 900);
+  assert.deepEqual(status.dpiStages, [900]);
+});
+
+test("a CID/MID shared by models with different sensors stays on the generic codec behind a receiver", () => {
+  assert.equal(atkCatalogSensorForCidMid("2,77"), "PAW3395SE");
+  assert.equal(atkCatalogSensorForCidMid("1,2"), "PAW3950Ultra");
+  assert.equal(atkCatalogSensorForCidMid("2,5"), null);
+  assert.equal(atkCatalogSensorForCidMid("250,250"), null);
+  assert.equal(atkCatalogSensorForCidMid(null), null);
+  assert.equal(atkCatalogDevice(0x373b, 0x1278, "2,77")?.model, "ATK X1 SE NK");
+  assert.equal(atkCatalogDevice(0x373b, 0x1278, "2,5"), undefined);
 });
