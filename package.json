@@ -218,6 +218,10 @@
       "types": "./dist/fater/index.d.ts",
       "import": "./dist/fater/index.js"
     },
+    "./thermaltake": {
+      "types": "./dist/thermaltake/index.d.ts",
+      "import": "./dist/thermaltake/index.js"
+    },
     "./ajazz": {
       "types": "./dist/ajazz/index.d.ts",
       "import": "./dist/ajazz/index.js"

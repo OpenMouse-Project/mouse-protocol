@@ -39,6 +39,7 @@ export * as bytech from "./bytech/index.js";
 export * as motospeed from "./motospeed/index.js";
 export * as rapoo from "./rapoo/index.js";
 export * as fater from "./fater/index.js";
+export * as thermaltake from "./thermaltake/index.js";
 export * as coolermaster from "./coolermaster/index.js";
 export * as ajazz from "./ajazz/index.js";
 export * as scyrox from "./scyrox/index.js";
