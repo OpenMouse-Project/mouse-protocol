@@ -134,6 +134,12 @@ import {
   FATER_VENDOR_ID,
 } from "@openmouse/protocol/fater";
 import {
+  THERMALTAKE_CONFIG_USAGE,
+  THERMALTAKE_CONFIG_USAGE_PAGE,
+  THERMALTAKE_PRODUCT_IDS,
+  THERMALTAKE_VENDOR_ID,
+} from "@openmouse/protocol/thermaltake";
+import {
   AJAZZ_DONGLE_VENDOR_ID,
   AJAZZ_PRODUCTS,
   AJAZZ_USAGE,
@@ -212,6 +218,7 @@ export const VENDOR_ID = {
   hyperxKingston: HYPERX_VENDOR_ID_KINGSTON,
   hyperxHp: HYPERX_VENDOR_ID_HP,
   hitscan: HITSCAN_VENDOR_ID,
+  thermaltake: THERMALTAKE_VENDOR_ID,
 } as const;
 
 /**
@@ -260,6 +267,14 @@ export const FATER_HID_FILTERS: HIDDeviceFilter[] = [...FATER_PRODUCT_IDS].map((
   productId,
   usagePage: FATER_CONFIG_USAGE_PAGE,
   usage: FATER_CONFIG_USAGE,
+}));
+
+/** LED-page config collection on the Iris's interface 1, read from the mouse with HidP_GetCaps. */
+export const THERMALTAKE_HID_FILTERS: HIDDeviceFilter[] = [...THERMALTAKE_PRODUCT_IDS].map((productId) => ({
+  vendorId: THERMALTAKE_VENDOR_ID,
+  productId,
+  usagePage: THERMALTAKE_CONFIG_USAGE_PAGE,
+  usage: THERMALTAKE_CONFIG_USAGE,
 }));
 
 /** Holtek config collection measured on the M724 K1NG 1K (usbmon + usbhid-dump). */
@@ -889,6 +904,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...REDRAGON_HID_FILTERS,
   ...REDRAGON_M690_PRO_HID_FILTERS,
   ...FATER_HID_FILTERS,
+  ...THERMALTAKE_HID_FILTERS,
   ...MOTOSPEED_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
