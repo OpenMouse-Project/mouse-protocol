@@ -56,13 +56,17 @@ Native `HidD_SetFeature` / `HidD_GetFeature` on it work.
   have caps, and Chrome does not protect feature reports on a mouse
   collection, so the driver uses it for firmware, the active profile and
   profile switching.
-- **OpenMouse Bridge** (v1.0.0-beta.20) lists col03 as `0x08/0x4B` with an
-  input report 0 and no feature reports, from the descriptor hidapi rebuilds.
-  Bridge sends an undeclared feature report to every path, but
+- **OpenMouse Bridge** lists col03 as `0x08/0x4B` with an input report 0 and
+  no feature reports, from the descriptor hidapi rebuilds. Bridge sends an
+  undeclared feature report to every path, but v1.0.0-beta.20's
   `receive_feature_report` refuses one no path declares (only Razer and
-  Microsoft have a fallback buffer), so reads fail with "feature report 12 is
-  not declared by this interface". A fallback buffer of 2053 bytes for vendor
-  `0x264a` would unblock it.
+  Microsoft have a fallback buffer): "feature report 12 is not declared by
+  this interface". With a 2053-byte fallback for vendor `0x264a` it reads.
+  Its replies are shorter than WebHID's: hidapi reports only what the device
+  transferred and Bridge drops the first byte as the report id, so a `0x0C`
+  reply arrives as 7 bytes without the `B0` status (`55 AA 80 00 50 00 00`)
+  and a profile as 2051 bytes (`B0 p checksum data`, no trailing pad). The
+  codec pads anything shorter than the full report back into place.
 
 ## Evidence
 
@@ -82,6 +86,11 @@ page, lighting in `LEDSETPATH`, buttons in `ButtonSet`, report framing in
   intended block byte for byte, and writing the original block back restored
   it byte for byte.
 - Profile switching over interface 0's 8-byte report, as above.
+- The driver itself, from a browser tab through OpenMouse Bridge (built with
+  the `0x264a` read fallback): status read, then polling 500 Hz, stage 2 to
+  900 DPI, active stage 3, three stages, debounce 12 ms, angle snapping on,
+  switch to profile 2 and back. Each step read back as written; the original
+  profile block was then written back and matched byte for byte.
 
 Run the vendor software and a WebHID page at the same time and their commands
 interleave; close the Iris app (`IrisMain`) first. It also rewrites the active
@@ -92,10 +101,10 @@ profile when it starts.
 - 1500 Hz (`0x10`): the vendor tool writes it but reads it back as 1000 Hz.
   2000 Hz (`0x00`) was found stored on one profile, so the firmware accepts it,
   but the delivered report rate was not measured.
-- Angle snapping and button response were decoded but not written on hardware.
-- The WebHID path itself on Chrome for Windows: the 8-byte frames were sent
-  natively with `HidD_SetFeature` exactly as the driver sends them, but not
-  from a browser tab.
+- The effect of angle snapping and button response on the sensor and buttons
+  (the stored bytes were verified, the behaviour was not measured).
+- The Chrome for Windows path: the 8-byte frames were sent natively with
+  `HidD_SetFeature` exactly as the driver sends them, but not from Chrome.
 
 ## Lighting (decoded, not implemented)
 

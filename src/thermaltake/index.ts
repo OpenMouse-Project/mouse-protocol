@@ -118,13 +118,15 @@ export const thermaltakeCommands = {
 
 /**
  * A reply laid out as the vendor tool sees it: index 0 is the report id slot,
- * then the 2052 report bytes. Accepts the reply with or without that leading
- * byte, since transports differ on whether they keep it. Null for any other
- * length.
+ * then the 2052 report bytes. Transports differ: WebHID keeps the leading
+ * byte (2053 bytes), others drop it, and OpenMouse Bridge also stops where
+ * the device's transfer ended (7 bytes for a 0x0C reply, 2051 for a profile).
+ * Anything shorter than the full report is taken to start after the id slot
+ * and is zero-padded. Null for an empty or oversized reply.
  */
 export function thermaltakeNormalizeReply(reportId: number, reply: Uint8Array): Uint8Array | null {
   if (reply.length === THERMALTAKE_REPORT_SIZE + 1) return reply;
-  if (reply.length !== THERMALTAKE_REPORT_SIZE) return null;
+  if (reply.length === 0 || reply.length > THERMALTAKE_REPORT_SIZE) return null;
   const full = new Uint8Array(THERMALTAKE_REPORT_SIZE + 1);
   full[0] = reportId;
   full.set(reply, 1);
@@ -152,27 +154,30 @@ export function thermaltakeShortCommand(payload: Uint8Array): Uint8Array<ArrayBu
   return payload.slice(0, THERMALTAKE_SHORT_REPORT_SIZE);
 }
 
+/** Which report a command reply came back on. */
+export type ThermaltakeChannel = "config" | "short";
+
 /**
- * A command reply with the status byte at index 0, whichever channel it came
+ * A command reply with its status slot at index 0, whichever channel it came
  * from: the 0x0C report writes its status over the report id slot, and the
  * short report puts it first after an optional leading id byte.
  */
-function commandFrame(reply: Uint8Array): Uint8Array | null {
+function commandFrame(reply: Uint8Array, channel: ThermaltakeChannel): Uint8Array | null {
+  if (channel === "config") return thermaltakeNormalizeReply(THERMALTAKE_REPORT_ID.command, reply);
   if (reply.length === THERMALTAKE_SHORT_REPORT_SIZE + 1) return reply.subarray(1);
-  if (reply.length === THERMALTAKE_SHORT_REPORT_SIZE) return reply;
-  return thermaltakeNormalizeReply(THERMALTAKE_REPORT_ID.command, reply);
+  return reply.length === THERMALTAKE_SHORT_REPORT_SIZE ? reply : null;
 }
 
 /** Firmware byte from a `C4 08` reply (`B0 55 AA <version>`), or null. */
-export function thermaltakeDecodeFirmware(reply: Uint8Array): number | null {
-  const full = commandFrame(reply);
+export function thermaltakeDecodeFirmware(reply: Uint8Array, channel: ThermaltakeChannel = "config"): number | null {
+  const full = commandFrame(reply, channel);
   if (!full || full[1] !== 0x55 || full[2] !== 0xaa) return null;
   return full[3]!;
 }
 
 /** Zero-based active profile from a `DF 0D` reply, or null when it does not look like one. */
-export function thermaltakeDecodeActiveProfile(reply: Uint8Array): number | null {
-  const full = commandFrame(reply);
+export function thermaltakeDecodeActiveProfile(reply: Uint8Array, channel: ThermaltakeChannel = "config"): number | null {
+  const full = commandFrame(reply, channel);
   if (!full || full[2] !== REGISTER_PROFILE) return null;
   const count = full[5]! >> 4;
   const active = full[5]! & 0x0f;

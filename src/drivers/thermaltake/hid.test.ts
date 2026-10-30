@@ -74,7 +74,12 @@ test("decodes the firmware and profile-register replies the mouse sent", () => {
   assert.equal(thermaltakeDecodeActiveProfile(commandReply([0xb0, 0xc0, 0x0d, 0x00, 0x00, 0x57])), null);
   // Without the leading report-id byte the offsets shift back into place.
   assert.equal(thermaltakeDecodeActiveProfile(commandReply([0xc0, 0x0d, 0x00, 0x00, 0x52]).subarray(0, THERMALTAKE_REPORT_SIZE)), 2);
+  // OpenMouse Bridge on Windows: hidapi reports the 8 bytes the device sent
+  // and Bridge drops the first as the report id, status byte included.
+  assert.equal(thermaltakeDecodeFirmware(new Uint8Array([0x55, 0xaa, 0x80, 0x00, 0x50, 0x00, 0x00])), 0x80);
+  assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array([0xc0, 0x0d, 0x00, 0x00, 0x50, 0x00, 0x00])), 0);
   assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array(64)), null);
+  assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array(0)), null);
 });
 
 test("profile replies are checked for status, index and checksum", () => {
@@ -82,6 +87,8 @@ test("profile replies are checked for status, index and checksum", () => {
   const reply = profileReply(0, data);
   assert.deepEqual(thermaltakeDecodeProfile(reply, 0), data);
   assert.deepEqual(thermaltakeDecodeProfile(reply.subarray(1), 0), data);
+  // Bridge: no report id in front and no pad byte at the end (2051 bytes).
+  assert.deepEqual(thermaltakeDecodeProfile(reply.subarray(1, -1), 0), data);
   assert.equal(thermaltakeDecodeProfile(reply, 1), null);
   const damaged = reply.slice();
   damaged[100] ^= 1;
@@ -269,8 +276,8 @@ test("short commands are the first 8 bytes and refuse anything longer", () => {
   assert.equal(hex(thermaltakeShortCommand(thermaltakeCommands.writeActiveProfile(1))), "de 0d 00 00 51 00 00 00");
   assert.throws(() => thermaltakeShortCommand(thermaltakeEncodeProfileWrite(0, profileData(PROFILE_0_HEAD))), RangeError);
   // The 8-byte reply decodes like the 0x0C one, with or without the id byte.
-  assert.equal(thermaltakeDecodeFirmware(new Uint8Array([0x00, 0xb0, 0x55, 0xaa, 0x80, 0, 0x50, 0, 0])), 0x80);
-  assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array([0xb0, 0xc0, 0x0d, 0, 0, 0x52, 0, 0])), 2);
+  assert.equal(thermaltakeDecodeFirmware(new Uint8Array([0x00, 0xb0, 0x55, 0xaa, 0x80, 0, 0x50, 0, 0]), "short"), 0x80);
+  assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array([0xb0, 0xc0, 0x0d, 0, 0, 0x52, 0, 0]), "short"), 2);
 });
 
 // What Chrome on Windows shows of interface 1: the config collection has no
