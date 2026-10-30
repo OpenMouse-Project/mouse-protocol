@@ -308,8 +308,10 @@ export class ThermaltakeHidClient {
         typeof patch === "function" ? patch(thermaltakeDecodeSettings(data)) : patch,
       );
       if (next.every((byte, i) => byte === data[i])) return;
-      await this.command(thermaltakeCommands.beginWrite(), DELAY_MS.beginWrite);
       try {
+        // Inside the try: a transport can apply the opening command and still
+        // reject it, and the write window must be closed either way.
+        await this.command(thermaltakeCommands.beginWrite(), DELAY_MS.beginWrite);
         await this.device.sendFeatureReport(THERMALTAKE_REPORT_ID.profile, thermaltakeEncodeProfileWrite(profile, next));
         await delay(DELAY_MS.flashWrite);
       } finally {

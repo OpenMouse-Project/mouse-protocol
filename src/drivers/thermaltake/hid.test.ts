@@ -80,6 +80,10 @@ test("decodes the firmware and profile-register replies the mouse sent", () => {
   assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array([0xc0, 0x0d, 0x00, 0x00, 0x50, 0x00, 0x00])), 0);
   assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array(64)), null);
   assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array(0)), null);
+  // A reply that kept its status byte must carry 0xB0.
+  assert.equal(thermaltakeDecodeActiveProfile(commandReply([0xb1, 0xc0, 0x0d, 0x00, 0x00, 0x50])), null);
+  assert.equal(thermaltakeDecodeFirmware(commandReply([0x00, 0x55, 0xaa, 0x80])), null);
+  assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array([0x00, 0xc0, 0x0d, 0, 0, 0x50, 0, 0]), "short"), null);
 });
 
 test("profile replies are checked for status, index and checksum", () => {
@@ -133,6 +137,8 @@ test("polling codes and DPI steps", () => {
   assert.equal(thermaltakeNearestDpi(1649), 1600);
   assert.equal(thermaltakeNearestDpi(50), 100);
   assert.equal(thermaltakeNearestDpi(26000), 5000);
+  assert.throws(() => thermaltakeNearestDpi(Number.NaN), RangeError);
+  assert.throws(() => thermaltakeNearestDpi(Number.POSITIVE_INFINITY), RangeError);
 });
 
 test("applying settings keeps every byte it does not own", () => {
@@ -156,6 +162,10 @@ test("applying settings keeps every byte it does not own", () => {
   assert.throws(() => thermaltakeApplySettings(data, { activeDpiStage: 1 }), RangeError);
   assert.throws(() => thermaltakeApplySettings(data, { debounceMs: 40 }), RangeError);
   assert.throws(() => thermaltakeApplySettings(data, { dpiStages: [] }), RangeError);
+  // A patch that does not touch the stages keeps the level byte as stored,
+  // even one the vendor tool would only read as "four stages".
+  const odd = profileData([...PROFILE_0_HEAD.slice(0, 8), 0x50, ...PROFILE_0_HEAD.slice(9)]);
+  assert.equal(thermaltakeApplySettings(odd, { pollingRateHz: 500, debounceMs: 9 })[8], 0x50);
 });
 
 interface FakeMouse {
@@ -378,6 +388,20 @@ test("an unchanged setting sends no write", async () => {
   const { device, sent } = fakeDevice(mouse);
   await new ThermaltakeHidClient(device).setPollingRate(1000);
   assert.deepEqual(sent, ["df 0d 00 00 00", "c4 0c 00 00 00"]);
+});
+
+test("the write window is closed even when opening it reports an error", async () => {
+  const mouse = fakeMouse();
+  const { device, sent } = fakeDevice(mouse);
+  const send = device.sendFeatureReport.bind(device);
+  (device as { sendFeatureReport: HIDDevice["sendFeatureReport"] }).sendFeatureReport = async (reportId, data) => {
+    const bytes = new Uint8Array(data as ArrayBuffer);
+    await send(reportId, bytes);
+    if (reportId === THERMALTAKE_REPORT_ID.command && bytes[0] === 0xc4 && bytes[1] === 0x10) throw new Error("NAK");
+  };
+  await assert.rejects(new ThermaltakeHidClient(device).setPollingRate(500), /NAK/);
+  assert.deepEqual(sent.slice(-2), ["c4 10 00 00 00", "c4 00 00 00 00"]);
+  await assert.rejects(new ThermaltakeHidClient(fakeDevice(fakeMouse()).device).setDpi(Number.NaN), RangeError);
 });
 
 test("a write the mouse did not keep is an error", async () => {
