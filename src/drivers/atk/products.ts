@@ -1,6 +1,8 @@
 import type { AtkSensor } from "@openmouse/protocol/atk";
 import {
   atkDeviceForHid,
+  atkDevicesForCidMid,
+  atkDevicesForHid,
   type AtkCatalogSensor,
   type AtkDeviceDescriptor,
 } from "./device-catalog.generated.ts";
@@ -49,7 +51,23 @@ export function atkCatalogDevice(
   productId: number,
   cidMid?: string | null,
 ): AtkDeviceDescriptor | undefined {
-  return atkDeviceForHid(vendorId, productId, cidMid);
+  const byUsbId = atkDeviceForHid(vendorId, productId, cidMid);
+  if (byUsbId || !cidMid || atkDevicesForHid(vendorId, productId).length > 0) return byUsbId;
+  const byCidMid = atkDevicesForCidMid(cidMid);
+  return byCidMid.length === 1 ? byCidMid[0] : undefined;
+}
+
+/**
+ * Sensor shared by every catalog model with this CID/MID. Receivers enumerate
+ * under their own USB id, so the paired mouse is known only by CID/MID; the
+ * pair is not unique, but when every model sharing it has the same sensor the
+ * DPI codec is still unambiguous.
+ */
+export function atkCatalogSensorForCidMid(cidMid: string | null): AtkSensor | null {
+  if (!cidMid) return null;
+  const sensors = new Set(atkDevicesForCidMid(cidMid).map((device) => atkCatalogSensorToSensor(device.sensor)));
+  const [only] = sensors;
+  return sensors.size === 1 && only ? only : null;
 }
 
 
