@@ -653,6 +653,20 @@ test("identity finds the PAW3950 whichever slot the receiver puts it in", () => 
   assert.equal(cableOnly?.is8KReceiver, false, "no dongle, so no 8K receiver");
 });
 
+test("lift-off decodes through the sensor's own table", () => {
+  const reply = (wire: number) => frame(0x84, 0x01, wire);
+  // PAW3950 (and an unknown sensor): the hardware-verified remap.
+  assert.equal(incottDecodeLiftOffDirect(reply(2)), 7);
+  assert.equal(incottDecodeLiftOffDirect(reply(2), INCOTT_SENSOR_PAW3950), 7);
+  assert.equal(incottDecodeLiftOffDirect(reply(0), INCOTT_SENSOR_PAW3950), 10);
+  // PAW3395: the wire value is the millimetre step, and 0 is not offered.
+  assert.equal(incottDecodeLiftOffDirect(reply(1), INCOTT_SENSOR_PAW3395), 10);
+  assert.equal(incottDecodeLiftOffDirect(reply(2), INCOTT_SENSOR_PAW3395), 20);
+  assert.equal(incottDecodeLiftOffDirect(reply(0), INCOTT_SENSOR_PAW3395), null);
+  assert.deepEqual([...incottEncodeSetLiftOff(10, INCOTT_SENSOR_PAW3395)].slice(0, 3), [0x04, 0x01, 0x01]);
+  assert.throws(() => incottEncodeSetLiftOff(7, INCOTT_SENSOR_PAW3395), RangeError);
+});
+
 test("identity reports the PAW3395 only when no slot carries 0xf1", () => {
   const identity = incottDecodeIdentity(frame(0x8f, 0x01, 0x0e, 0x02, 0xf0, 0xf0, 0x00, 0xff));
   assert.equal(identity?.sensorId, INCOTT_SENSOR_PAW3395);

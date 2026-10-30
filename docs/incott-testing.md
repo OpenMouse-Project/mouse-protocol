@@ -814,22 +814,15 @@ exactly the stale-frame bug this queue exists to prevent.
 Per the "record what didn't work" principle, these are open questions no
 capture session has resolved. **Do not resolve these by guessing.**
 
-- **Lift-off hw -> millimetre label mapping — needs a hardware check.** The
-  hw values 0/1/2 round-trip cleanly (confirmed 2026-09-08, see above), but
-  which physical distance each means is unknown. IncottHIDApp claims hardware
-  `0` = 1 mm, `1` = 2 mm, `2` = 0.7 mm (`INCOTT_LOD_WIRE_TO_TENTHS` in
-  `src/incott/index.ts`). The vendor's own device definition
-  (`js/gvarG23-v102.js`) instead pairs `lodUI = [0.7, 1, 2]` with
-  `lodHW = [0, 1, 2]`, i.e. hardware `0` = 0.7 mm — a different mapping.
-  Neither capture session recorded which on-screen label was selected for a
-  given write. **Left unchanged pending a hardware check**: set 0.7 mm in the
-  vendor tool, then read `0x84`/`0x01` (or the packed form) and see which
-  value comes back.
 - **The remaining `0x8f` identity bytes.** Bytes 2-6 are decoded (model,
   receiver, sensor — see the model-identification section at the end of this
   document). Bytes 7-8 (`00 ff` on this device) are still unknown; a firmware
   version is the obvious candidate but nothing confirms it.
 Resolved since this list was written (kept for the record):
+
+- ~~**Lift-off hw -> millimetre label mapping.**~~ Settled on a PAW3950 on
+  2026-09-08 (hardware `2` = 0.7 mm), and per sensor since: see "Lift-off
+  distance mapping" below.
 
 - ~~**DPI per-axis read.**~~ It exists: `09 82 <stage> <axis>`, echoed at
   reply byte 8. The earlier probe saw one value for all three axes because X
@@ -882,10 +875,40 @@ The device contradicts that, so the arrays are not a paired lookup. Recording it
 because it is exactly the kind of plausible-but-wrong inference worth warning the
 next contributor about.
 
-Only the 0.7 mm point was read back directly. Hardware `0` and `1` are 1 mm and
-2 mm in that order; the mapping is a bijection over {0,1,2} and the one claim that
-was testable proved correct, but neither of those two values has been read
-individually.
+That session read only the 0.7 mm point; hardware `0` and `1` (1 mm and 2 mm)
+followed from the bijection. All three points have since been read individually,
+see the hardware read in "The mapping depends on the sensor" below.
+
+### The mapping depends on the sensor
+
+Both readings above were right, for different sensors. The vendor
+configurator's profile apply path, as ported byte-for-byte in
+[oexi/incott-driver-desktop](https://github.com/oexi/incott-driver-desktop)
+(`src/protocol/device.js`, MIT; its tests diff every report against the
+vendor's original JavaScript), remaps lift-off only for the PAW3950:
+
+| On screen | PAW3950 wire | PAW3395 wire |
+| --- | --- | --- |
+| 0.7 mm | `2` | not offered |
+| 1 mm | `0` | `1` |
+| 2 mm | `1` | `2` |
+
+For the PAW3395 the profile value goes out unchanged and `lodOptions` offers
+only 1 mm and 2 mm, which is what `lodUI`/`lodHW` describe when read as a
+pair.
+
+The PAW3950 column is now read point by point on hardware (2026-10-30, a G23
+Pro on the 8K dongle, `captures/incott-lift-off/`): each step was set with
+the vendor port, the port was closed, and the OpenMouse hardware test read
+`0x84`/`0x01` back as `2` for 0.7 mm, `0` for 1 mm and `1` for 2 mm.
+
+Until this change the driver applied the PAW3950 table to every unit, so on a
+PAW3395 (non-Pro) mouse it showed 2 mm as "Low" (0.7 mm), 1 mm as "High", and
+writing "Low" set 2 mm. `incottDecodeLiftOffDirect`, `incottDecodeLiftOff` and
+`incottEncodeSetLiftOff` now take the identity reply's `sensorId`, and the
+driver offers only Medium/High on a PAW3395. An unreadable identity keeps the
+PAW3950 table. The PAW3395 column has not been read on hardware: every unit
+tested here is a PAW3950.
 
 ## Model identification: SOLVED 2026-09-10 — it is `0x8F`
 

@@ -35,6 +35,7 @@ import {
   incottIsWiredProduct,
   incottMacroChunks,
   incottLiftOffLabel,
+  incottLiftOffStepsForSensor,
   incottLiftOffTenths,
   incottNormalizeProductName,
   incottPerformanceModeFromWire,
@@ -456,6 +457,11 @@ export class IncottHidClient {
    * look-alike (see the class comment and `open()`).
    */
   private collectionVerified: boolean | null = null;
+  /**
+   * The fitted sensor from the latest identity reply (`open()`/`readStatus()`),
+   * `null` until one decodes. Lift-off's wire table depends on it.
+   */
+  private sensorId: number | null = null;
 
   constructor(device: HIDDevice, options?: IncottTransactionOptions) {
     this.device = device;
@@ -601,6 +607,7 @@ export class IncottHidClient {
     this.device.addEventListener("inputreport", this.onInputReport);
     const identity = incottDecodeIdentity(await this.query(INCOTT_CMD_QUERY_IDENTITY, INCOTT_SUB_NONE));
     this.collectionVerified = identity !== null;
+    this.sensorId = identity?.sensorId ?? null;
   }
 
   async close(): Promise<void> {
@@ -694,9 +701,9 @@ export class IncottHidClient {
     // nibble trick (`incottDecodeLiftOff`/`incottDecodeMotionSync`, still
     // exported and tested): verified on hardware 2026-09-08 that both forms
     // agree at every step (lift-off hw 0/1/2, motion sync 0/1/0).
-    const liftOffTenths = dead
-      ? null
-      : incottDecodeLiftOffDirect(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_LOD));
+    // Decoded once the identity reply below has named the sensor: the
+    // hw-to-millimetre table differs between the PAW3950 and the PAW3395.
+    const liftOffFrame = dead ? null : await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_LOD);
     const motionSync = dead
       ? null
       : incottDecodeToggle(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_MOTION_SYNC), INCOTT_SUB_MOTION_SYNC);
@@ -751,6 +758,10 @@ export class IncottHidClient {
     const identity = dead
       ? null
       : incottDecodeIdentity(await this.query(INCOTT_CMD_QUERY_IDENTITY, INCOTT_SUB_NONE));
+    // A failed refresh keeps the sensor the last good reply named, so one
+    // dropped identity query cannot switch a PAW3395 to the PAW3950 table.
+    if (identity?.sensorId != null) this.sensorId = identity.sensorId;
+    const liftOffTenths = liftOffFrame === null ? null : incottDecodeLiftOffDirect(liftOffFrame, this.sensorId);
 
     // The model READ FROM THE DEVICE is preferred over the product string:
     // it is the only source that works on the 2.4 GHz dongle, where the
@@ -891,7 +902,7 @@ export class IncottHidClient {
       // when no input report has arrived yet, regardless of connection.
       batteryState: batteryCharging === null ? "Unknown" : batteryCharging ? "Charging" : "Discharging",
       liftOffDistance: liftOffTenths === null ? null : incottLiftOffLabel(liftOffTenths),
-      supportedLiftOffDistances: ["Low", "Medium", "High"],
+      supportedLiftOffDistances: incottLiftOffStepsForSensor(this.sensorId).map((tenths) => incottLiftOffLabel(tenths)!),
       // Both fields together, or neither: the shared remapper only renders
       // when it has the current assignments AND the list of actions it may
       // write back.
@@ -1058,10 +1069,10 @@ export class IncottHidClient {
 
   async setLiftOffDistance(level: LiftOffLevel): Promise<LiftOffLevel> {
     const tenths = incottLiftOffTenths(level);
-    await this.write(incottEncodeSetLiftOff(tenths));
+    await this.write(incottEncodeSetLiftOff(tenths, this.sensorId));
     // Symmetric single-purpose read (`0x84`/`0x01`), preferred over the
     // packed byte-7 nibble form — see the comment in `readStatus()`.
-    const gotTenths = incottDecodeLiftOffDirect(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_LOD));
+    const gotTenths = incottDecodeLiftOffDirect(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_LOD), this.sensorId);
     const got = gotTenths === null ? null : incottLiftOffLabel(gotTenths);
     if (got !== level) {
       throw new Error(`The mouse kept a ${got ?? "unreadable"} lift-off distance instead of ${level}.`);
