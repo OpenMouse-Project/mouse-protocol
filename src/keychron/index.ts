@@ -115,6 +115,9 @@ export const KEYCHRON_LAUNCHER_MICE: readonly KeychronLauncherMouse[] = [
   { productId: 0xd091, name: "Keychron M8 HE", dpi: [50, 30000], maxPollingHz: 8000, lod: [[3, 0.7], [1, 1], [2, 2]], buttons: [[0, "left"], [1, "middle"], [2, "right"], [3, "backward"], [4, "forward"], [7, "upScroll"], [8, "downScroll"]] },
   { productId: 0xd092, name: "Keychron G9 HE 8K", dpi: [50, 30000], maxPollingHz: 8000, lod: [[3, 0.7], [1, 1], [2, 2]], buttons: [[0, "left"], [1, "middle"], [2, "right"], [3, "backward"], [4, "forward"], [7, "upScroll"], [8, "downScroll"]] },
   { productId: 0xd09d, name: "Keychron G6 HE 8K", dpi: [50, 40000], maxPollingHz: 8000, lodLevels: [[1, 0.7], [2, 0.8], [3, 0.9], [4, 1], [5, 1.1], [6, 1.2], [7, 1.3], [8, 1.4], [9, 1.5], [10, 1.6], [11, 1.7]], buttons: [[0, "left"], [1, "middle"], [2, "right"], [3, "forward"], [4, "backward"], [13, "upScroll"], [14, "downScroll"]] },
+  { productId: 0xd0a2, name: "Keychron G6 HE 8K", dpi: [50, 40000], maxPollingHz: 8000, lodLevels: [[1, 0.7], [2, 0.8], [3, 0.9], [4, 1], [5, 1.1], [6, 1.2], [7, 1.3], [8, 1.4], [9, 1.5], [10, 1.6], [11, 1.7]], buttons: [[0, "left"], [1, "middle"], [2, "right"], [3, "forward"], [4, "backward"], [13, "upScroll"], [14, "downScroll"]] },
+  { productId: 0xd0a3, name: "Keychron G3 HE", dpi: [50, 40000], maxPollingHz: 8000, lodLevels: [[1, 0.7], [2, 0.8], [3, 0.9], [4, 1], [5, 1.1], [6, 1.2], [7, 1.3], [8, 1.4], [9, 1.5], [10, 1.6], [11, 1.7]], buttons: [[0, "left"], [1, "middle"], [2, "right"], [3, "backward"], [4, "forward"], [7, "upScroll"], [8, "downScroll"]] },
+  { productId: 0xd085, name: "JamesDonkey RSR7 Ultra+", dpi: [50, 30000], maxPollingHz: 8000, lod: [[3, 0.7], [1, 1], [2, 2]], buttons: [[0, "left"], [1, "middle"], [2, "right"], [3, "backward"], [4, "forward"], [7, "upScroll"], [8, "downScroll"]] },
 ];
 /** Receivers in Launcher's product list (category "Bridge"). */
 export const KEYCHRON_RECEIVERS = new Map<number, string>([
@@ -156,6 +159,7 @@ export const KEYCHRON_4K_MICE: ReadonlyArray<{ productId: number; modelId: numbe
  */
 export const KEYCHRON_8K_NORDIC_MICE: ReadonlyArray<{ productId: number; name: string }> = [
   { productId: 0xd077, name: "Keychron G3 Air" },
+  { productId: 0x2801, name: "Keychron LM7 Air" },
 ];
 /**
  * Ultra-Link 8K receivers from Keychron's product list. 0xd05b is listed with
