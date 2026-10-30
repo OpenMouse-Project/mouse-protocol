@@ -269,13 +269,16 @@ export const FATER_HID_FILTERS: HIDDeviceFilter[] = [...FATER_PRODUCT_IDS].map((
   usage: FATER_CONFIG_USAGE,
 }));
 
-/** LED-page config collection on the Iris's interface 1, read from the mouse with HidP_GetCaps. */
-export const THERMALTAKE_HID_FILTERS: HIDDeviceFilter[] = [...THERMALTAKE_PRODUCT_IDS].map((productId) => ({
-  vendorId: THERMALTAKE_VENDOR_ID,
-  productId,
-  usagePage: THERMALTAKE_CONFIG_USAGE_PAGE,
-  usage: THERMALTAKE_CONFIG_USAGE,
-}));
+/**
+ * The Iris's LED-page config collection (interface 1) and its mouse collection
+ * (interface 0), read from the mouse with HidP_GetCaps. Chrome on Windows drops
+ * the first, so the second, with its 8-byte command report, is the one a
+ * browser can use there.
+ */
+export const THERMALTAKE_HID_FILTERS: HIDDeviceFilter[] = [...THERMALTAKE_PRODUCT_IDS].flatMap((productId) => [
+  { vendorId: THERMALTAKE_VENDOR_ID, productId, usagePage: THERMALTAKE_CONFIG_USAGE_PAGE, usage: THERMALTAKE_CONFIG_USAGE },
+  { vendorId: THERMALTAKE_VENDOR_ID, productId, usagePage: 0x01, usage: 0x02 },
+]);
 
 /** Holtek config collection measured on the M724 K1NG 1K (usbmon + usbhid-dump). */
 /**

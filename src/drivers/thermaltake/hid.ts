@@ -13,6 +13,7 @@ import {
   THERMALTAKE_PRODUCT_NAMES,
   THERMALTAKE_PROFILE_COUNT,
   THERMALTAKE_REPORT_ID,
+  THERMALTAKE_SHORT_REPORT_ID,
   THERMALTAKE_VENDOR_ID,
   thermaltakeApplySettings,
   thermaltakeCommands,
@@ -22,6 +23,7 @@ import {
   thermaltakeDecodeSettings,
   thermaltakeEncodeProfileWrite,
   thermaltakeNearestDpi,
+  thermaltakeShortCommand,
   type ThermaltakeSettingsPatch,
 } from "../../thermaltake/index.ts";
 
@@ -41,26 +43,45 @@ function hasConfigCollection(collection: HIDCollectionInfo): boolean {
     || collection.children.some(hasConfigCollection);
 }
 
-export function thermaltakeExposesConfigChannel(device: HIDDevice): boolean {
-  return device.collections.some(hasConfigCollection);
+/** Interface 0: the Generic Desktop Mouse collection with its unnumbered 8-byte feature report. */
+function hasShortChannel(collection: HIDCollectionInfo): boolean {
+  return (collection.usagePage === 0x01 && collection.usage === 0x02
+    && collection.featureReports.some((report) => report.reportId === THERMALTAKE_SHORT_REPORT_ID))
+    || collection.children.some(hasShortChannel);
 }
 
-const UNREACHABLE_NOTE = "Status only: the settings collection declares only constant items, so Chrome on "
-  + "Windows hides it and cannot send it reports. Run OpenMouse Bridge to change settings.";
+/**
+ * Which command path this WebHID device offers: the full config collection,
+ * the 8-byte report on the mouse interface, or neither.
+ */
+export function thermaltakeChannel(device: HIDDevice): "config" | "short" | null {
+  if (device.collections.some(hasConfigCollection)) return "config";
+  if (device.collections.some(hasShortChannel)) return "short";
+  return null;
+}
+
+const SHORT_NOTE = "In the browser this mouse can only switch onboard profiles. DPI, polling rate, button "
+  + "response and angle snapping live in profile blocks that only its settings collection carries, and "
+  + "Chrome on Windows hides that collection. Run OpenMouse Bridge to change them.";
+const UNREACHABLE_NOTE = "Status only: this is the mouse's keyboard interface. Reconnect and pick the other "
+  + "Iris Optical RGB entry to switch profiles, or run OpenMouse Bridge to change every setting.";
+const NEEDS_CONFIG = "Changing this needs the mouse's settings collection, which Chrome on Windows hides. "
+  + "Run OpenMouse Bridge to change it.";
 
 /**
- * Tt eSPORTS Iris Optical RGB and its Hatsune Miku Edition over the 2052-byte
- * feature reports of the LED-page config collection (see
+ * Tt eSPORTS Iris Optical RGB and its Hatsune Miku Edition (see
  * `@openmouse/protocol/thermaltake`). Settings live in five onboard profiles;
  * every change rewrites the active profile whole, keeping the bytes it does
  * not touch (lighting, buttons, name), and is read back before it counts.
  *
- * The config collection holds only constant items, so Windows reports no
- * caps for it and Chrome on Windows drops it, leaving just the consumer
- * collection: the same wall as the Delux M600 Pro
- * (docs/thermaltake-iris-testing.md). That device is still claimed so the
- * user learns why, but it reports identity only. OpenMouse Bridge lists the
- * collection without reports and reaches it natively.
+ * Two paths, like the Rapoo driver:
+ * - with the LED-page config collection (OpenMouse Bridge, which reaches it
+ *   natively) everything works;
+ * - in Chrome on Windows that collection holds only constant items, has no
+ *   caps and is dropped (docs/thermaltake-iris-testing.md), so the driver
+ *   falls back to the 8-byte report on the mouse interface: firmware, the
+ *   active profile and switching between the five profiles.
+ * The keyboard interface alone offers neither and reports identity only.
  */
 export class ThermaltakeHidClient {
   readonly device: HIDDevice;
@@ -75,8 +96,8 @@ export class ThermaltakeHidClient {
     return device.vendorId === THERMALTAKE_VENDOR_ID && THERMALTAKE_PRODUCT_IDS.includes(device.productId);
   }
 
-  private get settingsReachable(): boolean {
-    return thermaltakeExposesConfigChannel(this.device);
+  private get channel(): "config" | "short" | null {
+    return thermaltakeChannel(this.device);
   }
 
   displayName(): string {
@@ -110,7 +131,8 @@ export class ThermaltakeHidClient {
   }
 
   readStatus(): Promise<MouseStatus> {
-    if (!this.settingsReachable) {
+    if (this.channel === "short") return this.readShortStatus();
+    if (this.channel === null) {
       return Promise.resolve({
         brand: "Thermaltake",
         name: this.displayName(),
@@ -162,7 +184,7 @@ export class ThermaltakeHidClient {
         liftOffDistance: null,
         connectionType: "Wired",
         deviceMode: "Onboard",
-        firmware: this.firmware === null ? [] : [`Firmware V1.${String(this.firmware).padStart(3, "0")}`],
+        firmware: this.firmwareLabel(),
       };
     });
   }
@@ -223,7 +245,41 @@ export class ThermaltakeHidClient {
     return milliseconds;
   }
 
-  /** One-based, as the profile selector counts. */
+  private readShortStatus(): Promise<MouseStatus> {
+    return this.run(async () => {
+      if (this.firmware === null) this.firmware = await this.readFirmwareNow();
+      const profile = await this.readActiveProfileNow();
+      return {
+        brand: "Thermaltake",
+        name: this.displayName(),
+        ui: {
+          family: "thermaltake",
+          settingsReady: false,
+          hideSignalCard: true,
+          hideSleepCard: true,
+          hideProcessingCard: true,
+          showAdvancedSection: true,
+          statusNote: SHORT_NOTE,
+        },
+        batteryPercent: null,
+        batteryState: "Unknown",
+        dpi: 0,
+        pollingRateHz: 0,
+        activeProfile: profile + 1,
+        profileCount: THERMALTAKE_PROFILE_COUNT,
+        liftOffDistance: null,
+        connectionType: "Wired",
+        deviceMode: "Onboard",
+        firmware: this.firmwareLabel(),
+      };
+    });
+  }
+
+  private firmwareLabel(): string[] {
+    return this.firmware === null ? [] : [`Firmware V1.${String(this.firmware).padStart(3, "0")}`];
+  }
+
+  /** One-based, as the profile selector counts. Works on either channel. */
   setProfile(profile: number): Promise<number> {
     return this.run(async () => {
       const index = profile - 1;
@@ -244,6 +300,7 @@ export class ThermaltakeHidClient {
     patch: ThermaltakeSettingsPatch | ((current: ReturnType<typeof thermaltakeDecodeSettings>) => ThermaltakeSettingsPatch),
   ): Promise<void> {
     return this.run(async () => {
+      if (this.channel !== "config") throw new Error(NEEDS_CONFIG);
       const profile = await this.readActiveProfileNow();
       const data = await this.readProfileNow(profile);
       const next = thermaltakeApplySettings(
@@ -268,7 +325,7 @@ export class ThermaltakeHidClient {
   private async readFirmwareNow(): Promise<number | null> {
     try {
       await this.command(thermaltakeCommands.readFirmware(), DELAY_MS.firmware);
-      return thermaltakeDecodeFirmware(await this.receive(THERMALTAKE_REPORT_ID.command));
+      return thermaltakeDecodeFirmware(await this.receiveCommandReply());
     } catch {
       return null;
     }
@@ -276,7 +333,7 @@ export class ThermaltakeHidClient {
 
   private async readActiveProfileNow(): Promise<number> {
     await this.command(thermaltakeCommands.readActiveProfile(), DELAY_MS.register);
-    const profile = thermaltakeDecodeActiveProfile(await this.receive(THERMALTAKE_REPORT_ID.command));
+    const profile = thermaltakeDecodeActiveProfile(await this.receiveCommandReply());
     if (profile === null) throw new Error("The mouse did not report its active profile.");
     return profile;
   }
@@ -289,8 +346,13 @@ export class ThermaltakeHidClient {
   }
 
   private async command(payload: Uint8Array<ArrayBuffer>, waitMs: number): Promise<void> {
-    await this.device.sendFeatureReport(THERMALTAKE_REPORT_ID.command, payload);
+    if (this.channel === "config") await this.device.sendFeatureReport(THERMALTAKE_REPORT_ID.command, payload);
+    else await this.device.sendFeatureReport(THERMALTAKE_SHORT_REPORT_ID, thermaltakeShortCommand(payload));
     await delay(waitMs);
+  }
+
+  private receiveCommandReply(): Promise<Uint8Array> {
+    return this.receive(this.channel === "config" ? THERMALTAKE_REPORT_ID.command : THERMALTAKE_SHORT_REPORT_ID);
   }
 
   private async receive(reportId: number): Promise<Uint8Array> {
@@ -300,7 +362,7 @@ export class ThermaltakeHidClient {
 
   private run<T>(action: () => Promise<T>): Promise<T> {
     const result = this.queue.then(async () => {
-      if (!this.settingsReachable) throw new Error(UNREACHABLE_NOTE);
+      if (this.channel === null) throw new Error(UNREACHABLE_NOTE);
       await this.open();
       return action();
     });

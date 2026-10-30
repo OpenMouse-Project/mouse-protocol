@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ThermaltakeHidClient, thermaltakeExposesConfigChannel } from "./hid.ts";
+import { ThermaltakeHidClient, thermaltakeChannel } from "./hid.ts";
 import {
   THERMALTAKE_CONFIG_USAGE,
   THERMALTAKE_CONFIG_USAGE_PAGE,
@@ -20,6 +20,7 @@ import {
   thermaltakeHzToPollingCode,
   thermaltakeNearestDpi,
   thermaltakePollingCodeToHz,
+  thermaltakeShortCommand,
 } from "../../thermaltake/index.ts";
 
 const hex = (bytes: Uint8Array, length = bytes.length) =>
@@ -210,19 +211,71 @@ function fakeMouse(): FakeMouse {
   };
 }
 
-test("isSupported claims the Iris ids; only the config collection makes it writable", () => {
+/**
+ * Interface 0 as Chrome on Windows shows it: the mouse collection with its
+ * unnumbered 8-byte feature report. Replies come back with the leading 0x00
+ * report id, as `HidD_GetFeature` returned them on hardware.
+ */
+function fakeMouseInterface(mouse: FakeMouse) {
+  const sent: string[] = [];
+  let last = new Uint8Array(8);
+  const device = {
+    vendorId: THERMALTAKE_VENDOR_ID,
+    productId: THERMALTAKE_IRIS_PRODUCT_ID,
+    productName: "Iris Optical RGB",
+    opened: false,
+    collections: [{
+      usagePage: 0x01,
+      usage: 0x02,
+      featureReports: [{ reportId: 0, items: [] }],
+      inputReports: [],
+      outputReports: [],
+      children: [],
+    }],
+    open: async () => { (device as { opened: boolean }).opened = true; },
+    close: async () => {},
+    sendFeatureReport: async (reportId: number, data: Uint8Array) => {
+      assert.equal(reportId, 0);
+      assert.equal(data.length, 8);
+      sent.push(hex(data, 5));
+      last = data.slice();
+      if (data[0] === 0xde && data[1] === 0x0d) mouse.active = data[4]! & 0x0f;
+    },
+    receiveFeatureReport: async (reportId: number) => {
+      assert.equal(reportId, 0);
+      const body = last[0] === 0xc4 && last[1] === 0x08
+        ? [0xb0, 0x55, 0xaa, 0x80, 0x00, 0x50]
+        : [0xb0, 0xc0, last[1]!, 0x00, 0x00, 0x50 + mouse.active];
+      const reply = new Uint8Array(9);
+      reply.set(body, 1);
+      return new DataView(reply.buffer);
+    },
+  } as unknown as HIDDevice;
+  return { device, sent };
+}
+
+test("isSupported claims the Iris ids; the channel decides what works", () => {
   assert.equal(ThermaltakeHidClient.isSupported(fakeDevice(fakeMouse()).device), true);
-  assert.equal(thermaltakeExposesConfigChannel(fakeDevice(fakeMouse()).device), true);
+  assert.equal(thermaltakeChannel(fakeDevice(fakeMouse()).device), "config");
+  assert.equal(thermaltakeChannel(fakeMouseInterface(fakeMouse()).device), "short");
   assert.equal(ThermaltakeHidClient.isSupported(fakeDevice(fakeMouse(), 0x0c).device), true);
-  assert.equal(thermaltakeExposesConfigChannel(fakeDevice(fakeMouse(), 0x0c).device), false);
+  assert.equal(thermaltakeChannel(fakeDevice(fakeMouse(), 0x0c).device), null);
   const other = fakeDevice(fakeMouse()).device as unknown as { productId: number };
   other.productId = 0x1020;
   assert.equal(ThermaltakeHidClient.isSupported(other as unknown as HIDDevice), false);
 });
 
-// What Chrome on Windows hands over: the config collection has no caps, so
-// only the consumer collection (usage 0x0C:0x01) survives.
-test("without the config collection the mouse is status only and sends nothing", async () => {
+test("short commands are the first 8 bytes and refuse anything longer", () => {
+  assert.equal(hex(thermaltakeShortCommand(thermaltakeCommands.writeActiveProfile(1))), "de 0d 00 00 51 00 00 00");
+  assert.throws(() => thermaltakeShortCommand(thermaltakeEncodeProfileWrite(0, profileData(PROFILE_0_HEAD))), RangeError);
+  // The 8-byte reply decodes like the 0x0C one, with or without the id byte.
+  assert.equal(thermaltakeDecodeFirmware(new Uint8Array([0x00, 0xb0, 0x55, 0xaa, 0x80, 0, 0x50, 0, 0])), 0x80);
+  assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array([0xb0, 0xc0, 0x0d, 0, 0, 0x52, 0, 0])), 2);
+});
+
+// What Chrome on Windows shows of interface 1: the config collection has no
+// caps, so only the consumer collection (usage 0x0C:0x01) survives.
+test("the keyboard interface alone is status only and sends nothing", async () => {
   const { device, sent } = fakeDevice(fakeMouse(), 0x0c);
   const client = new ThermaltakeHidClient(device);
   const status = await client.readStatus();
@@ -232,6 +285,31 @@ test("without the config collection the mouse is status only and sends nothing",
   await assert.rejects(client.setPollingRate(500), /OpenMouse Bridge/);
   await assert.rejects(client.setProfile(2), /OpenMouse Bridge/);
   assert.deepEqual(sent, []);
+});
+
+test("the mouse interface reads firmware and switches profiles but edits nothing", async () => {
+  const mouse = fakeMouse();
+  mouse.active = 1;
+  const { device, sent } = fakeMouseInterface(mouse);
+  const client = new ThermaltakeHidClient(device);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.settingsReady, false);
+  assert.match(status.ui?.statusNote ?? "", /switch onboard profiles/);
+  assert.equal(status.activeProfile, 2);
+  assert.equal(status.profileCount, 5);
+  assert.deepEqual(status.firmware, ["Firmware V1.128"]);
+  assert.equal(status.dpiStages, undefined);
+
+  assert.equal(await client.setProfile(5), 5);
+  assert.equal(mouse.active, 4);
+  await assert.rejects(client.setDpi(800), /OpenMouse Bridge/);
+  assert.deepEqual(sent, [
+    "c4 08 00 00 00",
+    "df 0d 00 00 00",
+    "de 0d 00 00 54",
+    "c4 00 00 00 00",
+    "df 0d 00 00 00",
+  ]);
 });
 
 test("readStatus reports the active profile's settings", async () => {
