@@ -19,6 +19,7 @@ import {
 import {
   LogitechHidppClient,
   connectionDetailFor,
+  hasLightforceModeControl,
   hasLiftOffControl,
   isPowerOnlyModeStatus,
   isWiredHidppConnection,
@@ -175,13 +176,19 @@ test("an onboard-only mouse is told how to get itself supported", () => {
   assert.doesNotMatch(unknown.message, /format (\d|null)/);
   assert.match(unknown.message, /Copy verification data/);
 });
-test("the G309's mode status is power-only and exposes no surface or LightForce controls", () => {
-  // Model id captured from hardware: 0x8090 V2 with only the power-mode half.
-  assert.equal(isPowerOnlyModeStatus("B03C40B10000"), true);
-  // The G305 reports the same reserved status1 byte.
-  assert.equal(isPowerOnlyModeStatus("407400000000"), true);
-  // Every other model keeps the status1 fields, and unknown/absent ids must
-  // not be silently downgraded.
+test("G309 exposes LightForce mode without lift-off control, while G305 is power-only", () => {
+  const g309 = "B03C40B10000";
+  const g305 = "407400000000";
+  assert.equal(isPowerOnlyModeStatus(g309), false);
+  assert.equal(hasLightforceModeControl(g309, false, false), true);
+  assert.equal(hasLightforceModeControl(g309, false, true), false, "HITS takes precedence");
+
+  assert.equal(isPowerOnlyModeStatus(g305), true);
+  assert.equal(hasLightforceModeControl(g305, false, false), false);
+  assert.equal(hasLightforceModeControl("unknown", false, false), false);
+  assert.equal(hasLightforceModeControl("unknown", true, false), true);
+
+  // Unknown/absent ids must not be silently downgraded.
   assert.equal(isPowerOnlyModeStatus("B03C40B10001"), false);
   assert.equal(isPowerOnlyModeStatus(""), false);
   assert.equal(isPowerOnlyModeStatus(null), false);
@@ -326,6 +333,56 @@ async function resolveIndex(client: LogitechHidppClient): Promise<number | null>
   await driver.resolveDeviceIndex();
   return driver.resolvedDeviceIndex;
 }
+
+test("extended DPI writes zero for unsupported Y axes", async () => {
+  const { client } = harness(LIGHTSPEED_RECEIVER, { 1: "mouse" });
+  const driver = client as unknown as {
+    resolveDpiFeature(): Promise<{ index: number; legacy: boolean }>;
+    getDpiOptions(): Promise<number[]>;
+    ensureHostControl(): Promise<void>;
+    getFeature(featureId: number): Promise<{ index: number; version: number }>;
+    readDpiConfiguration(featureIndex: number): Promise<{ x: number; y: number; lod: number }>;
+    readDpiCapabilities(featureIndex: number): Promise<{ separateAxes: boolean; liftOff: boolean }>;
+    requestLong(featureIndex: number, functionId: number, parameters: number[]): Promise<Uint8Array>;
+  };
+  let configurationReads = 0;
+  let writeParameters: number[] = [];
+  driver.resolveDpiFeature = async () => ({ index: 0x07, legacy: false });
+  driver.getDpiOptions = async () => [800, 1600];
+  driver.ensureHostControl = async () => {};
+  driver.getFeature = async () => ({ index: 0x07, version: 1 });
+  driver.readDpiCapabilities = async () => ({ separateAxes: false, liftOff: false });
+  driver.readDpiConfiguration = async () => {
+    configurationReads += 1;
+    return configurationReads === 1
+      ? { x: 800, y: 0, lod: 3 }
+      : { x: 1600, y: 0, lod: 0 };
+  };
+  driver.requestLong = async (_featureIndex, functionId, parameters) => {
+    assert.equal(functionId, 0x60);
+    writeParameters = parameters;
+    return new Uint8Array();
+  };
+
+  assert.equal(await client.setDpi(1600), 1600);
+  assert.deepEqual(writeParameters, [0x00, 0x06, 0x40, 0x00, 0x00, 0x00]);
+});
+
+test("HID++ rejections identify the feature and function that failed", async () => {
+  const { client, device } = harness(LIGHTSPEED_RECEIVER, { 1: "mouse" });
+  await resolveIndex(client);
+  device.onRequest = (request) => request[1] === 0x07 && request[2] === withSoftwareId(0x60)
+    ? new Uint8Array([request[0], 0xff, request[1], request[2], 0x02, 0, 0])
+    : null;
+  const driver = client as unknown as {
+    requestLong(featureIndex: number, functionId: number, parameters: number[]): Promise<Uint8Array>;
+  };
+
+  await assert.rejects(
+    driver.requestLong(0x07, 0x60, [0, 6, 64, 0, 0, 0]),
+    /invalid argument.*feature 0x07, function 0x60/,
+  );
+});
 
 /**
  * Simulates `readStatus()`'s own retry: clear the already-resolved (and, by

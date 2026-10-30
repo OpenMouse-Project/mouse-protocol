@@ -274,13 +274,27 @@ const KNOWN_RECEIVER_PRODUCT_IDS: ReadonlySet<number> = new Set(LOGITECH_RECEIVE
  * model id, like the Superstrike detection.
  */
 const MODE_STATUS_POWER_ONLY_MODEL_IDS: ReadonlySet<string> = new Set([
-  "B03C40B10000", // G309 LIGHTSPEED
   "407400000000", // G305 LIGHTSPEED
+]);
+
+const LIGHTFORCE_MODE_WITHOUT_LIFT_OFF_MODEL_IDS: ReadonlySet<string> = new Set([
+  "B03C40B10000", // G309 LIGHTSPEED
 ]);
 
 /** Whether 0x8090 on this model is the power-mode-only variant. */
 export function isPowerOnlyModeStatus(modelId: string | null | undefined): boolean {
   return MODE_STATUS_POWER_ONLY_MODEL_IDS.has(modelId ?? "");
+}
+
+/** Whether the model exposes LightForce mode, even without a live lift-off control. */
+export function hasLightforceModeControl(
+  modelId: string | null | undefined,
+  hasLiveLiftOffControl: boolean,
+  hasAnalogButtons: boolean,
+): boolean {
+  return !isPowerOnlyModeStatus(modelId)
+    && !hasAnalogButtons
+    && (hasLiveLiftOffControl || LIGHTFORCE_MODE_WITHOUT_LIFT_OFF_MODEL_IDS.has(modelId ?? ""));
 }
 
 /**
@@ -538,7 +552,11 @@ export class LogitechHidppClient {
         return failure !== null;
       });
       if (failedIndex >= 0) {
-        this.waiters.splice(failedIndex, 1)[0].reject(new Error(failure ?? "The mouse rejected that request."));
+        const [waiter] = this.waiters.splice(failedIndex, 1);
+        const request = waiter
+          ? ` (feature 0x${waiter.featureIndex.toString(16).padStart(2, "0")}, function 0x${waiter.functionId.toString(16).padStart(2, "0")})`
+          : "";
+        waiter?.reject(new Error(`${failure ?? "The mouse rejected that request."}${request}`));
       }
       return;
     }
@@ -921,9 +939,8 @@ export class LogitechHidppClient {
       onboardProfileFormat,
       // HID++ exposes no per-field support mask for status1. A power-only
       // variant can leave it reserved at zero, which would falsely decode as
-      // Surface Auto and LightForce Optical. Only expose that control bank when
-      // the sensor positively reports the related live LOD capability; this is
-      // deliberately conservative and avoids a product/model exception.
+      // Surface Auto and LightForce Optical. Require live LOD capability
+      // except for models whose status fields have been verified separately.
       ...wheel,
       friendlyName: friendly?.name ?? null,
       friendlyNameMaxLength: friendly?.maxLength ?? null,
@@ -933,10 +950,14 @@ export class LogitechHidppClient {
       hapticIntensity: haptics?.intensity ?? null,
       hapticEnabled: haptics?.enabled ?? null,
       hapticBatterySaving: haptics?.batterySaving ?? null,
-      gamingSurfaceMode: modeStatus === null || !hasLiveLiftOffControl
+      gamingSurfaceMode: modeStatus === null || !hasLiveLiftOffControl || isPowerOnlyModeStatus(identity.modelId)
         ? null
         : decodeModeStatus(modeStatus, MODE_STATUS.gamingSurface),
-      lightforceSwitchMode: modeStatus === null || !hasLiveLiftOffControl || !hasLightforceSwitches(Boolean(analogButtonsFeature.index))
+      lightforceSwitchMode: modeStatus === null || !hasLightforceModeControl(
+        identity.modelId,
+        hasLiveLiftOffControl,
+        Boolean(analogButtonsFeature.index),
+      )
         ? null
         : decodeModeStatus(modeStatus, MODE_STATUS.lightforce),
       lighting: lighting ?? undefined,
@@ -1241,16 +1262,19 @@ export class LogitechHidppClient {
     await this.ensureHostControl();
     const feature = await this.getFeature(FEATURE.extendedDpi);
     const current = await this.readDpiConfiguration(feature.index);
+    const capabilities = await this.readDpiCapabilities(feature.index);
+    const writeDpiY = capabilities.separateAxes ? dpiY : 0;
+    const writeLod = capabilities.liftOff ? current.lod : 0;
     await this.requestLong(feature.index, 0x60, [
       0x00,
       dpi >> 8,
       dpi & 0xff,
-      dpiY >> 8,
-      dpiY & 0xff,
-      current.lod,
+      writeDpiY >> 8,
+      writeDpiY & 0xff,
+      writeLod,
     ]);
     const confirmed = await this.readDpiConfiguration(feature.index);
-    if (confirmed.x !== dpi || confirmed.y !== dpiY) {
+    if (confirmed.x !== dpi || (capabilities.separateAxes && confirmed.y !== dpiY)) {
       throw new Error(`The mouse kept ${confirmed.x}/${confirmed.y} DPI instead of ${dpi}/${dpiY} DPI.`);
     }
     return confirmed.x;
@@ -1269,12 +1293,13 @@ export class LogitechHidppClient {
       throw new Error("This mouse does not expose lift-off-distance controls.");
     }
     const current = await this.readDpiConfiguration(feature.index);
+    const capabilities = await this.readDpiCapabilities(feature.index);
     await this.requestLong(feature.index, 0x60, [
       0x00,
       current.x >> 8,
       current.x & 0xff,
-      current.y >> 8,
-      current.y & 0xff,
+      capabilities.separateAxes ? current.y >> 8 : 0,
+      capabilities.separateAxes ? current.y & 0xff : 0,
       lod,
     ]);
     const confirmed = await this.readDpiConfiguration(feature.index);
