@@ -41,12 +41,26 @@ function hasConfigCollection(collection: HIDCollectionInfo): boolean {
     || collection.children.some(hasConfigCollection);
 }
 
+export function thermaltakeExposesConfigChannel(device: HIDDevice): boolean {
+  return device.collections.some(hasConfigCollection);
+}
+
+const UNREACHABLE_NOTE = "Status only: the settings collection declares only constant items, so Chrome on "
+  + "Windows hides it and cannot send it reports. Run OpenMouse Bridge to change settings.";
+
 /**
  * Tt eSPORTS Iris Optical RGB and its Hatsune Miku Edition over the 2052-byte
  * feature reports of the LED-page config collection (see
  * `@openmouse/protocol/thermaltake`). Settings live in five onboard profiles;
  * every change rewrites the active profile whole, keeping the bytes it does
  * not touch (lighting, buttons, name), and is read back before it counts.
+ *
+ * The config collection holds only constant items, so Windows reports no
+ * caps for it and Chrome on Windows drops it, leaving just the consumer
+ * collection: the same wall as the Delux M600 Pro
+ * (docs/thermaltake-iris-testing.md). That device is still claimed so the
+ * user learns why, but it reports identity only. OpenMouse Bridge lists the
+ * collection without reports and reaches it natively.
  */
 export class ThermaltakeHidClient {
   readonly device: HIDDevice;
@@ -58,9 +72,11 @@ export class ThermaltakeHidClient {
   }
 
   static isSupported(device: HIDDevice): boolean {
-    if (device.vendorId !== THERMALTAKE_VENDOR_ID) return false;
-    if (!THERMALTAKE_PRODUCT_IDS.includes(device.productId)) return false;
-    return device.collections.some(hasConfigCollection);
+    return device.vendorId === THERMALTAKE_VENDOR_ID && THERMALTAKE_PRODUCT_IDS.includes(device.productId);
+  }
+
+  private get settingsReachable(): boolean {
+    return thermaltakeExposesConfigChannel(this.device);
   }
 
   displayName(): string {
@@ -94,6 +110,21 @@ export class ThermaltakeHidClient {
   }
 
   readStatus(): Promise<MouseStatus> {
+    if (!this.settingsReachable) {
+      return Promise.resolve({
+        brand: "Thermaltake",
+        name: this.displayName(),
+        ui: { family: "thermaltake", settingsReady: false, statusNote: UNREACHABLE_NOTE },
+        batteryPercent: null,
+        batteryState: "Unknown",
+        dpi: 0,
+        pollingRateHz: 0,
+        activeProfile: null,
+        liftOffDistance: null,
+        connectionType: "Wired",
+        firmware: [],
+      });
+    }
     return this.run(async () => {
       if (this.firmware === null) this.firmware = await this.readFirmwareNow();
       const profile = await this.readActiveProfileNow();
@@ -269,6 +300,7 @@ export class ThermaltakeHidClient {
 
   private run<T>(action: () => Promise<T>): Promise<T> {
     const result = this.queue.then(async () => {
+      if (!this.settingsReachable) throw new Error(UNREACHABLE_NOTE);
       await this.open();
       return action();
     });
