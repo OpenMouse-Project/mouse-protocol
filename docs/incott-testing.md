@@ -828,7 +828,9 @@ capture session has resolved. **Do not resolve these by guessing.**
 - **The remaining `0x8f` identity bytes.** Bytes 2-6 are decoded (model,
   receiver, sensor — see the model-identification section at the end of this
   document). Bytes 7-8 (`00 ff` on this device) are still unknown; a firmware
-  version is the obvious candidate but nothing confirms it.
+  version is the obvious candidate but nothing confirms it. One lead: on the
+  Zero 29 only, the vendor reads the shell colour from this area (see "Shell
+  colour: Zero 29 only" below).
 Resolved since this list was written (kept for the record):
 
 - ~~**DPI per-axis read.**~~ It exists: `09 82 <stage> <axis>`, echoed at
@@ -946,6 +948,31 @@ not own.
 The sensor decides the "Pro" suffix: the vendor appends `Pro` when the sensor
 is `0x3950`, which is how `G23V2Pro` appears for a device whose HID product
 string only ever says `incott 8K wireless mouse`.
+
+### Shell colour: Zero 29 only
+
+`readDps()` has one more branch, transcribed here from the port in
+[oexi/incott-driver-desktop](https://github.com/oexi/incott-driver-desktop)
+(`src/protocol/device.js`, MIT), whose tests diff every report against the
+vendor's original JavaScript:
+
+```js
+if (r[2] === 6) {                     // model code 0x06, Zero 29
+  const i1 = this.iswireless ? 6 : 5;
+  this.isPink = r[i1] === 2;
+}
+```
+
+With `r[n]` being `frame[n+1]`, that is **frame byte 7 behind the receiver,
+frame byte 6 on the cable**, one slot past the sensor byte for the same link,
+and `0x02` means the pink shell: the vendor then swaps in its pink product
+render and button diagrams. No other model code takes this branch, so for
+every other model the identity reply carries no colour as far as the vendor
+knows. A white G23 Pro reads `00` in both positions
+(`09 8f 01 02 00 f1 00 00 00` on the cable, `09 8f 01 02 02 f0 f1 00 02` on
+the dongle).
+
+Not read on a Zero 29 here, and not decoded by `incottDecodeIdentity`.
 
 ### The sensor slot moves with the receiver — corrected 2026-09-11
 
