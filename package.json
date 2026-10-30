@@ -233,6 +233,10 @@
     "./hitscan": {
       "types": "./dist/hitscan/index.d.ts",
       "import": "./dist/hitscan/index.js"
+    },
+    "./roccat": {
+      "types": "./dist/roccat/index.d.ts",
+      "import": "./dist/roccat/index.js"
     }
   },
   "scripts": {

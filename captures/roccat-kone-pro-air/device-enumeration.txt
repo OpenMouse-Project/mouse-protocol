@@ -1,0 +1,24 @@
+# HID interface enumeration, ROCCAT Kone Pro Air Stellar Wireless dongle
+# USB 1e7d:2c8e, Windows, node-hid devices() + Win32 PnP, 2026-10-14.
+# The composite is "USB Composite Device"/"ROCCAT Kone Pro Air Dongle",
+# four interfaces:
+#
+# iface 0  usage page 0x0001, usage 0x0002 -> boot mouse (pointer)
+# iface 1  usage page 0x0001, usage 0x0006 -> keyboard-style interface
+#          (media keys? uninterpreted)
+# iface 2  usage page 0xFF00, usage 0x0001 -> VENDOR CONTROL CHANNEL,
+#          unnumbered 64-byte output reports. No feature reports
+#          (every GET answer timed out or returned zero).
+# iface 3  usage page 0x000C, usage 0x0001 -> consumer control,
+#          plus a second top-level collection on the same interface with
+#          usage page 0x0001, usage 0x0080 (system control).
+#
+# Wired generation (`1e7d:2c92`) is reported by the public SignalRGB plugin's
+# Validate() guard as interface === 1 for the same collection shape; not
+# captured on this unit.
+#
+# Win32 PnP hardware IDs (no serial suffix present):
+#   USB\VID_1E7D&PID_2C8E&MI_00
+#   USB\VID_1E7D&PID_2C8E&MI_01
+#   USB\VID_1E7D&PID_2C8E&MI_02
+#   USB\VID_1E7D&PID_2C8E&MI_03
