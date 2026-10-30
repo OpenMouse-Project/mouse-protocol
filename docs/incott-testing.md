@@ -896,7 +896,13 @@ vendor's original JavaScript), remaps lift-off only for the PAW3950:
 
 For the PAW3395 the profile value goes out unchanged and `lodOptions` offers
 only 1 mm and 2 mm, which is what `lodUI`/`lodHW` describe when read as a
-pair. The PAW3950 column is the hardware-verified table above.
+pair.
+
+The PAW3950 column is now read point by point on hardware (2026-10-30, a G23
+Pro on the 8K dongle, `captures/incott-lift-off/`): each step was set with
+the vendor port, the port was closed, and the OpenMouse hardware test read
+`0x84`/`0x01` back as `2` for 0.7 mm, `0` for 1 mm and `1` for 2 mm. That
+closes the gap noted above, where only the 0.7 mm point had been read.
 
 Until this change the driver applied the PAW3950 table to every unit, so on a
 PAW3395 (non-Pro) mouse it showed 2 mm as "Low" (0.7 mm), 1 mm as "High", and

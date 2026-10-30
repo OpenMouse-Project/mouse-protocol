@@ -811,7 +811,9 @@ export const INCOTT_LOD_TENTHS_TO_WIRE: Readonly<Record<number, number>> = { 10:
  * 2 = 2 mm, and 0.7 mm does not exist. That is also why `lodUI`/`lodHW`
  * read as a straight pairing: they describe the PAW3395 path.
  *
- * Not yet read on PAW3395 hardware; every unit tested here is a PAW3950.
+ * Not yet read on PAW3395 hardware; every unit tested here is a PAW3950. The
+ * PAW3950 table was read point by point on 2026-10-30 (wire 2/0/1 for
+ * 0.7/1/2 mm, captures/incott-lift-off/).
  */
 export const INCOTT_LOD_WIRE_TO_TENTHS_PAW3395: Readonly<Record<number, number>> = { 1: 10, 2: 20 };
 export const INCOTT_LOD_TENTHS_TO_WIRE_PAW3395: Readonly<Record<number, number>> = { 10: 1, 20: 2 };
