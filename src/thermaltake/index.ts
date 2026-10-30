@@ -163,9 +163,16 @@ export type ThermaltakeChannel = "config" | "short";
  * short report puts it first after an optional leading id byte.
  */
 function commandFrame(reply: Uint8Array, channel: ThermaltakeChannel): Uint8Array | null {
-  if (channel === "config") return thermaltakeNormalizeReply(THERMALTAKE_REPORT_ID.command, reply);
-  if (reply.length === THERMALTAKE_SHORT_REPORT_SIZE + 1) return reply.subarray(1);
-  return reply.length === THERMALTAKE_SHORT_REPORT_SIZE ? reply : null;
+  const frame = channel === "config"
+    ? thermaltakeNormalizeReply(THERMALTAKE_REPORT_ID.command, reply)
+    : reply.length === THERMALTAKE_SHORT_REPORT_SIZE + 1
+      ? reply.subarray(1)
+      : reply.length === THERMALTAKE_SHORT_REPORT_SIZE ? reply : null;
+  if (!frame) return null;
+  // A reply that kept its status must report success. Bridge drops that byte
+  // from 0x0C replies, which leaves the report id padded back in its place.
+  const statusDropped = channel === "config" && frame[0] === THERMALTAKE_REPORT_ID.command;
+  return frame[0] === THERMALTAKE_STATUS_OK || statusDropped ? frame : null;
 }
 
 /** Firmware byte from a `C4 08` reply (`B0 55 AA <version>`), or null. */
@@ -239,6 +246,7 @@ export function thermaltakeHzToPollingCode(hz: number): number {
 
 /** Nearest DPI the mouse can store, inside 100..5000 in steps of 100. */
 export function thermaltakeNearestDpi(dpi: number): number {
+  if (!Number.isFinite(dpi)) throw new RangeError(`Invalid DPI ${dpi}.`);
   const clamped = Math.min(THERMALTAKE_DPI_MAX, Math.max(THERMALTAKE_DPI_MIN, dpi));
   return Math.round(clamped / THERMALTAKE_DPI_STEP) * THERMALTAKE_DPI_STEP;
 }
@@ -293,11 +301,15 @@ export function thermaltakeApplySettings(data: Uint8Array, patch: ThermaltakeSet
       next[o.dpiTable + i] = thermaltakeNearestDpi(dpi) / THERMALTAKE_DPI_STEP;
     });
   }
-  const active = patch.activeDpiStage ?? Math.min(current.activeDpiStage, stages.length - 1);
-  if (!Number.isInteger(active) || active < 0 || active >= stages.length) {
-    throw new RangeError(`Invalid DPI stage ${active + 1}.`);
+  // Leave the level byte alone unless the stages change, so a polling or
+  // debounce patch never rewrites a value the vendor tool would read as-is.
+  if (patch.dpiStages !== undefined || patch.activeDpiStage !== undefined) {
+    const active = patch.activeDpiStage ?? Math.min(current.activeDpiStage, stages.length - 1);
+    if (!Number.isInteger(active) || active < 0 || active >= stages.length) {
+      throw new RangeError(`Invalid DPI stage ${active + 1}.`);
+    }
+    next[o.dpiLevels] = (stages.length << 4) | active;
   }
-  next[o.dpiLevels] = (stages.length << 4) | active;
   if (patch.angleSnapping !== undefined) {
     // The vendor tool writes the whole byte as 0x80 or 0; leave an "off" byte
     // alone so turning off what is already off changes nothing.

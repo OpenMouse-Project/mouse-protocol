@@ -157,8 +157,10 @@ The default profile maps slot 0 to left, 1 to right, 2 to middle.
 
 Forty macro blocks of 2048 bytes (8 per profile, index `profile * 8 + slot`),
 read with `C4 0B index` then report 0x04 and written as report 0x04
-`[04, 0, index, checksum, block]`. Block header: `+64` execution mode, `+65`
-loop count, `+66` time unit, `+67..68` event length (little-endian), `+69`
-name length, `+70..` UTF-16LE name, events from `+120` (up to 1992 bytes,
-5000 ms delay limit per step). The event encoding is in the vendor's
-`Macro.cs` and still needs a capture to confirm.
+`[04, 0, index, checksum, block]`. The vendor keeps each macro in a 2112-byte
+file and sends bytes 64..2111 as the block, so offsets inside the block are:
+`+0` execution mode, `+1` loop count, `+2` time unit, `+3..4` event length
+(little-endian), `+5` name length, `+6..` UTF-16LE name, events from `+56`
+(up to 1992 bytes, to the end of the block; 5000 ms delay limit per step).
+The event encoding is in the vendor's `Macro.cs` and still needs a capture to
+confirm.
