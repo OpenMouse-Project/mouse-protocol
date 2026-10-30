@@ -1015,6 +1015,16 @@ test("setLiftOffDistance writes the PAW3395 wire values and refuses 0.7 mm", asy
   assert.equal(sent.length, before, "nothing is sent for a step the sensor does not offer");
 });
 
+test("a failed identity refresh keeps the PAW3395 table from the last good reply", async () => {
+  const { device, state } = fakeDevice({ state: { identity: PAW3395_IDENTITY, lodWire: 2 } });
+  const client = new IncottHidClient(device, fast);
+  await client.open();
+  state.identity = null; // the identity query stops answering after open()
+  const status = await client.readStatus();
+  assert.equal(status.liftOffDistance, "High");
+  assert.deepEqual(status.supportedLiftOffDistances, ["Medium", "High"]);
+});
+
 test("a PAW3950 keeps the hardware-verified table: wire 2 is 0.7 mm", async () => {
   const { device } = fakeDevice({ state: { identity: [0x01, 0x02, 0x00, 0xf1, 0x00, 0x00, 0x00], lodWire: 2 } });
   const client = new IncottHidClient(device, fast);

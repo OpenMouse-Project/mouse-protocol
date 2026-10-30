@@ -875,10 +875,9 @@ The device contradicts that, so the arrays are not a paired lookup. Recording it
 because it is exactly the kind of plausible-but-wrong inference worth warning the
 next contributor about.
 
-Only the 0.7 mm point was read back directly. Hardware `0` and `1` are 1 mm and
-2 mm in that order; the mapping is a bijection over {0,1,2} and the one claim that
-was testable proved correct, but neither of those two values has been read
-individually.
+That session read only the 0.7 mm point; hardware `0` and `1` (1 mm and 2 mm)
+followed from the bijection. All three points have since been read individually,
+see the hardware read in "The mapping depends on the sensor" below.
 
 ### The mapping depends on the sensor
 
@@ -901,8 +900,7 @@ pair.
 The PAW3950 column is now read point by point on hardware (2026-10-30, a G23
 Pro on the 8K dongle, `captures/incott-lift-off/`): each step was set with
 the vendor port, the port was closed, and the OpenMouse hardware test read
-`0x84`/`0x01` back as `2` for 0.7 mm, `0` for 1 mm and `1` for 2 mm. That
-closes the gap noted above, where only the 0.7 mm point had been read.
+`0x84`/`0x01` back as `2` for 0.7 mm, `0` for 1 mm and `1` for 2 mm.
 
 Until this change the driver applied the PAW3950 table to every unit, so on a
 PAW3395 (non-Pro) mouse it showed 2 mm as "Low" (0.7 mm), 1 mm as "High", and

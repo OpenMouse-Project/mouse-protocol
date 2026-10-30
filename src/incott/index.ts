@@ -792,10 +792,8 @@ export const INCOTT_POLLING_HZ_TO_WIRE: Readonly<Record<number, number>> = {
  * them as a pair implies hardware 0 = 0.7 mm, which the device
  * contradicts. Do not 'fix' this mapping from that file.
  *
- * Remaining nuance: only the 0.7 mm point was read directly. Hardware 0
- * and 1 are 1 mm and 2 mm in that order per IncottHIDApp; since the
- * mapping is a bijection over {0,1,2} and its 0.7 mm claim proved correct,
- * the other two follow, but neither has been read back individually.
+ * That session read only the 0.7 mm point; all three were read
+ * individually on 2026-10-30 (see INCOTT_LOD_WIRE_TO_TENTHS_PAW3395 below).
  */
 export const INCOTT_LOD_STEPS_TENTHS: readonly number[] = [7, 10, 20];
 export const INCOTT_LOD_WIRE_TO_TENTHS: Readonly<Record<number, number>> = { 0: 10, 1: 20, 2: 7 };

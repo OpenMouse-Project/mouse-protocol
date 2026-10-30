@@ -758,7 +758,9 @@ export class IncottHidClient {
     const identity = dead
       ? null
       : incottDecodeIdentity(await this.query(INCOTT_CMD_QUERY_IDENTITY, INCOTT_SUB_NONE));
-    this.sensorId = identity?.sensorId ?? null;
+    // A failed refresh keeps the sensor the last good reply named, so one
+    // dropped identity query cannot switch a PAW3395 to the PAW3950 table.
+    if (identity?.sensorId != null) this.sensorId = identity.sensorId;
     const liftOffTenths = liftOffFrame === null ? null : incottDecodeLiftOffDirect(liftOffFrame, this.sensorId);
 
     // The model READ FROM THE DEVICE is preferred over the product string:
