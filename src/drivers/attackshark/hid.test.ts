@@ -208,6 +208,7 @@ function nativeX11WithReadBack(options: { asleep?: boolean } = {}) {
   const sent: Array<{ reportId: number; data: number[] }> = [];
   const listeners = new Map<string, (event: { reportId: number; data: DataView }) => void>();
   let staged: number | null = null;
+  let staleReads = 0;
   const device = {
     vendorId: 0x1d57,
     productId: 0xfa60,
@@ -227,7 +228,10 @@ function nativeX11WithReadBack(options: { asleep?: boolean } = {}) {
       const reply = reportId === 0xa0
         ? [0xa0, staged === null || options.asleep ? 0 : 1, 0, 0, 0, 0, 0, 0]
         : reportId === staged ? reports.get(reportId)! : [0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x15, 0x00];
-      if (reportId !== 0xa0) staged = null;
+      if (reportId !== 0xa0) {
+        if (reportId !== staged) staleReads++;
+        staged = null;
+      }
       return Promise.resolve(new DataView(new Uint8Array(reply).buffer));
     },
     addEventListener(type: string, listener: (event: { reportId: number; data: DataView }) => void) {
@@ -239,7 +243,7 @@ function nativeX11WithReadBack(options: { asleep?: boolean } = {}) {
     reportId: 0x03,
     data: new DataView(new Uint8Array([model, 0x40, 0x01, 0x50]).buffer),
   });
-  return { device, sent, announce, reports };
+  return { device, sent, announce, reports, staleReads: () => staleReads };
 }
 
 test("a named X11 over a native adapter reads its live table, polling rate and firmware", async () => {
@@ -390,6 +394,37 @@ test("a different model behind the same receiver drops the cached X11 table", as
   // The M600 Pro is written from the factory table, not the X11's bytes.
   assert.deepEqual(sent.map(({ reportId }) => reportId), [0x04]);
   assert.equal(sent[0].data[4], 0x3f);
+});
+
+test("a different model behind the same receiver stops reporting the X11's firmware", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, announce } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  assert.deepEqual((await client.readStatus()).firmware, ["Firmware 1.07"]);
+  announce(0x20);
+  assert.deepEqual((await client.readStatus()).firmware, []);
+});
+
+test("overlapping X11 status reads and edits do not interleave their read handshakes", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, announce, staleReads } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  const [status, applied, again] = await Promise.all([
+    client.readStatus(),
+    client.setDpiStageValue(2, 1600),
+    client.readStatus(),
+  ]);
+  assert.equal(applied, 1600);
+  assert.deepEqual(status.firmware, ["Firmware 1.07"]);
+  assert.deepEqual(again.firmware, ["Firmware 1.07"]);
+  // A fetch the firmware was not asked to stage returns stale buffer bytes.
+  assert.equal(staleReads(), 0);
 });
 
 test("X11 read-back is not tried before a receiver message names the X11", async () => {

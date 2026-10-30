@@ -506,6 +506,7 @@ export class AttackSharkHidClient {
   private readonly receiverWriteGapMs: number;
   private lastStatus: MouseStatus | null = null;
   private queue: Promise<unknown> = Promise.resolve();
+  private exclusiveQueue: Promise<unknown> = Promise.resolve();
   private batteryPercent: number | null = null;
   private listening = false;
 
@@ -591,6 +592,7 @@ export class AttackSharkHidClient {
       if (runtime.modelId !== null && runtime.modelId !== packet[1]) {
         x11DpiStates.delete(this.device.productId);
         runtime.readBackWorks = false;
+        runtime.firmwareVersion = null;
       }
       runtime.modelId = packet[1];
     }
@@ -724,7 +726,7 @@ export class AttackSharkHidClient {
 
     const dpiState = this.x11DpiSupported ? x11DpiStateFor(this.device.productId) : null;
     if (dpiState && this.x11ReadBack) {
-      await this.readX11DpiState();
+      await this.exclusive(() => this.readX11DpiState());
     }
     if (dpiState) {
       dpi = dpiState.stages[dpiState.activeStage - 1] ?? 0;
@@ -733,7 +735,7 @@ export class AttackSharkHidClient {
     // X11 polling rate: read back when possible, otherwise the last value
     // this process applied (defaulting to 1,000 Hz).
     if (x11Runtime) {
-      if (this.x11ReadBack) await this.readX11Runtime(x11Runtime);
+      if (this.x11ReadBack) await this.exclusive(() => this.readX11Runtime(x11Runtime));
       pollingRateHz = x11Runtime.pollingRateHz;
       if (x11Runtime.firmwareVersion !== null) {
         const version = x11Runtime.firmwareVersion;
@@ -813,7 +815,7 @@ export class AttackSharkHidClient {
       // status read reads the rate back where the 0xa0 handshake is available.
       const entry = POLLING_RATES_1D57.find(([, hz]) => hz === pollingRateHz);
       if (!entry) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
-      await this.write1d57PollingRate(entry[0]);
+      await this.exclusive(() => this.write1d57PollingRate(entry[0]));
       x11RuntimeFor(this.device.productId).pollingRateHz = pollingRateHz;
       if (this.lastStatus) this.lastStatus = { ...this.lastStatus, pollingRateHz };
       return pollingRateHz;
@@ -1000,60 +1002,76 @@ export class AttackSharkHidClient {
     return enabled[stage];
   }
 
+  /**
+   * Run one edit start to finish: read the live table, change it, write it
+   * back. Held exclusively so no other read or edit slips its own request in
+   * between and so no read lands between this edit's read and its write.
+   */
+  private editX11<T>(apply: (state: X11DpiState) => Promise<T>): Promise<T> {
+    return this.exclusive(async () => apply(await this.x11DpiForEdit()));
+  }
+
   /** Sets the active stage's DPI, preserving the other five. */
   async setDpi(dpi: number, _dpiY?: number): Promise<number> {
-    const state = await this.x11DpiForEdit();
-    const value = nearestX11Dpi(dpi);
-    state.stages[state.activeStage - 1] = value;
-    await this.writeX11Dpi();
-    if (this.lastStatus) this.lastStatus = { ...this.lastStatus, dpi: value };
-    return value;
+    return this.editX11(async (state) => {
+      const value = nearestX11Dpi(dpi);
+      state.stages[state.activeStage - 1] = value;
+      await this.writeX11Dpi();
+      if (this.lastStatus) this.lastStatus = { ...this.lastStatus, dpi: value };
+      return value;
+    });
   }
 
   /** Edits one stage's DPI. `stage` is 0-based, matching the shared UI contract. */
   async setDpiStageValue(stage: number, dpi: number): Promise<number> {
-    const state = await this.x11DpiForEdit();
-    const hardware = this.x11HardwareStage(state, stage);
-    const value = nearestX11Dpi(dpi);
-    state.stages[hardware] = value;
-    await this.writeX11Dpi();
-    if (this.lastStatus) {
-      this.lastStatus = {
-        ...this.lastStatus,
-        dpiStages: x11EnabledStages(state).map((index) => state.stages[index]),
-      };
-    }
-    return value;
+    return this.editX11(async (state) => {
+      const hardware = this.x11HardwareStage(state, stage);
+      const value = nearestX11Dpi(dpi);
+      state.stages[hardware] = value;
+      await this.writeX11Dpi();
+      if (this.lastStatus) {
+        this.lastStatus = {
+          ...this.lastStatus,
+          dpiStages: x11EnabledStages(state).map((index) => state.stages[index]),
+        };
+      }
+      return value;
+    });
   }
 
   /** Selects the active stage. `stage` is 0-based, matching the shared UI contract. */
   async setActiveDpiStage(stage: number): Promise<number> {
-    const state = await this.x11DpiForEdit();
-    const hardware = this.x11HardwareStage(state, stage);
-    state.activeStage = hardware + 1;
-    await this.writeX11Dpi();
-    if (this.lastStatus) {
-      this.lastStatus = {
-        ...this.lastStatus,
-        dpi: state.stages[hardware] ?? this.lastStatus.dpi,
-        activeDpiStage: stage,
-      };
-    }
-    return stage;
+    return this.editX11(async (state) => {
+      const hardware = this.x11HardwareStage(state, stage);
+      state.activeStage = hardware + 1;
+      await this.writeX11Dpi();
+      if (this.lastStatus) {
+        this.lastStatus = {
+          ...this.lastStatus,
+          dpi: state.stages[hardware] ?? this.lastStatus.dpi,
+          activeDpiStage: stage,
+        };
+      }
+      return stage;
+    });
   }
 
   async setAngleSnapping(enabled: boolean): Promise<boolean> {
-    (await this.x11DpiForEdit()).angleSnap = enabled;
-    await this.writeX11Dpi();
-    if (this.lastStatus) this.lastStatus = { ...this.lastStatus, angleSnapping: enabled };
-    return enabled;
+    return this.editX11(async (state) => {
+      state.angleSnap = enabled;
+      await this.writeX11Dpi();
+      if (this.lastStatus) this.lastStatus = { ...this.lastStatus, angleSnapping: enabled };
+      return enabled;
+    });
   }
 
   async setRippleControl(enabled: boolean): Promise<boolean> {
-    (await this.x11DpiForEdit()).rippleControl = enabled;
-    await this.writeX11Dpi();
-    if (this.lastStatus) this.lastStatus = { ...this.lastStatus, rippleControl: enabled };
-    return enabled;
+    return this.editX11(async (state) => {
+      state.rippleControl = enabled;
+      await this.writeX11Dpi();
+      if (this.lastStatus) this.lastStatus = { ...this.lastStatus, rippleControl: enabled };
+      return enabled;
+    });
   }
 
   // ── 0x25a7 low-level ──────────────────────────────────────────────────
@@ -1189,6 +1207,19 @@ export class AttackSharkHidClient {
   private run<T>(task: () => Promise<T>): Promise<T> {
     const next = this.queue.then(task, task);
     this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  /**
+   * Run a multi-step exchange with the receiver without letting another one
+   * start in the middle. `run` only orders single transfers; a read handshake
+   * (stage, wait, fetch) and an edit (read, write) span several, and a second
+   * request staged in between replaces the first. Never call this from inside
+   * a task already running here.
+   */
+  private exclusive<T>(task: () => Promise<T>): Promise<T> {
+    const next = this.exclusiveQueue.then(task, task);
+    this.exclusiveQueue = next.catch(() => undefined);
     return next;
   }
 
