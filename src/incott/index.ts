@@ -801,6 +801,38 @@ export const INCOTT_LOD_STEPS_TENTHS: readonly number[] = [7, 10, 20];
 export const INCOTT_LOD_WIRE_TO_TENTHS: Readonly<Record<number, number>> = { 0: 10, 1: 20, 2: 7 };
 export const INCOTT_LOD_TENTHS_TO_WIRE: Readonly<Record<number, number>> = { 10: 0, 20: 1, 7: 2 };
 
+/**
+ * The table above is the PAW3950's. The vendor configurator only remaps
+ * lift-off for that sensor: its profile apply path (as ported byte-for-byte
+ * in oexi/incott-driver-desktop `src/protocol/device.js`, MIT) sends 0.7 mm
+ * as 2, 1 mm as 0 and 2 mm as 1 when the sensor is the PAW3950, and the
+ * profile value unchanged otherwise. For a PAW3395 it offers only 1 mm and
+ * 2 mm (`lodOptions`), so the wire value IS the millimetre step: 1 = 1 mm,
+ * 2 = 2 mm, and 0.7 mm does not exist. That is also why `lodUI`/`lodHW`
+ * read as a straight pairing: they describe the PAW3395 path.
+ *
+ * Not yet read on PAW3395 hardware; every unit tested here is a PAW3950.
+ */
+export const INCOTT_LOD_WIRE_TO_TENTHS_PAW3395: Readonly<Record<number, number>> = { 1: 10, 2: 20 };
+export const INCOTT_LOD_TENTHS_TO_WIRE_PAW3395: Readonly<Record<number, number>> = { 10: 1, 20: 2 };
+
+/**
+ * Lift-off steps (tenths of a millimetre) the fitted sensor offers. An
+ * unknown sensor (`null`, identity unreadable) keeps the PAW3950 table, the
+ * only one verified on hardware.
+ */
+export function incottLiftOffStepsForSensor(sensorId: number | null): readonly number[] {
+  return sensorId === INCOTT_SENSOR_PAW3395 ? [10, 20] : INCOTT_LOD_STEPS_TENTHS;
+}
+
+function lodWireToTenths(sensorId: number | null): Readonly<Record<number, number>> {
+  return sensorId === INCOTT_SENSOR_PAW3395 ? INCOTT_LOD_WIRE_TO_TENTHS_PAW3395 : INCOTT_LOD_WIRE_TO_TENTHS;
+}
+
+function lodTenthsToWire(sensorId: number | null): Readonly<Record<number, number>> {
+  return sensorId === INCOTT_SENSOR_PAW3395 ? INCOTT_LOD_TENTHS_TO_WIRE_PAW3395 : INCOTT_LOD_TENTHS_TO_WIRE;
+}
+
 export const INCOTT_DEBOUNCE_MIN_MS = 0;
 export const INCOTT_DEBOUNCE_MAX_MS = 30;
 export const INCOTT_SLEEP_MIN_S = 1;
@@ -997,8 +1029,9 @@ export function incottEncodeSetPollingRate(hz: number): Uint8Array {
   return payload(INCOTT_CMD_SET_POLLING, wire);
 }
 
-export function incottEncodeSetLiftOff(tenthsMm: number): Uint8Array {
-  const wire = INCOTT_LOD_TENTHS_TO_WIRE[tenthsMm];
+/** `sensorId` picks the wire table; see `INCOTT_LOD_WIRE_TO_TENTHS_PAW3395`. */
+export function incottEncodeSetLiftOff(tenthsMm: number, sensorId: number | null = null): Uint8Array {
+  const wire = lodTenthsToWire(sensorId)[tenthsMm];
   if (wire === undefined) throw new RangeError(`Unsupported lift-off distance: ${tenthsMm}`);
   return payload(INCOTT_CMD_SET_SENSOR, INCOTT_SUB_LOD, wire);
 }
@@ -1256,10 +1289,10 @@ export function incottDecodePollingRate(frame: Uint8Array): number | null {
  * values 0, 1, 2 round-tripped identically through both forms — so this is
  * not wrong, just less direct.
  */
-export function incottDecodeLiftOff(frame: Uint8Array): number | null {
+export function incottDecodeLiftOff(frame: Uint8Array, sensorId: number | null = null): number | null {
   if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_NONE)) return null;
   if (frame.length < 8) return null;
-  return INCOTT_LOD_WIRE_TO_TENTHS[frame[7] >> 4] ?? null;
+  return lodWireToTenths(sensorId)[frame[7] >> 4] ?? null;
 }
 
 /**
@@ -1269,12 +1302,13 @@ export function incottDecodeLiftOff(frame: Uint8Array): number | null {
  * `incottDecodeLiftOff`'s packed byte-7 nibble read: verified on hardware
  * 2026-09-08 by round-tripping hw 0, 1, 2 through both this form and the
  * nibble form and finding they agree at every step. The hw-to-millimetre
- * label mapping is still an open question — see `INCOTT_LOD_WIRE_TO_TENTHS`.
+ * mapping depends on the sensor, so pass the identity reply's `sensorId`;
+ * see `INCOTT_LOD_WIRE_TO_TENTHS` and `INCOTT_LOD_WIRE_TO_TENTHS_PAW3395`.
  */
-export function incottDecodeLiftOffDirect(frame: Uint8Array): number | null {
+export function incottDecodeLiftOffDirect(frame: Uint8Array, sensorId: number | null = null): number | null {
   if (!incottFrameMatches(frame, INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_LOD)) return null;
   const wire = frame[3];
-  return wire !== undefined ? (INCOTT_LOD_WIRE_TO_TENTHS[wire] ?? null) : null;
+  return wire !== undefined ? (lodWireToTenths(sensorId)[wire] ?? null) : null;
 }
 
 /**

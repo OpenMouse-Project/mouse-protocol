@@ -988,6 +988,42 @@ test("setLiftOffDistance maps the three named stops onto tenths of a millimetre"
   await assert.rejects(new IncottHidClient(stuck.device, fast).setLiftOffDistance("Low"), /kept a Medium lift-off/);
 });
 
+// A PAW3395 unit (sensor byte 0xF0 in both slots). The vendor sends the
+// millimetre step straight through for this sensor: 1 = 1 mm, 2 = 2 mm, no
+// 0.7 mm. See `INCOTT_LOD_WIRE_TO_TENTHS_PAW3395`.
+const PAW3395_IDENTITY = [0x01, 0x02, 0x02, 0xf0, 0xf0, 0x00, 0xff];
+
+test("readStatus decodes lift-off through the PAW3395 table and offers no 0.7 mm", async () => {
+  const { device } = fakeDevice({ state: { identity: PAW3395_IDENTITY, lodWire: 2 } });
+  const client = new IncottHidClient(device, fast);
+  await client.open();
+  const status = await client.readStatus();
+  assert.equal(status.liftOffDistance, "High", "wire 2 is 2 mm on a PAW3395, not 0.7 mm");
+  assert.deepEqual(status.supportedLiftOffDistances, ["Medium", "High"]);
+});
+
+test("setLiftOffDistance writes the PAW3395 wire values and refuses 0.7 mm", async () => {
+  const { device, state, sent } = fakeDevice({ state: { identity: PAW3395_IDENTITY } });
+  const client = new IncottHidClient(device, fast);
+  await client.open();
+  assert.equal(await client.setLiftOffDistance("Medium"), "Medium");
+  assert.equal(state.lodWire, 1);
+  assert.equal(await client.setLiftOffDistance("High"), "High");
+  assert.equal(state.lodWire, 2);
+  const before = sent.length;
+  await assert.rejects(client.setLiftOffDistance("Low"), RangeError);
+  assert.equal(sent.length, before, "nothing is sent for a step the sensor does not offer");
+});
+
+test("a PAW3950 keeps the hardware-verified table: wire 2 is 0.7 mm", async () => {
+  const { device } = fakeDevice({ state: { identity: [0x01, 0x02, 0x00, 0xf1, 0x00, 0x00, 0x00], lodWire: 2 } });
+  const client = new IncottHidClient(device, fast);
+  await client.open();
+  const status = await client.readStatus();
+  assert.equal(status.liftOffDistance, "Low");
+  assert.deepEqual(status.supportedLiftOffDistances, ["Low", "Medium", "High"]);
+});
+
 test("setMotionSync, setAngleSnapping and setRippleControl are independent toggles", async () => {
   const { device, state } = fakeDevice();
   const client = new IncottHidClient(device, fast);
