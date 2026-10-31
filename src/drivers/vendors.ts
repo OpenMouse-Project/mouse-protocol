@@ -24,6 +24,12 @@ import {
 import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
 import { LAMZU_INCA_PRODUCTS, LAMZU_INCA_VENDOR_ID } from "@openmouse/protocol/lamzu";
 import {
+  LEOBOG_GM3_PRODUCT_IDS,
+  LEOBOG_GM3_USAGE,
+  LEOBOG_GM3_USAGE_PAGE,
+  LEOBOG_GM3_VENDOR_ID,
+} from "../leobog/index.ts";
+import {
   MCHOSE_CONFIG_USAGE,
   MCHOSE_CONFIG_USAGE_PAGE,
   MCHOSE_DOCK_PRODUCT_ID,
@@ -162,6 +168,7 @@ export const VENDOR_ID = {
   lamzu: 0x373e,
   lunafury: 0x373e,
   vancer: 0x373e,
+  leobog: LEOBOG_GM3_VENDOR_ID,
   bytech: 0x372e,
   lamzuInca: LAMZU_INCA_VENDOR_ID,
   attackshark: 0x373e,
@@ -272,6 +279,17 @@ export const REDRAGON_M690_PRO_HID_FILTERS: HIDDeviceFilter[] = REDRAGON_M690_PR
   productId,
   usagePage: REDRAGON_M690_PRO_USAGE_PAGE,
   usage: REDRAGON_M690_PRO_USAGE,
+}));
+
+/**
+ * LEOBOG GM3 (SinoWealth): the wired mouse and 2.4 GHz receiver expose the
+ * report-9 battery query on the 0xFF02:0x0002 vendor collection.
+ */
+export const LEOBOG_GM3_HID_FILTERS: HIDDeviceFilter[] = LEOBOG_GM3_PRODUCT_IDS.map((productId) => ({
+  vendorId: LEOBOG_GM3_VENDOR_ID,
+  productId,
+  usagePage: LEOBOG_GM3_USAGE_PAGE,
+  usage: LEOBOG_GM3_USAGE,
 }));
 
 export const REDRAGON_HID_FILTERS: HIDDeviceFilter[] = [...REDRAGON_PRODUCT_IDS].map((productId) => ({
@@ -888,6 +906,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...DAREU_HID_FILTERS,
   ...REDRAGON_HID_FILTERS,
   ...REDRAGON_M690_PRO_HID_FILTERS,
+  ...LEOBOG_GM3_HID_FILTERS,
   ...FATER_HID_FILTERS,
   ...MOTOSPEED_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({

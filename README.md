@@ -59,6 +59,7 @@ checklist.
 | K-snake | `@openmouse/protocol/ksnake` |
 | Keychron | `@openmouse/protocol/keychron` |
 | Lamzu / CRDRAKO / Attack Shark / LunaFury | `@openmouse/protocol/lamzu` |
+| LEOBOG GM3 | `@openmouse/protocol/leobog` |
 | Logitech | `@openmouse/protocol/logitech` |
 | MCHOSE | `@openmouse/protocol/mchose` |
 | Microsoft | `@openmouse/protocol/microsoft` |

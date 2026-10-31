@@ -7,6 +7,7 @@ export * as endgameGearOt from "./endgame-gear/ot.js";
 export * as finalmouse from "./finalmouse/index.js";
 export * as keychron from "./keychron/index.js";
 export * as lamzu from "./lamzu/index.js";
+export * as leobog from "./leobog/index.js";
 export * as logitech from "./logitech/index.js";
 export * as microsoft from "./microsoft/index.js";
 export * as moddo from "./moddo/index.js";

@@ -66,6 +66,10 @@
       "types": "./dist/lamzu/index.d.ts",
       "import": "./dist/lamzu/index.js"
     },
+    "./leobog": {
+      "types": "./dist/leobog/index.d.ts",
+      "import": "./dist/leobog/index.js"
+    },
     "./mchose": {
       "types": "./dist/mchose/index.d.ts",
       "import": "./dist/mchose/index.js"

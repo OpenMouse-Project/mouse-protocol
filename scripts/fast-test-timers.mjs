@@ -27,6 +27,9 @@ const TIMING_ASSERTING = [
   "gwolves/magnetic.test.ts",
   // Telemetry must stay quiet for a real interval before it is accepted.
   "pulsar/pulsar-areson-hid.test.ts",
+  // The GM3 cable path ignores a block write that does not follow the read
+  // reply by a real gap, so the write-order test measures elapsed time.
+  "leobog/hid.test.ts",
 ];
 
 /** Longest delay a mocked timer is allowed to take. */
