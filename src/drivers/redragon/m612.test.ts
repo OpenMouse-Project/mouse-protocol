@@ -19,7 +19,7 @@ import {
   redragonM612EncodeDpi,
   redragonM612SlotAddress,
 } from "@openmouse/protocol/redragon";
-import { RedragonHidClient } from "./hid.ts";
+import { RedragonHidClient, RedragonM612HidClient } from "./hid.ts";
 
 const hex = (text: string): number[] => text.match(/../g)!.map((byte) => parseInt(byte, 16));
 
@@ -200,6 +200,8 @@ test("the client picks the model by PID and refuses unknown ones", () => {
   unknown.productId = 0xfc00;
   assert.equal(RedragonHidClient.isSupported(asDevice(unknown)), false);
   assert.throws(() => new RedragonHidClient(asDevice(unknown)), /not a supported/);
+  assert.ok(m612() instanceof RedragonM612HidClient, "the registry's construction keeps the old subclass identity");
+  assert.ok(new RedragonM612HidClient(asDevice(new FakeM612())) instanceof RedragonHidClient);
 });
 
 test("readStatus reports the mouse's own values as verified", async () => {
@@ -236,7 +238,8 @@ test("polling follows the active profile up to profile 5 (0x3a)", async () => {
   fake.memory[0x3a] = 0x08;
   assert.equal((await m612(fake).readStatus()).pollingRateHz, 125);
   fake.memory[0x2c] = 3;
-  assert.equal((await m612(fake).readStatus()).pollingRateHz, 500, "profile 4 keeps its own byte at 0x38");
+  fake.memory[0x38] = 0x04;
+  assert.equal((await m612(fake).readStatus()).pollingRateHz, 250, "profile 4 keeps its own byte at 0x38");
 });
 
 test("readStatus rejects values the firmware never holds", async () => {

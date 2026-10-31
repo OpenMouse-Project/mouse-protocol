@@ -98,6 +98,9 @@ export class RedragonHidClient {
     if (!model) throw new Error(`Redragon product 0x${device.productId.toString(16)} is not a supported Holtek mouse.`);
     this.device = device;
     this.model = model;
+    // Compatibility: before the shared client, M612 devices built through
+    // this constructor were `RedragonM612HidClient` instances.
+    if (new.target === RedragonHidClient && model.model === "M612") return new RedragonM612HidClient(device);
   }
 
   /** Holtek VID, a catalogued PID, and the config collection (the mouse and keyboard interfaces lack it). */

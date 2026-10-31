@@ -8,6 +8,7 @@ import {
   REDRAGON_M724_DPI_LABELS,
   REDRAGON_M724_MODEL,
   REDRAGON_REPORT_ID,
+  redragonDecodeDpiValue,
   redragonEncodeDpiSlot,
   redragonEncodeDpiValue,
   redragonEncodePollingRate,
@@ -15,7 +16,7 @@ import {
   redragonM724DecodeDpi,
   redragonM724EncodeDpi,
 } from "@openmouse/protocol/redragon";
-import { RedragonHidClient } from "./hid.ts";
+import { RedragonHidClient, RedragonM612HidClient } from "./hid.ts";
 
 const hex = (text: string): number[] => text.match(/../g)!.map((byte) => parseInt(byte, 16));
 
@@ -137,6 +138,7 @@ test("isSupported needs the Holtek VID, the M724 PID, and the config collection"
   const otherVendor = new FakeM724();
   otherVendor.vendorId = 0x1234;
   assert.equal(RedragonHidClient.isSupported(otherVendor as unknown as HIDDevice), false);
+  assert.ok(!(k1ng() instanceof RedragonM612HidClient), "only the M612 keeps the old subclass");
 });
 
 test("readStatus reads the dumped mouse: profile 1, its stages, rainbow, lift-off", async () => {
@@ -257,4 +259,8 @@ test("the deprecated section helpers still emit the first driver's frames", () =
   assert.deepEqual([...redragonHello()], hex("02f50000000000000000000000000000"));
   assert.throws(() => redragonEncodeDpiSlot(1, 0, 800), /profile/);
   assert.throws(() => redragonEncodePollingRate(333), /never observed/);
+  for (const dpi of [800, 1200, 2400, 3500, 5500, 12400]) {
+    const { value, range } = redragonEncodeDpiValue(dpi);
+    assert.ok(Math.abs(redragonDecodeDpiValue(value, range) - dpi) / dpi < 0.01, `${dpi} DPI round-trips within 1%`);
+  }
 });
