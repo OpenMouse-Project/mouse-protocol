@@ -292,6 +292,16 @@ test("a timed-out confirmation does not leave a waiter behind", async () => {
   assert.equal((client as unknown as { telemetryWaiters: unknown[] }).telemetryWaiters.length, 0);
 });
 
+test("a status read that times out does not leave a waiter behind", async () => {
+  // The mouse answers nothing, so no report ever arrives to drain the waiters.
+  const { client } = await openClient({
+    async receiveFeatureReport() { return new DataView(new ArrayBuffer(31)); },
+  } as Partial<HIDDevice>);
+  await client.readStatus();
+  await client.readStatus();
+  assert.equal((client as unknown as { telemetryWaiters: unknown[] }).telemetryWaiters.length, 0);
+});
+
 test("a wired mouse at full charge reports battery status 2 without losing telemetry", async () => {
   const { transport, client } = await openClient();
   transport.emit(RYUNIX_TELEMETRY_REPORT_ID, [1, 2, 0x01, 100, 2, 0, 0, 1, 0x20]);
@@ -514,4 +524,17 @@ test("commands from separate callers are serialised and sequenced", async () => 
   await Promise.all([client.setLiftOffDistance("Low"), client.setSleepTimeout(120), client.setAngleSnapping(false)]);
   assert.deepEqual(transport.sent.map((entry) => entry.data[1]), [1, 2, 3]);
   assert.deepEqual(transport.sent.map((entry) => entry.data[0]), [0x05, 0x07, 0x08]);
+});
+
+test("concurrent writes build on each other instead of on the state before either", async () => {
+  const { client } = await openClient();
+  await Promise.all([client.setAngleSnapping(true), client.setRippleControl(true)]);
+  await Promise.all([client.setDpiStageValue(0, 400), client.setDpiStageValue(1, 900)]);
+  await Promise.all([client.setButtonMapping("Back button", "Copy"), client.setButtonMapping("Forward button", "Paste")]);
+  const status = await client.readStatus();
+  assert.equal(status.angleSnapping, true);
+  assert.equal(status.rippleControl, true);
+  assert.deepEqual(status.dpiStages?.slice(0, 2), [400, 900]);
+  assert.equal(status.buttonMappings?.["Back button"], "Copy");
+  assert.equal(status.buttonMappings?.["Forward button"], "Paste");
 });

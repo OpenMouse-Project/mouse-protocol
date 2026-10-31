@@ -326,6 +326,7 @@ export class AmketteXsHidClient {
       const finish = (value: KyuProMx1Telemetry | null): void => {
         if (settled) return;
         settled = true;
+        this.telemetryWaiters = this.telemetryWaiters.filter((waiter) => waiter !== check);
         clearTimeout(timer);
         resolve(value);
       };
@@ -417,19 +418,29 @@ export class AmketteXsHidClient {
     build: (sequence: () => number) => Uint8Array | Uint8Array[],
     confirm?: Confirmation,
   ): Promise<void> {
-    return this.enqueue(async () => {
-      await this.open();
-      const frames = build(() => this.nextSequence());
-      for (const [index, frame] of (Array.isArray(frames) ? frames : [frames]).entries()) {
-        if (index > 0) await delay(DPI_AXIS_GAP_MS);
-        await this.sendFrame(frame);
-      }
-      if (!confirm) return;
-      const confirmed = await this.confirmByTelemetry(confirm.accept);
-      if (!confirmed && this.telemetry && !confirm.accept(this.telemetry)) {
-        throw new Error(confirm.mismatch(this.telemetry));
-      }
-    });
+    return this.enqueue(() => this.transmit(build, confirm));
+  }
+
+  /**
+   * `send` without the queue, for setters that read and update write-only state
+   * inside their own queued transaction, so concurrent setters build on each
+   * other's writes rather than on the state before either.
+   */
+  private async transmit(
+    build: (sequence: () => number) => Uint8Array | Uint8Array[],
+    confirm?: Confirmation,
+  ): Promise<void> {
+    await this.open();
+    const frames = build(() => this.nextSequence());
+    for (const [index, frame] of (Array.isArray(frames) ? frames : [frames]).entries()) {
+      if (index > 0) await delay(DPI_AXIS_GAP_MS);
+      await this.sendFrame(frame);
+    }
+    if (!confirm) return;
+    const confirmed = await this.confirmByTelemetry(confirm.accept);
+    if (!confirmed && this.telemetry && !confirm.accept(this.telemetry)) {
+      throw new Error(confirm.mismatch(this.telemetry));
+    }
   }
 
   /**
@@ -449,6 +460,7 @@ export class AmketteXsHidClient {
     return state.dpiStages ? [...state.dpiStages] : ryunixDefaultDpiStages(ryunixSensor(this.telemetry?.sensorType ?? null));
   }
 
+  /** Runs inside a queued transaction. */
   private async writeDpiTable(
     stages: number[],
     activeStage: number,
@@ -457,7 +469,7 @@ export class AmketteXsHidClient {
     const sensor = this.requireSensor();
     const state = stateFor(this.device.productId);
     const table = { stages, activeStage };
-    await this.send((sequence) => [
+    await this.transmit((sequence) => [
       ryunixSetDpiFrame(sequence(), table, sensor, "x"),
       ryunixSetDpiFrame(sequence(), table, sensor, "y"),
       ryunixSetDpiColorsFrame(sequence(), state.dpiColors),
@@ -572,15 +584,18 @@ export class AmketteXsHidClient {
     return pollingRateHz;
   }
 
-  public async setDpi(dpi: number): Promise<number> {
-    const stages = this.tableFor(stateFor(this.device.productId));
-    return this.writeStageValue(stages, this.activeStage(stages.length), dpi);
+  public setDpi(dpi: number): Promise<number> {
+    return this.enqueue(() => {
+      const stages = this.tableFor(stateFor(this.device.productId));
+      return this.writeStageValue(stages, this.activeStage(stages.length), dpi);
+    });
   }
 
-  public async setDpiStageValue(stage: number, dpi: number): Promise<number> {
-    return this.writeStageValue(this.tableFor(stateFor(this.device.productId)), stage, dpi);
+  public setDpiStageValue(stage: number, dpi: number): Promise<number> {
+    return this.enqueue(() => this.writeStageValue(this.tableFor(stateFor(this.device.productId)), stage, dpi));
   }
 
+  /** Runs inside a queued transaction. */
   private async writeStageValue(stages: number[], stage: number, dpi: number): Promise<number> {
     if (!Number.isInteger(stage) || stage < 0 || stage >= stages.length) {
       throw new RangeError(`Invalid DPI stage ${stage + 1}.`);
@@ -598,42 +613,48 @@ export class AmketteXsHidClient {
    * configurator does on every stage click. Stages stored on the mouse by
    * another tool are replaced by the shown values.
    */
-  public async setActiveDpiStage(stage: number): Promise<number> {
-    const stages = this.tableFor(stateFor(this.device.productId));
-    if (!Number.isInteger(stage) || stage < 0 || stage >= stages.length) {
-      throw new RangeError(`Invalid DPI stage ${stage + 1}.`);
-    }
-    await this.writeDpiTable(stages, stage, {
-      accept: (value) => value.dpiStage === stage,
-      mismatch: (value) => `The mouse still reports DPI stage ${value.dpiStage + 1} after the change.`,
+  public setActiveDpiStage(stage: number): Promise<number> {
+    return this.enqueue(async () => {
+      const stages = this.tableFor(stateFor(this.device.productId));
+      if (!Number.isInteger(stage) || stage < 0 || stage >= stages.length) {
+        throw new RangeError(`Invalid DPI stage ${stage + 1}.`);
+      }
+      await this.writeDpiTable(stages, stage, {
+        accept: (value) => value.dpiStage === stage,
+        mismatch: (value) => `The mouse still reports DPI stage ${value.dpiStage + 1} after the change.`,
+      });
+      return stage;
     });
-    return stage;
   }
 
   public async setDpiStageCount(count: number): Promise<number> {
     if (!Number.isInteger(count) || count < 1 || count > RYUNIX_DPI_MAX_STAGES) {
       throw new RangeError(`A DPI table needs 1 to ${RYUNIX_DPI_MAX_STAGES} stages.`);
     }
-    const sensor = this.requireSensor();
-    const current = this.tableFor(stateFor(this.device.productId));
-    const stages = ryunixDefaultDpiStages(sensor, RYUNIX_DPI_MAX_STAGES)
-      .map((fallback, index) => current[index] ?? fallback)
-      .slice(0, count);
-    await this.writeDpiTable(stages, this.activeStage(stages.length));
-    return count;
+    return this.enqueue(async () => {
+      const sensor = this.requireSensor();
+      const current = this.tableFor(stateFor(this.device.productId));
+      const stages = ryunixDefaultDpiStages(sensor, RYUNIX_DPI_MAX_STAGES)
+        .map((fallback, index) => current[index] ?? fallback)
+        .slice(0, count);
+      await this.writeDpiTable(stages, this.activeStage(stages.length));
+      return count;
+    });
   }
 
   public async setDpiStageColor(index: number, color: string): Promise<string> {
     ryunixParseColor(color);
-    const state = stateFor(this.device.productId);
     if (!Number.isInteger(index) || index < 0 || index >= RYUNIX_DPI_MAX_STAGES) {
       throw new RangeError(`Invalid DPI stage ${index + 1}.`);
     }
-    const colors = [...state.dpiColors];
-    colors[index] = color.toLowerCase();
-    await this.send((sequence) => ryunixSetDpiColorsFrame(sequence(), colors));
-    state.dpiColors = colors;
-    return colors[index]!;
+    return this.enqueue(async () => {
+      const state = stateFor(this.device.productId);
+      const colors = [...state.dpiColors];
+      colors[index] = color.toLowerCase();
+      await this.transmit((sequence) => ryunixSetDpiColorsFrame(sequence(), colors));
+      state.dpiColors = colors;
+      return colors[index]!;
+    });
   }
 
   public async setLiftOffDistance(level: LiftOffLevel): Promise<LiftOffLevel> {
@@ -662,16 +683,18 @@ export class AmketteXsHidClient {
     return minutes * 60;
   }
 
-  private async writeSensorOptions(patch: Partial<Record<"angleSnapping" | "motionSync" | "rippleControl", boolean>>): Promise<void> {
-    const state = stateFor(this.device.productId);
-    // The mouse cannot report these, so unwritten ones take the vendor app's defaults.
-    const next = {
-      angleSnapping: patch.angleSnapping ?? state.angleSnapping ?? VENDOR_DEFAULTS.angleSnapping,
-      motionSync: patch.motionSync ?? state.motionSync ?? VENDOR_DEFAULTS.motionSync,
-      rippleControl: patch.rippleControl ?? state.rippleControl ?? VENDOR_DEFAULTS.rippleControl,
-    };
-    await this.send((sequence) => ryunixSetSensorOptionsFrame(sequence(), next));
-    Object.assign(state, next);
+  private writeSensorOptions(patch: Partial<Record<"angleSnapping" | "motionSync" | "rippleControl", boolean>>): Promise<void> {
+    return this.enqueue(async () => {
+      const state = stateFor(this.device.productId);
+      // The mouse cannot report these, so unwritten ones take the vendor app's defaults.
+      const next = {
+        angleSnapping: patch.angleSnapping ?? state.angleSnapping ?? VENDOR_DEFAULTS.angleSnapping,
+        motionSync: patch.motionSync ?? state.motionSync ?? VENDOR_DEFAULTS.motionSync,
+        rippleControl: patch.rippleControl ?? state.rippleControl ?? VENDOR_DEFAULTS.rippleControl,
+      };
+      await this.transmit((sequence) => ryunixSetSensorOptionsFrame(sequence(), next));
+      Object.assign(state, next);
+    });
   }
 
   public async setAngleSnapping(enabled: boolean): Promise<boolean> {
@@ -694,22 +717,25 @@ export class AmketteXsHidClient {
     if (effect === undefined || !lighting.mode) {
       throw new Error(`This mouse does not offer the ${lighting.mode ?? "selected"} lighting effect.`);
     }
-    const state = stateFor(this.device.productId);
-    const level = lighting.brightness == null
-      ? state.brightness
-      : RYUNIX_BRIGHTNESS_LEVELS[BRIGHTNESS_PERCENT.indexOf(lighting.brightness as 25 | 50 | 75 | 100)];
-    if (level === undefined) throw new Error(`Brightness ${lighting.brightness}% is not available.`);
-    const speed = lighting.speed ?? state.speed;
-    if (!(RYUNIX_SPEED_LEVELS as readonly number[]).includes(speed)) {
-      throw new Error(`Lighting speed ${speed} is not available.`);
-    }
-    await this.send((sequence) => ryunixSetLightingFrame(sequence(), { effect, brightness: level, speed }), {
-      accept: (value) => value.ledModeCode === effect,
-      mismatch: () => "The mouse still reports its previous lighting effect after the change.",
+    const mode = lighting.mode;
+    return this.enqueue(async () => {
+      const state = stateFor(this.device.productId);
+      const level = lighting.brightness == null
+        ? state.brightness
+        : RYUNIX_BRIGHTNESS_LEVELS[BRIGHTNESS_PERCENT.indexOf(lighting.brightness as 25 | 50 | 75 | 100)];
+      if (level === undefined) throw new Error(`Brightness ${lighting.brightness}% is not available.`);
+      const speed = lighting.speed ?? state.speed;
+      if (!(RYUNIX_SPEED_LEVELS as readonly number[]).includes(speed)) {
+        throw new Error(`Lighting speed ${speed} is not available.`);
+      }
+      await this.transmit((sequence) => ryunixSetLightingFrame(sequence(), { effect, brightness: level, speed }), {
+        accept: (value) => value.ledModeCode === effect,
+        mismatch: () => "The mouse still reports its previous lighting effect after the change.",
+      });
+      state.brightness = level;
+      state.speed = speed;
+      return mode;
     });
-    state.brightness = level;
-    state.speed = speed;
-    return lighting.mode;
   }
 
   /**
@@ -723,12 +749,14 @@ export class AmketteXsHidClient {
     if (index < 0) throw new Error(`Unknown button "${button}".`);
     const code = RYUNIX_BUTTON_ACTIONS.get(action);
     if (!code) throw new Error(`Unknown button action "${action}".`);
-    const state = stateFor(this.device.productId);
-    const changed = [...state.buttons];
-    changed[index] = code;
-    const positions = RYUNIX_BUTTON_FACTORY_CODES.map((factory, position) => changed[position] ?? factory);
-    await this.send((sequence) => ryunixSetButtonsFrames([sequence(), sequence()], positions));
-    state.buttons = changed;
-    return action;
+    return this.enqueue(async () => {
+      const state = stateFor(this.device.productId);
+      const changed = [...state.buttons];
+      changed[index] = code;
+      const positions = RYUNIX_BUTTON_FACTORY_CODES.map((factory, position) => changed[position] ?? factory);
+      await this.transmit((sequence) => ryunixSetButtonsFrames([sequence(), sequence()], positions));
+      state.buttons = changed;
+      return action;
+    });
   }
 }
