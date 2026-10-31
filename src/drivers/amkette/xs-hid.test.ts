@@ -18,7 +18,7 @@ beforeEach(() => resetAmketteXsWriteState());
 
 /** Stands in for `navigator.hid`, whose disconnect events hand write state to a replugged mouse. */
 const hid = new EventTarget();
-Object.defineProperty(globalThis.navigator, "hid", { value: hid, configurable: true });
+Object.defineProperty(globalThis, "navigator", { value: { hid }, configurable: true });
 
 function unplug(device: HIDDevice): void {
   void device.close();
@@ -291,6 +291,16 @@ test("the first status read waits for the report opening asked for", async () =>
 test("startNotifications reports that the mouse does not push status", async () => {
   const { client } = await openClient();
   assert.equal(await client.startNotifications(() => {}), false);
+});
+
+test("a confirmed write with no fresh report is judged by its acknowledgement", async () => {
+  const { transport, client } = await openClient();
+  await client.readStatus();
+  // From here the mouse acknowledges commands but answers no status request.
+  const receive = transport.device.receiveFeatureReport.bind(transport.device);
+  transport.device.receiveFeatureReport = async (reportId: number) =>
+    reportId === RYUNIX_CONFIG_REPORT_ID ? new DataView(new ArrayBuffer(31)) : receive(reportId);
+  assert.equal(await client.setPollingRate(1000), 1000);
 });
 
 test("a timed-out confirmation does not leave a waiter behind", async () => {
@@ -568,6 +578,32 @@ test("a replugged mouse keeps what was written before the unplug", async () => {
   assert.equal((await after.client.readStatus()).dpiStages?.[0], 500);
   const other = await openClient();
   assert.notEqual((await other.client.readStatus()).dpiStages?.[0], 500, "only one replugged handle inherits it");
+});
+
+test("close waits for queued writes and stays closed", async () => {
+  const { transport, client } = await openClient();
+  const write = client.setAngleSnapping(true);
+  await client.close();
+  await write;
+  assert.equal(transport.device.opened, false);
+  assert.equal(transport.listenerAttached(), false);
+  assert.equal(transport.sent.filter((entry) => entry.data[0] === 0x08).length, 1, "the queued write still went out");
+});
+
+test("two clients on one handle share its command queue", async () => {
+  const { transport, client } = await openClient();
+  const other = new AmketteXsHidClient(transport.device);
+  await Promise.all([client.setAngleSnapping(true), other.setRippleControl(true)]);
+  const status = await other.readStatus();
+  assert.equal(status.angleSnapping, true);
+  assert.equal(status.rippleControl, true);
+});
+
+test("a DPI write on a client not yet opened waits for the sensor report", async () => {
+  const transport = fakeDevice();
+  const client = new AmketteXsHidClient(transport.device);
+  assert.equal(await client.setDpiStageValue(0, 500), 500);
+  assert.equal((await client.readStatus()).dpiStages?.[0], 500);
 });
 
 test("concurrent writes build on each other instead of on the state before either", async () => {

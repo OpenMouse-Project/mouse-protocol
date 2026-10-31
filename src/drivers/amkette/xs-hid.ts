@@ -167,6 +167,13 @@ function stateFor(device: HIDDevice): WriteOnlyState {
   return claim.state;
 }
 
+/**
+ * One command queue per handle, shared by every client on it: write-only state
+ * is per handle, and the acknowledgement carries no sequence number, so two
+ * clients' commands must not interleave.
+ */
+const queues = new WeakMap<HIDDevice, Promise<unknown>>();
+
 /** Forget what this session wrote, e.g. between tests. */
 export function resetAmketteXsWriteState(productId?: number): void {
   if (productId === undefined) claimsByProduct.clear();
@@ -226,7 +233,6 @@ export class AmketteXsHidClient {
   private openRequestPending = false;
   private listening = false;
   private sequence = 0;
-  private queue: Promise<unknown> = Promise.resolve();
   private telemetryWaiters: Array<() => void> = [];
   private onChange: (() => void) | null = null;
 
@@ -264,15 +270,21 @@ export class AmketteXsHidClient {
     }
   }
 
-  public async close(): Promise<void> {
-    if (this.listening) {
-      this.device.removeEventListener("inputreport", this.onInputReport);
-      this.listening = false;
-    }
-    this.telemetry = null;
-    this.openRequestPending = false;
-    this.onChange = null;
-    if (this.device.opened) await this.device.close();
+  /**
+   * Runs after the commands already queued, so a pending write finishes all its
+   * frames rather than reopening the mouse once it is closed.
+   */
+  public close(): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.listening) {
+        this.device.removeEventListener("inputreport", this.onInputReport);
+        this.listening = false;
+      }
+      this.telemetry = null;
+      this.openRequestPending = false;
+      this.onChange = null;
+      if (this.device.opened) await this.device.close();
+    });
   }
 
   /**
@@ -410,8 +422,8 @@ export class AmketteXsHidClient {
   }
 
   private enqueue<T>(action: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(action);
-    this.queue = run.catch(() => undefined);
+    const run = (queues.get(this.device) ?? Promise.resolve()).then(action);
+    queues.set(this.device, run.catch(() => undefined));
     return run;
   }
 
@@ -443,9 +455,9 @@ export class AmketteXsHidClient {
   /**
    * Send frames and, when `accept` is given, judge the write against fresh
    * status, all inside the command queue so another setter's frames cannot land
-   * between the write and its confirmation. Throws when the mouse reports a
-   * value other than the one written; a mouse that sends no status at all is
-   * judged by its acknowledgement alone.
+   * between the write and its confirmation. Throws when a report requested
+   * after the write shows a value other than the one written; with no fresh
+   * report, the write is judged by its acknowledgement alone.
    */
   private send(
     build: (sequence: () => number) => Uint8Array | Uint8Array[],
@@ -470,8 +482,9 @@ export class AmketteXsHidClient {
       await this.sendFrame(frame);
     }
     if (!confirm) return;
+    const before = this.telemetryCount;
     const confirmed = await this.confirmByTelemetry(confirm.accept);
-    if (!confirmed && this.telemetry && !confirm.accept(this.telemetry)) {
+    if (!confirmed && this.telemetryCount > before && this.telemetry && !confirm.accept(this.telemetry)) {
       throw new Error(confirm.mismatch(this.telemetry));
     }
   }
@@ -491,6 +504,15 @@ export class AmketteXsHidClient {
   /** The vendor app seeds a table the first time, since the mouse never reports one. */
   private tableFor(state: WriteOnlyState): number[] {
     return state.dpiStages ? [...state.dpiStages] : ryunixDefaultDpiStages(ryunixSensor(this.telemetry?.sensorType ?? null));
+  }
+
+  /**
+   * Opens the mouse and, until it has reported, waits for the report that names
+   * its sensor, which DPI values depend on. Runs inside a queued transaction.
+   */
+  private async awaitSensorReport(): Promise<void> {
+    await this.open();
+    if (!this.telemetry) await this.refreshTelemetry();
   }
 
   /** Runs inside a queued transaction. */
@@ -618,14 +640,18 @@ export class AmketteXsHidClient {
   }
 
   public setDpi(dpi: number): Promise<number> {
-    return this.enqueue(() => {
+    return this.enqueue(async () => {
+      await this.awaitSensorReport();
       const stages = this.tableFor(stateFor(this.device));
       return this.writeStageValue(stages, this.activeStage(stages.length), dpi);
     });
   }
 
   public setDpiStageValue(stage: number, dpi: number): Promise<number> {
-    return this.enqueue(() => this.writeStageValue(this.tableFor(stateFor(this.device)), stage, dpi));
+    return this.enqueue(async () => {
+      await this.awaitSensorReport();
+      return this.writeStageValue(this.tableFor(stateFor(this.device)), stage, dpi);
+    });
   }
 
   /** Runs inside a queued transaction. */
@@ -648,6 +674,7 @@ export class AmketteXsHidClient {
    */
   public setActiveDpiStage(stage: number): Promise<number> {
     return this.enqueue(async () => {
+      await this.awaitSensorReport();
       const stages = this.tableFor(stateFor(this.device));
       if (!Number.isInteger(stage) || stage < 0 || stage >= stages.length) {
         throw new RangeError(`Invalid DPI stage ${stage + 1}.`);
@@ -665,6 +692,7 @@ export class AmketteXsHidClient {
       throw new RangeError(`A DPI table needs 1 to ${RYUNIX_DPI_MAX_STAGES} stages.`);
     }
     return this.enqueue(async () => {
+      await this.awaitSensorReport();
       const sensor = this.requireSensor();
       const current = this.tableFor(stateFor(this.device));
       const stages = ryunixDefaultDpiStages(sensor, RYUNIX_DPI_MAX_STAGES)
