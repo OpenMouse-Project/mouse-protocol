@@ -100,7 +100,7 @@ export function ninjutsoResponseValue(response: DataView | Uint8Array, command: 
   const bytes = response instanceof Uint8Array
     ? response
     : new Uint8Array(response.buffer, response.byteOffset, response.byteLength);
-  const padded = bytes[1] !== command && bytes[0] === command
+  const padded = bytes[1] !== command && bytes[0] === command && bytes[5] !== 0
     ? Uint8Array.from([NINJUTSO_REPORT_ID, ...bytes])
     : bytes;
   if (padded.length < 9 || padded[1] !== command) return null;
