@@ -108,6 +108,18 @@ test("DPI slider labels and codes match RDCfg's 0xCFF table and the factory push
   }
 });
 
+test("every slider position encodes to the byte RDCfg's 0xCFF table holds", () => {
+  // Low byte of each dword at RDCfg.exe 0x49f140-0x49f230, read from the binary.
+  // Position p < 62 uses the dword for p (range 0); 62-92 reuse the dword for p - 31 (range 1).
+  const table = hex("0406090b0d0f121416181b1d1f212426282b2d2f313436383a3d3f414346484a4d4f515356585a5c5f616366686a6c6f717375787a7c7f818385878a8c");
+  REDRAGON_M724_DPI_LABELS.forEach((label, index) => {
+    const position = index + 1;
+    const expected = position < 62 ? { value: table[position - 1], range: 0 } : { value: table[position - 32], range: 1 };
+    const { value, range } = redragonM724EncodeDpi(label);
+    assert.deepEqual({ value, range }, expected, `position ${position} (${label} DPI)`);
+  });
+});
+
 test("DPI requests snap to the slider and stay inside it", () => {
   assert.equal(redragonM724EncodeDpi(1250).dpi, 1200, "ties go to the lower label");
   assert.equal(redragonM724EncodeDpi(6300).dpi, 6200);
@@ -122,6 +134,9 @@ test("isSupported needs the Holtek VID, the M724 PID, and the config collection"
   const mouseOnly = new FakeM724();
   mouseOnly.collections = [{ usagePage: 0x01, usage: 0x02, children: [], featureReports: [], inputReports: [], outputReports: [] }];
   assert.equal(RedragonHidClient.isSupported(mouseOnly as unknown as HIDDevice), false);
+  const otherVendor = new FakeM724();
+  otherVendor.vendorId = 0x1234;
+  assert.equal(RedragonHidClient.isSupported(otherVendor as unknown as HIDDevice), false);
 });
 
 test("readStatus reads the dumped mouse: profile 1, its stages, rainbow, lift-off", async () => {

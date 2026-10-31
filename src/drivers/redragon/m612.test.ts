@@ -230,6 +230,15 @@ test("readStatus follows the active profile", async () => {
   assert.equal(status.dpi, 8000);
 });
 
+test("polling follows the active profile up to profile 5 (0x3a)", async () => {
+  const fake = new FakeM612();
+  fake.memory[0x2c] = 4;
+  fake.memory[0x3a] = 0x08;
+  assert.equal((await m612(fake).readStatus()).pollingRateHz, 125);
+  fake.memory[0x2c] = 3;
+  assert.equal((await m612(fake).readStatus()).pollingRateHz, 500, "profile 4 keeps its own byte at 0x38");
+});
+
 test("readStatus rejects values the firmware never holds", async () => {
   const badProfile = new FakeM612();
   badProfile.memory[0x2c] = 7;
