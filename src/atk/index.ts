@@ -358,6 +358,7 @@ export const ATK_COMPX_COMMAND = {
   getWirelessMouseOnline: 0x03,
   setWirelessDonglePair: 0x05,
   getWirelessDonglePairResult: 0x06,
+  setMacroKey: 0x06,
   restoreFactory: 0x09,
   enterUsbUpgradeMode: 0x0d,
   getCurrentConfig: 0x0e,
@@ -419,6 +420,275 @@ export const ATK_R1_SHORTCUT_SLOT_LENGTH = 32;
 export const ATK_R1_MACRO_BASE = 0x0300;
 export const ATK_R1_MACRO_SLOT_LENGTH = 384;
 export const ATK_R1_MACRO_SLOT_COUNT = 12;
+/**
+ * Action records one slot holds: a 31-byte header, a one-byte action count and
+ * five bytes per action fit 70 records in 384 bytes.
+ */
+export const ATK_R1_MACRO_MAX_ACTIONS = 70;
+
+/** AtkR1 button key index carried by SetMacroKey, matching ATK HUB. */
+export const ATK_R1_MACRO_KEY_INDEX = {
+  left: 0,
+  right: 1,
+  middle: 2,
+  back: 3,
+  forward: 4,
+  bottom: 5,
+} as const;
+
+export type AtkR1MacroKeyId = keyof typeof ATK_R1_MACRO_KEY_INDEX;
+
+/** Macro start modes as the R1 button record's value2 byte encodes them. */
+export const ATK_R1_MACRO_START_TYPES = {
+  stopImmediately: 254,
+  repeatUntilAnyKeyPress: 255,
+  repeatUntilTriggerPress: 253,
+  loopCount: 0,
+} as const;
+
+export interface AtkR1MacroStepInput {
+  kind: "key-down" | "key-up" | "wheel-up" | "wheel-down";
+  /** HID usage for keyboard steps. Ignored for wheel steps. */
+  keyCode: number;
+  holdTime: number;
+}
+
+/** Macro action record fields used by the R1's 384-byte macro slots. */
+export const ATK_R1_MACRO_KEY_STATE = {
+  down: 0x80,
+  up: 0x40,
+  scroll: 0,
+} as const;
+
+export const ATK_R1_MACRO_KEY_TYPE = {
+  generalKey: 1,
+  scroll: 6,
+} as const;
+
+/**
+ * Pack one R1 macro into the vendor's 384-byte slot format: a fixed 31-byte
+ * header, an action count, five-byte action records, and a final checksum.
+ */
+export function atkPackAtkR1MacroTable(
+  steps: readonly AtkR1MacroStepInput[],
+): number[] {
+  if (steps.length < 1 || steps.length > ATK_R1_MACRO_MAX_ACTIONS) {
+    throw new Error(`An R1 macro needs 1-${ATK_R1_MACRO_MAX_ACTIONS} steps.`);
+  }
+
+  const records: number[] = [];
+  for (const [index, step] of steps.entries()) {
+    if (![step.keyCode, step.holdTime].every((value) =>
+      Number.isInteger(value) && value >= 0 && value <= 0xffff)) {
+      throw new Error("R1 macro values must be 16-bit integers.");
+    }
+    // Every non-final delay is floored at 20 ms: the firmware treats a shorter
+    // gap as no gap and drops the step. The floor is applied here rather than
+    // rejected so a fast recorded press still saves, but it does mean a stored
+    // delay below 20 ms reads back as 20 ms after a save.
+    const holdTime = index === steps.length - 1 ? step.holdTime : Math.max(20, step.holdTime);
+    if (step.kind === "wheel-up" || step.kind === "wheel-down") {
+      const direction = step.kind === "wheel-down" ? 255 : 1;
+      const delay = packAtkR1MacroDelay(holdTime);
+      records.push(
+        ATK_R1_MACRO_KEY_STATE.scroll | ATK_R1_MACRO_KEY_TYPE.scroll,
+        direction,
+        0,
+        ...delay,
+        ATK_R1_MACRO_KEY_STATE.scroll | ATK_R1_MACRO_KEY_TYPE.scroll,
+        0,
+        0,
+        ...delay,
+      );
+      continue;
+    }
+    if (step.keyCode < 0 || step.keyCode > 0xff) {
+      throw new Error("R1 keyboard macro values must be bytes with a 16-bit hold time.");
+    }
+    records.push(
+      (step.kind === "key-up" ? ATK_R1_MACRO_KEY_STATE.up : ATK_R1_MACRO_KEY_STATE.down)
+        | ATK_R1_MACRO_KEY_TYPE.generalKey,
+      step.keyCode,
+      0,
+      ...packAtkR1MacroDelay(holdTime),
+    );
+  }
+
+  const actionCount = records.length / 5;
+  if (actionCount > ATK_R1_MACRO_MAX_ACTIONS) {
+    throw new Error(`An R1 macro holds at most ${ATK_R1_MACRO_MAX_ACTIONS} actions.`);
+  }
+  const payload = [actionCount, ...records];
+  payload.push((0x55 - payload.reduce((total, byte) => total + byte, 0)) & 0xff);
+  return [
+    8,
+    ...Array.from({ length: 8 }, () => 2),
+    ...Array.from({ length: 22 }, () => 255),
+    ...payload,
+  ];
+}
+
+/**
+ * Macro action delays use the unsuffixed DataView uint16 accessors in ATK HUB,
+ * so the bytes on the wire are big-endian. SetMacroKey's separate legacy
+ * payload uses an explicitly little-endian uint16 and must not share this.
+ */
+function packAtkR1MacroDelay(value: number): readonly [number, number] {
+  return [(value >> 8) & 0xff, value & 0xff];
+}
+
+/**
+ * Decode the action records stored in one R1 macro slot. The editor can
+ * safely round-trip keyboard and wheel actions; vendor-only action types are
+ * rejected so an edit cannot silently replace them with keyboard steps.
+ *
+ * Delays are returned exactly as stored. `atkPackAtkR1MacroTable` floors every
+ * non-final delay at 20 ms, so a slot holding a shorter one reads back lower
+ * than a save would write it.
+ */
+export function atkUnpackAtkR1MacroActions(
+  actionCount: number,
+  records: Uint8Array | readonly number[],
+): AtkR1MacroStepInput[] {
+  if (!Number.isInteger(actionCount) || actionCount < 0 || actionCount > ATK_R1_MACRO_MAX_ACTIONS) {
+    throw new Error(`An R1 macro holds 0-${ATK_R1_MACRO_MAX_ACTIONS} actions.`);
+  }
+  const bytes = Array.from(records);
+  if (bytes.length < actionCount * 5) {
+    throw new Error("The R1 macro action table is truncated.");
+  }
+
+  const steps: AtkR1MacroStepInput[] = [];
+  for (let index = 0; index < actionCount; index += 1) {
+    const offset = index * 5;
+    const status = bytes[offset]!;
+    const value = bytes[offset + 1]!;
+    const value2 = bytes[offset + 2]!;
+    const delay = (bytes[offset + 3]! << 8) | bytes[offset + 4]!;
+    const keyType = status & 0x07;
+    const isDown = (status & ATK_R1_MACRO_KEY_STATE.down) !== 0;
+    const isUp = (status & ATK_R1_MACRO_KEY_STATE.up) !== 0;
+
+    if (keyType === ATK_R1_MACRO_KEY_TYPE.generalKey) {
+      if (isDown === isUp || value2 !== 0) {
+        throw new Error("This R1 macro contains a keyboard action with no press or release state.");
+      }
+      steps.push({
+        kind: isDown ? "key-down" : "key-up",
+        keyCode: value,
+        holdTime: delay,
+      });
+      continue;
+    }
+
+    if (keyType === ATK_R1_MACRO_KEY_TYPE.scroll && !isDown && !isUp && value2 === 0) {
+      if (value === 0) {
+        const previous = steps.at(-1);
+        if (previous?.kind !== "wheel-up" && previous?.kind !== "wheel-down") {
+          throw new Error("This R1 macro contains an unmatched wheel release action.");
+        }
+        // The editor holds one delay for the whole wheel pair, so a pair the
+        // vendor stored with different delays cannot survive a save; refuse it
+        // rather than silently rewriting the press with the release's delay.
+        if (previous.holdTime !== delay) {
+          throw new Error("This R1 macro contains a wheel pair with mismatched delays.");
+        }
+        continue;
+      }
+      if (value !== 0x01 && value !== 0xff) {
+        throw new Error(`This R1 macro contains an unsupported wheel direction 0x${value.toString(16).padStart(2, "0")}.`);
+      }
+      steps.push({
+        kind: value === 0x01 ? "wheel-up" : "wheel-down",
+        keyCode: 0,
+        holdTime: delay,
+      });
+      continue;
+    }
+
+    throw new Error(`This R1 macro contains vendor action type ${keyType}, which the editor cannot safely edit.`);
+  }
+
+  return steps;
+}
+
+/**
+ * Raw nine-byte SetMacroKey payload for one macro step. The 16-byte frame
+ * carries a button index, these nine bytes and a checksum, so the repeat count
+ * has no field of its own: only the single-pass case is expressible.
+ */
+export function atkPackAtkR1MacroStep(
+  input: AtkR1MacroStepInput,
+  position: number,
+  macroId: number,
+  startType: number,
+  runCount: number,
+): number[] {
+  if (!Number.isInteger(position) || position < 0 || position > 0xff) throw new Error("Macro step position is invalid.");
+  if (![macroId, startType, runCount].every((value) =>
+    Number.isInteger(value) && value >= 0 && value <= 0xff)) {
+    throw new Error("ATK macro identifiers must be bytes.");
+  }
+  if (startType === ATK_R1_MACRO_START_TYPES.loopCount && runCount !== 1) {
+    throw new Error(
+      "This SetMacroKey frame has no repeat-count field; only a single pass can be sent.",
+    );
+  }
+  const step = [];
+  if (input.kind === "wheel-up" || input.kind === "wheel-down") {
+    step.push(
+      position,
+      2,
+      0,
+      input.kind === "wheel-down" ? 0xff : 0x01,
+      0,
+      ...packAtkR1Uint16(input.holdTime),
+      macroId,
+      startType,
+    );
+    return step;
+  }
+  if (!Number.isInteger(input.keyCode) || input.keyCode < 0 || input.keyCode > 0xff) {
+    throw new Error("ATK macro keycode must be a byte.");
+  }
+  step.push(
+    position,
+    0,
+    input.kind === "key-up" ? 1 : 0,
+    input.keyCode,
+    0,
+    ...packAtkR1Uint16(input.holdTime),
+    macroId,
+    startType,
+  );
+  return step;
+}
+
+function packAtkR1Uint16(value: number): number[] {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
+    throw new Error("ATK macro hold time must be a 16-bit integer.");
+  }
+  return [value & 0xff, (value >> 8) & 0xff];
+}
+
+/** Build the 16-byte SetMacroKey frame for one step of one button. */
+export function atkBuildAtkR1MacroKey(keyIndex: number, step: readonly number[]): Uint8Array {
+  if (!Number.isInteger(keyIndex) || keyIndex < 0 || keyIndex > 5) {
+    throw new Error("ATK macro button index is invalid.");
+  }
+  // The frame is 16 bytes: command, three reserved bytes, a length, the button
+  // index, nine step bytes and the checksum. A ten-byte step would push its
+  // last byte into the checksum's slot and be dropped silently.
+  if (step.length !== 9) throw new Error("ATK macro step must contain nine bytes.");
+  const payload = new Uint8Array(16);
+  payload[0] = ATK_COMPX_COMMAND.setMacroKey;
+  payload[4] = 11;
+  payload[5] = keyIndex;
+  for (let offset = 0; offset < 9; offset += 1) payload[offset + 6] = step[offset]!;
+  const sum = 0x08 + Array.from(payload.subarray(0, 15)).reduce((total, byte) => (total + byte) & 0xff, 0);
+  payload[15] = (CHECKSUM_TOTAL - (sum & 0xff)) & 0xff;
+  return payload;
+}
 
 export type AtkR1ButtonId = (typeof ATK_R1_BUTTONS)[number]["id"];
 
@@ -431,6 +701,58 @@ export interface AtkButtonAssignment {
   checksumValid: boolean;
   label: string;
   raw: string;
+}
+
+export interface AtkButtonAction {
+  id: string;
+  label: string;
+  keyClass: number;
+  value1: number;
+  value2: number;
+}
+
+/**
+ * Standard R1 button actions transcribed from ATK HUB. Shortcuts and macros
+ * deliberately remain unlisted until their slot payloads are hardware-verified.
+ */
+export const ATK_R1_BUTTON_ACTIONS: readonly AtkButtonAction[] = [
+  { id: "disabled", label: "Disabled", keyClass: 0x00, value1: 0x00, value2: 0x00 },
+  { id: "left-click", label: "Left click", keyClass: 0x01, value1: 0x01, value2: 0x00 },
+  { id: "right-click", label: "Right click", keyClass: 0x01, value1: 0x02, value2: 0x00 },
+  { id: "middle-click", label: "Middle click", keyClass: 0x01, value1: 0x04, value2: 0x00 },
+  { id: "back", label: "Back", keyClass: 0x01, value1: 0x08, value2: 0x00 },
+  { id: "forward", label: "Forward", keyClass: 0x01, value1: 0x10, value2: 0x00 },
+  { id: "dpi-cycle", label: "DPI cycle", keyClass: 0x02, value1: 0x01, value2: 0x00 },
+  { id: "dpi-up", label: "DPI up", keyClass: 0x02, value1: 0x02, value2: 0x00 },
+  { id: "dpi-down", label: "DPI down", keyClass: 0x02, value1: 0x03, value2: 0x00 },
+  { id: "scroll-left", label: "Horizontal scroll left", keyClass: 0x03, value1: 0x01, value2: 0x00 },
+  { id: "scroll-right", label: "Horizontal scroll right", keyClass: 0x03, value1: 0x02, value2: 0x00 },
+  { id: "wheel-up", label: "Wheel up", keyClass: 0x0b, value1: 0x01, value2: 0x00 },
+  { id: "wheel-down", label: "Wheel down", keyClass: 0x0b, value1: 0x02, value2: 0x00 },
+] as const;
+
+export function atkButtonAction(id: string): AtkButtonAction | null {
+  return ATK_R1_BUTTON_ACTIONS.find((action) => action.id === id) ?? null;
+}
+
+/** Find the standard action matching a decoded four-byte record. */
+export function atkButtonActionId(keyClass: number, value1: number, value2: number): string | null {
+  return ATK_R1_BUTTON_ACTIONS.find((action) =>
+    action.keyClass === keyClass && action.value1 === value1 && action.value2 === value2)?.id ?? null;
+}
+
+/** Pack a four-byte assignment whose checksum makes the record sum to 0x55. */
+export function atkPackButtonAssignment(action: AtkButtonAction): number[] {
+  if (![action.keyClass, action.value1, action.value2].every((value) =>
+    Number.isInteger(value) && value >= 0 && value <= 0xff)) {
+    throw new Error("ATK button assignments must use byte values.");
+  }
+  return [
+    action.keyClass,
+    action.value1,
+    action.value2,
+    (CHECKSUM_TOTAL - action.keyClass - action.value1 - action.value2) & 0xff,
+  ];
 }
 
 export const ATK_BUTTON_CLASS = {

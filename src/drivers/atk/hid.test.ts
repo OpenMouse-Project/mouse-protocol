@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { atkDpiOptionsForSensor, atkPackDpiStage, atkPackDpiStageForSensor, atkUnpackDpiStageForSensor } from "@openmouse/protocol/atk";
+import {
+  ATK_R1_MACRO_START_TYPES,
+  atkDpiOptionsForSensor,
+  atkPackDpiStage,
+  atkPackDpiStageForSensor,
+  atkUnpackDpiStageForSensor,
+} from "@openmouse/protocol/atk";
 import { wePackScalarPair } from "@openmouse/protocol/endgame-gear-we";
 import { AtkHidClient } from "./hid.ts";
 import { PulsarHidClient } from "../pulsar/pulsar-hid.ts";
@@ -239,6 +245,33 @@ test("wired R1 switches configuration banks with readback", async () => {
   assert.ok(selection);
   assert.deepEqual([...selection!.subarray(0, 7)], [0x0f, 0, 0, 0, 1, 2, 0]);
   assert.equal(sumFrame(8, selection!), 0x55);
+});
+
+test("R1 SE receiver switches banks after its silent profile command", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const transport = fake as unknown as FakeAtkDevice;
+  // The receiver does not echo SetCurrentConfig; the applied bank is proven by getCurrentConfig.
+  transport.ignoredCommands.add(0x0f);
+  transport.replies = [reply(0x10, 0x0000, [0x02, 0x29]), reply(0x0e, 0x0000, [1])];
+
+  assert.equal(await new AtkHidClient(fake).setR1ActiveProfile(2), 2);
+  const selection = transport.sent.find(({ data }) => data[0] === 0x0f)?.data;
+  assert.ok(selection);
+  assert.deepEqual([...selection!.subarray(0, 7)], [0x0f, 0, 0, 0, 1, 1, 0]);
+  assert.equal(sumFrame(8, selection!), 0x55);
+});
+
+test("an ATK NearLink mouse sharing the R1 SE CID/MID does not become an R1", async () => {
+  // 0x373b:0x1305 (ATK A9 3.0 NK) reports the same "2,29" pair as the VXE R1
+  // SE, so the CID/MID table must not hand it the R1 codecs.
+  const near = device(0x1305, "ATK A9 3.0 NK");
+  (near as unknown as FakeAtkDevice).replies = [reply(0x10, 0, [0x02, 0x29])];
+
+  await assert.rejects(
+    new AtkHidClient(near).setR1ActiveProfile(1),
+    /not available on this connection/,
+  );
 });
 
 test("R1 receiver telemetry reads online identity and pairing countdown without entering pairing", async () => {
@@ -592,6 +625,108 @@ test("wired R1 SE+ status uses identity, PAW3395SE, and all configured DPI stage
   assert.equal(status.dpiLedMode, 0);
   assert.equal(status.dpiLedBrightness, 1);
   assert.equal(status.dpiLedSpeed, 2);
+});
+
+test("R1 SE receiver exposes read-only button assignments through the shared EEPROM rows", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x0e, 0x0000, [0x00]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0068, [...button(1, 4), ...button(1, 8)]),
+    reply(0x08, 0x0070, [...button(1, 16), ...button(2, 1)]),
+  ];
+
+  const config = await new AtkHidClient(fake).readR1StoredConfiguration();
+  assert.equal(config.activeProfile, 1);
+  assert.deepEqual(
+    config.buttons.map(({ id, action, checksumValid }) => ({ id, action, checksumValid })),
+    [
+      { id: "left", action: "Left click", checksumValid: true },
+      { id: "right", action: "Right click", checksumValid: true },
+      { id: "middle", action: "Middle click", checksumValid: true },
+      { id: "back", action: "Back", checksumValid: true },
+      { id: "forward", action: "Forward", checksumValid: true },
+      { id: "bottom", action: "DPI cycle", checksumValid: true },
+    ],
+  );
+});
+
+test("R1 SE receiver writes one button record and preserves its paired neighbour", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(2, 1)]),
+  ];
+
+  const assignment = await new AtkHidClient(fake).setR1ButtonAssignment(1, "dpi-cycle");
+  assert.equal(assignment.label, "DPI cycle");
+  const write = wrote(fake);
+  assert.deepEqual(
+    [write[2], write[3], write[4]],
+    [0x00, 0x60, 0x08],
+  );
+  assert.deepEqual(
+    Array.from(write.subarray(5, 13)),
+    [...button(1, 1), ...button(2, 1)],
+  );
+});
+
+test("R1 SE receiver writes the macro slot and binds the macro button record", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0060, [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)]),
+  ];
+
+  await new AtkHidClient(fake).setR1ButtonMacro(
+    0,
+    [{ kind: "key-down", keyCode: 0x04, holdTime: 20 }],
+    {
+      startType: ATK_R1_MACRO_START_TYPES.stopImmediately,
+      runCount: 1,
+      macroId: 2,
+    },
+  );
+
+  const writes = (fake as unknown as FakeAtkDevice).sent
+    .filter(({ data }) => data[0] === 0x07);
+  const macroWrites = writes.filter(({ data }) => data[2] === 0x06);
+  assert.equal(macroWrites.length, 4);
+  const table = macroWrites.flatMap(({ data }) => Array.from(data.subarray(5, 5 + data[4]!)));
+  assert.deepEqual(table.slice(0, 10), [8, 2, 2, 2, 2, 2, 2, 2, 2, 255]);
+  assert.deepEqual(table.slice(31, 38), [1, 0x81, 4, 0, 0, 20, 0xbb]);
+
+  const bind = writes.find(({ data }) => data[2] === 0x00 && data[3] === 0x60);
+  assert.ok(bind);
+  assert.deepEqual(
+    Array.from(bind!.data.subarray(5, 13)),
+    [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)],
+  );
+});
+
+test("R1 SE receiver reads a stored macro slot into editable steps", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x031f, [2]),
+    reply(0x08, 0x0320, [
+      0x81, 0x04, 0, 0, 20,
+      0x41, 0x04, 0, 0, 30,
+    ]),
+  ];
+
+  const steps = await new AtkHidClient(fake).readR1ButtonMacro(0);
+  assert.deepEqual(steps, [
+    { kind: "key-down", keyCode: 0x04, holdTime: 20 },
+    { kind: "key-up", keyCode: 0x04, holdTime: 30 },
+  ]);
 });
 
 test("R1 receiver readStatus fails before fallback decoding when CID/MID times out", async () => {

@@ -7,9 +7,11 @@ import {
   ATK_COMPX_FIRMWARE_HEADER_LENGTH,
   ATK_COMPX_FIRMWARE_PAYLOAD_OFFSET,
   ATK_R1_BUTTONS,
+  ATK_R1_BUTTON_ACTIONS,
   ATK_R1_MACRO_BASE,
   ATK_R1_MACRO_SLOT_COUNT,
   ATK_R1_MACRO_SLOT_LENGTH,
+  ATK_R1_MACRO_START_TYPES,
   ATK_R1_PROFILE_COUNT,
   ATK_R1_SHORTCUT_BASE,
   ATK_R1_SHORTCUT_SLOT_LENGTH,
@@ -17,6 +19,7 @@ import {
   atkBuildReceiverPairRequest,
   atkBuildSetCurrentProfile,
   atkBuildDongleLight,
+  atkButtonActionId,
   atkDecodeAntiMistouch,
   atkCompxPayloadCrc,
   atkDecodeButtonAssignment,
@@ -34,6 +37,11 @@ import {
   atkPackDpiStage,
   atkPackDpiStageForSensor,
   atkPackAntiMistouch,
+  atkPackAtkR1MacroTable,
+  atkPackAtkR1MacroStep,
+  atkBuildAtkR1MacroKey,
+  atkUnpackAtkR1MacroActions,
+  atkPackButtonAssignment,
   atkPackSensorMode,
   atkPackVxeR1LiveSetting,
   atkPackVxeR1PollingSetting,
@@ -307,6 +315,116 @@ test("button assignments preserve unknown values and report checksum corruption"
   assert.equal(unknown?.checksumValid, false);
   assert.equal(unknown?.label, "Unknown class 0xfe (0xaa, 0xbb)");
   assert.equal(atkDecodeButtonAssignment([1, 2, 3]), null);
+});
+
+test("standard R1 button actions pack into valid four-byte assignments", () => {
+  for (const action of ATK_R1_BUTTON_ACTIONS) {
+    const record = atkPackButtonAssignment(action);
+    assert.equal(record.reduce((total, byte) => total + byte, 0) & 0xff, 0x55, action.id);
+    const decoded = atkDecodeButtonAssignment(record);
+    assert.equal(decoded?.checksumValid, true, action.id);
+    assert.equal(atkButtonActionId(action.keyClass, action.value1, action.value2), action.id);
+  }
+});
+
+test("R1 macro tables match the ATK HUB COMPX slot format", () => {
+  const table = atkPackAtkR1MacroTable([
+    { kind: "key-down", keyCode: 0x04, holdTime: 20 },
+    { kind: "key-up", keyCode: 0x04, holdTime: 30 },
+  ]);
+  assert.deepEqual(table.slice(0, 31), [
+    8,
+    ...Array.from({ length: 8 }, () => 2),
+    ...Array.from({ length: 22 }, () => 255),
+  ]);
+  assert.deepEqual(table.slice(31), [
+    2,
+    0x81, 0x04, 0, 0, 20,
+    0x41, 0x04, 0, 0, 30,
+    0x57,
+  ]);
+  assert.equal(
+    table.slice(31).reduce((total, byte) => total + byte, 0) & 0xff,
+    0x55,
+  );
+  assert.deepEqual(
+    atkPackAtkR1MacroTable([{ kind: "wheel-down", keyCode: 0, holdTime: 35 }]).slice(31),
+    [2, 6, 255, 0, 0, 35, 6, 0, 0, 0, 35, 0x02],
+  );
+
+  const keyboard = [
+    { kind: "key-down" as const, keyCode: 0x04, holdTime: 20 },
+    { kind: "key-up" as const, keyCode: 0x04, holdTime: 30 },
+  ];
+  const keyboardTable = atkPackAtkR1MacroTable(keyboard);
+  assert.deepEqual(
+    atkUnpackAtkR1MacroActions(keyboardTable[31]!, keyboardTable.slice(32)),
+    keyboard,
+  );
+
+  const wheel = atkPackAtkR1MacroTable([{ kind: "wheel-down", keyCode: 0, holdTime: 35 }]);
+  assert.deepEqual(
+    atkUnpackAtkR1MacroActions(wheel[31]!, wheel.slice(32)),
+    [{ kind: "wheel-down", keyCode: 0, holdTime: 35 }],
+  );
+
+  assert.throws(
+    () => atkUnpackAtkR1MacroActions(1, [0x04, 0x01, 0, 0, 20]),
+    /vendor action type 4/,
+  );
+});
+
+test("R1 macro button records carry the official start-mode bytes", () => {
+  assert.deepEqual(
+    Object.values(ATK_R1_MACRO_START_TYPES),
+    [254, 255, 253, 0],
+  );
+});
+
+test("a wheel pair the vendor stored with two delays is refused, not merged", () => {
+  // The editor keeps one hold time per wheel step, so a pair with two different
+  // delays cannot survive a save; decoding it would silently rewrite the press.
+  assert.throws(
+    () => atkUnpackAtkR1MacroActions(2, [0x06, 0x01, 0, 0, 20, 0x06, 0, 0, 0, 35]),
+    /mismatched delays/,
+  );
+  assert.deepEqual(
+    atkUnpackAtkR1MacroActions(2, [0x06, 0x01, 0, 0, 35, 0x06, 0, 0, 0, 35]),
+    [{ kind: "wheel-up", keyCode: 0, holdTime: 35 }],
+  );
+});
+
+test("the SetMacroKey frame carries every step byte it is given", () => {
+  const step = atkPackAtkR1MacroStep(
+    { kind: "key-down", keyCode: 0x04, holdTime: 20 },
+    0,
+    0,
+    ATK_R1_MACRO_START_TYPES.stopImmediately,
+    1,
+  );
+  assert.equal(step.length, 9);
+
+  const frame = atkBuildAtkR1MacroKey(0, step);
+  assert.equal(frame.length, 16);
+  assert.equal(frame[4], 11);
+  assert.equal(frame[5], 0);
+  assert.deepEqual([...frame.subarray(6, 15)], step);
+  assert.equal((0x08 + [...frame].reduce((total, byte) => total + byte, 0)) & 0xff, 0x55);
+
+  // A tenth byte would land in the checksum slot, so it is rejected instead.
+  assert.throws(() => atkBuildAtkR1MacroKey(0, [...step, 0]), /nine bytes/);
+});
+
+test("only a single-pass repeat count fits the SetMacroKey frame", () => {
+  const input = { kind: "key-down" as const, keyCode: 0x04, holdTime: 20 };
+  assert.throws(
+    () => atkPackAtkR1MacroStep(input, 0, 0, ATK_R1_MACRO_START_TYPES.loopCount, 5),
+    /single pass/,
+  );
+  assert.equal(
+    atkPackAtkR1MacroStep(input, 0, 0, ATK_R1_MACRO_START_TYPES.loopCount, 1).length,
+    9,
+  );
 });
 
 test("COMPX firmware parser checks endpoints, geometry, and raw payload CRC", () => {

@@ -61,6 +61,7 @@ export const ATK_PRODUCTS: Record<string, AtkProduct> = {
   "2,11": { brand: "VXE", model: "R1", sensor: "PAW3395", family: "r1", verified: false },
   "2,12": { brand: "VXE", model: "R1", sensor: "PAW3395", family: "r1", verified: true },
   "2,27": { brand: "VXE", model: "R1 Pro Max", sensor: "PAW3395", family: "r1", verified: true },
+  "2,29": { brand: "VXE", model: "R1 SE", sensor: "PAW3395SE", family: "r1", verified: true },
   "2,32": { brand: "VXE", model: "R1 SE+", sensor: "PAW3395SE", family: "r1", verified: true },
   "2,39": { brand: "ATK", model: "X1 Pro Max", sensor: "PAW3950", verified: true },
   "2,83": { brand: "ATK", model: "A9 Plus Nearlink", sensor: "PAW3395", maxPollingHz: 1000, verified: true },
