@@ -17,6 +17,7 @@ import {
   lamzuAtlantisDecodePollingRate,
   lamzuAtlantisDecodeReply,
   lamzuAtlantisEncodeAngleTuning,
+  lamzuAtlantisEncodeDpiStage,
   lamzuAtlantisEncodeDpiStage3955,
   lamzuAtlantisEncodeLiftOffDistance,
   lamzuAtlantisEncodePollingRate,
@@ -127,6 +128,19 @@ test("DPI stages decode with the shared CompX 50-step encoding", () => {
   assert.deepEqual(pulsarVgnEncodeDpi(400), stage);
   // Above 12,800 the count no longer fits one byte and rides in the flags.
   assert.equal(pulsarVgnDecodeDpi(pulsarVgnEncodeDpi(26000)), 26000);
+});
+
+test("the legacy stage encoder matches Pulsar's and reaches the decoder's ten bits", () => {
+  for (let dpi = 50; dpi <= 26000; dpi += 50) {
+    assert.deepEqual(lamzuAtlantisEncodeDpiStage(dpi), [...pulsarVgnEncodeDpi(dpi)]);
+  }
+  // The 3950's 30,000 ceiling is past Pulsar's 26,000 but inside the field.
+  for (const dpi of [30000, 51200]) {
+    assert.deepEqual(lamzuAtlantisDecodeDpiStage(Uint8Array.from(lamzuAtlantisEncodeDpiStage(dpi))), { x: dpi, y: dpi });
+  }
+  for (const dpi of [0, 25, 51250, 1625.5]) {
+    assert.throws(() => lamzuAtlantisEncodeDpiStage(dpi));
+  }
 });
 
 test("a DPI stage colour decodes from the same four-byte field shape", () => {
