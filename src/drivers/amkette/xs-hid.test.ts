@@ -16,6 +16,15 @@ import { AmketteXsHidClient, isAmketteDevice, resetAmketteXsWriteState } from ".
 
 beforeEach(() => resetAmketteXsWriteState());
 
+/** Stands in for `navigator.hid`, whose disconnect events hand write state to a replugged mouse. */
+const hid = new EventTarget();
+Object.defineProperty(globalThis.navigator, "hid", { value: hid, configurable: true });
+
+function unplug(device: HIDDevice): void {
+  void device.close();
+  hid.dispatchEvent(Object.assign(new Event("disconnect"), { device }));
+}
+
 function report(reportId: number): HIDReportInfo {
   return { reportId, items: [] } as unknown as HIDReportInfo;
 }
@@ -524,6 +533,41 @@ test("commands from separate callers are serialised and sequenced", async () => 
   await Promise.all([client.setLiftOffDistance("Low"), client.setSleepTimeout(120), client.setAngleSnapping(false)]);
   assert.deepEqual(transport.sent.map((entry) => entry.data[1]), [1, 2, 3]);
   assert.deepEqual(transport.sent.map((entry) => entry.data[0]), [0x05, 0x07, 0x08]);
+});
+
+test("two identical mice connected together keep their own written settings", async () => {
+  const first = await openClient();
+  const second = await openClient();
+  await first.client.setDpiStageValue(0, 500);
+  await first.client.setAngleSnapping(true);
+  const status = await second.client.readStatus();
+  assert.notEqual(status.dpiStages?.[0], 500);
+  assert.equal(status.angleSnapping, false);
+  await second.client.setDpiStageValue(1, 900);
+  assert.notEqual((await second.client.readStatus()).dpiStages?.[0], 500, "the second mouse is not sent the first one's table");
+  const firstStages = (await first.client.readStatus()).dpiStages;
+  assert.equal(firstStages?.[0], 500);
+  assert.notEqual(firstStages?.[1], 900);
+});
+
+test("switching away from a mouse does not hand its settings to another", async () => {
+  const first = await openClient();
+  await first.client.setAngleSnapping(true);
+  await first.client.close();
+  const second = await openClient();
+  assert.equal((await second.client.readStatus()).angleSnapping, false);
+  await second.client.close();
+  assert.equal((await first.client.readStatus()).angleSnapping, true);
+});
+
+test("a replugged mouse keeps what was written before the unplug", async () => {
+  const before = await openClient();
+  await before.client.setDpiStageValue(0, 500);
+  unplug(before.transport.device);
+  const after = await openClient();
+  assert.equal((await after.client.readStatus()).dpiStages?.[0], 500);
+  const other = await openClient();
+  assert.notEqual((await other.client.readStatus()).dpiStages?.[0], 500, "only one replugged handle inherits it");
 });
 
 test("concurrent writes build on each other instead of on the state before either", async () => {

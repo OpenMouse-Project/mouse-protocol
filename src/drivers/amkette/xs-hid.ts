@@ -93,9 +93,9 @@ const VENDOR_DEFAULTS = {
 } as const;
 
 /**
- * What the mouse cannot report back, as last written by OpenMouse this session.
- * Keyed by product ID, so the cable, the receiver and Bluetooth each start
- * fresh, and two mice on the same path share it.
+ * What one mouse cannot report back, as last written by OpenMouse this session.
+ * The cable, the receiver and Bluetooth have their own product IDs, so each
+ * path starts fresh.
  */
 interface WriteOnlyState {
   dpiStages: number[] | null;
@@ -112,32 +112,65 @@ interface WriteOnlyState {
   speed: number;
 }
 
-const writeOnlyByProduct = new Map<number, WriteOnlyState>();
+/** A handle's write-only state, and the handle now using it. */
+interface Claim {
+  device: HIDDevice;
+  state: WriteOnlyState;
+}
 
-function stateFor(productId: number): WriteOnlyState {
-  let state = writeOnlyByProduct.get(productId);
-  if (!state) {
-    state = {
-      dpiStages: null,
-      dpiColors: [...RYUNIX_DEFAULT_DPI_COLORS],
-      liftOffMm: null,
-      sleepMinutes: null,
-      angleSnapping: null,
-      motionSync: null,
-      rippleControl: null,
-      buttons: new Array(RYUNIX_BUTTON_POSITIONS).fill(null),
-      brightness: 4,
-      speed: 3,
+const claimsByProduct = new Map<number, Claim[]>();
+/** Handles WebHID has reported disconnected; their state can pass to a replugged mouse. */
+const disconnected = new WeakSet<HIDDevice>();
+let watchedHid: HID | null = null;
+
+function watchDisconnects(): void {
+  const hid = globalThis.navigator?.hid;
+  if (!hid || hid === watchedHid) return;
+  watchedHid = hid;
+  hid.addEventListener("disconnect", (event) => disconnected.add(event.device));
+}
+
+/**
+ * The state for this handle. WebHID hands a replugged mouse over as a new
+ * HIDDevice, so a new handle takes over the state of a same-product handle that
+ * has disconnected, keeping the session's DPI table across the replug. Any
+ * other new handle starts fresh: two identical mice connected together, or
+ * switched between, never share settings. Two that are both unplugged and
+ * replugged may swap, since nothing tells them apart.
+ */
+function stateFor(device: HIDDevice): WriteOnlyState {
+  watchDisconnects();
+  let claims = claimsByProduct.get(device.productId);
+  if (!claims) claimsByProduct.set(device.productId, claims = []);
+  let claim = claims.find((entry) => entry.device === device)
+    ?? claims.find((entry) => disconnected.has(entry.device));
+  if (claim) {
+    claim.device = device;
+  } else {
+    claim = {
+      device,
+      state: {
+        dpiStages: null,
+        dpiColors: [...RYUNIX_DEFAULT_DPI_COLORS],
+        liftOffMm: null,
+        sleepMinutes: null,
+        angleSnapping: null,
+        motionSync: null,
+        rippleControl: null,
+        buttons: new Array(RYUNIX_BUTTON_POSITIONS).fill(null),
+        brightness: 4,
+        speed: 3,
+      },
     };
-    writeOnlyByProduct.set(productId, state);
+    claims.push(claim);
   }
-  return state;
+  return claim.state;
 }
 
 /** Forget what this session wrote, e.g. between tests. */
 export function resetAmketteXsWriteState(productId?: number): void {
-  if (productId === undefined) writeOnlyByProduct.clear();
-  else writeOnlyByProduct.delete(productId);
+  if (productId === undefined) claimsByProduct.clear();
+  else claimsByProduct.delete(productId);
 }
 
 function hasCollection(collections: readonly HIDCollectionInfo[], usage: number, featureReport?: number): boolean {
@@ -467,7 +500,7 @@ export class AmketteXsHidClient {
     confirm?: Confirmation,
   ): Promise<void> {
     const sensor = this.requireSensor();
-    const state = stateFor(this.device.productId);
+    const state = stateFor(this.device);
     const table = { stages, activeStage };
     await this.transmit((sequence) => [
       ryunixSetDpiFrame(sequence(), table, sensor, "x"),
@@ -492,7 +525,7 @@ export class AmketteXsHidClient {
 
   private buildStatus(): MouseStatus {
     const telemetry = this.telemetry;
-    const state = stateFor(this.device.productId);
+    const state = stateFor(this.device);
     const sensor = ryunixSensor(telemetry?.sensorType ?? null);
     const wireless = this.isWireless();
     // Until a table is written the mouse's own stages are unknown; the vendor's
@@ -586,13 +619,13 @@ export class AmketteXsHidClient {
 
   public setDpi(dpi: number): Promise<number> {
     return this.enqueue(() => {
-      const stages = this.tableFor(stateFor(this.device.productId));
+      const stages = this.tableFor(stateFor(this.device));
       return this.writeStageValue(stages, this.activeStage(stages.length), dpi);
     });
   }
 
   public setDpiStageValue(stage: number, dpi: number): Promise<number> {
-    return this.enqueue(() => this.writeStageValue(this.tableFor(stateFor(this.device.productId)), stage, dpi));
+    return this.enqueue(() => this.writeStageValue(this.tableFor(stateFor(this.device)), stage, dpi));
   }
 
   /** Runs inside a queued transaction. */
@@ -615,7 +648,7 @@ export class AmketteXsHidClient {
    */
   public setActiveDpiStage(stage: number): Promise<number> {
     return this.enqueue(async () => {
-      const stages = this.tableFor(stateFor(this.device.productId));
+      const stages = this.tableFor(stateFor(this.device));
       if (!Number.isInteger(stage) || stage < 0 || stage >= stages.length) {
         throw new RangeError(`Invalid DPI stage ${stage + 1}.`);
       }
@@ -633,7 +666,7 @@ export class AmketteXsHidClient {
     }
     return this.enqueue(async () => {
       const sensor = this.requireSensor();
-      const current = this.tableFor(stateFor(this.device.productId));
+      const current = this.tableFor(stateFor(this.device));
       const stages = ryunixDefaultDpiStages(sensor, RYUNIX_DPI_MAX_STAGES)
         .map((fallback, index) => current[index] ?? fallback)
         .slice(0, count);
@@ -648,7 +681,7 @@ export class AmketteXsHidClient {
       throw new RangeError(`Invalid DPI stage ${index + 1}.`);
     }
     return this.enqueue(async () => {
-      const state = stateFor(this.device.productId);
+      const state = stateFor(this.device);
       const colors = [...state.dpiColors];
       colors[index] = color.toLowerCase();
       await this.transmit((sequence) => ryunixSetDpiColorsFrame(sequence(), colors));
@@ -663,7 +696,7 @@ export class AmketteXsHidClient {
       throw new Error(`This mouse offers Low and High lift-off, not ${level}.`);
     }
     await this.send((sequence) => ryunixSetLiftOffFrame(sequence(), millimetres));
-    stateFor(this.device.productId).liftOffMm = millimetres;
+    stateFor(this.device).liftOffMm = millimetres;
     return level;
   }
 
@@ -679,13 +712,13 @@ export class AmketteXsHidClient {
       wakeOnMove: true,
       lightOnMove: false,
     }));
-    stateFor(this.device.productId).sleepMinutes = minutes;
+    stateFor(this.device).sleepMinutes = minutes;
     return minutes * 60;
   }
 
   private writeSensorOptions(patch: Partial<Record<"angleSnapping" | "motionSync" | "rippleControl", boolean>>): Promise<void> {
     return this.enqueue(async () => {
-      const state = stateFor(this.device.productId);
+      const state = stateFor(this.device);
       // The mouse cannot report these, so unwritten ones take the vendor app's defaults.
       const next = {
         angleSnapping: patch.angleSnapping ?? state.angleSnapping ?? VENDOR_DEFAULTS.angleSnapping,
@@ -719,7 +752,7 @@ export class AmketteXsHidClient {
     }
     const mode = lighting.mode;
     return this.enqueue(async () => {
-      const state = stateFor(this.device.productId);
+      const state = stateFor(this.device);
       const level = lighting.brightness == null
         ? state.brightness
         : RYUNIX_BRIGHTNESS_LEVELS[BRIGHTNESS_PERCENT.indexOf(lighting.brightness as 25 | 50 | 75 | 100)];
@@ -750,7 +783,7 @@ export class AmketteXsHidClient {
     const code = RYUNIX_BUTTON_ACTIONS.get(action);
     if (!code) throw new Error(`Unknown button action "${action}".`);
     return this.enqueue(async () => {
-      const state = stateFor(this.device.productId);
+      const state = stateFor(this.device);
       const changed = [...state.buttons];
       changed[index] = code;
       const positions = RYUNIX_BUTTON_FACTORY_CODES.map((factory, position) => changed[position] ?? factory);

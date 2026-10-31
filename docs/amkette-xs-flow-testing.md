@@ -228,9 +228,12 @@ Consequences worth knowing:
   layout, as the vendor app does, so a layout stored by another tool is reset.
   0xFF ("not configured" in the vendor app) is not used, because what the
   firmware does with it is unknown;
-- what was written is remembered per product ID for the session only, so the
-  same mouse on the cable, the receiver and Bluetooth starts fresh on each path,
-  and two mice on the same path share it;
+- what was written is remembered per connection for the session only, so the
+  same mouse on the cable, the receiver and Bluetooth starts fresh on each path.
+  A replugged mouse (a new WebHID handle) takes over what was written to a
+  handle with the same product ID that WebHID reported disconnected; two
+  identical mice connected together keep their own. Two that are both unplugged
+  and replugged may swap, since nothing on the wire tells them apart;
 - the acknowledgement on report `0x06` carries no sequence number. The driver
   assumes it reflects the newest command; the receiver test supports this (it
   reads `06 00` right after a new command, before turning `06 01`), but nothing
