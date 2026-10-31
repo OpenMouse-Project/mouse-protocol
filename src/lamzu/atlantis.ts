@@ -366,6 +366,22 @@ export function lamzuAtlantisDecodeDpiStage(field: Uint8Array): LamzuAtlantisDpi
 }
 
 /**
+ * Encodes one DPI as a legacy stage field, both axes in lockstep: the same
+ * bytes as `pulsarVgnEncodeDpi`, but over the whole ten bits the decoder above
+ * reads (50 to 51,200 DPI) rather than the Pulsar ceiling of 26,000. Each
+ * product's own maxDpi still bounds what a client writes.
+ */
+export function lamzuAtlantisEncodeDpiStage(dpi: number): number[] {
+  const value = dpi / LAMZU_ATLANTIS_DPI_STEP - 1;
+  if (!Number.isInteger(value) || value < 0 || value > 0x3ff) {
+    throw new Error("A legacy DPI stage holds 50 to 51,200 DPI in 50 DPI steps.");
+  }
+  const low = value & 0xff;
+  const high = value >> 8;
+  return lamzuAtlantisSealField([low, low, (high << 2) | (high << 6)]);
+}
+
+/**
  * The 3955 sensor's two value bands, from the vendor configurator's sensor
  * table. Below 42,002 DPI the value stores as-is; above, halved, with the
  * band marker in both nibbles of the flags byte (DPIex 17 = 0x11).

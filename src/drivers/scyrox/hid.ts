@@ -15,6 +15,11 @@ import { SCYROX_V8S_20K_ADDRESS, scyroxProduct } from "@openmouse/protocol/scyro
  * Reads are verified on both transports (see docs/scyrox-v8s-testing.md);
  * writes inherit the Atlantis client's write-then-read-back behavior and still
  * need hardware verification one by one.
+ *
+ * The older V8's "SCYROX 8K Dongle" (0x3554:0xf5f7) answers the same
+ * sequence; its 3950 sensor keeps the stages in the legacy fields, which the
+ * catalog entry selects. Its full read and a polling-rate round trip are
+ * verified (see docs/scyrox-v8-testing.md).
  */
 export class ScyroxHidClient extends LamzuAtlantisHidClient {
   constructor(device: HIDDevice) {

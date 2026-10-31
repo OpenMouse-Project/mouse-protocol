@@ -9,6 +9,7 @@ import {
   LAMZU_ATLANTIS_USAGE_PAGE,
   LAMZU_ATLANTIS_VENDOR_ID,
   LAMZU_ATLANTIS_WRITE_ACTIVE_PROFILE as WRITE_ACTIVE_PROFILE,
+  lamzuAtlantisEncodeDpiStage,
   lamzuAtlantisEncodeDpiStage3955,
   lamzuAtlantisSealField,
 } from "@openmouse/protocol/lamzu";
@@ -261,6 +262,23 @@ test("a 3955 sensor's stages are read and written at 6912, not the legacy fields
     [...pulsarVgnEncodeDpi(400)],
     "the legacy factory default is left alone",
   );
+  await client.close();
+});
+
+test("a Scyrox V8 reads and writes its stages in the legacy fields, up to 30,000", async () => {
+  const device = new FakeAtlantis(0xf5f7);
+  // The constructor's two legacy stages, 400 and 1,600, as the V8 keeps them.
+  const client = new ScyroxHidClient(device as unknown as HIDDevice);
+  const status = await client.readStatus();
+  assert.deepEqual(status.dpiStages, [400, 1600]);
+  assert.equal(status.pollingRateHz, 500, "0x02 is 500 Hz in CompX's own table");
+
+  assert.equal(await client.setDpiStageValue(1, 30000), 30000);
+  assert.deepEqual(
+    [...device.flash.subarray(FLASH.dpiValues + 4, FLASH.dpiValues + 8)],
+    lamzuAtlantisEncodeDpiStage(30000),
+  );
+  await assert.rejects(() => client.setDpiStageValue(1, 30050), /between 50 and 30000/);
   await client.close();
 });
 

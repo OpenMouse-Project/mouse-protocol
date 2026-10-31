@@ -55,8 +55,8 @@ test("the wired mouse and every catalogued receiver are claimed", () => {
 test("other devices on CompX's shared vendor id are left alone", () => {
   // VXE R1 SE+ transports, a Teevolution Terra Pro, a VGN Dragonfly F2 Master+
   // and Pulsar's own 4K receiver all enumerate under 0x3554, as do the Scyrox
-  // V8S and its dongle, which have their own registered client.
-  for (const productId of [0xf58e, 0xf58f, 0xf520, 0xfb56, 0x0002, 0xf515, 0xf517]) {
+  // V8S, its dongle and the V8's dongle, which have their own registered client.
+  for (const productId of [0xf58e, 0xf58f, 0xf520, 0xfb56, 0x0002, 0xf515, 0xf517, 0xf5f7]) {
     assert.equal(LamzuAtlantisHidClient.isSupported(device(LAMZU_ATLANTIS_VENDOR_ID, productId)), false);
   }
 });

@@ -16,6 +16,11 @@ import type { LamzuAtlantisProduct } from "../lamzu/atlantis.js";
  * 0x3554:0xf515 and its "Scyrox Turbo 8k dongle" receiver 0x3554:0xf517 — see
  * docs/scyrox-v8s-testing.md. Every other flash field the Atlantis client
  * reads decoded cleanly on both transports; no write has been exercised yet.
+ *
+ * The older V8 ("SCYROX 8K Dongle", 0x3554:0xf5f7, mouse firmware v2.22) runs
+ * a 3950 sensor and keeps its DPI stages in the legacy fields; it was read on
+ * hardware and its polling rate written and read back, see
+ * docs/scyrox-v8-testing.md.
  */
 export const SCYROX_VENDOR_ID = 0x3554;
 
@@ -24,7 +29,7 @@ export const SCYROX_V8S_CID = 0x3e;
 export const SCYROX_V8S_MID = 0x05;
 
 /** Product ids this brand owns on CompX's shared vendor id. */
-export const SCYROX_PRODUCT_IDS: readonly number[] = [0xf515, 0xf517];
+export const SCYROX_PRODUCT_IDS: readonly number[] = [0xf515, 0xf517, 0xf5f7];
 
 /**
  * The "20K" switch: 20,000 FPS sensor scanning, which the vendor configurator
@@ -111,6 +116,37 @@ export const SCYROX_PRODUCTS: ReadonlyMap<number, ScyroxProduct> = new Map([
     supportsHyperMode: false,
     supportsAngleTuning: true,
     supportsFactoryReset: true,
+    mirrorSleepToPerformanceTime: true,
+  }],
+  // The V8's "SCYROX 8K Dongle". The vendor configurator offers the V8S's
+  // seven rates for it, and the mouse held 0x10 while the configurator showed
+  // 2,000 Hz, so it shares the CompX rate bytes.
+  [0xf5f7, {
+    brand: "Scyrox",
+    model: "V8",
+    wireless: true,
+    pollingRates: RATES_V8S,
+    rateFamily: "pulsar",
+    // A 3950 sensor: the stage values live in the legacy fields at 12, which
+    // held the five stages the configurator showed, while reading the 3955
+    // records at 6912 did not give them back.
+    dpiLayout: "legacy",
+    verified: true,
+    // The configurator's device table gives the V8 (the entry whose upgrade
+    // tool ships firmware v2.22, the version this mouse reported) a 3950
+    // sensor and a 30,000 DPI ceiling, and its 3950 table steps 50 to 30,000
+    // by 50.
+    minDpi: 50,
+    maxDpi: 30000,
+    dpiStep: 50,
+    maxDpiStages: 5,
+    // The 3950 codes its three heights 3, 1 and 2 (0.7, 1 and 2 mm), which
+    // neither Lamzu's two stops nor a 1-to-n scale describes, so lift-off
+    // stays out until the byte has its own decoder.
+    supportsLiftOffDistance: false,
+    supportsHyperMode: false,
+    // Flash 173 and 183 both held 180 (30 minutes in the configurator's
+    // table), as its sleep setter writes them.
     mirrorSleepToPerformanceTime: true,
   }],
 ]);
