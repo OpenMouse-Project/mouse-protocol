@@ -16,6 +16,12 @@ Button remapping and macros are outside this change.
   define the single-row write as class `0x03`, command `0x0c`, fixed data size
   `0x32`, inclusive start/end columns followed by RGB bytes. Custom activation
   is class `0x03`, command `0x0a`, data size `0x02`, arguments `[0x05, 0x00]`.
+- [OpenRGB's Diamondback catalog](https://github.com/CalcProgrammer1/OpenRGB/blob/master/Controllers/RazerController/RazerDevices.cpp)
+  declares a linear 21-cell row (19 strip LEDs, logo and scroll wheel).
+- [OpenRGB's controller](https://github.com/CalcProgrammer1/OpenRGB/blob/master/Controllers/RazerController/RazerController/RazerController.cpp)
+  sends that complete row from column 0 through 20 and activates custom mode
+  after every upload. Its linear report retains data size `0x32` while copying
+  all 63 RGB bytes into the report's 80-byte argument area.
 
 These facts are transcribed from the upstream sources, not inferred from other
 Razer models. The new writes have automated coverage, but have not yet been
@@ -27,15 +33,22 @@ The status exposes the existing Mouse effects zone followed by LED 0 through
 LED 20. LED numbers are protocol columns, not a claimed physical left-to-right
 layout. The existing OpenMouse lighting strip renders them without a new UI.
 
-Choosing Static or Off writes only the selected cell, then activates the
-volatile custom frame if it is not already active. This preserves untouched
-cells in the mouse's frame buffer; their initial colors cannot be read back.
-Off writes black to that LED. Brightness is global and remains on the Mouse
-zone. A built-in Mouse effect overrides the visible custom colors; the driver
-then clears the LED modes it reports. The next LED write activates custom again.
+Ticket T 0124 reports that the original single-cell implementation only changed
+the first LED, while whole-mouse effects worked. The correction follows
+OpenRGB's complete-row upload and activation sequence. This is a source-backed
+fix candidate; physical confirmation from the reporter is still required.
+
+Choosing Static or Off uploads all 21 cells, then activates the volatile custom
+frame on every edit. Previously acknowledged Static colors are preserved;
+unknown cells start black because their initial colors cannot be read back.
+Off writes black to that LED. After a successful upload and activation, unknown
+cells are reported as Off. Brightness is global and remains on the Mouse zone.
+A built-in Mouse effect overrides the visible custom colors and clears the LED
+modes reported by the driver. Starting custom mode again initializes unknown
+cells to black.
 
 Colors and effect state are write-only. On connection the LED modes are unknown.
-The cache records a cell only after both upload and activation succeed. This
+The cache records the complete row only after both upload and activation succeed. This
 does not promise persistence after an unplug, or synchronize with other RGB
 software editing the same mouse.
 
@@ -46,7 +59,7 @@ Synapse and OpenRGB so they do not replace the test colors.
 
 1. Record the firmware, DPI, polling rate and brightness before testing.
 2. In Lighting, choose LED 0, set Static red and apply. Record the physical LED
-   that changes and any error. The rest of the frame should not be repainted.
+   that changes and any error. Initially unknown cells are set to black.
 3. Repeat with LED 1 in green and LED 20 in blue; confirm earlier cells keep
    their colors, and record the physical positions.
 4. Set LED 1 to Off; verify only that cell goes dark.
