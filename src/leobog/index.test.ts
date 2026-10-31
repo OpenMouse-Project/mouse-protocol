@@ -151,6 +151,11 @@ test("rejects a block whose fields are outside the vendor's range", () => {
   const sillySleep = CAPTURED_ONBOARD.slice();
   sillySleep[0x4a] = 121;
   assert.equal(leobogGm3DecodeOnboard(sillySleep), null);
+
+  const stageTooHigh = CAPTURED_ONBOARD.slice();
+  stageTooHigh[7 + 2 * 2] = 0xff; // stage 2 reads 6,553,500 DPI
+  stageTooHigh[7 + 2 * 2 + 1] = 0xff;
+  assert.equal(leobogGm3DecodeOnboard(stageTooHigh), null);
 });
 
 test("writes one DPI stage into both tables and nothing else", () => {
@@ -206,6 +211,17 @@ test("shrinking the stage count blanks the trailing entries the vendor way", () 
 
   assert.throws(() => leobogGm3WithStageCount(CAPTURED_ONBOARD, 0), /out of range/);
   assert.throws(() => leobogGm3WithStageCount(CAPTURED_ONBOARD, 7), /out of range/);
+});
+
+test("an enabled stage holding the 100 DPI floor survives a count change", () => {
+  // The vendor blanks a disabled stage to 100 DPI, which is also a value the
+  // user can pick, so only stages that were already disabled may be refilled.
+  const floored = leobogGm3WithDpiStage(leobogGm3WithStageCount(CAPTURED_ONBOARD, 4), 2, LEOBOG_GM3_DPI_MIN);
+  const grown = leobogGm3WithStageCount(floored, 6);
+
+  assert.equal(leobogGm3DecodeOnboard(grown)?.dpiStages[2], LEOBOG_GM3_DPI_MIN);
+  // Stages 4 and 5 were disabled before the change, so they take the fill value.
+  assert.equal(leobogGm3DecodeOnboard(grown)?.dpiStages[5], 4800);
 });
 
 test("validates DPI values the block can encode", () => {

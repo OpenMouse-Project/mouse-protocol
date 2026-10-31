@@ -210,6 +210,11 @@ export class LeobogGm3HidClient {
    * The device answers no read for the button table, so the client keeps its
    * own copy, seeded from the factory bindings. Every write sends the whole
    * table, which is why the untouched slots come from here.
+   *
+   * That seed is also the risk: the copy starts at the factory bindings, so the
+   * first write replaces any binding the user made in the vendor application
+   * and there is no read to check against. Anything richer than a whole-table
+   * write would have to come from the vendor application's own profile file.
    */
   private buttonTable: LeobogGm3ButtonCode[] = defaultButtonTable();
   /**
@@ -342,6 +347,14 @@ export class LeobogGm3HidClient {
    * Uploads one macro with vendor command `03 00`. The device answers no read
    * for it, so there is nothing to confirm against — the local copy is only
    * updated after the frame was handed over, exactly like the button table.
+   *
+   * `slot` names this client's copy, not a field in the frame: the record
+   * carries the name, the steps and nothing else, so the mouse numbers the
+   * macros it receives in upload order. Labels and button bindings are built
+   * from the same local slot, so they line up while every upload goes through
+   * one client. A macro uploaded by the vendor application can shift the
+   * indices, and with no readback that cannot be detected from here — see
+   * `docs/leobog-gm3-buttons.md`.
    */
   async setMacro(slot: number, name: string, steps: readonly LeobogGm3MacroStep[]): Promise<void> {
     return await this.run(async () => {
@@ -386,6 +399,19 @@ export class LeobogGm3HidClient {
         replayed.buttonOptions = this.getButtonOptions();
         replayed.defaultButtonMappings = this.getDefaultButtonMappings();
         replayed.leobogMacros = this.getMacros();
+        // A settings write also runs during the backoff. Its read-back block is
+        // newer than the one this replay carries, so the configuration-derived
+        // fields come from the cache — otherwise a change the mouse accepted
+        // looks like it reverted until the next full poll.
+        if (this.configCache !== null) {
+          const cached = this.configCache.config;
+          replayed.dpi = cached.dpiStages[cached.activeStage]!;
+          replayed.dpiStages = cached.dpiStages.slice(0, cached.stageCount);
+          replayed.activeDpiStage = cached.activeStage;
+          replayed.pollingRateHz = cached.pollingRateHz;
+          replayed.debounceMs = cached.debounceMs;
+          replayed.sleepTimeout = cached.sleepMinutes * 60;
+        }
         return replayed;
       }
       const product = this.product();
@@ -494,7 +520,7 @@ export class LeobogGm3HidClient {
     await this.apply(
       (block) => leobogGm3WithDpiStage(block, stage, dpi),
       (config) => config.dpiStages[stage] === dpi,
-      `The mouse kept ${dpi} DPI on stage ${stage + 1}.`,
+      `The mouse did not keep ${dpi} DPI on stage ${stage + 1}.`,
     );
   }
 
@@ -503,7 +529,7 @@ export class LeobogGm3HidClient {
       await this.apply(
         (block) => leobogGm3WithActiveStage(block, stage),
         (config) => config.activeStage === stage,
-        `The mouse kept DPI stage ${stage + 1}.`,
+        `The mouse did not switch to DPI stage ${stage + 1}.`,
       );
       return stage;
     });
@@ -514,7 +540,7 @@ export class LeobogGm3HidClient {
       await this.apply(
         (block) => leobogGm3WithStageCount(block, count),
         (config) => config.stageCount === count,
-        `The mouse kept ${count} DPI stages.`,
+        `The mouse did not keep ${count} DPI stages.`,
       );
       return count;
     });
@@ -525,7 +551,7 @@ export class LeobogGm3HidClient {
       await this.apply(
         (block) => leobogGm3WithPollingRate(block, hz),
         (config) => config.pollingRateHz === hz,
-        `The mouse kept ${hz} Hz.`,
+        `The mouse did not keep ${hz} Hz.`,
       );
       return hz;
     });
@@ -536,7 +562,7 @@ export class LeobogGm3HidClient {
       await this.apply(
         (block) => leobogGm3WithDebounce(block, ms),
         (config) => config.debounceMs === ms,
-        `The mouse kept ${ms} ms debounce.`,
+        `The mouse did not keep ${ms} ms debounce.`,
       );
       return ms;
     });
@@ -554,7 +580,7 @@ export class LeobogGm3HidClient {
       await this.apply(
         (block) => leobogGm3WithSleepMinutes(block, minutes),
         (config) => config.sleepMinutes === minutes,
-        `The mouse kept a ${minutes || "no"} minute auto-sleep timer.`,
+        `The mouse did not keep a ${minutes || "no"} minute auto-sleep timer.`,
       );
       return seconds;
     });
@@ -580,10 +606,12 @@ export class LeobogGm3HidClient {
       + " the list starts from the factory bindings and follows writes made here.";
     const notes = (refreshFailed
       ? "The mouse did not answer a settings refresh — it may be asleep. Press a button on the mouse; the values below are the last ones it reported."
-      : config === null
-      ? "The mouse is not answering its configuration commands, so settings are read-only until it is awake; press a button on the mouse."
+      // The link flag is checked before the missing block: a sleeping mouse
+      // reports both, and the sleep state is the reason the block is empty.
       : linked === false
         ? "The mouse is asleep, so the battery reading is the receiver's last value; press a button to wake it."
+        : config === null
+          ? "The mouse is not answering its configuration commands, so settings are read-only until it is awake; press a button on the mouse."
         : scope + buttonNote) + batteryNote;
 
     return {
@@ -725,12 +753,24 @@ export class LeobogGm3HidClient {
     verify: (config: LeobogGm3OnboardConfig) => boolean,
     message: string,
   ): Promise<void> {
+    // A receive that timed out leaves the handle busy even though this call has
+    // given up on it, so a failed read reopens the device before the error goes
+    // back to the UI. Otherwise the next status poll queues behind the stale
+    // request and the page looks frozen.
+    const readBlock = async (deadlineMs: number): Promise<Uint8Array> => {
+      try {
+        return await this.readOnboard(3, deadlineMs);
+      } catch (error) {
+        await this.resetDevice();
+        throw error;
+      }
+    };
     await this.open();
-    const before = await this.readOnboard(3, CONFIG_WRITE_DEADLINE_MS);
+    const before = await readBlock(CONFIG_WRITE_DEADLINE_MS);
     await sleep(WRITE_GAP_MS);
     await this.writeOnboard(transform(before));
     await sleep(RESPONSE_DELAY_MS);
-    const config = leobogGm3DecodeOnboard(await this.readOnboard(3, WIRED_CONFIG_READ_DEADLINE_MS));
+    const config = leobogGm3DecodeOnboard(await readBlock(WIRED_CONFIG_READ_DEADLINE_MS));
     if (config === null || !verify(config)) throw new Error(message);
     // The UI can show the change straight away instead of waiting for the next
     // status poll to re-read the block.
@@ -805,6 +845,7 @@ export class LeobogGm3HidClient {
           continue;
         }
 
+        let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
         try {
           const remainingMs = deadlineAt - Date.now();
           if (remainingMs <= 0) {
@@ -812,11 +853,13 @@ export class LeobogGm3HidClient {
           }
           const response = await Promise.race([
             pending,
-            sleep(remainingMs).then(() => {
-              // The receive is still outstanding: WebHID offers no cancel, so
-              // it stays on the handle until the browser's own timeout.
-              this.abandonedReceive = true;
-              throw new Error(`The GM3 did not answer within ${deadlineMs} ms.`);
+            new Promise<never>((_, reject) => {
+              deadlineTimer = setTimeout(() => {
+                // The receive is still outstanding: WebHID offers no cancel, so
+                // it stays on the handle until the browser's own timeout.
+                this.abandonedReceive = true;
+                reject(new Error(`The GM3 did not answer within ${deadlineMs} ms.`));
+              }, remainingMs);
             }),
           ]);
           if (expectedCommand === undefined || responseMatchesCommand(response, expectedCommand)) {
@@ -824,6 +867,10 @@ export class LeobogGm3HidClient {
           }
           lastError = new Error(`The GM3 replied with command 0x${response[2]?.toString(16) ?? "??"} instead of 0x${expectedCommand.toString(16)}.`);
         } finally {
+          // A reply that beats the deadline has to clear its timer: left
+          // running it would flag the next healthy poll as abandoned and make
+          // the status poll back off for seconds.
+          if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
           // The real HID call keeps waiting for its own timeout; swallow that
           // so a late rejection is not an unhandled promise.
           void pending.catch(() => undefined);

@@ -262,6 +262,18 @@ test("R1 SE receiver switches banks after its silent profile command", async () 
   assert.equal(sumFrame(8, selection!), 0x55);
 });
 
+test("an ATK NearLink mouse sharing the R1 SE CID/MID does not become an R1", async () => {
+  // 0x373b:0x1305 (ATK A9 3.0 NK) reports the same "2,29" pair as the VXE R1
+  // SE, so the CID/MID table must not hand it the R1 codecs.
+  const near = device(0x1305, "ATK A9 3.0 NK");
+  (near as unknown as FakeAtkDevice).replies = [reply(0x10, 0, [0x02, 0x29])];
+
+  await assert.rejects(
+    new AtkHidClient(near).setR1ActiveProfile(1),
+    /not available on this connection/,
+  );
+});
+
 test("R1 receiver telemetry reads online identity and pairing countdown without entering pairing", async () => {
   const fake = device();
   const online = reply(0x03, 0, [1, 0xaa, 0xbb, 0xcc]);

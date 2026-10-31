@@ -38,6 +38,8 @@ import {
   atkPackDpiStageForSensor,
   atkPackAntiMistouch,
   atkPackAtkR1MacroTable,
+  atkPackAtkR1MacroStep,
+  atkBuildAtkR1MacroKey,
   atkUnpackAtkR1MacroActions,
   atkPackButtonAssignment,
   atkPackSensorMode,
@@ -376,6 +378,52 @@ test("R1 macro button records carry the official start-mode bytes", () => {
   assert.deepEqual(
     Object.values(ATK_R1_MACRO_START_TYPES),
     [254, 255, 253, 0],
+  );
+});
+
+test("a wheel pair the vendor stored with two delays is refused, not merged", () => {
+  // The editor keeps one hold time per wheel step, so a pair with two different
+  // delays cannot survive a save; decoding it would silently rewrite the press.
+  assert.throws(
+    () => atkUnpackAtkR1MacroActions(2, [0x06, 0x01, 0, 0, 20, 0x06, 0, 0, 0, 35]),
+    /mismatched delays/,
+  );
+  assert.deepEqual(
+    atkUnpackAtkR1MacroActions(2, [0x06, 0x01, 0, 0, 35, 0x06, 0, 0, 0, 35]),
+    [{ kind: "wheel-up", keyCode: 0, holdTime: 35 }],
+  );
+});
+
+test("the SetMacroKey frame carries every step byte it is given", () => {
+  const step = atkPackAtkR1MacroStep(
+    { kind: "key-down", keyCode: 0x04, holdTime: 20 },
+    0,
+    0,
+    ATK_R1_MACRO_START_TYPES.stopImmediately,
+    1,
+  );
+  assert.equal(step.length, 9);
+
+  const frame = atkBuildAtkR1MacroKey(0, step);
+  assert.equal(frame.length, 16);
+  assert.equal(frame[4], 11);
+  assert.equal(frame[5], 0);
+  assert.deepEqual([...frame.subarray(6, 15)], step);
+  assert.equal((0x08 + [...frame].reduce((total, byte) => total + byte, 0)) & 0xff, 0x55);
+
+  // A tenth byte would land in the checksum slot, so it is rejected instead.
+  assert.throws(() => atkBuildAtkR1MacroKey(0, [...step, 0]), /nine bytes/);
+});
+
+test("only a single-pass repeat count fits the SetMacroKey frame", () => {
+  const input = { kind: "key-down" as const, keyCode: 0x04, holdTime: 20 };
+  assert.throws(
+    () => atkPackAtkR1MacroStep(input, 0, 0, ATK_R1_MACRO_START_TYPES.loopCount, 5),
+    /single pass/,
+  );
+  assert.equal(
+    atkPackAtkR1MacroStep(input, 0, 0, ATK_R1_MACRO_START_TYPES.loopCount, 1).length,
+    9,
   );
 });
 

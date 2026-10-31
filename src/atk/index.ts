@@ -420,6 +420,11 @@ export const ATK_R1_SHORTCUT_SLOT_LENGTH = 32;
 export const ATK_R1_MACRO_BASE = 0x0300;
 export const ATK_R1_MACRO_SLOT_LENGTH = 384;
 export const ATK_R1_MACRO_SLOT_COUNT = 12;
+/**
+ * Action records one slot holds: a 31-byte header, a one-byte action count and
+ * five bytes per action fit 70 records in 384 bytes.
+ */
+export const ATK_R1_MACRO_MAX_ACTIONS = 70;
 
 /** AtkR1 button key index carried by SetMacroKey, matching ATK HUB. */
 export const ATK_R1_MACRO_KEY_INDEX = {
@@ -467,8 +472,8 @@ export const ATK_R1_MACRO_KEY_TYPE = {
 export function atkPackAtkR1MacroTable(
   steps: readonly AtkR1MacroStepInput[],
 ): number[] {
-  if (steps.length < 1 || steps.length > 70) {
-    throw new Error("An R1 macro needs 1-70 steps.");
+  if (steps.length < 1 || steps.length > ATK_R1_MACRO_MAX_ACTIONS) {
+    throw new Error(`An R1 macro needs 1-${ATK_R1_MACRO_MAX_ACTIONS} steps.`);
   }
 
   const records: number[] = [];
@@ -477,6 +482,10 @@ export function atkPackAtkR1MacroTable(
       Number.isInteger(value) && value >= 0 && value <= 0xffff)) {
       throw new Error("R1 macro values must be 16-bit integers.");
     }
+    // Every non-final delay is floored at 20 ms: the firmware treats a shorter
+    // gap as no gap and drops the step. The floor is applied here rather than
+    // rejected so a fast recorded press still saves, but it does mean a stored
+    // delay below 20 ms reads back as 20 ms after a save.
     const holdTime = index === steps.length - 1 ? step.holdTime : Math.max(20, step.holdTime);
     if (step.kind === "wheel-up" || step.kind === "wheel-down") {
       const direction = step.kind === "wheel-down" ? 255 : 1;
@@ -506,7 +515,9 @@ export function atkPackAtkR1MacroTable(
   }
 
   const actionCount = records.length / 5;
-  if (actionCount > 70) throw new Error("An R1 macro holds at most 70 actions.");
+  if (actionCount > ATK_R1_MACRO_MAX_ACTIONS) {
+    throw new Error(`An R1 macro holds at most ${ATK_R1_MACRO_MAX_ACTIONS} actions.`);
+  }
   const payload = [actionCount, ...records];
   payload.push((0x55 - payload.reduce((total, byte) => total + byte, 0)) & 0xff);
   return [
@@ -530,13 +541,17 @@ function packAtkR1MacroDelay(value: number): readonly [number, number] {
  * Decode the action records stored in one R1 macro slot. The editor can
  * safely round-trip keyboard and wheel actions; vendor-only action types are
  * rejected so an edit cannot silently replace them with keyboard steps.
+ *
+ * Delays are returned exactly as stored. `atkPackAtkR1MacroTable` floors every
+ * non-final delay at 20 ms, so a slot holding a shorter one reads back lower
+ * than a save would write it.
  */
 export function atkUnpackAtkR1MacroActions(
   actionCount: number,
   records: Uint8Array | readonly number[],
 ): AtkR1MacroStepInput[] {
-  if (!Number.isInteger(actionCount) || actionCount < 0 || actionCount > 70) {
-    throw new Error("An R1 macro holds 0-70 actions.");
+  if (!Number.isInteger(actionCount) || actionCount < 0 || actionCount > ATK_R1_MACRO_MAX_ACTIONS) {
+    throw new Error(`An R1 macro holds 0-${ATK_R1_MACRO_MAX_ACTIONS} actions.`);
   }
   const bytes = Array.from(records);
   if (bytes.length < actionCount * 5) {
@@ -572,7 +587,12 @@ export function atkUnpackAtkR1MacroActions(
         if (previous?.kind !== "wheel-up" && previous?.kind !== "wheel-down") {
           throw new Error("This R1 macro contains an unmatched wheel release action.");
         }
-        previous.holdTime = delay;
+        // The editor holds one delay for the whole wheel pair, so a pair the
+        // vendor stored with different delays cannot survive a save; refuse it
+        // rather than silently rewriting the press with the release's delay.
+        if (previous.holdTime !== delay) {
+          throw new Error("This R1 macro contains a wheel pair with mismatched delays.");
+        }
         continue;
       }
       if (value !== 0x01 && value !== 0xff) {
@@ -592,7 +612,11 @@ export function atkUnpackAtkR1MacroActions(
   return steps;
 }
 
-/** Raw 10-byte SetMacroKey payload for one macro step. */
+/**
+ * Raw nine-byte SetMacroKey payload for one macro step. The 16-byte frame
+ * carries a button index, these nine bytes and a checksum, so the repeat count
+ * has no field of its own: only the single-pass case is expressible.
+ */
 export function atkPackAtkR1MacroStep(
   input: AtkR1MacroStepInput,
   position: number,
@@ -605,6 +629,11 @@ export function atkPackAtkR1MacroStep(
     Number.isInteger(value) && value >= 0 && value <= 0xff)) {
     throw new Error("ATK macro identifiers must be bytes.");
   }
+  if (startType === ATK_R1_MACRO_START_TYPES.loopCount && runCount !== 1) {
+    throw new Error(
+      "This SetMacroKey frame has no repeat-count field; only a single pass can be sent.",
+    );
+  }
   const step = [];
   if (input.kind === "wheel-up" || input.kind === "wheel-down") {
     step.push(
@@ -616,7 +645,6 @@ export function atkPackAtkR1MacroStep(
       ...packAtkR1Uint16(input.holdTime),
       macroId,
       startType,
-      runCount,
     );
     return step;
   }
@@ -632,7 +660,6 @@ export function atkPackAtkR1MacroStep(
     ...packAtkR1Uint16(input.holdTime),
     macroId,
     startType,
-    runCount,
   );
   return step;
 }
@@ -649,12 +676,15 @@ export function atkBuildAtkR1MacroKey(keyIndex: number, step: readonly number[])
   if (!Number.isInteger(keyIndex) || keyIndex < 0 || keyIndex > 5) {
     throw new Error("ATK macro button index is invalid.");
   }
-  if (step.length !== 10) throw new Error("ATK macro step must contain ten bytes.");
+  // The frame is 16 bytes: command, three reserved bytes, a length, the button
+  // index, nine step bytes and the checksum. A ten-byte step would push its
+  // last byte into the checksum's slot and be dropped silently.
+  if (step.length !== 9) throw new Error("ATK macro step must contain nine bytes.");
   const payload = new Uint8Array(16);
   payload[0] = ATK_COMPX_COMMAND.setMacroKey;
   payload[4] = 11;
   payload[5] = keyIndex;
-  for (let offset = 0; offset < 10; offset += 1) payload[offset + 6] = step[offset]!;
+  for (let offset = 0; offset < 9; offset += 1) payload[offset + 6] = step[offset]!;
   const sum = 0x08 + Array.from(payload.subarray(0, 15)).reduce((total, byte) => (total + byte) & 0xff, 0);
   payload[15] = (CHECKSUM_TOTAL - (sum & 0xff)) & 0xff;
   return payload;

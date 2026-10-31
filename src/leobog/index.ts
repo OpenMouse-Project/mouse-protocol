@@ -186,15 +186,22 @@ export function leobogGm3BuildMacroRequest(payload: Uint8Array): Uint8Array {
 
 /** Pulls the 400-byte block out of a `44 00` answer, or null on a mismatch. */
 export function leobogGm3ParseConfig(response: Uint8Array): Uint8Array | null {
-  const frame = leobogGm3NormaliseResponse(response);
-  if (
-    frame.length < 8 + LEOBOG_GM3_ONBOARD_LENGTH
-    || frame[0] !== LEOBOG_GM3_POWER_REPORT_ID
-    || frame[2] !== LEOBOG_GM3_CONFIG_READ_COMMAND
-  ) {
-    return null;
+  // A frame that already carries the report id is indistinguishable from one
+  // whose payload happens to start with that byte value, so both alignments are
+  // tried and each one has to match the length and the config-read command.
+  const candidates = response[0] === LEOBOG_GM3_POWER_REPORT_ID
+    ? [response, prependReportId(response)]
+    : [prependReportId(response)];
+  for (const frame of candidates) {
+    if (
+      frame.length >= 8 + LEOBOG_GM3_ONBOARD_LENGTH
+      && frame[0] === LEOBOG_GM3_POWER_REPORT_ID
+      && frame[2] === LEOBOG_GM3_CONFIG_READ_COMMAND
+    ) {
+      return frame.slice(8, 8 + LEOBOG_GM3_ONBOARD_LENGTH);
+    }
   }
-  return frame.slice(8, 8 + LEOBOG_GM3_ONBOARD_LENGTH);
+  return null;
 }
 
 /** Adds the leading report id to a reply that arrived without one. */

@@ -103,8 +103,11 @@ export const LEOBOG_GM3_MACRO_MODE = {
 export type LeobogGm3MacroMode = typeof LEOBOG_GM3_MACRO_MODE[keyof typeof LEOBOG_GM3_MACRO_MODE];
 
 function assertMacroName(name: string): number {
-  const bytes = new TextEncoder().encode(name).length * 2;
-  if (!Number.isInteger(bytes) || bytes < 2 || bytes > LEOBOG_GM3_MACRO_MAX_NAME_BYTES) {
+  // The record stores the name as UTF-16LE code units, so the declared length
+  // has to count code units too — a code point like "é" is one unit but two
+  // UTF-8 bytes, and an astral character is one code point but two units.
+  const bytes = name.length * 2;
+  if (bytes < 2 || bytes > LEOBOG_GM3_MACRO_MAX_NAME_BYTES) {
     throw new RangeError(
       `A macro name must be 1-${LEOBOG_GM3_MACRO_MAX_NAME_BYTES / 2} characters (got "${name}").`,
     );
@@ -149,8 +152,8 @@ export function leobogGm3EncodeMacroRecord(
   payload[3] = (size >> 8) & 0xff;
   payload[4] = nameBytes;
   let cursor = 5;
-  for (const character of name) {
-    const code = character.codePointAt(0) ?? 0;
+  for (let index = 0; index < name.length; index++) {
+    const code = name.charCodeAt(index);
     payload[cursor] = code & 0xff;
     payload[cursor + 1] = (code >> 8) & 0xff;
     cursor += 2;
@@ -192,7 +195,7 @@ export function leobogGm3DecodeMacroRecord(
     name += String.fromCharCode(payload[at]! | (payload[at + 1]! << 8));
   }
   const stepBytes = size - 1 - nameBytes;
-  if (stepBytes % LEOBOG_GM3_MACRO_STEP_BYTES !== 0) return null;
+  if (stepBytes < 0 || stepBytes % LEOBOG_GM3_MACRO_STEP_BYTES !== 0) return null;
   const steps: LeobogGm3MacroStep[] = [];
   for (let at = 5 + nameBytes; at < 4 + size; at += LEOBOG_GM3_MACRO_STEP_BYTES) {
     steps.push({
