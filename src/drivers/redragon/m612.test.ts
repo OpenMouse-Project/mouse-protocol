@@ -19,7 +19,7 @@ import {
   redragonM612EncodeDpi,
   redragonM612SlotAddress,
 } from "@openmouse/protocol/redragon";
-import { RedragonHidClient, RedragonM612HidClient } from "./hid.ts";
+import { RedragonHidClient } from "./hid.ts";
 
 const hex = (text: string): number[] => text.match(/../g)!.map((byte) => parseInt(byte, 16));
 
@@ -29,7 +29,9 @@ const hex = (text: string): number[] => text.match(/../g)!.map((byte) => parseIn
  */
 function factoryMemory(): Uint8Array {
   const memory = new Uint8Array(0x500);
+  // Polling per profile: 0x32 holds profiles 1-3, 0x38 profiles 4-5 (capture lines 18-19).
   memory.set([0x02, 0x00, 0x02, 0x00, 0x02, 0x00], 0x32);
+  memory.set([0x02, 0x00, 0x02, 0x00], 0x38);
   for (const base of [0x42, 0x102, 0x1b2, 0x262, 0x312]) {
     [0x0e, 0x1b, 0x35, 0x4f, 0x6a].forEach((value, stage) => {
       memory.set([0x01, value, 0x00, value, 0x00], base + 2 + 6 * stage);
@@ -117,7 +119,7 @@ class FakeM612 {
 }
 
 const asDevice = (fake: FakeM612): HIDDevice => fake as unknown as HIDDevice;
-const m612 = (fake = new FakeM612()) => new RedragonHidClient(asDevice(fake)) as RedragonM612HidClient;
+const m612 = (fake = new FakeM612()) => new RedragonHidClient(asDevice(fake));
 
 test("M612 catalog entry and slider table", () => {
   const product = REDRAGON_PRODUCTS.get(0xfc61);
@@ -191,16 +193,13 @@ test("slot addresses follow the captured per-profile bases", () => {
   assert.throws(() => redragonM612SlotAddress(0, 5), /stage/);
 });
 
-test("the registry's constructor hands the M612 its own client, and only it", () => {
-  const client = new RedragonHidClient(asDevice(new FakeM612()));
-  assert.ok(client instanceof RedragonM612HidClient);
-  assert.equal(typeof (client as RedragonM612HidClient).setActiveDpiStage, "function");
-  const m724 = new FakeM612();
-  m724.productId = 0xfc7a;
-  const k1ng = new RedragonHidClient(asDevice(m724));
-  assert.ok(!(k1ng instanceof RedragonM612HidClient));
-  assert.equal((k1ng as unknown as Record<string, unknown>).setActiveDpiStage, undefined);
+test("the client picks the model by PID and refuses unknown ones", () => {
   assert.equal(RedragonHidClient.isSupported(asDevice(new FakeM612())), true);
+  assert.deepEqual(m612().getDpiOptions(), [...REDRAGON_M612_DPI_LABELS]);
+  const unknown = new FakeM612();
+  unknown.productId = 0xfc00;
+  assert.equal(RedragonHidClient.isSupported(asDevice(unknown)), false);
+  assert.throws(() => new RedragonHidClient(asDevice(unknown)), /not a supported/);
 });
 
 test("readStatus reports the mouse's own values as verified", async () => {
@@ -275,7 +274,7 @@ test("setActiveDpiStage moves the active profile's stage pointer", async () => {
   await assert.rejects(() => client.setActiveDpiStage(5), /stage/);
 });
 
-test("setPollingRate rewrites only the rate byte of the block", async () => {
+test("setPollingRate rewrites only the active profile's rate byte", async () => {
   const fake = new FakeM612();
   fake.memory.set([0x02, 0x00, 0x03, 0x00, 0x05, 0x00], 0x32);
   const client = m612(fake);
@@ -288,7 +287,7 @@ test("setPollingRate rewrites only the rate byte of the block", async () => {
 test("a write the mouse does not keep is reported, not assumed", async () => {
   const fake = new FakeM612();
   fake.ignoreWrites = true;
-  await assert.rejects(() => m612(fake).setPollingRate(1000), /kept 02 00 02 00 02 00/);
+  await assert.rejects(() => m612(fake).setPollingRate(1000), /kept 02 00 at 0x32/);
   await assert.rejects(() => m612(fake).setDpiStageValue(0, 800), /kept/);
 });
 
