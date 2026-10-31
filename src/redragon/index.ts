@@ -44,4 +44,5 @@ export const REDRAGON_MODELS: ReadonlyMap<number, RedragonModel> = new Map([
 export * from "./holtek.js";
 export * from "./m612.js";
 export * from "./m724.js";
+export * from "./deprecated.js";
 export * from "./m690-pro.js";

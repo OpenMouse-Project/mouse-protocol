@@ -466,6 +466,9 @@ export class RedragonHidClient {
   }
 }
 
+/** @deprecated `RedragonHidClient` serves the M612 too; the model follows the PID. */
+export class RedragonM612HidClient extends RedragonHidClient {}
+
 function parseColor(color: string, model: string): [number, number, number] {
   const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
   if (!match) throw new Error(`Redragon ${model} colour "${color}" is not #rrggbb.`);

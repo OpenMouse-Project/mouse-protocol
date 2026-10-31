@@ -102,8 +102,8 @@ writes it immediately, **outside** any `F5` bracket:
 02 F1 02 04 / 01 / 02 / 08 / 10
 ```
 
-DPI stages, the active stage, and button maps are per profile; polling and
-lighting are global. `setProfile` replays that sequence byte for byte.
+DPI stages, the active stage, button maps, and polling are per profile;
+lighting is global. `setProfile` replays that sequence byte for byte.
 
 ## Lighting
 

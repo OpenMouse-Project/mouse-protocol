@@ -8,6 +8,10 @@ import {
   REDRAGON_M724_DPI_LABELS,
   REDRAGON_M724_MODEL,
   REDRAGON_REPORT_ID,
+  redragonEncodeDpiSlot,
+  redragonEncodeDpiValue,
+  redragonEncodePollingRate,
+  redragonHello,
   redragonM724DecodeDpi,
   redragonM724EncodeDpi,
 } from "@openmouse/protocol/redragon";
@@ -228,4 +232,14 @@ test("setLiftOffDistance writes 0x2a and reads it back", async () => {
   assert.equal(await client.setLiftOffDistance("High"), "High");
   assert.deepEqual(fake.writes(), ["f5", "f32a000200000002", ...COMMIT_BLOCK, "f501"]);
   assert.equal((await client.readStatus()).liftOffDistance, "High");
+});
+
+test("the deprecated section helpers still emit the first driver's frames", () => {
+  assert.deepEqual([...redragonEncodeDpiSlot(0, 1, 2400)], hex("02f34a00050000000136003600000000"));
+  assert.deepEqual([...redragonEncodeDpiSlot(0, 0, 800)], hex("02f34400050000000112001200000000"));
+  assert.deepEqual(redragonEncodeDpiValue(12400), { value: 140, range: 1 });
+  assert.deepEqual([...redragonEncodePollingRate(125)], hex("02f33200060000000800010001000000"));
+  assert.deepEqual([...redragonHello()], hex("02f50000000000000000000000000000"));
+  assert.throws(() => redragonEncodeDpiSlot(1, 0, 800), /profile/);
+  assert.throws(() => redragonEncodePollingRate(333), /never observed/);
 });
