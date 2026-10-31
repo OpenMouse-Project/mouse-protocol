@@ -107,6 +107,12 @@ export function leobogGm3DecodeOnboard(payload: Uint8Array): LeobogGm3OnboardCon
       (_, stage) => readDpi(payload, DPI_TABLE_OFFSETS[0] + stage * DPI_ENTRY_STRIDE),
     );
 
+  // Every enabled stage must hold a value the encoder can produce. Entries past
+  // the count legitimately read back as the 100 DPI floor, so they are exempt.
+  for (let stage = 0; stage < stageCount; stage++) {
+    if (!leobogGm3IsDpiValue(dpiStages[stage]!)) return null;
+  }
+
   return {
     stageCount,
     activeStage,
@@ -194,9 +200,11 @@ export function leobogGm3WithStageCount(payload: Uint8Array, count: number): Uin
   }
   const next = mutableCopy(payload);
   const [tableA, tableB] = DPI_TABLE_OFFSETS;
-  // Any stage the vendor write blanked reads back as the 100 DPI floor, so it
-  // is treated as empty and refilled from the last stage that still holds a
-  // value.
+  // A stage the vendor disables reads back as the 100 DPI floor — which is also
+  // a value the user can pick. Only a stage that was disabled before, at or
+  // past the previous count, counts as blank and gets refilled; an enabled
+  // stage keeps whatever it holds, so a deliberate 100 DPI survives.
+  const previousStageCount = next[OFFSET_STAGE_AND_COUNT]! & 0x0f;
   let fill = LEOBOG_GM3_DPI_MIN;
   for (let stage = 0; stage < LEOBOG_GM3_MAX_DPI_STAGES; stage++) {
     const value = readDpi(next, tableA + stage * DPI_ENTRY_STRIDE);
@@ -205,7 +213,8 @@ export function leobogGm3WithStageCount(payload: Uint8Array, count: number): Uin
   const active = Math.min((next[OFFSET_STAGE_AND_COUNT]! >> 4) - 1, count - 1);
 
   for (let stage = 0; stage < LEOBOG_GM3_MAX_DPI_STAGES; stage++) {
-    const blank = stage >= count || readDpi(next, tableA + stage * DPI_ENTRY_STRIDE) <= LEOBOG_GM3_DPI_MIN;
+    const blank = stage >= previousStageCount
+      && readDpi(next, tableA + stage * DPI_ENTRY_STRIDE) <= LEOBOG_GM3_DPI_MIN;
     for (const table of [tableA, tableB]) {
       const offset = table + stage * DPI_ENTRY_STRIDE;
       if (stage >= count) {

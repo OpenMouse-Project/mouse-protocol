@@ -102,9 +102,19 @@ it, so its fields are not decoded yet.
 
 The driver covers the battery, the wake/link flag and the onboard
 configuration block: DPI stages and their values, the active stage, the stage
-count, the polling rate and the button debounce. Lighting, sleep, button
-remapping and macros belong to the same block or to neighbouring commands, but
-their fields have not been located, so the driver leaves them alone.
+count, the polling rate, the button debounce and the auto-sleep idle timer. It
+also writes the `01 00` button table and uploads `03 00` macros.
+
+Two of those writes are one-way. The device answers no read for the button
+table, so the driver keeps a copy seeded from the factory bindings and sends
+the whole table on every write: the first write replaces any binding made in
+the vendor application, and there is no way to read the current table back
+first. Macros are write-only in the same way, and the record carries no slot
+field, so the mouse assigns indices in upload order — see
+`docs/leobog-gm3-buttons.md`.
+
+Lighting lives in the same block but its fields have not been located, so the
+driver leaves it alone.
 
 ## Firmware version
 

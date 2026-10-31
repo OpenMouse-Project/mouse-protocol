@@ -81,6 +81,10 @@ test("the record round-trips through encode and decode", () => {
     name: "OMTEST",
     steps: [],
   });
+  // The name is UTF-16LE, so the declared length counts code units: "é" is one
+  // unit while the emoji is a surrogate pair and therefore two.
+  assert.deepEqual(leobogGm3DecodeMacroRecord(leobogGm3EncodeMacroRecord("Caf\u00e9", []))?.name, "Caf\u00e9");
+  assert.deepEqual(leobogGm3DecodeMacroRecord(leobogGm3EncodeMacroRecord("\u{1F600}", []))?.name, "\u{1F600}");
 });
 
 test("rejects malformed records", () => {
@@ -89,6 +93,14 @@ test("rejects malformed records", () => {
   wrongTag[0] = 0x05;
   assert.equal(leobogGm3DecodeMacroRecord(wrongTag), null);
   assert.equal(leobogGm3DecodeMacroRecord(CAPTURED_OM2.slice(0, 20)), null);
+
+  // A size field smaller than its own name leaves a negative step count that
+  // still divides by four; it must not decode as a macro with no steps.
+  const negativeSteps = new Uint8Array(13);
+  negativeSteps[0] = 0x04;
+  negativeSteps[2] = 5;
+  negativeSteps[4] = 8;
+  assert.equal(leobogGm3DecodeMacroRecord(negativeSteps), null);
 });
 
 test("validates names, delays and usages", () => {

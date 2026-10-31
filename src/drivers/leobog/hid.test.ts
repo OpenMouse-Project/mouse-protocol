@@ -486,7 +486,7 @@ test("refuses a write the mouse did not keep", async () => {
 
   await assert.rejects(
     client(fake).setPollingRate(500),
-    /kept 500 Hz/,
+    /did not keep 500 Hz/,
   );
 });
 
