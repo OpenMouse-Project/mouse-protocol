@@ -1,3 +1,5 @@
+import { ryunixPollingHz } from "./protocol.ts";
+
 export const RYUNIX_VENDOR_ID = 0x04f3;
 export const RYUNIX_WIRED_PRODUCT_ID = 0x026e;
 export const RYUNIX_WIRELESS_PRODUCT_ID = 0x026f;
@@ -8,6 +10,7 @@ export const RYUNIX_PRODUCT_IDS: ReadonlySet<number> = new Set([
 
 export const RYUNIX_USAGE_PAGE = 0x0a;
 export const RYUNIX_USAGE = 0xc7;
+
 export const RYUNIX_TELEMETRY_REPORT_ID = 0x04;
 export const RYUNIX_CONFIG_REPORT_ID = 0x05;
 
@@ -19,13 +22,6 @@ export type RyunixLedMode =
   | "Wave"
   | "Reactive"
   | "Cycling";
-
-const POLLING_RATES: Readonly<Record<number, number>> = {
-  0x08: 125,
-  0x04: 250,
-  0x02: 500,
-  0x01: 1000,
-};
 
 const LED_MODES: Readonly<Record<number, RyunixLedMode>> = {
   0x00: "Off",
@@ -44,11 +40,20 @@ export interface KyuProMx1Telemetry {
   pollingRateHz: number;
   batteryPercent: number;
   charging: boolean;
+  /**
+   * Offset 4 raw: 0 discharging, 1 charging. 2 was captured from a wired XS
+   * Flow 2 Speed at 100% and is read as full; other values are kept as sent.
+   */
+  batteryStatusCode: number;
   ledMode: RyunixLedMode | null;
   ledModeCode: number;
+  /** Offset 7: the mouse's top polling-rate class (see `ryunixSupportedPollingRates`). */
+  maxPollingCode: number | null;
+  /** Offset 8: the sensor type (see `RYUNIX_SENSORS`). */
+  sensorType: number | null;
 }
 
-/** Decode the six-byte telemetry body delivered by input report 0x04. */
+/** Decode the telemetry body delivered by input report 0x04 (six bytes minimum, nine with sensor type). */
 export function decodeKyuProMx1Telemetry(
   data: Uint8Array,
   reportId: number,
@@ -56,14 +61,14 @@ export function decodeKyuProMx1Telemetry(
   if (reportId !== RYUNIX_TELEMETRY_REPORT_ID || data.length < 6) return null;
 
   const activeByte = data[0];
-  const pollingRateHz = POLLING_RATES[data[2]];
+  const pollingRateHz = ryunixPollingHz(data[2]);
   const batteryPercent = data[3];
-  const chargingByte = data[4];
+  const batteryStatusCode = data[4];
   if (
     (activeByte !== 0 && activeByte !== 1)
-    || pollingRateHz === undefined
+    || pollingRateHz === null
     || batteryPercent > 100
-    || (chargingByte !== 0 && chargingByte !== 1)
+    || batteryStatusCode > 2
   ) return null;
 
   return {
@@ -71,8 +76,11 @@ export function decodeKyuProMx1Telemetry(
     dpiStage: data[1],
     pollingRateHz,
     batteryPercent,
-    charging: chargingByte === 1,
+    charging: batteryStatusCode === 1,
+    batteryStatusCode,
     ledMode: LED_MODES[data[5]] ?? null,
     ledModeCode: data[5],
+    maxPollingCode: data.length > 7 ? data[7] : null,
+    sensorType: data.length > 8 && data[8] !== 0 ? data[8] : null,
   };
 }
