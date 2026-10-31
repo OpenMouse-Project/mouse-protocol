@@ -19,7 +19,7 @@ export const REDRAGON_PRODUCTS: ReadonlyMap<number, RedragonProduct> = new Map([
     model: "M724",
     name: "K1NG 1K",
     transport: "wired",
-    verified: false,
+    verified: true,
     stages: 5,
     maxDpi: 12400,
   }],
