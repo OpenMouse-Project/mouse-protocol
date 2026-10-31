@@ -28,6 +28,7 @@
       "@openmouse/protocol/incott": ["./src/incott/index.ts"],
       "@openmouse/protocol/keychron": ["./src/keychron/index.ts"],
       "@openmouse/protocol/lamzu": ["./src/lamzu/index.ts"],
+      "@openmouse/protocol/leobog": ["./src/leobog/index.ts"],
       "@openmouse/protocol/logitech": ["./src/logitech/index.ts"],
       "@openmouse/protocol/microsoft": ["./src/microsoft/index.ts"],
       "@openmouse/protocol/motospeed": ["./src/motospeed/index.ts"],
