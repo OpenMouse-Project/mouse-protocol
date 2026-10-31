@@ -1,57 +1,71 @@
 import type { MouseLighting, MouseLightingMode, MouseStatus } from "../mouse-types.js";
 import {
+  REDRAGON_ACTIVE_PROFILE_ADDRESS,
+  REDRAGON_BUTTON_BASES,
+  REDRAGON_BUTTON_LENGTH,
   REDRAGON_COMMIT_CODES,
   REDRAGON_CONFIG_USAGE,
   REDRAGON_CONFIG_USAGE_PAGE,
-  REDRAGON_M612_ACTIVE_PROFILE_ADDRESS,
-  REDRAGON_M612_BUTTON_LENGTH,
-  REDRAGON_M612_BUTTON_OFFSETS,
-  REDRAGON_M612_BUTTON_OPTIONS,
-  REDRAGON_M612_DPI_LABELS,
   REDRAGON_M612_EFFECTS,
   REDRAGON_M612_LIGHTING_BLOCK_LENGTH,
   REDRAGON_M612_LIGHTING_EFFECT_ADDRESS,
-  REDRAGON_M612_LIGHTING_SPEEDS,
-  REDRAGON_M612_POLL_ADDRESS,
-  REDRAGON_M612_POLL_LENGTH,
-  REDRAGON_M612_PRODUCT_ID,
-  REDRAGON_M612_PROFILE_COUNT,
-  REDRAGON_M612_PROFILE_SELECT_CODE,
-  REDRAGON_M612_PROFILE_BASES,
-  REDRAGON_M612_SLOT_LENGTH,
-  REDRAGON_M612_STAGE_COUNT,
+  REDRAGON_M724_EFFECTS,
+  REDRAGON_M724_LIGHTING_BLOCK_LENGTH,
+  REDRAGON_MAX_TRANSFER,
+  REDRAGON_MODELS,
   REDRAGON_POLLING_CODES,
   REDRAGON_POLLING_RATES,
   REDRAGON_PRODUCTS,
   REDRAGON_PRODUCT_IDS,
-  REDRAGON_PROFILE0,
-  REDRAGON_PROFILE0_DPI_SUBCMDS,
+  REDRAGON_PROFILE_BASES,
+  REDRAGON_PROFILE_COUNT,
+  REDRAGON_PROFILE_SELECT_CODE,
   REDRAGON_REPORT_ID,
+  REDRAGON_SLOT_LENGTH,
+  REDRAGON_STAGE_COUNT,
   REDRAGON_VENDOR_ID,
   redragonDecodeRead,
   redragonEncodeCommit,
-  redragonEncodeDpiSlot,
-  redragonEncodePollingRate,
   redragonEncodeRead,
   redragonEncodeWrite,
-  redragonHello,
-  redragonM612ButtonAddress,
-  redragonM612DecodeButtonAction,
-  redragonM612DecodeDpi,
   redragonM612EffectForBit,
-  redragonM612EncodeButtonAction,
-  redragonM612EncodeDpi,
-  redragonM612SlotAddress,
-  type RedragonM612Effect,
+  redragonM724EffectForBlock,
+  redragonM724LightingAddress,
+  redragonPollAddress,
   redragonSession,
+  redragonSlotAddress,
+  type RedragonM612Effect,
+  type RedragonModel,
 } from "@openmouse/protocol/redragon";
 
 /** RDCfg gaps consecutive writes ~8-18 ms; stay well above that. */
 const WRITE_DELAY_MS = 30;
-/** Factory DPI table a default RDCfg pushes (level 1 is 1200 out of the box). */
-const FACTORY_STAGES = [1200, 2400, 3500, 5500, 12400];
-const DEFAULT_POLLING_HZ = 1000;
 
+const LIFT_OFF_LEVELS = ["Low", "Medium", "High"] as const;
+type LiftOff = (typeof LIFT_OFF_LEVELS)[number];
+
+/** RDCfg's three brightness positions as percentages. */
+const BRIGHTNESS = [33, 67, 100] as const;
+/** Lighting speed 1 (slowest) to 8; the wire byte is `9 - speed`. */
+const SPEEDS = [1, 2, 3, 4, 5, 6, 7, 8];
+
+/** M612 effects OpenMouse can show; FLASH has no matching lighting mode. */
+const M612_MODES: ReadonlyArray<readonly [RedragonM612Effect, MouseLightingMode]> = [
+  ["static", "Static"],
+  ["breathing", "Breathing single"],
+  ["spectrumBreathing", "Breathing random"],
+  ["wave", "Wave"],
+  ["off", "Off"],
+];
+
+interface Settings {
+  profile: number;
+  activeStage: number;
+  stages: number[];
+  pollingHz: number;
+}
+
+/** True when the `0xFFA0:0x01` collection with feature report 2 is present at any depth. */
 function hasConfigCollection(collections: readonly HIDCollectionInfo[]): boolean {
   return collections.some((collection) =>
     (collection.usagePage === REDRAGON_CONFIG_USAGE_PAGE &&
@@ -60,35 +74,33 @@ function hasConfigCollection(collections: readonly HIDCollectionInfo[]): boolean
     hasConfigCollection(collection.children ?? []));
 }
 
+const hex = (bytes: ArrayLike<number>) => Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join(" ");
+
 /**
- * Redragon K1NG 1K (M724, `04d9:fc7a`) WebHID control.
+ * Redragon Holtek mice (K1NG 1K M724 `04d9:fc7a`, Predator M612 `04d9:fc61`)
+ * over WebHID.
  *
- * Transport: Holtek vendor collection `0xFFA0:0x01` on USB interface 2,
- * 16-byte numbered feature report 2, `SET_FEATURE` writes of the form
- * `[F3 sub profile section ...]` (see `@openmouse/protocol/redragon`).
- * The device STALLs malformed writes and never answers reads: RDCfg pushes
- * its whole profile table at startup and issues no `GET_REPORT` at all, so
- * this driver is write-only like the SteelSeries Rival 3. `readStatus`
- * therefore reports this session's last-written stages (or the factory
- * table before any write) with `valuesVerified: false`, and the only
- * hardware probe is the `FA FA` marker every `GET_FEATURE` echo carries.
+ * Both keep their settings in one flat memory on the `0xFFA0:0x01`
+ * collection (see `@openmouse/protocol/redragon`): every value shown is
+ * read from the mouse with `F2`, and every write runs inside the vendor
+ * bracket, is followed by the commit block, and is read back before it is
+ * reported as done. DPI stages, polling, buttons, and (on the M724)
+ * lighting live per onboard profile, so they follow the active profile.
  */
 export class RedragonHidClient {
   readonly device: HIDDevice;
+  private readonly model: RedragonModel;
   private queue: Promise<unknown> = Promise.resolve();
-  private lastStages: number[] | null = null;
-  private lastPollingHz: number | null = null;
 
+  /** Throws for a PID without a model descriptor; `isSupported` filters those out first. */
   constructor(device: HIDDevice) {
+    const model = REDRAGON_MODELS.get(device.productId);
+    if (!model) throw new Error(`Redragon product 0x${device.productId.toString(16)} is not a supported Holtek mouse.`);
     this.device = device;
-    // The driver registry builds this class for every Redragon PID. The M612
-    // answers reads, so it gets a subclass with read-back and active-stage
-    // control; the app gates those controls on which methods exist.
-    if (new.target === RedragonHidClient && device.productId === REDRAGON_M612_PRODUCT_ID) {
-      return new RedragonM612HidClient(device);
-    }
+    this.model = model;
   }
 
+  /** Holtek VID, a catalogued PID, and the config collection (the mouse and keyboard interfaces lack it). */
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== REDRAGON_VENDOR_ID) return false;
     if (!REDRAGON_PRODUCT_IDS.includes(device.productId)) return false;
@@ -100,7 +112,7 @@ export class RedragonHidClient {
   }
 
   getDpiOptions(): number[] {
-    return [200, 400, 800, 1200, 1600, 2000, 2400, 3200, 3500, 4000, 5500, 6400, 8000, 10000, 12400];
+    return [...this.model.dpi.labels];
   }
 
   async open(): Promise<void> {
@@ -114,192 +126,10 @@ export class RedragonHidClient {
   async readStatus(): Promise<MouseStatus> {
     return await this.run(async () => {
       await this.open();
-      await this.probeConfigChannel();
-      const product = REDRAGON_PRODUCTS.get(this.device.productId);
-      // The firmware reports a generic "USB Gaming Mouse" product string,
-      // so prefer the catalog name whenever the PID is known.
-      const name = product ? `Redragon ${product.name}` : (this.device.productName?.trim() || "Redragon Mouse");
-      const stages = this.lastStages ?? [...FACTORY_STAGES];
-      return {
-        brand: "Redragon",
-        name,
-        ui: {
-          family: "redragon",
-          settingsReady: true,
-          valuesVerified: false,
-          hideUnsupportedPollingRates: true,
-          hideProcessingCard: true,
-          pollingNote: "The M724 never reports its polling rate; the value shown is this session's last write, or 1000 Hz before any write.",
-          statusNote: "The K1NG 1K never reports settings back; values shown are this session's last writes, or the factory table before any write.",
-          dpiStageEditor: {
-            maxStages: REDRAGON_PROFILE0_DPI_SUBCMDS.length,
-            countEditable: false,
-            minDpi: 50,
-            maxDpi: product?.maxDpi ?? 12400,
-            stepDpi: 50,
-          },
-          defaultDisplayName: `Redragon ${product?.name ?? "Mouse"}`,
-        },
-        batteryPercent: null,
-        batteryState: "Unknown",
-        dpi: stages[0] ?? FACTORY_STAGES[0]!,
-        dpiStages: stages,
-        pollingRateHz: this.lastPollingHz ?? DEFAULT_POLLING_HZ,
-        supportedPollingRates: this.supportedPollingRates,
-        activeProfile: null,
-        connectionType: "Wired",
-        liftOffDistance: null,
-        firmware: [],
-      };
-    });
-  }
-
-  /**
-   * Writes the whole profile-1 DPI table in one vendor session bracket,
-   * closed by the commit block. Bisected live: RDCfg re-pushes the table on
-   * every Apply and the change is felt immediately; a lone slot write is
-   * stored but only takes effect at boot, and the trailing `F1` block is
-   * what activates it. Sibling stages come from this session's cache
-   * (factory table before any write): editing in RDCfg meanwhile makes the
-   * cache stale, exactly like any write-only driver.
-   */
-  async setDpiStageValue(stage: number, dpi: number): Promise<number> {
-    if (!Number.isInteger(stage) || stage < 0 || stage >= REDRAGON_PROFILE0_DPI_SUBCMDS.length) {
-      throw new Error(`Redragon DPI stage ${stage} is out of range 0-4.`);
-    }
-    // Validates the DPI before anything is sent.
-    redragonEncodeDpiSlot(REDRAGON_PROFILE0, stage, dpi);
-    await this.run(async () => {
-      await this.open();
-      const next = [...(this.lastStages ?? FACTORY_STAGES)];
-      next[stage] = dpi;
-      await this.writeSession(async () => {
-        for (let level = 0; level < REDRAGON_PROFILE0_DPI_SUBCMDS.length; level++) {
-          await this.sendFrame(redragonEncodeDpiSlot(REDRAGON_PROFILE0, level, next[level]!));
-        }
-        for (const code of REDRAGON_COMMIT_CODES) {
-          await this.sendFrame(redragonEncodeCommit(code));
-        }
-      });
-      this.lastStages = next;
-    });
-    return dpi;
-  }
-
-  /**
-   * Writes the polling rate inside the same session bracket + commit block
-   * as DPI writes (the vendor sends it mid-push; the trailing `F1` block is
-   * what activates writes, verified live for DPI).
-   */
-  async setPollingRate(hz: number): Promise<number> {
-    const frame = redragonEncodePollingRate(hz);
-    await this.run(async () => {
-      await this.open();
-      await this.writeSession(async () => {
-        await this.sendFrame(frame);
-        for (const code of REDRAGON_COMMIT_CODES) {
-          await this.sendFrame(redragonEncodeCommit(code));
-        }
-      });
-      this.lastPollingHz = hz;
-    });
-    return hz;
-  }
-
-  /**
-   * The `FA FA` echo every `GET_FEATURE` carries doubles as the proof that
-   * the granted interface is the config channel: the mouse and keyboard
-   * interfaces expose no feature report 2 at all. The marker is matched as
-   * the last two payload bytes so both WebHID framings (report id stripped
-   * or kept) validate.
-   */
-  protected async probeConfigChannel(): Promise<void> {
-    const view = await this.device.receiveFeatureReport(REDRAGON_REPORT_ID);
-    const echo = new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
-    console.debug("[redragon] feature2 echo", [...echo].map((b) => b.toString(16).padStart(2, "0")).join(" "));
-    const marker = echo.length >= 2 && echo[echo.length - 2] === 0xfa && echo[echo.length - 1] === 0xfa;
-    if (!marker) {
-      throw new Error(
-        `The Redragon config channel answered ${echo.length} bytes without its FA FA marker (see console "[redragon] feature2 echo"). Add the device again and choose the entry backed by the vendor interface.`,
-      );
-    }
-  }
-
-  protected async sendFrame(frame: Uint8Array): Promise<void> {
-    await this.device.sendFeatureReport(REDRAGON_REPORT_ID, frame.slice(1).buffer as ArrayBuffer);
-    await new Promise((resolve) => setTimeout(resolve, WRITE_DELAY_MS));
-  }
-
-  private async sendSessionFrame(begin: boolean): Promise<void> {
-    await this.sendFrame(begin ? redragonHello() : redragonSession(false));
-  }
-
-  protected async writeSession(operation: () => Promise<void>): Promise<void> {
-    await this.sendSessionFrame(true);
-    try {
-      await operation();
-    } finally {
-      await this.sendSessionFrame(false);
-    }
-  }
-
-  protected async run<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.queue.then(operation, operation);
-    this.queue = result.then(() => undefined, () => undefined);
-    return await result;
-  }
-}
-
-interface M612Settings {
-  profile: number;
-  activeStage: number;
-  stages: number[];
-  pollingHz: number;
-}
-
-
-/** RDCfg's button numbers, named for what each one is on the mouse. */
-const M612_BUTTON_NAMES = [
-  "Left (1)", "Right (2)", "Wheel click (3)", "Fire (4)", "Button 5", "Button 6",
-  "Button 7", "Button 8", "Button 9", "Wheel up", "Wheel down",
-] as const;
-
-/** RDCfg effects OpenMouse can show; FLASH has no matching lighting mode. */
-const M612_MODES: ReadonlyArray<readonly [RedragonM612Effect, MouseLightingMode]> = [
-  ["static", "Static"],
-  ["breathing", "Breathing single"],
-  ["spectrumBreathing", "Breathing random"],
-  ["wave", "Wave"],
-  ["off", "Off"],
-];
-/** RDCfg's three brightness positions as percentages. */
-const M612_BRIGHTNESS = [33, 67, 100] as const;
-const M612_SPEEDS = Array.from({ length: REDRAGON_M612_LIGHTING_SPEEDS }, (_, index) => index + 1);
-
-/**
- * Redragon Predator M612 (`04d9:fc61`) WebHID control.
- *
- * Same Holtek transport as the M724, but the M612 answers `F2` reads (see
- * `redragonEncodeRead`), so every value shown is read from the mouse and
- * every write is read back before it is reported as done. Reads need no
- * session bracket; writes use the vendor bracket and commit block.
- *
- * DPI stages live per onboard profile, so writes target whichever profile
- * the mouse reports as active. DPI values snap to the positions RDCfg's
- * slider offers and report its label for them.
- */
-export class RedragonM612HidClient extends RedragonHidClient {
-  override getDpiOptions(): number[] {
-    return [...REDRAGON_M612_DPI_LABELS];
-  }
-
-  override async readStatus(): Promise<MouseStatus> {
-    return await this.run(async () => {
-      await this.open();
-      await this.probeConfigChannel();
       const settings = await this.readSettings();
-      const product = REDRAGON_PRODUCTS.get(REDRAGON_M612_PRODUCT_ID)!;
-      const labels = REDRAGON_M612_DPI_LABELS;
+      const product = REDRAGON_PRODUCTS.get(this.model.productId)!;
+      const labels = this.model.dpi.labels;
+      const liftOff = await this.readLiftOff();
       return {
         brand: "Redragon",
         name: `Redragon ${product.name}`,
@@ -310,11 +140,11 @@ export class RedragonM612HidClient extends RedragonHidClient {
           hideUnsupportedPollingRates: true,
           hideProcessingCard: true,
           dpiStageEditor: {
-            maxStages: REDRAGON_M612_STAGE_COUNT,
+            maxStages: REDRAGON_STAGE_COUNT,
             countEditable: false,
             minDpi: labels[0]!,
             maxDpi: labels[labels.length - 1]!,
-            stepDpi: 10,
+            stepDpi: this.model.dpi.step,
           },
           defaultDisplayName: `Redragon ${product.name}`,
           showAdvancedSection: true,
@@ -327,12 +157,13 @@ export class RedragonM612HidClient extends RedragonHidClient {
         pollingRateHz: settings.pollingHz,
         supportedPollingRates: this.supportedPollingRates,
         activeProfile: settings.profile + 1,
-        profileCount: REDRAGON_M612_PROFILE_COUNT,
+        profileCount: REDRAGON_PROFILE_COUNT,
         buttonMappings: await this.readButtonMappings(settings.profile),
-        buttonOptions: [...REDRAGON_M612_BUTTON_OPTIONS],
-        lighting: await this.readLighting(),
+        buttonOptions: [...this.model.buttons.options],
+        lighting: this.model.lighting === "profile" ? await this.readProfileLighting(settings.profile) : await this.readEffectLighting(),
         connectionType: "Wired",
-        liftOffDistance: null,
+        liftOffDistance: liftOff,
+        ...(this.model.liftOffAddress === undefined ? {} : { supportedLiftOffDistances: [...LIFT_OFF_LEVELS] }),
         firmware: [],
       };
     });
@@ -343,14 +174,14 @@ export class RedragonM612HidClient extends RedragonHidClient {
    * then reads it back. Returns the DPI label the mouse now holds, which
    * can differ from the request by the slider's step.
    */
-  override async setDpiStageValue(stage: number, dpi: number): Promise<number> {
+  async setDpiStageValue(stage: number, dpi: number): Promise<number> {
     // Validate both before anything is sent.
-    const code = redragonM612EncodeDpi(dpi);
-    redragonM612SlotAddress(0, stage);
+    const code = this.model.dpi.encode(dpi);
+    redragonSlotAddress(0, stage);
     return await this.run(async () => {
       await this.open();
-      const address = redragonM612SlotAddress(await this.readActiveProfile(), stage);
-      const slot = await this.readBytes(address, REDRAGON_M612_SLOT_LENGTH);
+      const address = redragonSlotAddress(await this.readActiveProfile(), stage);
+      const slot = await this.readBytes(address, REDRAGON_SLOT_LENGTH);
       await this.writeAndConfirm(address, [slot[0]!, code.value, code.range, code.value, code.range]);
       return code.dpi;
     });
@@ -358,45 +189,48 @@ export class RedragonM612HidClient extends RedragonHidClient {
 
   /** Selects the active DPI stage of the active profile, as the DPI button does. */
   async setActiveDpiStage(stage: number): Promise<number> {
-    if (!Number.isInteger(stage) || stage < 0 || stage >= REDRAGON_M612_STAGE_COUNT) {
-      throw new Error(`Redragon M612 DPI stage ${stage} is outside 0-4.`);
+    if (!Number.isInteger(stage) || stage < 0 || stage >= REDRAGON_STAGE_COUNT) {
+      throw new Error(`Redragon DPI stage ${stage} is outside 0-${REDRAGON_STAGE_COUNT - 1}.`);
     }
     return await this.run(async () => {
       await this.open();
-      const base = REDRAGON_M612_PROFILE_BASES[await this.readActiveProfile()]!;
-      await this.writeAndConfirm(base, [stage]);
+      await this.writeAndConfirm(REDRAGON_PROFILE_BASES[await this.readActiveProfile()]!, [stage]);
       return stage;
     });
   }
 
-  /** Rewrites the polling code, keeping the block's other bytes. */
-  override async setPollingRate(hz: number): Promise<number> {
+  /** Rewrites the active profile's polling code, keeping the byte after it. */
+  async setPollingRate(hz: number): Promise<number> {
     const code = REDRAGON_POLLING_CODES[hz];
     if (code === undefined) {
       throw new Error(`Redragon polling rate ${hz} Hz is not offered; supported: ${REDRAGON_POLLING_RATES.join(", ")}.`);
     }
     return await this.run(async () => {
       await this.open();
-      const block = await this.readBytes(REDRAGON_M612_POLL_ADDRESS, REDRAGON_M612_POLL_LENGTH);
-      block[0] = code;
-      await this.writeAndConfirm(REDRAGON_M612_POLL_ADDRESS, [...block]);
+      const address = redragonPollAddress(await this.readActiveProfile());
+      const [, next] = await this.readBytes(address, 2);
+      await this.writeAndConfirm(address, [code, next!]);
       return hz;
     });
   }
 
-  /** Switches the onboard profile (1-5), exactly as RDCfg's MODE menu does. */
+  /**
+   * Switches the onboard profile (1-5) as RDCfg's MODE menu does: the profile
+   * byte outside any bracket, `F1 02 01`, then the commit block. Without the
+   * block the M724 stores the byte but keeps the old profile running.
+   */
   async setProfile(profile: number): Promise<void> {
-    if (!Number.isInteger(profile) || profile < 1 || profile > REDRAGON_M612_PROFILE_COUNT) {
-      throw new Error(`Redragon M612 profile ${profile} is outside 1-${REDRAGON_M612_PROFILE_COUNT}.`);
+    if (!Number.isInteger(profile) || profile < 1 || profile > REDRAGON_PROFILE_COUNT) {
+      throw new Error(`Redragon profile ${profile} is outside 1-${REDRAGON_PROFILE_COUNT}.`);
     }
     await this.run(async () => {
       await this.open();
-      const current = await this.readBytes(REDRAGON_M612_ACTIVE_PROFILE_ADDRESS, 2);
+      const current = await this.readBytes(REDRAGON_ACTIVE_PROFILE_ADDRESS, 2);
       const next = [profile - 1, current[1]!];
-      await this.sendFrame(redragonEncodeWrite(REDRAGON_M612_ACTIVE_PROFILE_ADDRESS, next));
-      await this.sendFrame(redragonEncodeCommit(REDRAGON_M612_PROFILE_SELECT_CODE));
+      await this.sendFrame(redragonEncodeWrite(REDRAGON_ACTIVE_PROFILE_ADDRESS, next));
+      await this.sendFrame(redragonEncodeCommit(REDRAGON_PROFILE_SELECT_CODE));
       for (const code of REDRAGON_COMMIT_CODES) await this.sendFrame(redragonEncodeCommit(code));
-      await this.confirm(REDRAGON_M612_ACTIVE_PROFILE_ADDRESS, next);
+      await this.confirm(REDRAGON_ACTIVE_PROFILE_ADDRESS, next);
     });
   }
 
@@ -406,9 +240,9 @@ export class RedragonM612HidClient extends RedragonHidClient {
    * leave the mouse unable to click.
    */
   async setButtonMapping(button: string, action: string): Promise<void> {
-    const slot = M612_BUTTON_NAMES.indexOf(button as (typeof M612_BUTTON_NAMES)[number]);
-    if (slot < 0) throw new Error(`The Redragon M612 has no button named "${button}".`);
-    const value = redragonM612EncodeButtonAction(action);
+    const slot = this.model.buttons.names.indexOf(button);
+    if (slot < 0) throw new Error(`The Redragon ${this.model.model} has no button named "${button}".`);
+    const value = this.model.buttons.encode(action);
     await this.run(async () => {
       await this.open();
       const profile = await this.readActiveProfile();
@@ -419,40 +253,72 @@ export class RedragonM612HidClient extends RedragonHidClient {
           throw new Error("Keep Left click on at least one button, or the mouse cannot click.");
         }
       }
-      await this.writeAndConfirm(redragonM612ButtonAddress(profile, slot), value);
+      await this.writeAndConfirm(REDRAGON_BUTTON_BASES[profile]! + this.model.buttons.offsets[slot]!, value);
     });
   }
 
-  /**
-   * Writes the effect selector and that effect's parameter block. Lighting is
-   * global, not per profile. A colour, speed, or brightness equal to what
-   * the current effect shows is treated as unchanged, so switching effects
-   * keeps the target effect's own stored values.
-   */
-  async setLighting(lighting: MouseLighting): Promise<void> {
-    const effect = M612_MODES.find(([, mode]) => mode === lighting.mode)?.[0];
-    if (!effect) throw new Error(`The Redragon M612 has no "${lighting.mode}" lighting effect.`);
-    const info = REDRAGON_M612_EFFECTS.find((candidate) => candidate.effect === effect)!;
-    if (lighting.speed != null && !M612_SPEEDS.includes(lighting.speed)) {
-      throw new Error(`Redragon M612 lighting speed ${lighting.speed} is outside 1-${REDRAGON_M612_LIGHTING_SPEEDS}.`);
-    }
-    if (lighting.brightness != null && !M612_BRIGHTNESS.includes(lighting.brightness as 33)) {
-      throw new Error(`Redragon M612 brightness ${lighting.brightness}% is not one of ${M612_BRIGHTNESS.join(", ")}.`);
-    }
-    const rgb = lighting.color == null ? null : parseColor(lighting.color);
+  /** Sets the lift-off height (M724 only): Low, Medium, or High. */
+  async setLiftOffDistance(value: LiftOff): Promise<LiftOff> {
+    const address = this.model.liftOffAddress;
+    if (address === undefined) throw new Error(`The Redragon ${this.model.model} has no lift-off setting.`);
+    const level = LIFT_OFF_LEVELS.indexOf(value);
+    if (level < 0) throw new Error(`Redragon lift-off "${value}" is not Low, Medium, or High.`);
     await this.run(async () => {
       await this.open();
-      const shown = await this.readLighting();
+      const [, next] = await this.readBytes(address, 2);
+      await this.writeAndConfirm(address, [level, next!]);
+    });
+    return value;
+  }
+
+  /**
+   * Writes the lighting. On the M612 that is the global effect selector and
+   * that effect's parameter block, where a colour, speed, or brightness equal
+   * to what the current effect shows is treated as unchanged, so switching
+   * effects keeps the target effect's own stored values. On the M724 it is
+   * the active profile's single block.
+   */
+  async setLighting(lighting: MouseLighting): Promise<void> {
+    const model = this.model.model;
+    if (lighting.speed != null && !SPEEDS.includes(lighting.speed)) {
+      throw new Error(`Redragon ${model} lighting speed ${lighting.speed} is outside 1-${SPEEDS.length}.`);
+    }
+    if (lighting.brightness != null && !BRIGHTNESS.includes(lighting.brightness as 33)) {
+      throw new Error(`Redragon ${model} brightness ${lighting.brightness}% is not one of ${BRIGHTNESS.join(", ")}.`);
+    }
+    const rgb = lighting.color == null ? null : parseColor(lighting.color, model);
+    if (this.model.lighting === "profile") {
+      const info = REDRAGON_M724_EFFECTS.find((candidate) => candidate.name === lighting.mode);
+      if (!info) throw new Error(`The Redragon ${model} has no "${lighting.mode}" lighting effect.`);
+      await this.run(async () => {
+        await this.open();
+        const address = redragonM724LightingAddress(await this.readActiveProfile());
+        const block = [...await this.readBytes(address, REDRAGON_M724_LIGHTING_BLOCK_LENGTH)];
+        block[4] = info.mode;
+        block[6] = info.kind;
+        if (info.color && rgb) block.splice(1, 3, ...rgb);
+        if (info.speed && lighting.speed != null) block[5] = SPEEDS.length + 1 - lighting.speed;
+        if (lighting.brightness != null) block[7] = BRIGHTNESS.indexOf(lighting.brightness as 33) + 1;
+        await this.writeAndConfirm(address, block);
+      });
+      return;
+    }
+    const effect = M612_MODES.find(([, mode]) => mode === lighting.mode)?.[0];
+    if (!effect) throw new Error(`The Redragon ${model} has no "${lighting.mode}" lighting effect.`);
+    const info = REDRAGON_M612_EFFECTS.find((candidate) => candidate.effect === effect)!;
+    await this.run(async () => {
+      await this.open();
+      const shown = await this.readEffectLighting();
       const selector = await this.readBytes(REDRAGON_M612_LIGHTING_EFFECT_ADDRESS, 2);
       const writes: Array<[number, number[]]> = [];
       if (info.block !== null) {
         const block = [...await this.readBytes(info.block, REDRAGON_M612_LIGHTING_BLOCK_LENGTH)];
         if (info.color && rgb && lighting.color !== shown.color) block.splice(1, 3, ...rgb);
         if (info.speed && lighting.speed != null && lighting.speed !== shown.speed) {
-          block[5] = REDRAGON_M612_LIGHTING_SPEEDS + 1 - lighting.speed;
+          block[5] = SPEEDS.length + 1 - lighting.speed;
         }
         if (lighting.brightness != null && lighting.brightness !== shown.brightness) {
-          block[7] = M612_BRIGHTNESS.indexOf(lighting.brightness as 33) + 1;
+          block[7] = BRIGHTNESS.indexOf(lighting.brightness as 33) + 1;
         }
         writes.push([info.block, block]);
       }
@@ -465,74 +331,101 @@ export class RedragonM612HidClient extends RedragonHidClient {
     });
   }
 
+  /** Names every button of `profile` with its decoded action, from one ranged read. */
   private async readButtonMappings(profile: number): Promise<Record<string, string>> {
-    const first = redragonM612ButtonAddress(profile, 0);
-    const span = REDRAGON_M612_BUTTON_OFFSETS.at(-1)! + REDRAGON_M612_BUTTON_LENGTH;
-    const bytes = await this.readRange(first, span);
-    return Object.fromEntries(M612_BUTTON_NAMES.map((name, slot) => {
-      const offset = REDRAGON_M612_BUTTON_OFFSETS[slot]!;
-      return [name, redragonM612DecodeButtonAction(bytes.subarray(offset, offset + REDRAGON_M612_BUTTON_LENGTH))];
-    }));
+    const { names, offsets, decode } = this.model.buttons;
+    const bytes = await this.readRange(REDRAGON_BUTTON_BASES[profile]!, offsets.at(-1)! + REDRAGON_BUTTON_LENGTH);
+    return Object.fromEntries(names.map((name, slot) =>
+      [name, decode(bytes.subarray(offsets[slot]!, offsets[slot]! + REDRAGON_BUTTON_LENGTH))]));
   }
 
-  private async readLighting(): Promise<MouseLighting> {
+  /** M724: the profile's block; brightness is hidden when the effect is Off. */
+  private async readProfileLighting(profile: number): Promise<MouseLighting> {
+    const block = await this.readBytes(redragonM724LightingAddress(profile), REDRAGON_M724_LIGHTING_BLOCK_LENGTH);
+    const info = redragonM724EffectForBlock(block);
+    const lit = info !== undefined && info.name !== "Off";
+    return {
+      zone: "Mouse",
+      modes: REDRAGON_M724_EFFECTS.map((effect) => effect.name),
+      mode: info?.name ?? null,
+      color: `#${hex(block.subarray(1, 4)).replaceAll(" ", "")}`,
+      color2: null,
+      colorModes: REDRAGON_M724_EFFECTS.filter((effect) => effect.color).map((effect) => effect.name),
+      dualColorModes: [],
+      reactiveModes: REDRAGON_M724_EFFECTS.filter((effect) => effect.speed).map((effect) => effect.name),
+      speeds: SPEEDS,
+      speed: info?.speed && block[5]! >= 1 && block[5]! <= SPEEDS.length ? SPEEDS.length + 1 - block[5]! : null,
+      brightness: lit ? (BRIGHTNESS[block[7]! - 1] ?? null) : null,
+      brightnessLevels: lit ? [...BRIGHTNESS] : undefined,
+    };
+  }
+
+  /** M612: the global effect bit and that effect's parameter block (none for Off). */
+  private async readEffectLighting(): Promise<MouseLighting> {
     const [bit] = await this.readBytes(REDRAGON_M612_LIGHTING_EFFECT_ADDRESS, 1);
     const info = redragonM612EffectForBit(bit ?? -1);
     const block = info?.block != null ? await this.readBytes(info.block, REDRAGON_M612_LIGHTING_BLOCK_LENGTH) : null;
     const mode = M612_MODES.find(([effect]) => effect === info?.effect)?.[1] ?? null;
-    const colorModes = M612_MODES.filter(([effect]) => REDRAGON_M612_EFFECTS.find((e) => e.effect === effect)!.color).map(([, m]) => m);
-    const speedModes = M612_MODES.filter(([effect]) => REDRAGON_M612_EFFECTS.find((e) => e.effect === effect)!.speed).map(([, m]) => m);
-    const lit = block !== null;
+    const modesWhere = (key: "color" | "speed") =>
+      M612_MODES.filter(([effect]) => REDRAGON_M612_EFFECTS.find((e) => e.effect === effect)![key]).map(([, m]) => m);
     return {
       zone: "Mouse",
       modes: M612_MODES.map(([, m]) => m),
       mode,
-      color: block ? `#${[...block.subarray(1, 4)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}` : null,
+      color: block ? `#${hex(block.subarray(1, 4)).replaceAll(" ", "")}` : null,
       color2: null,
-      colorModes,
+      colorModes: modesWhere("color"),
       dualColorModes: [],
-      reactiveModes: speedModes,
-      speeds: M612_SPEEDS,
-      speed: block && info?.speed && block[5]! >= 1 && block[5]! <= REDRAGON_M612_LIGHTING_SPEEDS
-        ? REDRAGON_M612_LIGHTING_SPEEDS + 1 - block[5]! : null,
-      brightness: block ? (M612_BRIGHTNESS[block[7]! - 1] ?? null) : null,
+      reactiveModes: modesWhere("speed"),
+      speeds: SPEEDS,
+      speed: block && info?.speed && block[5]! >= 1 && block[5]! <= SPEEDS.length ? SPEEDS.length + 1 - block[5]! : null,
+      brightness: block ? (BRIGHTNESS[block[7]! - 1] ?? null) : null,
       // Off has no parameter block, so there is no brightness to set.
-      brightnessLevels: lit ? [...M612_BRIGHTNESS] : undefined,
+      brightnessLevels: block !== null ? [...BRIGHTNESS] : undefined,
     };
   }
 
+  /** Null on models without lift-off, or for a level byte outside 0-2. */
+  private async readLiftOff(): Promise<LiftOff | null> {
+    if (this.model.liftOffAddress === undefined) return null;
+    const [level] = await this.readBytes(this.model.liftOffAddress, 1);
+    return LIFT_OFF_LEVELS[level!] ?? null;
+  }
+
+  /** Reads any length in transfers of at most 8 bytes. */
   private async readRange(address: number, length: number): Promise<Uint8Array> {
     const out = new Uint8Array(length);
-    for (let offset = 0; offset < length; offset += 8) {
-      out.set(await this.readBytes(address + offset, Math.min(8, length - offset)), offset);
+    for (let offset = 0; offset < length; offset += REDRAGON_MAX_TRANSFER) {
+      out.set(await this.readBytes(address + offset, Math.min(REDRAGON_MAX_TRANSFER, length - offset)), offset);
     }
     return out;
   }
 
-  private async readSettings(): Promise<M612Settings> {
+  /** Active profile, its stage table and active stage, and its polling rate; rejects values the firmware never holds. */
+  private async readSettings(): Promise<Settings> {
     const profile = await this.readActiveProfile();
-    const base = REDRAGON_M612_PROFILE_BASES[profile]!;
-    const [activeStage] = await this.readBytes(base, 1);
-    if (activeStage === undefined || activeStage >= REDRAGON_M612_STAGE_COUNT) {
-      throw new Error(`The Redragon M612 reported DPI stage ${activeStage}; expected 0-4.`);
+    const [activeStage] = await this.readBytes(REDRAGON_PROFILE_BASES[profile]!, 1);
+    if (activeStage === undefined || activeStage >= REDRAGON_STAGE_COUNT) {
+      throw new Error(`The Redragon ${this.model.model} reported DPI stage ${activeStage}; expected 0-4.`);
     }
     const stages: number[] = [];
-    for (let stage = 0; stage < REDRAGON_M612_STAGE_COUNT; stage++) {
-      const slot = await this.readBytes(redragonM612SlotAddress(profile, stage), REDRAGON_M612_SLOT_LENGTH);
-      stages.push(redragonM612DecodeDpi(slot[1]!, slot[2]!));
+    for (let stage = 0; stage < REDRAGON_STAGE_COUNT; stage++) {
+      const slot = await this.readBytes(redragonSlotAddress(profile, stage), REDRAGON_SLOT_LENGTH);
+      stages.push(this.model.dpi.decode(slot[1]!, slot[2]!));
     }
-    const [pollCode] = await this.readBytes(REDRAGON_M612_POLL_ADDRESS, 1);
+    const [pollCode] = await this.readBytes(redragonPollAddress(profile), 1);
     const pollingHz = REDRAGON_POLLING_RATES.find((hz) => REDRAGON_POLLING_CODES[hz] === pollCode);
     if (pollingHz === undefined) {
-      throw new Error(`The Redragon M612 reported polling code ${pollCode}; expected 1, 2, 4, or 8.`);
+      throw new Error(`The Redragon ${this.model.model} reported polling code ${pollCode}; expected 1, 2, 4, or 8.`);
     }
     return { profile, activeStage, stages, pollingHz };
   }
 
+  /** The active profile index 0-4, rejecting anything else. */
   private async readActiveProfile(): Promise<number> {
-    const [profile] = await this.readBytes(REDRAGON_M612_ACTIVE_PROFILE_ADDRESS, 1);
-    if (profile === undefined || profile >= REDRAGON_M612_PROFILE_BASES.length) {
-      throw new Error(`The Redragon M612 reported profile ${profile}; expected 0-4.`);
+    const [profile] = await this.readBytes(REDRAGON_ACTIVE_PROFILE_ADDRESS, 1);
+    if (profile === undefined || profile >= REDRAGON_PROFILE_COUNT) {
+      throw new Error(`The Redragon ${this.model.model} reported profile ${profile}; expected 0-4.`);
     }
     return profile;
   }
@@ -548,9 +441,7 @@ export class RedragonM612HidClient extends RedragonHidClient {
   private async writeAndConfirm(address: number, data: number[]): Promise<void> {
     await this.writeSession(async () => {
       await this.sendFrame(redragonEncodeWrite(address, data));
-      for (const code of REDRAGON_COMMIT_CODES) {
-        await this.sendFrame(redragonEncodeCommit(code));
-      }
+      for (const code of REDRAGON_COMMIT_CODES) await this.sendFrame(redragonEncodeCommit(code));
     });
     await this.confirm(address, data);
   }
@@ -559,14 +450,38 @@ export class RedragonM612HidClient extends RedragonHidClient {
   private async confirm(address: number, data: readonly number[]): Promise<void> {
     const confirmed = await this.readBytes(address, data.length);
     if (confirmed.some((byte, index) => byte !== data[index])) {
-      const hex = (bytes: ArrayLike<number>) => Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join(" ");
-      throw new Error(`The Redragon M612 kept ${hex(confirmed)} at 0x${address.toString(16)} instead of ${hex(data)}.`);
+      throw new Error(`The Redragon ${this.model.model} kept ${hex(confirmed)} at 0x${address.toString(16)} instead of ${hex(data)}.`);
     }
+  }
+
+  private async sendFrame(frame: Uint8Array): Promise<void> {
+    await this.device.sendFeatureReport(REDRAGON_REPORT_ID, frame.slice(1).buffer as ArrayBuffer);
+    await new Promise((resolve) => setTimeout(resolve, WRITE_DELAY_MS));
+  }
+
+  /** The bracket is always closed: a session left open hangs the interface. */
+  private async writeSession(operation: () => Promise<void>): Promise<void> {
+    await this.sendFrame(redragonSession(true));
+    try {
+      await operation();
+    } finally {
+      await this.sendFrame(redragonSession(false));
+    }
+  }
+
+  private async run<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(operation, operation);
+    this.queue = result.then(() => undefined, () => undefined);
+    return await result;
   }
 }
 
-function parseColor(color: string): [number, number, number] {
+/** @deprecated `RedragonHidClient` serves the M612 too; the model follows the PID. */
+export class RedragonM612HidClient extends RedragonHidClient {}
+
+/** `#rrggbb` to RGB bytes; anything else throws. */
+function parseColor(color: string, model: string): [number, number, number] {
   const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
-  if (!match) throw new Error(`Redragon M612 colour "${color}" is not #rrggbb.`);
+  if (!match) throw new Error(`Redragon ${model} colour "${color}" is not #rrggbb.`);
   return [parseInt(match[1]!, 16), parseInt(match[2]!, 16), parseInt(match[3]!, 16)];
 }
