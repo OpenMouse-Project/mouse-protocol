@@ -65,6 +65,7 @@ interface Settings {
   pollingHz: number;
 }
 
+/** True when the `0xFFA0:0x01` collection with feature report 2 is present at any depth. */
 function hasConfigCollection(collections: readonly HIDCollectionInfo[]): boolean {
   return collections.some((collection) =>
     (collection.usagePage === REDRAGON_CONFIG_USAGE_PAGE &&
@@ -91,6 +92,7 @@ export class RedragonHidClient {
   private readonly model: RedragonModel;
   private queue: Promise<unknown> = Promise.resolve();
 
+  /** Throws for a PID without a model descriptor; `isSupported` filters those out first. */
   constructor(device: HIDDevice) {
     const model = REDRAGON_MODELS.get(device.productId);
     if (!model) throw new Error(`Redragon product 0x${device.productId.toString(16)} is not a supported Holtek mouse.`);
@@ -98,6 +100,7 @@ export class RedragonHidClient {
     this.model = model;
   }
 
+  /** Holtek VID, a catalogued PID, and the config collection (the mouse and keyboard interfaces lack it). */
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== REDRAGON_VENDOR_ID) return false;
     if (!REDRAGON_PRODUCT_IDS.includes(device.productId)) return false;
@@ -328,6 +331,7 @@ export class RedragonHidClient {
     });
   }
 
+  /** Names every button of `profile` with its decoded action, from one ranged read. */
   private async readButtonMappings(profile: number): Promise<Record<string, string>> {
     const { names, offsets, decode } = this.model.buttons;
     const bytes = await this.readRange(REDRAGON_BUTTON_BASES[profile]!, offsets.at(-1)! + REDRAGON_BUTTON_LENGTH);
@@ -335,6 +339,7 @@ export class RedragonHidClient {
       [name, decode(bytes.subarray(offsets[slot]!, offsets[slot]! + REDRAGON_BUTTON_LENGTH))]));
   }
 
+  /** M724: the profile's block; brightness is hidden when the effect is Off. */
   private async readProfileLighting(profile: number): Promise<MouseLighting> {
     const block = await this.readBytes(redragonM724LightingAddress(profile), REDRAGON_M724_LIGHTING_BLOCK_LENGTH);
     const info = redragonM724EffectForBlock(block);
@@ -355,6 +360,7 @@ export class RedragonHidClient {
     };
   }
 
+  /** M612: the global effect bit and that effect's parameter block (none for Off). */
   private async readEffectLighting(): Promise<MouseLighting> {
     const [bit] = await this.readBytes(REDRAGON_M612_LIGHTING_EFFECT_ADDRESS, 1);
     const info = redragonM612EffectForBit(bit ?? -1);
@@ -379,12 +385,14 @@ export class RedragonHidClient {
     };
   }
 
+  /** Null on models without lift-off, or for a level byte outside 0-2. */
   private async readLiftOff(): Promise<LiftOff | null> {
     if (this.model.liftOffAddress === undefined) return null;
     const [level] = await this.readBytes(this.model.liftOffAddress, 1);
     return LIFT_OFF_LEVELS[level!] ?? null;
   }
 
+  /** Reads any length in transfers of at most 8 bytes. */
   private async readRange(address: number, length: number): Promise<Uint8Array> {
     const out = new Uint8Array(length);
     for (let offset = 0; offset < length; offset += REDRAGON_MAX_TRANSFER) {
@@ -393,6 +401,7 @@ export class RedragonHidClient {
     return out;
   }
 
+  /** Active profile, its stage table and active stage, and its polling rate; rejects values the firmware never holds. */
   private async readSettings(): Promise<Settings> {
     const profile = await this.readActiveProfile();
     const [activeStage] = await this.readBytes(REDRAGON_PROFILE_BASES[profile]!, 1);
@@ -412,6 +421,7 @@ export class RedragonHidClient {
     return { profile, activeStage, stages, pollingHz };
   }
 
+  /** The active profile index 0-4, rejecting anything else. */
   private async readActiveProfile(): Promise<number> {
     const [profile] = await this.readBytes(REDRAGON_ACTIVE_PROFILE_ADDRESS, 1);
     if (profile === undefined || profile >= REDRAGON_PROFILE_COUNT) {
@@ -469,6 +479,7 @@ export class RedragonHidClient {
 /** @deprecated `RedragonHidClient` serves the M612 too; the model follows the PID. */
 export class RedragonM612HidClient extends RedragonHidClient {}
 
+/** `#rrggbb` to RGB bytes; anything else throws. */
 function parseColor(color: string, model: string): [number, number, number] {
   const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
   if (!match) throw new Error(`Redragon ${model} colour "${color}" is not #rrggbb.`);

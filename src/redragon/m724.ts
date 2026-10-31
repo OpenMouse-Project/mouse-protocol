@@ -78,6 +78,7 @@ export const REDRAGON_M724_EFFECTS: readonly RedragonM724EffectInfo[] = [
   { name: "Off", mode: 0, kind: 0, color: false, speed: false },
 ];
 
+/** Address of profile p's 8-byte lighting block. */
 export function redragonM724LightingAddress(profile: number): number {
   if (!Number.isInteger(profile) || profile < 0 || profile > 4) throw new Error(`Redragon M724 profile ${profile} is outside 0-4.`);
   return REDRAGON_M724_LIGHTING_BASE + REDRAGON_M724_LIGHTING_BLOCK_LENGTH * profile;

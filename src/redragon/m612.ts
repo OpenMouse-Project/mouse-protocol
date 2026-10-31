@@ -149,6 +149,7 @@ export function redragonM612EffectForBit(bit: number): RedragonM612EffectInfo | 
  */
 export const REDRAGON_M612_BUTTON_OFFSETS = [0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c, 0x20, 0x28, 0x2c] as const;
 
+/** Address of one button slot in RDCfg's M612 numbering (slot 0-10). */
 export function redragonM612ButtonAddress(profile: number, slot: number): number {
   const base = REDRAGON_M612_BUTTON_BASES[profile];
   const offset = REDRAGON_M612_BUTTON_OFFSETS[slot];

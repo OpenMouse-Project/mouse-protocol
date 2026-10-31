@@ -56,6 +56,7 @@ export const REDRAGON_POLLING_CODES: Readonly<Record<number, number>> = {
   125: 0x08,
 };
 
+/** Rejects addresses outside 16 bits and lengths a single frame cannot carry. */
 function checkTransfer(address: number, length: number): void {
   if (!Number.isInteger(address) || address < 0 || address > 0xffff) {
     throw new Error(`Redragon address ${address} is outside 0x0000-0xffff.`);
@@ -174,6 +175,7 @@ export function redragonSlotAddress(profile: number, stage: number): number {
   return REDRAGON_PROFILE_BASES[profile]! + 2 + 6 * stage;
 }
 
+/** Rejects profile indexes outside 0-4. */
 function checkProfile(profile: number): void {
   if (!Number.isInteger(profile) || profile < 0 || profile >= REDRAGON_PROFILE_COUNT) {
     throw new Error(`Redragon profile ${profile} is outside 0-${REDRAGON_PROFILE_COUNT - 1}.`);
