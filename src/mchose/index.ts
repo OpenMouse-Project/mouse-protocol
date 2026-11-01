@@ -577,6 +577,10 @@ export function mchoseEncodeReadProfileName(index: number): number[] {
 /** Factory names are Chinese ("默认板载2"), shown as "Default onboard 2". */
 const FACTORY_PROFILE_NAME = /^默认板载(\d+)$/;
 
+/**
+ * Decode a `0x12 0x68` reply (profile index, then a NUL-terminated UTF-8 name).
+ * Returns null when the name is empty.
+ */
 export function mchoseDecodeProfileName(payload: Uint8Array): string | null {
   if (payload.length < 2) return null;
   let end = 1;

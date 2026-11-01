@@ -257,6 +257,10 @@ export class MchoseHidClient {
     return product ? mchosePollingRates(product, this.device.productId) : [];
   }
 
+  /**
+   * Read identity, battery, config and profile names into a `MouseStatus`.
+   * Replies that never arrive leave their fields unset instead of throwing.
+   */
   async readStatus(): Promise<MouseStatus> {
     await this.open();
 
@@ -480,6 +484,10 @@ export class MchoseHidClient {
     return config.liftOffIndex;
   }
 
+  /**
+   * Set lift-off by label. The label's position among the model's steps is
+   * offset by `liftOffIndexBase` to get the firmware index, then read back.
+   */
   async setLiftOffDistance(label: NonNullable<MouseStatus["liftOffDistance"]>): Promise<void> {
     const steps = this.cachedProduct?.liftOffDistances.length ?? 3;
     const step = mchoseLiftOffLabels(steps).indexOf(label);

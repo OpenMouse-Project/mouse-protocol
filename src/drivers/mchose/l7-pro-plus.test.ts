@@ -20,7 +20,22 @@ const toBytes = (hex: string): number[] => hex.split(" ").map((h) => parseInt(h,
 /** Report id plus the masked command and its first argument. */
 const requestKey = (id: number, bytes: number[]): string => `${id}:${bytes[0]}:${bytes[1]}`;
 
-function replayDevice(name: string, productId: number, vendorId = 0x3837) {
+/** Matches no product, so a model found with it came from the battery reply's mouse id. */
+const NO_PRODUCT_NAME = "Unrecognised device";
+/** Only the connect captures hold a battery reply, so the others identify the model by name. */
+const L7_NAME = "MCHOSE L7 Pro+";
+
+/**
+ * A fake HID device that answers each feature read with the last reply the
+ * capture holds for the same request. `sent` records every report the driver
+ * writes, so tests can compare its bytes with the vendor's.
+ */
+function replayDevice(
+  name: string,
+  productId: number,
+  vendorId = 0x3837,
+  productName = NO_PRODUCT_NAME,
+) {
   const replies = new Map<string, number[]>();
   let lastKey = "";
   for (const event of capture(name)) {
@@ -34,7 +49,7 @@ function replayDevice(name: string, productId: number, vendorId = 0x3837) {
   const device = {
     vendorId,
     productId,
-    productName: "MCHOSE L7 Pro+",
+    productName,
     opened: true,
     collections: [
       { usagePage: 0xff01, usage: 0x0001, type: 0, children: [], input: 0, output: 0, feature: 0 },
@@ -64,6 +79,14 @@ describe("MCHOSE L7 Pro+ captures", () => {
     assert.equal(status.connectionType, "Wired");
   });
 
+  it("identifies the model through the dongle from the battery reply", async () => {
+    const { device } = replayDevice("16-dongle-connect", 0x1020, 0x5253);
+    const status = await new MchoseHidClient(device).readStatus();
+    assert.equal(status.name, "MCHOSE L7 Pro+");
+    assert.equal(status.batteryPercent, 100);
+    assert.equal(status.connectionType, "Wireless");
+  });
+
   it("reads DPI, polling, mode, debounce and profile names", async () => {
     const { device } = replayDevice("00-connect", 0x4015);
     const status = await new MchoseHidClient(device).readStatus();
@@ -77,12 +100,12 @@ describe("MCHOSE L7 Pro+ captures", () => {
   });
 
   it("reads the wired polling rate from the wired half", async () => {
-    const { device } = replayDevice("11-polling-8000", 0x4015);
+    const { device } = replayDevice("11-polling-8000", 0x4015, 0x3837, L7_NAME);
     assert.equal((await new MchoseHidClient(device).readStatus()).pollingRateHz, 8000);
   });
 
   it("reads the wireless polling rate through the dongle", async () => {
-    const { device } = replayDevice("19-wireless-4000hz", 0x1020, 0x5253);
+    const { device } = replayDevice("19-wireless-4000hz", 0x1020, 0x5253, L7_NAME);
     assert.equal(MchoseHidClient.isSupported(device), true);
     const status = await new MchoseHidClient(device).readStatus();
     assert.equal(status.name, "MCHOSE L7 Pro+");
@@ -91,8 +114,8 @@ describe("MCHOSE L7 Pro+ captures", () => {
   });
 
   it("reads lift-off 1 mm and 2 mm as Low and High", async () => {
-    const low = replayDevice("13-lod-1mm", 0x4015);
-    const high = replayDevice("12-lod-2mm", 0x4015);
+    const low = replayDevice("13-lod-1mm", 0x4015, 0x3837, L7_NAME);
+    const high = replayDevice("12-lod-2mm", 0x4015, 0x3837, L7_NAME);
     assert.equal((await new MchoseHidClient(low.device).readStatus()).liftOffDistance, "Low");
     const status = await new MchoseHidClient(high.device).readStatus();
     assert.equal(status.liftOffDistance, "High");
@@ -100,7 +123,7 @@ describe("MCHOSE L7 Pro+ captures", () => {
   });
 
   it("writes lift-off 2 mm with the command bytes the vendor driver sent", async () => {
-    const { device, sent } = replayDevice("12-lod-2mm", 0x4015);
+    const { device, sent } = replayDevice("12-lod-2mm", 0x4015, 0x3837, L7_NAME);
     const client = new MchoseHidClient(device);
     await client.readStatus();
     await client.setLiftOffDistance("High");
