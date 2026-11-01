@@ -686,6 +686,11 @@ test("R1 SE receiver writes the macro slot and binds the macro button record", a
   Object.assign(fake, { vendorId: 0x3554 });
   (fake as unknown as FakeAtkDevice).replies = [
     reply(0x10, 0x0000, [0x02, 0x20]),
+    // The upload captures the slot first so a failed write can be undone.
+    reply(0x08, 0x0600, new Array<number>(10).fill(0)),
+    reply(0x08, 0x060a, new Array<number>(10).fill(0)),
+    reply(0x08, 0x0614, new Array<number>(10).fill(0)),
+    reply(0x08, 0x061e, new Array<number>(8).fill(0)),
     // The uploaded payload is read back before the button is bound.
     reply(0x08, 0x061f, [1, 0x81, 4, 0, 0, 20, 0xbb]),
     reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),

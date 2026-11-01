@@ -523,7 +523,7 @@ export class AtkHidClient {
   async setR1ButtonMacro(
     index: number,
     steps: readonly AtkR1MacroStepInput[],
-    options: { startType: number; runCount: number; macroId?: number },
+    options: { startType: number; runCount: number; macroId: number },
   ): Promise<void> {
     await this.identify();
     if (!this.usesR1CompxReceiver() && !this.usesVerifiedR1WiredTransport()) {
@@ -531,7 +531,9 @@ export class AtkHidClient {
     }
     const button = ATK_R1_BUTTONS[index];
     if (!button) throw new Error("The selected button is invalid.");
-    const macroId = options.macroId ?? 0;
+    // The slot is required: defaulting it to 0 would make a second button's
+    // upload overwrite the first button's macro.
+    const macroId = options.macroId;
     if (!Number.isInteger(macroId) || macroId < 0 || macroId >= ATK_R1_MACRO_SLOT_COUNT) {
       throw new Error(`An R1 macro slot must be between 0 and ${ATK_R1_MACRO_SLOT_COUNT - 1}.`);
     }
@@ -549,26 +551,42 @@ export class AtkHidClient {
 
     const table = atkPackAtkR1MacroTable(steps);
     const base = ATK_R1_MACRO_BASE + macroId * ATK_R1_MACRO_SLOT_LENGTH;
-    // Upload and readback share one queued task, so nothing can write the slot
-    // between a chunk and the chunk that confirms it.
+    // Upload, readback and rollback share one queued task, so nothing can write
+    // the slot between a chunk and the chunk that confirms it.
     await this.run(async () => {
-      for (let offset = 0; offset < table.length; offset += 10) {
-        await this.writeUnqueued(base + offset, table.slice(offset, offset + 10));
-      }
-      // A chunk the receiver dropped would leave the slot holding an older
-      // macro, so the payload it just stored — the action count, the records
-      // and the checksum — is read back before the button is pointed at the
-      // slot. The 31-byte header is skipped: only this region is ever read
-      // back elsewhere, and the device may normalize the constant header.
-      const payloadBytes = table.length - 31;
-      for (let offset = 0; offset < payloadBytes; offset += 10) {
-        const expected = table.slice(31 + offset, 31 + Math.min(offset + 10, payloadBytes));
-        const readback = await this.readUnqueued(base + 31 + offset, expected.length);
-        if (!expected.every((byte, at) => readback[at] === byte)) {
-          throw new Error(
-            `Macro slot ${macroId + 1} did not keep the uploaded steps; the button was left unchanged.`,
-          );
+      const writeAll = async (bytes: readonly number[]): Promise<void> => {
+        for (let offset = 0; offset < bytes.length; offset += 10) {
+          await this.writeUnqueued(base + offset, bytes.slice(offset, offset + 10));
         }
+      };
+      // A slot that a button already points at must not be left half written,
+      // so everything this upload overwrites is captured first and put back if
+      // the readback disagrees.
+      const before: number[] = [];
+      for (let offset = 0; offset < table.length; offset += 10) {
+        const chunk = await this.readUnqueued(base + offset, Math.min(10, table.length - offset));
+        before.push(...chunk);
+      }
+      try {
+        await writeAll(table);
+        // A chunk the receiver dropped would leave the slot holding an older
+        // macro, so the payload it just stored — the action count, the records
+        // and the checksum — is read back before the button is pointed at the
+        // slot. The 31-byte header is skipped here: only this region is read
+        // back elsewhere, and the device may normalize the constant header.
+        const payloadBytes = table.length - 31;
+        for (let offset = 0; offset < payloadBytes; offset += 10) {
+          const expected = table.slice(31 + offset, 31 + Math.min(offset + 10, payloadBytes));
+          const readback = await this.readUnqueued(base + 31 + offset, expected.length);
+          if (!expected.every((byte, at) => readback[at] === byte)) {
+            throw new Error(
+              `Macro slot ${macroId + 1} did not keep the uploaded steps; the previous contents were written back as a best effort.`,
+            );
+          }
+        }
+      } catch (error) {
+        await writeAll(before).catch(() => undefined);
+        throw error;
       }
     });
 
