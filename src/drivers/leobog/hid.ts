@@ -68,13 +68,6 @@ const WIRELESS_CONFIG_READ_DEADLINE_MS = 600;
 const WIRED_CONFIG_READ_DEADLINE_MS = 2_500;
 const CONFIG_RETRY_BACKOFF_MS = 1_000;
 /**
- * How long a poll stays off the device after one of its receives had to be
- * abandoned. WebHID has no cancel, so that receive keeps sitting on the handle
- * until the browser gives up on it; issuing the next poll immediately stacks a
- * second wait on top of the first, which is what made the browser itself
- * stutter while the 2.4 GHz link was quiet.
- */
-/**
  * How long a poll stays off the device after a rough one. Two things make a
  * poll rough: a receive that had to be abandoned, which WebHID cannot cancel
  * and which therefore sits on the handle until the browser gives up on it,
@@ -411,6 +404,9 @@ export class LeobogGm3HidClient {
           replayed.pollingRateHz = cached.pollingRateHz;
           replayed.debounceMs = cached.debounceMs;
           replayed.sleepTimeout = cached.sleepMinutes * 60;
+          // The hints have to follow the values: leaving them alone would show
+          // current settings behind a "settings are read-only" note.
+          replayed.ui = this.ui(this.product(), null, cached, false, replayed.batteryPercent ?? null);
         }
         return replayed;
       }
@@ -420,10 +416,14 @@ export class LeobogGm3HidClient {
       // configuration read.
       const linked = product.connection === "Wireless" ? await this.readLink() : null;
       const name = `LEOBOG ${product.name}`;
+      // The link query can leave a receive outstanding. Every later request
+      // would queue on the same handle behind it, so stop here and let the
+      // backoff below give that transfer time to land.
+      const abandoned = this.abandonedReceive;
       // A sleeping mouse times out on every block command, and the link flag
       // already says so, so skip the attempt instead of stalling the poll.
-      const settings = linked === false
-        ? { config: null, refreshFailed: false }
+      const settings = linked === false || abandoned
+        ? { config: this.configCache?.config ?? null, refreshFailed: abandoned }
         : await this.settingsForStatus(
           POLL_CONFIG_READ_DEADLINE_MS,
         );
@@ -437,7 +437,7 @@ export class LeobogGm3HidClient {
       // write is waiting behind it, spending the round trip on a battery
       // number the block can answer is the difference between a click that
       // lands immediately and one that waits for the whole poll.
-      const queried = product.connection === "Wireless" && !this.operationQueuedBehind()
+      const queried = product.connection === "Wireless" && !abandoned && !this.operationQueuedBehind()
         ? await this.tryBattery()
         : null;
       // The block's battery byte is a receiver cache, not a cable reading.
@@ -497,18 +497,29 @@ export class LeobogGm3HidClient {
   /**
    * The plain DPI control: the vendor application's DPI slider edits the
    * *selected* stage's value and leaves the selection alone, so this writes
-   * the active stage rather than moving to a different one.
+   * whichever stage is active in the block the write is based on. Resolving it
+   * there rather than from an earlier read means a stage the mouse switched to
+   * in between cannot be missed. The GM3 hides this control, so it is the
+   * stage-value path that reaches it today.
    */
   async setDpi(dpi: number): Promise<number> {
+    if (!leobogGm3IsDpiValue(dpi)) {
+      throw new RangeError(`This mouse supports ${LEOBOG_GM3_DPI_MIN}-${LEOBOG_GM3_DPI_MAX} DPI in steps of ${LEOBOG_GM3_DPI_STEP}.`);
+    }
     return await this.run(async () => {
-      await this.open();
-      const config = leobogGm3DecodeOnboard(
-        await this.readOnboard(1, CONFIG_WRITE_DEADLINE_MS),
+      let stage = 0;
+      await this.apply(
+        (block) => {
+          const config = leobogGm3DecodeOnboard(block);
+          if (config === null) {
+            throw new Error("Could not read the GM3 configuration block to find the active DPI stage.");
+          }
+          stage = config.activeStage;
+          return leobogGm3WithDpiStage(block, stage, dpi);
+        },
+        (config) => config.dpiStages[stage] === dpi,
+        () => `The mouse did not keep ${dpi} DPI on stage ${stage + 1}.`,
       );
-      if (config === null) {
-        throw new Error("Could not read the GM3 configuration block to find the active DPI stage.");
-      }
-      await this.writeStageValue(config.activeStage, dpi);
       return dpi;
     });
   }
@@ -747,11 +758,20 @@ export class LeobogGm3HidClient {
    * Read-modify-write with a read-back check. `verify` decides whether the
    * mouse kept the change; anything else raises the supplied message so the
    * UI can surface it instead of showing a value the mouse never accepted.
+   *
+   * `message` may be a thunk when the caller only learns what it was writing
+   * from the transform.
+   *
+   * The block is read, held for the vendor's settle gap and written back in
+   * full, so a change the mouse makes by itself inside that window — pressing
+   * the DPI-cycle button, say — is replaced by the copy this write started
+   * from. The gap is a measured cable requirement; narrowing the window needs a
+   * command that writes a single field.
    */
   private async apply(
     transform: (block: Uint8Array) => Uint8Array,
     verify: (config: LeobogGm3OnboardConfig) => boolean,
-    message: string,
+    message: string | (() => string),
   ): Promise<void> {
     // A receive that timed out leaves the handle busy even though this call has
     // given up on it, so a failed read reopens the device before the error goes
@@ -771,7 +791,9 @@ export class LeobogGm3HidClient {
     await this.writeOnboard(transform(before));
     await sleep(RESPONSE_DELAY_MS);
     const config = leobogGm3DecodeOnboard(await readBlock(WIRED_CONFIG_READ_DEADLINE_MS));
-    if (config === null || !verify(config)) throw new Error(message);
+    if (config === null || !verify(config)) {
+      throw new Error(typeof message === "function" ? message() : message);
+    }
     // The UI can show the change straight away instead of waiting for the next
     // status poll to re-read the block.
     this.configCache = { config, at: Date.now() };

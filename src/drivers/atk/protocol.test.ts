@@ -406,6 +406,7 @@ test("the SetMacroKey frame carries every step byte it is given", () => {
 
   const frame = atkBuildAtkR1MacroKey(0, step);
   assert.equal(frame.length, 16);
+  assert.equal(frame[0], ATK_COMPX_COMMAND.setMacroKey);
   assert.equal(frame[4], 11);
   assert.equal(frame[5], 0);
   assert.deepEqual([...frame.subarray(6, 15)], step);

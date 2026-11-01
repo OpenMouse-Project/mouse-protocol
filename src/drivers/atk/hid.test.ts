@@ -268,11 +268,16 @@ test("an ATK NearLink mouse sharing the R1 SE CID/MID does not become an R1", as
   // SE, so the CID/MID table must not hand it the R1 codecs.
   const near = device(0x1305, "ATK A9 3.0 NK");
   (near as unknown as FakeAtkDevice).replies = [reply(0x10, 0, [0x02, 0x29])];
+  const client = new AtkHidClient(near);
 
   await assert.rejects(
-    new AtkHidClient(near).setR1ActiveProfile(1),
+    client.setR1ActiveProfile(1),
     /not available on this connection/,
   );
+  // The transport gate would reject this device even without the CID/MID
+  // filter, so pin the identity itself: catalog model, and not R1.
+  assert.equal(client.displayName(), "ATK A9 3.0 NK");
+  assert.equal(client.isR1(), false);
 });
 
 test("R1 receiver telemetry reads online identity and pairing countdown without entering pairing", async () => {
@@ -681,6 +686,8 @@ test("R1 SE receiver writes the macro slot and binds the macro button record", a
   Object.assign(fake, { vendorId: 0x3554 });
   (fake as unknown as FakeAtkDevice).replies = [
     reply(0x10, 0x0000, [0x02, 0x20]),
+    // The uploaded payload is read back before the button is bound.
+    reply(0x08, 0x061f, [1, 0x81, 4, 0, 0, 20, 0xbb]),
     reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
     reply(0x08, 0x0060, [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)]),
   ];
@@ -721,6 +728,8 @@ test("R1 SE receiver reads a stored macro slot into editable steps", async () =>
       0x81, 0x04, 0, 0, 20,
       0x41, 0x04, 0, 0, 30,
     ]),
+    // The slot's trailing checksum byte completes the 0x55 total.
+    reply(0x08, 0x032a, [0x57]),
   ];
 
   const steps = await new AtkHidClient(fake).readR1ButtonMacro(0);

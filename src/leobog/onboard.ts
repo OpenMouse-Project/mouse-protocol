@@ -68,9 +68,11 @@ export interface LeobogGm3OnboardConfig {
   reportedBatteryPercent: number | null;
 }
 
+/** Reads one table entry as DPI: the stored byte pair is `dpi / 100 - 1`. */
 const readDpi = (payload: Uint8Array, offset: number): number =>
   (payload[offset]! | (payload[offset + 1]! << 8)) * 100 + 100;
 
+/** Writes one table entry, the exact inverse of {@link readDpi}. */
 const writeDpi = (payload: Uint8Array, offset: number, dpi: number): void => {
   const encoded = dpi / 100 - 1;
   payload[offset] = encoded & 0xff;
@@ -100,6 +102,10 @@ export function leobogGm3DecodeOnboard(payload: Uint8Array): LeobogGm3OnboardCon
   // idle times should still read back rather than hiding every setting.
   if (sleepMinutes > 120) return null;
 
+  // Only the first table is decoded. The vendor keeps both copies in sync, but
+  // a block whose copies disagree is still read from table A: nothing measured
+  // says which one the firmware applies, so a difference is not treated as a
+  // read error. `leobogGm3DpiTablesAgree` reports it to callers that care.
   const dpiStages = DPI_TABLE_OFFSETS[0] === undefined
     ? []
     : Array.from(
@@ -148,6 +154,7 @@ export function leobogGm3IsDpiValue(dpi: number): boolean {
   );
 }
 
+/** A writable copy of the block, rejecting anything shorter than the block. */
 const mutableCopy = (payload: Uint8Array): Uint8Array => {
   if (payload.length < LEOBOG_GM3_ONBOARD_LENGTH) {
     throw new RangeError(`The onboard block is ${payload.length} bytes, not ${LEOBOG_GM3_ONBOARD_LENGTH}.`);

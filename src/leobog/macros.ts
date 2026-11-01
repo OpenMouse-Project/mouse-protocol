@@ -102,6 +102,10 @@ export const LEOBOG_GM3_MACRO_MODE = {
 
 export type LeobogGm3MacroMode = typeof LEOBOG_GM3_MACRO_MODE[keyof typeof LEOBOG_GM3_MACRO_MODE];
 
+/**
+ * Validates a macro name and returns the byte length to declare: the record
+ * stores UTF-16LE code units, so the length counts code units, not code points.
+ */
 function assertMacroName(name: string): number {
   // The record stores the name as UTF-16LE code units, so the declared length
   // has to count code units too — a code point like "é" is one unit but two
@@ -115,6 +119,7 @@ function assertMacroName(name: string): number {
   return bytes;
 }
 
+/** Range-checks one step before it is packed into a record. */
 function assertStep(step: LeobogGm3MacroStep): void {
   if (!Number.isInteger(step.delayMs) || step.delayMs < 0 || step.delayMs > 0xffff) {
     throw new RangeError(`A macro delay must be 0-65535 ms (got ${step.delayMs}).`);

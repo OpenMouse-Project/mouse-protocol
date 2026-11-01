@@ -401,16 +401,14 @@ export class AtkHidClient {
           : undefined,
         // Vendor catalog: models flagged noSensorAngle have no angle control.
         hideAngleSnapping: this.features().noSensorAngle === true ? true : undefined,
-        dpiStageEditor: this.usesR1ProMaxUiTransport() || this.isR1() ? {
-          // The Pro Max transports and the 0xf58e receiver all accept the full
-          // stage count; only the other R1 paths are limited to what the mouse
-          // reports right now, because their writes are not verified yet.
-          maxStages: this.usesR1ProMaxUiTransport() || this.usesR1CompxReceiver()
-            ? R1_MAX_DPI_STAGES
-            : Math.max(stageCount, 1),
-          countEditable: this.usesVerifiedR1WiredTransport()
-            || this.usesVerifiedR1ProMaxReceiverTransport()
-            || this.usesR1CompxReceiver(),
+        // Only the transports whose stage writes are accepted get an editor:
+        // the others reject `setDpiStageValue` outright, so offering a stage
+        // list there would promise an edit the connection refuses.
+        dpiStageEditor: this.usesR1ProMaxUiTransport() || this.usesR1CompxReceiver() ? {
+          maxStages: R1_MAX_DPI_STAGES,
+          // The gate above is the same set of transports `setDpiStageCount`
+          // accepts, so a listed editor is always editable.
+          countEditable: true,
           minDpi: sensorProfile?.minDpi ?? DPI_MIN,
           maxDpi: sensorProfile?.maxDpi ?? DPI_MAX,
           stepDpi: 50,
@@ -554,6 +552,21 @@ export class AtkHidClient {
     for (let offset = 0; offset < table.length; offset += 10) {
       await this.write(base + offset, table.slice(offset, offset + 10));
     }
+    // A chunk the receiver dropped would leave the slot holding an older macro,
+    // so the payload it just stored — the action count, the records and the
+    // checksum — is read back before the button is pointed at the slot. The
+    // 31-byte header is skipped: only this region is ever read back elsewhere,
+    // and the device may normalize the constant header on the way in.
+    const payloadBytes = table.length - 31;
+    for (let offset = 0; offset < payloadBytes; offset += 10) {
+      const expected = table.slice(31 + offset, 31 + Math.min(offset + 10, payloadBytes));
+      const readback = await this.read(base + 31 + offset, expected.length);
+      if (!expected.every((byte, at) => readback[at] === byte)) {
+        throw new Error(
+          `Macro slot ${macroId + 1} did not keep the uploaded steps; the button was left unchanged.`,
+        );
+      }
+    }
 
     const record = atkPackButtonAssignment({
       id: "macro",
@@ -596,9 +609,23 @@ export class AtkHidClient {
       );
       records.push(...chunk);
     }
+    // The slot's trailing byte makes the count, the records and itself sum to
+    // 0x55. Without this check a flipped action byte still decodes, and the
+    // editor would hand the wrong steps straight back on the next save.
+    const checksum = (await this.read(base + 32 + recordBytes, 1))[0]!;
+    const total = [actionCount, ...records, checksum].reduce((sum, byte) => sum + byte, 0) & 0xff;
+    if (total !== 0x55) {
+      throw new Error(
+        `Macro slot ${macroId + 1} failed its checksum, so its steps cannot be trusted.`,
+      );
+    }
     return atkUnpackAtkR1MacroActions(actionCount, records);
   }
 
+  /**
+   * Writes one four-byte button record into its EEPROM group and requires the
+   * receiver to echo it back, restoring the previous group if it does not.
+   */
   private async writeR1ButtonRecord(
     index: number,
     record: readonly number[],
@@ -620,7 +647,9 @@ export class AtkHidClient {
       const readback = Array.from(await this.readUnqueued(groupAddress, 8));
       if (!record.every((byte, offset) => readback[recordOffset + offset] === byte)) {
         await this.writeUnqueued(groupAddress, before).catch(() => undefined);
-        throw new Error(`The ${button.label.toLowerCase()} assignment did not survive readback; the previous value was restored.`);
+        // The rollback is best-effort: its own failure is swallowed above, so
+        // the message must not promise that the old value is back.
+        throw new Error(`The ${button.label.toLowerCase()} assignment did not survive readback; restoring the previous value could not be confirmed.`);
       }
       return readback;
     });
@@ -723,6 +752,11 @@ export class AtkHidClient {
     );
   }
 
+  /**
+   * Sets the polling rate on whichever transport the mouse answers on, either
+   * through the live-settings row or the EEPROM system row, and returns the
+   * rate the mouse confirmed.
+   */
   async setPollingRate(pollingRateHz: number): Promise<number> {
     if (this.usesAtk1kReceiver() && !this.getSupportedPollingRates().includes(pollingRateHz)) {
       throw new Error(`This receiver does not support ${pollingRateHz} Hz.`);
@@ -742,11 +776,16 @@ export class AtkHidClient {
       }
       const encoded = POLLING_RATES.find(([, hertz]) => hertz === pollingRateHz);
       if (!encoded) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
-      const system = Array.from(await this.read(REGISTER.system, R1_SYSTEM_ROW_LENGTH));
-      system.splice(0, 2, ...wePackScalarPair(encoded[0]));
-      await this.write(REGISTER.system, system);
-      await delay(R1_LIVE_WRITE_SETTLE_MS);
-      const confirmed = this.decodePollingRate((await this.read(REGISTER.system, SYSTEM_LENGTH))[0]!);
+      // The row also carries the DPI stage pair, so the whole read-modify-write
+      // holds the queue: a stage edit that read the row before this write would
+      // otherwise put the previous polling code back.
+      const confirmed = await this.run(async () => {
+        const system = Array.from(await this.readUnqueued(REGISTER.system, R1_SYSTEM_ROW_LENGTH));
+        system.splice(0, 2, ...wePackScalarPair(encoded[0]));
+        await this.writeUnqueued(REGISTER.system, system);
+        await delay(R1_LIVE_WRITE_SETTLE_MS);
+        return this.decodePollingRate((await this.readUnqueued(REGISTER.system, SYSTEM_LENGTH))[0]!);
+      });
       if (confirmed !== pollingRateHz) {
         throw new Error(`The mouse kept ${confirmed} Hz instead of ${pollingRateHz} Hz.`);
       }
@@ -1678,11 +1717,13 @@ export class AtkHidClient {
    */
   private async readPollingRate(system?: Uint8Array): Promise<number> {
     if (this.usesR1SystemRowPolling()) {
-      // This receiver tops out at 1000 Hz, so a higher stored code (left by a
-      // mouse that kept its 8K setting) is reported at the ceiling, the same
-      // way the 1K receiver path below does it.
-      const rate = this.decodePollingRate((system ?? await this.read(REGISTER.system, SYSTEM_LENGTH))[0]!);
-      return Math.min(rate, 1000);
+      // This receiver tops out at 1000 Hz. A code the table does not know — or
+      // one left by a mouse that kept its 8K setting — is reported at the
+      // ceiling rather than failing the whole status read, the same way the
+      // live-settings path below treats an answer it cannot decode.
+      const code = (system ?? await this.read(REGISTER.system, SYSTEM_LENGTH))[0]!;
+      const match = POLLING_RATES.find(([value]) => value === code);
+      return match ? Math.min(match[1], 1000) : 1000;
     }
     if (this.usesR1LiveSettings()) {
       const settings = await this.read(ATK_VXE_R1_SETTINGS_REGISTER, R1_SETTINGS_LENGTH).catch(() => null);
@@ -1803,14 +1844,11 @@ export class AtkHidClient {
   private productForCidMid(cidMid: string): AtkProduct | null {
     const product = ATK_PRODUCTS[cidMid] ?? null;
     if (product === null) return null;
-    if (product.family === "r1" && !this.usesR1UsbId()) return null;
+    // `usesSharedR1Transport` covers the R1 mouse, cable and receiver USB ids
+    // plus a product string that names the family, so a device the catalog
+    // lists under an R1 name keeps its entry.
+    if (product.family === "r1" && !this.usesSharedR1Transport()) return null;
     return product;
-  }
-
-  /** The USB ids the VXE R1 family answers on: its mouse, cable and receivers. */
-  private usesR1UsbId(): boolean {
-    return this.device.productId === VXE_R1_RECEIVER_PID
-      || (this.device.vendorId === VENDOR_ID.vgn && ATK_COMPX_PRODUCT_IDS.includes(this.device.productId));
   }
 
   /**
@@ -1937,6 +1975,7 @@ export class AtkHidClient {
     };
   }
 
+  /** Reads a run of EEPROM bytes, taking the queue for the whole exchange. */
   private async read(address: number, length: number): Promise<Uint8Array> {
     return await this.run(() => this.readUnqueued(address, length));
   }
@@ -1955,6 +1994,7 @@ export class AtkHidClient {
     return reply.subarray(DATA_OFFSET, DATA_OFFSET + length);
   }
 
+  /** Writes a run of EEPROM bytes, taking the queue for the whole exchange. */
   private async write(address: number, data: readonly number[]): Promise<void> {
     if (this.isR1() && !this.usesR1LiveSettings() && !this.usesVerifiedR1WiredTransport()) {
       throw new Error("Persistent R1 EEPROM writes are available only over a verified wired transport.");
@@ -2162,6 +2202,7 @@ export class AtkHidClient {
     );
   }
 
+  /** Sends a report that expects no answer. */
   private async send(frame: Uint8Array): Promise<void> {
     await this.run(async () => {
       await this.open();
@@ -2215,6 +2256,7 @@ export class AtkHidClient {
   }
 }
 
+/** Copies a report's data out of the view WebHID hands over. */
 function copyDataView(view: DataView): Uint8Array {
   return new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
 }

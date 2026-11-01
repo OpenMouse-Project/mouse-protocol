@@ -559,6 +559,10 @@ export function atkUnpackAtkR1MacroActions(
   }
 
   const steps: AtkR1MacroStepInput[] = [];
+  // A wheel press and its release are two records but one editable step, so a
+  // press with nothing after it would be saved back with a release the slot
+  // never held.
+  let wheelPressPending = false;
   for (let index = 0; index < actionCount; index += 1) {
     const offset = index * 5;
     const status = bytes[offset]!;
@@ -578,6 +582,7 @@ export function atkUnpackAtkR1MacroActions(
         keyCode: value,
         holdTime: delay,
       });
+      wheelPressPending = false;
       continue;
     }
 
@@ -593,6 +598,7 @@ export function atkUnpackAtkR1MacroActions(
         if (previous.holdTime !== delay) {
           throw new Error("This R1 macro contains a wheel pair with mismatched delays.");
         }
+        wheelPressPending = false;
         continue;
       }
       if (value !== 0x01 && value !== 0xff) {
@@ -603,12 +609,16 @@ export function atkUnpackAtkR1MacroActions(
         keyCode: 0,
         holdTime: delay,
       });
+      wheelPressPending = true;
       continue;
     }
 
     throw new Error(`This R1 macro contains vendor action type ${keyType}, which the editor cannot safely edit.`);
   }
 
+  if (wheelPressPending) {
+    throw new Error("This R1 macro ends with a wheel press that has no matching release.");
+  }
   return steps;
 }
 
@@ -664,6 +674,7 @@ export function atkPackAtkR1MacroStep(
   return step;
 }
 
+/** Packs one hold time as the little-endian pair SetMacroKey expects. */
 function packAtkR1Uint16(value: number): number[] {
   if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
     throw new Error("ATK macro hold time must be a 16-bit integer.");
@@ -680,6 +691,9 @@ export function atkBuildAtkR1MacroKey(keyIndex: number, step: readonly number[])
   // index, nine step bytes and the checksum. A ten-byte step would push its
   // last byte into the checksum's slot and be dropped silently.
   if (step.length !== 9) throw new Error("ATK macro step must contain nine bytes.");
+  if (!step.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 0xff)) {
+    throw new Error("ATK macro step bytes must be whole numbers in 0-255.");
+  }
   const payload = new Uint8Array(16);
   payload[0] = ATK_COMPX_COMMAND.setMacroKey;
   payload[4] = 11;

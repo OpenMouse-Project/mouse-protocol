@@ -39,7 +39,9 @@ Hardware response from the `258a:0138` receiver:
 
 `byte[8] = 0x64` is 100 percent. This read was exercised on the receiver with
 the native Windows HID path. The wired `258a:0136` path shares the vendor
-definition, but has not been connected for verification yet.
+definition and was connected later (see the wired-path section below): `09 01`
+turned out to be receiver-only, answering `ERROR_GEN_FAILURE` or a stale buffer
+over the cable, so the wired path never yields a live level.
 
 ## Frame layout
 
@@ -94,9 +96,9 @@ One startup session captured, in order:
 
 The `0B 00` write carries the host clock as
 `year(little endian) month day hour minute second weekday` (`EA 07 0A 18 0D 34
-1B 06` = 2026-10-24 13:52:27 Saturday). The `44 00` reply holds 26-byte
-records introduced by `44 01`; no DPI, polling or debounce value was found in
-it, so its fields are not decoded yet.
+1B 06` = 2026-10-24 13:52:27 Saturday). The `44 00` reply's 26-byte records,
+introduced by `44 01`, are the one part of the block still undecoded: the DPI,
+polling and debounce fields sit in its first 44 bytes and are decoded normally.
 
 ## Scope
 
@@ -332,8 +334,9 @@ Two things that cost time to find:
 - The vendor application sends an 80-byte button table (`01 00`) before every
   save. It is **not** required: `44 00` followed by `04 00` applies the change
   on its own, so this driver never sends it. Its payload is the button
-  mapping table, which OpenMouse does not manage yet — writing the captured
-  copy would overwrite whatever the user bound.
+  mapping table. OpenMouse writes that table only when a binding changes, and
+  the device answers no read for it, so the first such write starts from the
+  factory bindings and can overwrite bindings made in the vendor application.
 - While the vendor application is running it re-applies its cached profile
   (`%LOCALAPPDATA%\BYCOMBO4\LEOBOG Gm3\profile.dct`), so writes from another
   program appear to do nothing. Close it before changing settings with
