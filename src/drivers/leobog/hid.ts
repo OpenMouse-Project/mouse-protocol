@@ -815,6 +815,14 @@ export class LeobogGm3HidClient {
     // status poll to re-read the block.
     this.configCache = { config, at: Date.now() };
     this.configRetryAfter = 0;
+    // The block only answers an awake mouse, and this read-back verified the
+    // change, so the notes the last full poll left behind no longer describe
+    // the device: a replayed status would otherwise call an awake mouse asleep
+    // or claim its settings could not be refreshed.
+    this.lastStatusFlags = {
+      linked: this.lastStatusFlags.linked === false ? true : this.lastStatusFlags.linked,
+      refreshFailed: false,
+    };
   }
 
   /**

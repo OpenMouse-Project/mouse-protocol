@@ -612,36 +612,41 @@ export class AtkHidClient {
     }
 
     const base = ATK_R1_MACRO_BASE + macroId * ATK_R1_MACRO_SLOT_LENGTH;
-    const actionCount = (await this.read(base + 31, 1))[0]!;
-    if (actionCount === 0) return [];
-    // Anything above the slot's capacity is a misread, not an empty slot: a
-    // truncated table would decode as a plausible but wrong macro.
-    if (actionCount > ATK_R1_MACRO_MAX_ACTIONS) {
-      throw new Error(
-        `The stored R1 macro reports ${actionCount} actions, more than the ${ATK_R1_MACRO_MAX_ACTIONS} this slot holds.`,
-      );
-    }
+    // The count, the records and the checksum have to come from one snapshot:
+    // an upload into the same slot between them would mix two macros, which
+    // usually fails the checksum but could pass with the wrong steps.
+    return await this.run(async () => {
+      const actionCount = (await this.readUnqueued(base + 31, 1))[0]!;
+      if (actionCount === 0) return [];
+      // Anything above the slot's capacity is a misread, not an empty slot: a
+      // truncated table would decode as a plausible but wrong macro.
+      if (actionCount > ATK_R1_MACRO_MAX_ACTIONS) {
+        throw new Error(
+          `The stored R1 macro reports ${actionCount} actions, more than the ${ATK_R1_MACRO_MAX_ACTIONS} this slot holds.`,
+        );
+      }
 
-    const records: number[] = [];
-    const recordBytes = actionCount * 5;
-    for (let offset = 0; offset < recordBytes; offset += 10) {
-      const chunk = await this.read(
-        base + 32 + offset,
-        Math.min(10, recordBytes - offset),
-      );
-      records.push(...chunk);
-    }
-    // The slot's trailing byte makes the count, the records and itself sum to
-    // 0x55. Without this check a flipped action byte still decodes, and the
-    // editor would hand the wrong steps straight back on the next save.
-    const checksum = (await this.read(base + 32 + recordBytes, 1))[0]!;
-    const total = [actionCount, ...records, checksum].reduce((sum, byte) => sum + byte, 0) & 0xff;
-    if (total !== 0x55) {
-      throw new Error(
-        `Macro slot ${macroId + 1} failed its checksum, so its steps cannot be trusted.`,
-      );
-    }
-    return atkUnpackAtkR1MacroActions(actionCount, records);
+      const records: number[] = [];
+      const recordBytes = actionCount * 5;
+      for (let offset = 0; offset < recordBytes; offset += 10) {
+        const chunk = await this.readUnqueued(
+          base + 32 + offset,
+          Math.min(10, recordBytes - offset),
+        );
+        records.push(...chunk);
+      }
+      // The slot's trailing byte makes the count, the records and itself sum to
+      // 0x55. Without this check a flipped action byte still decodes, and the
+      // editor would hand the wrong steps straight back on the next save.
+      const checksum = (await this.readUnqueued(base + 32 + recordBytes, 1))[0]!;
+      const total = [actionCount, ...records, checksum].reduce((sum, byte) => sum + byte, 0) & 0xff;
+      if (total !== 0x55) {
+        throw new Error(
+          `Macro slot ${macroId + 1} failed its checksum, so its steps cannot be trusted.`,
+        );
+      }
+      return atkUnpackAtkR1MacroActions(actionCount, records);
+    });
   }
 
   /**
@@ -666,8 +671,16 @@ export class AtkHidClient {
 
       await this.writeUnqueued(groupAddress, after);
       await delay(R1_LIVE_WRITE_SETTLE_MS);
-      const readback = Array.from(await this.readUnqueued(groupAddress, 8));
-      if (!record.every((byte, offset) => readback[recordOffset + offset] === byte)) {
+      const readback = Array.from(await this.readUnqueued(groupAddress, 8).catch((error: unknown) => {
+        // The write already reached the device, so the cached mapping no longer
+        // describes it whether or not this read answers.
+        this.lastStatus = null;
+        throw error;
+      }));
+      // The whole row is compared, not just the record this call replaced: a
+      // changed neighbour means the row was not rebuilt from the copy read
+      // above, and the group has to go back.
+      if (!after.every((byte, offset) => readback[offset] === byte)) {
         await this.writeUnqueued(groupAddress, before).catch(() => undefined);
         // The cached status no longer describes the device, so drop it rather
         // than let the next read serve the old mapping from memory.
