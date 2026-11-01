@@ -516,6 +516,39 @@ export class AtkHidClient {
   }
 
   /**
+   * Bind one physical button to an existing R1 macro slot. The macro slot
+   * itself is left untouched, so the button editor can assign a macro the user
+   * already built without uploading a second copy of it.
+   */
+  async setR1ButtonMacroBinding(
+    index: number,
+    macroId: number,
+    startType: number,
+  ): Promise<AtkButtonAssignment> {
+    await this.identify();
+    if (!this.usesR1CompxReceiver() && !this.usesVerifiedR1WiredTransport()) {
+      throw new Error("R1 macro writes are not available on this connection.");
+    }
+    const button = ATK_R1_BUTTONS[index];
+    if (!button) throw new Error("The selected button is invalid.");
+    if (!Number.isInteger(macroId) || macroId < 0 || macroId >= ATK_R1_MACRO_SLOT_COUNT) {
+      throw new Error(`An R1 macro slot must be between 0 and ${ATK_R1_MACRO_SLOT_COUNT - 1}.`);
+    }
+    if (!Number.isInteger(startType) || startType < 0 || startType > 0xff) {
+      throw new Error("The R1 macro start mode must be a byte.");
+    }
+
+    const record = atkPackButtonAssignment({
+      id: "macro",
+      label: "Macro",
+      keyClass: ATK_BUTTON_CLASS.macro,
+      value1: macroId,
+      value2: startType,
+    });
+    return await this.writeR1ButtonRecord(index, record);
+  }
+
+  /**
    * Write one R1 macro into a 384-byte vendor slot and bind it to the selected
    * physical button. The slot format and button-record encoding match ATK HUB
    * 3.2.29's COMPX implementation.

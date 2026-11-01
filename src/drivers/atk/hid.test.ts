@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ATK_BUTTON_CLASS,
   ATK_R1_MACRO_START_TYPES,
   atkDpiOptionsForSensor,
   atkPackDpiStage,
@@ -678,6 +679,41 @@ test("R1 SE receiver writes one button record and preserves its paired neighbour
   assert.deepEqual(
     Array.from(write.subarray(5, 13)),
     [...button(1, 1), ...button(2, 1)],
+  );
+});
+
+test("R1 SE receiver binds an existing macro slot without rewriting it", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0060, [
+      ...button(6, 7, ATK_R1_MACRO_START_TYPES.repeatUntilAnyKeyPress),
+      ...button(1, 2),
+    ]),
+  ];
+
+  const assignment = await new AtkHidClient(fake).setR1ButtonMacroBinding(
+    0,
+    7,
+    ATK_R1_MACRO_START_TYPES.repeatUntilAnyKeyPress,
+  );
+  assert.equal(assignment.keyClass, ATK_BUTTON_CLASS.macro);
+  assert.equal(assignment.value1, 7);
+  assert.equal(assignment.value2, ATK_R1_MACRO_START_TYPES.repeatUntilAnyKeyPress);
+
+  const writes = (fake as unknown as FakeAtkDevice).sent
+    .filter(({ data }) => data[0] === 0x07);
+  assert.equal(writes.some(({ data }) => data[2] === 0x06), false);
+  const bind = writes.find(({ data }) => data[2] === 0x00 && data[3] === 0x60);
+  assert.ok(bind);
+  assert.deepEqual(
+    Array.from(bind!.data.subarray(5, 13)),
+    [
+      ...button(6, 7, ATK_R1_MACRO_START_TYPES.repeatUntilAnyKeyPress),
+      ...button(1, 2),
+    ],
   );
 });
 
