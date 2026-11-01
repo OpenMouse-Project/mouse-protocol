@@ -549,46 +549,7 @@ export class AtkHidClient {
       );
     }
 
-    const table = atkPackAtkR1MacroTable(steps);
-    const base = ATK_R1_MACRO_BASE + macroId * ATK_R1_MACRO_SLOT_LENGTH;
-    // Upload, readback and rollback share one queued task, so nothing can write
-    // the slot between a chunk and the chunk that confirms it.
-    await this.run(async () => {
-      const writeAll = async (bytes: readonly number[]): Promise<void> => {
-        for (let offset = 0; offset < bytes.length; offset += 10) {
-          await this.writeUnqueued(base + offset, bytes.slice(offset, offset + 10));
-        }
-      };
-      // A slot that a button already points at must not be left half written,
-      // so everything this upload overwrites is captured first and put back if
-      // the readback disagrees.
-      const before: number[] = [];
-      for (let offset = 0; offset < table.length; offset += 10) {
-        const chunk = await this.readUnqueued(base + offset, Math.min(10, table.length - offset));
-        before.push(...chunk);
-      }
-      try {
-        await writeAll(table);
-        // A chunk the receiver dropped would leave the slot holding an older
-        // macro, so the payload it just stored — the action count, the records
-        // and the checksum — is read back before the button is pointed at the
-        // slot. The 31-byte header is skipped here: only this region is read
-        // back elsewhere, and the device may normalize the constant header.
-        const payloadBytes = table.length - 31;
-        for (let offset = 0; offset < payloadBytes; offset += 10) {
-          const expected = table.slice(31 + offset, 31 + Math.min(offset + 10, payloadBytes));
-          const readback = await this.readUnqueued(base + 31 + offset, expected.length);
-          if (!expected.every((byte, at) => readback[at] === byte)) {
-            throw new Error(
-              `Macro slot ${macroId + 1} did not keep the uploaded steps; the previous contents were written back as a best effort.`,
-            );
-          }
-        }
-      } catch (error) {
-        await writeAll(before).catch(() => undefined);
-        throw error;
-      }
-    });
+    await this.writeR1MacroTable(macroId, atkPackAtkR1MacroTable(steps));
 
     const record = atkPackButtonAssignment({
       id: "macro",
@@ -598,6 +559,25 @@ export class AtkHidClient {
       value2: options.startType,
     });
     await this.writeR1ButtonRecord(index, record);
+    this.lastStatus = null;
+  }
+
+  /**
+   * Empties one macro slot without touching any button binding.
+   *
+   * The write has the same shape as an upload: the vendor's own reset leaves a
+   * zero action count behind, so the event bytes that were there stay in place
+   * but become unreachable. Reading the slot back reports it as empty.
+   */
+  async clearR1ButtonMacro(macroId: number): Promise<void> {
+    await this.identify();
+    if (!this.usesR1CompxReceiver() && !this.usesVerifiedR1WiredTransport()) {
+      throw new Error("R1 macro writes are not available on this connection.");
+    }
+    if (!Number.isInteger(macroId) || macroId < 0 || macroId >= ATK_R1_MACRO_SLOT_COUNT) {
+      throw new Error(`An R1 macro slot must be between 0 and ${ATK_R1_MACRO_SLOT_COUNT - 1}.`);
+    }
+    await this.writeR1MacroTable(macroId, atkPackAtkR1MacroTable([]));
     this.lastStatus = null;
   }
 
@@ -646,6 +626,52 @@ export class AtkHidClient {
         );
       }
       return atkUnpackAtkR1MacroActions(actionCount, records);
+    });
+  }
+
+  /**
+   * Writes one packed macro table into its slot and reads it back before the
+   * caller binds anything to it.
+   *
+   * A slot a button already plays must not be left half written, so everything
+   * this upload overwrites is captured first and put back when the readback
+   * disagrees. Upload, readback and rollback share one queued task, so nothing
+   * can write the slot between a chunk and the chunk that confirms it.
+   */
+  private async writeR1MacroTable(macroId: number, table: readonly number[]): Promise<void> {
+    const base = ATK_R1_MACRO_BASE + macroId * ATK_R1_MACRO_SLOT_LENGTH;
+    await this.run(async () => {
+      const writeAll = async (bytes: readonly number[]): Promise<void> => {
+        for (let offset = 0; offset < bytes.length; offset += 10) {
+          await this.writeUnqueued(base + offset, bytes.slice(offset, offset + 10));
+        }
+      };
+      const before: number[] = [];
+      for (let offset = 0; offset < table.length; offset += 10) {
+        const chunk = await this.readUnqueued(base + offset, Math.min(10, table.length - offset));
+        before.push(...chunk);
+      }
+      try {
+        await writeAll(table);
+        // A chunk the receiver dropped would leave the slot holding an older
+        // macro, so the payload it just stored — the action count, the records
+        // and the checksum — is read back. The 31-byte header is skipped here:
+        // only this region is read back elsewhere, and the device may
+        // normalize the constant header.
+        const payloadBytes = table.length - 31;
+        for (let offset = 0; offset < payloadBytes; offset += 10) {
+          const expected = table.slice(31 + offset, 31 + Math.min(offset + 10, payloadBytes));
+          const readback = await this.readUnqueued(base + 31 + offset, expected.length);
+          if (!expected.every((byte, at) => readback[at] === byte)) {
+            throw new Error(
+              `Macro slot ${macroId + 1} did not keep the uploaded steps; the previous contents were written back as a best effort.`,
+            );
+          }
+        }
+      } catch (error) {
+        await writeAll(before).catch(() => undefined);
+        throw error;
+      }
     });
   }
 

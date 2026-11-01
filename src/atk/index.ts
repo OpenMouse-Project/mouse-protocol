@@ -468,12 +468,17 @@ export const ATK_R1_MACRO_KEY_TYPE = {
 /**
  * Pack one R1 macro into the vendor's 384-byte slot format: a fixed 31-byte
  * header, an action count, five-byte action records, and a final checksum.
+ *
+ * No steps is a valid slot: the count is zeroed and the checksum covers that
+ * alone, which is the empty-macro state the vendor's own reset leaves behind.
+ * The bytes of a previously programmed macro stay where they are — the EEPROM
+ * command cannot put them back to `0xff` — but nothing can reach them.
  */
 export function atkPackAtkR1MacroTable(
   steps: readonly AtkR1MacroStepInput[],
 ): number[] {
-  if (steps.length < 1 || steps.length > ATK_R1_MACRO_MAX_ACTIONS) {
-    throw new Error(`An R1 macro needs 1-${ATK_R1_MACRO_MAX_ACTIONS} steps.`);
+  if (steps.length > ATK_R1_MACRO_MAX_ACTIONS) {
+    throw new Error(`An R1 macro holds at most ${ATK_R1_MACRO_MAX_ACTIONS} steps.`);
   }
 
   const records: number[] = [];
@@ -625,7 +630,15 @@ export function atkUnpackAtkR1MacroActions(
       continue;
     }
 
-    throw new Error(`This R1 macro contains vendor action type ${keyType}, which the editor cannot safely edit.`);
+    // The raw record is part of the message on purpose: an action the editor
+    // cannot name yet still has to be reportable so the format can be captured
+    // from a device that stores one.
+    const raw = [status, value, value2, bytes[offset + 3]!, bytes[offset + 4]!]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join(" ");
+    throw new Error(
+      `This R1 macro contains vendor action type ${keyType} (record ${raw}), which the editor cannot safely edit.`,
+    );
   }
 
   if (wheelPressPending) {

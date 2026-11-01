@@ -723,6 +723,33 @@ test("R1 SE receiver writes the macro slot and binds the macro button record", a
   );
 });
 
+test("R1 SE receiver clears a macro slot without touching any binding", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    // The slot is captured before it is overwritten, so a failed write can be
+    // undone: 33 bytes = the 31-byte header, the count and the checksum.
+    reply(0x08, 0x0600, new Array<number>(10).fill(0)),
+    reply(0x08, 0x060a, new Array<number>(10).fill(0)),
+    reply(0x08, 0x0614, new Array<number>(10).fill(0)),
+    reply(0x08, 0x061e, new Array<number>(3).fill(0)),
+    // The payload the write must leave behind: a zero count and its checksum.
+    reply(0x08, 0x061f, [0, 0x55]),
+  ];
+
+  await new AtkHidClient(fake).clearR1ButtonMacro(2);
+
+  const writes = (fake as unknown as FakeAtkDevice).sent.filter(({ data }) => data[0] === 0x07);
+  const macroWrites = writes.filter(({ data }) => data[2] === 0x06);
+  assert.equal(macroWrites.length, 4);
+  const table = macroWrites.flatMap(({ data }) => Array.from(data.subarray(5, 5 + data[4]!)));
+  assert.equal(table.length, 33);
+  assert.deepEqual(table.slice(31), [0, 0x55]);
+  // Clearing the slot is not a button edit.
+  assert.equal(writes.some(({ data }) => data[3] === 0x60), false);
+});
+
 test("R1 SE receiver reads a stored macro slot into editable steps", async () => {
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });

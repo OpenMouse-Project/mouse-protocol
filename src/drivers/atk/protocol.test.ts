@@ -372,6 +372,12 @@ test("R1 macro tables match the ATK HUB COMPX slot format", () => {
     () => atkUnpackAtkR1MacroActions(1, [0x04, 0x01, 0, 0, 20]),
     /vendor action type 4/,
   );
+
+  // No steps is the empty slot: header, a zero count and the checksum over it.
+  const empty = atkPackAtkR1MacroTable([]);
+  assert.equal(empty.length, 33);
+  assert.deepEqual(empty.slice(31), [0, 0x55]);
+  assert.deepEqual(atkUnpackAtkR1MacroActions(0, []), []);
 });
 
 test("R1 macro button records carry the official start-mode bytes", () => {
