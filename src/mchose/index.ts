@@ -500,6 +500,8 @@ export interface MchoseProduct {
   dpiMax: number;
   /** Lift-off steps in millimetres, in firmware index order. */
   liftOffDistances: readonly number[];
+  /** Firmware index of the first lift-off step; 0 when omitted. */
+  liftOffIndexBase?: number;
   /** Highest polling rate on a wired or 2.4 GHz link. */
   maxPollingRate: number;
 }
@@ -515,6 +517,8 @@ export const MCHOSE_PRODUCTS: readonly MchoseProduct[] = [
   { name: "A7 Ultra", productId: 0x1011, dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
   // Under VID 0x5253, per github.com/alexfrih/mchose-linux (verified on hardware).
   { name: "L7 Pro", productId: 0x00b0, dpiMax: 26000, liftOffDistances: [1, 2], maxPollingRate: 8000 },
+  // Firmware 5.32.5.0 reports 1 mm and 2 mm as lift-off indices 1 and 2.
+  { name: "L7 Pro+", productId: 0x4015, dpiMax: 26000, liftOffDistances: [1, 2], liftOffIndexBase: 1, maxPollingRate: 8000 },
 ];
 
 /** Rate lists the firmware exposes, keyed by the model's maximum rate. */
@@ -570,10 +574,14 @@ export function mchoseEncodeReadProfileName(index: number): number[] {
   return [MCHOSE_COMMAND.readProfileName, index];
 }
 
+/** Factory names are Chinese ("默认板载2"), shown as "Default onboard 2". */
+const FACTORY_PROFILE_NAME = /^默认板载(\d+)$/;
+
 export function mchoseDecodeProfileName(payload: Uint8Array): string | null {
   if (payload.length < 2) return null;
   let end = 1;
   while (end < payload.length && payload[end] !== 0) end += 1;
-  const name = String.fromCharCode(...payload.subarray(1, end)).trim();
-  return name.length ? name : null;
+  const name = new TextDecoder().decode(payload.subarray(1, end)).trim();
+  if (!name.length) return null;
+  return name.replace(FACTORY_PROFILE_NAME, "Default onboard $1");
 }

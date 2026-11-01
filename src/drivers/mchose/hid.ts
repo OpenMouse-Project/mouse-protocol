@@ -288,6 +288,7 @@ export class MchoseHidClient {
     const stages = config?.dpiStages ?? [];
     const rates = this.linkRates(product);
     const liftOffSteps = product?.liftOffDistances.length ?? 3;
+    const liftOffBase = product?.liftOffIndexBase ?? 0;
     const buttons = configPayload ? mchoseDecodeButtons(configPayload) : null;
     if (buttons) await this.labelMacros(buttons);
     const profileNames = config ? await this.readProfileNames() : null;
@@ -315,7 +316,7 @@ export class MchoseHidClient {
       connectionDetail: identity && !identity.connected
         ? "Receiver connected, mouse not linked"
         : undefined,
-      liftOffDistance: config ? (mchoseLiftOffLabels(liftOffSteps)[config.liftOffIndex] ?? null) : null,
+      liftOffDistance: config ? (mchoseLiftOffLabels(liftOffSteps)[config.liftOffIndex - liftOffBase] ?? null) : null,
       motionSync: config ? config.processing.motionSync : null,
       angleSnapping: config ? config.processing.angleSnapping : null,
       rippleControl: config ? config.processing.rippleControl : null,
@@ -481,8 +482,9 @@ export class MchoseHidClient {
 
   async setLiftOffDistance(label: NonNullable<MouseStatus["liftOffDistance"]>): Promise<void> {
     const steps = this.cachedProduct?.liftOffDistances.length ?? 3;
-    const index = mchoseLiftOffLabels(steps).indexOf(label);
-    if (index < 0) throw new Error(`This mouse does not offer a ${label} lift-off distance.`);
+    const step = mchoseLiftOffLabels(steps).indexOf(label);
+    if (step < 0) throw new Error(`This mouse does not offer a ${label} lift-off distance.`);
+    const index = step + (this.cachedProduct?.liftOffIndexBase ?? 0);
     const after = await this.writePerformance(index, {}, (c) => c.liftOffIndex === index);
     if (after.liftOffIndex !== index) {
       throw new Error("The mouse did not accept that lift-off distance.");

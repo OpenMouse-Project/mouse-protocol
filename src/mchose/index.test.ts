@@ -13,6 +13,7 @@ import {
   mchoseEncodeCommand,
   mchoseEncodeConfigWrite,
   mchoseFindProduct,
+  mchoseDecodeProfileName,
   mchosePackLinkByte,
   MCHOSE_POLLING_RATES,
   MCHOSE_PROFILE_COUNT,
@@ -151,6 +152,7 @@ test("the mouse id identifies the model, since host PIDs are shared", () => {
   assert.equal(mchoseFindProduct(0x4018)?.dpiMax, 26000);
   assert.equal(mchoseFindProduct(0x1011)?.name, "A7 Ultra");
   assert.equal(mchoseFindProduct(0x00b0)?.name, "L7 Pro");
+  assert.equal(mchoseFindProduct(0x4015)?.name, "L7 Pro+");
 });
 
 test("the product string disambiguates when the mouse id is unknown", () => {
@@ -158,6 +160,7 @@ test("the product string disambiguates when the mouse id is unknown", () => {
   // The plus model must not be swallowed by the shorter name.
   assert.equal(mchoseFindProduct(null, "MCHOSE A7 V2 Ultra")?.name, "A7 V2 Ultra");
   assert.equal(mchoseFindProduct(null, "MCHOSE A7 Ultra")?.name, "A7 Ultra");
+  assert.equal(mchoseFindProduct(null, "MCHOSE L7 Pro+")?.name, "L7 Pro+");
   assert.equal(mchoseFindProduct(null, "Some Other Mouse"), null);
   assert.equal(mchoseFindProduct(null, null), null);
 });
@@ -337,4 +340,13 @@ test("Bluetooth is capped at 1000 Hz even on an 8K model", () => {
     mchosePollingRates(ultraPlus, MCHOSE_LINK_PRODUCT_IDS.bluetooth),
     [125, 500, 1000],
   );
+});
+
+test("profile names decode as UTF-8 and translate the Chinese factory names", () => {
+  const reply = (index: number, name: number[]) => Uint8Array.from([index, ...name, 0, 0]);
+  const factory = [...new TextEncoder().encode("默认板载2")];
+  assert.equal(mchoseDecodeProfileName(reply(1, factory)), "Default onboard 2");
+  assert.equal(mchoseDecodeProfileName(reply(0, [...new TextEncoder().encode("Config 1")])), "Config 1");
+  assert.equal(mchoseDecodeProfileName(reply(0, [...new TextEncoder().encode("配置")])), "配置");
+  assert.equal(mchoseDecodeProfileName(reply(0, [])), null);
 });
