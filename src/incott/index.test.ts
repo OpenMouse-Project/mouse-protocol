@@ -36,6 +36,7 @@ import {
   incottEncodeSetSleep,
   incottEncodeSetToggle,
   incottFrameMatches,
+  incottFindOemModel,
   incottIsWiredProduct,
   incottKeyboardActionCode,
   incottMacroChunks,
@@ -954,4 +955,25 @@ test("the encoder still accepts the full range regardless of sensor", () => {
   // Same split as the polling rate: readStatus narrows what is OFFERED, the
   // codec keeps accepting anything the protocol can express.
   assert.doesNotThrow(() => incottEncodeSetDpi(0, 45000));
+});
+
+test("incottFindOemModel recognises the Aula SC900 Max product string and nothing else", () => {
+  assert.equal(incottFindOemModel("SC900MAX")?.displayName, "SC900 Max");
+  assert.equal(incottFindOemModel("  sc900 max ")?.displayName, "SC900 Max", "case, spacing and padding are ignored");
+  assert.equal(incottFindOemModel("incott 8K wireless mouse"), null);
+  assert.equal(incottFindOemModel("incott Esports G23V2Pro mouse"), null);
+  assert.equal(incottFindOemModel("SC900 Pro"), null, "a different model is not matched by prefix");
+  assert.equal(incottFindOemModel(""), null);
+  assert.equal(incottFindOemModel(undefined), null);
+});
+
+test("incottIsWiredProduct follows the OEM's own wired product id (SC900 Max cable is 0x622C, hardware-confirmed 2026-11-01)", () => {
+  assert.equal(incottIsWiredProduct(INCOTT_PRODUCT_ID_WIRED, "SC900MAX"), true);
+  assert.equal(incottIsWiredProduct(INCOTT_PRODUCT_ID, "SC900MAX"), false);
+});
+
+test("incottIsWiredProduct keeps Incott's own assignment when the product string is not a known OEM", () => {
+  assert.equal(incottIsWiredProduct(INCOTT_PRODUCT_ID_WIRED, "incott Esports G23V2Pro mouse"), true);
+  assert.equal(incottIsWiredProduct(INCOTT_PRODUCT_ID, "incott 8K wireless mouse"), false);
+  assert.equal(incottIsWiredProduct(INCOTT_PRODUCT_ID_WIRED, null), true);
 });

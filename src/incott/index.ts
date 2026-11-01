@@ -1600,8 +1600,56 @@ export function incottDecodeIdentity(frame: Uint8Array): IncottDeviceIdentity | 
  * this helper directly and derives `batteryState: "Charging"` from it rather
  * than from a same-named constant.
  */
-export function incottIsWiredProduct(productId: number): boolean {
+export function incottIsWiredProduct(productId: number, productName?: string | null): boolean {
+  const oem = incottFindOemModel(productName);
+  if (oem !== null) return productId === oem.wiredProductId;
   return productId === INCOTT_PRODUCT_ID_WIRED;
+}
+
+/**
+ * A mouse that runs Incott's firmware under another brand's name and reuses
+ * Incott's two product ids (`0x093A:0x522C` / `0x093A:0x622C`).
+ *
+ * `wiredProductId` says which of the two ids the CABLE enumerates as. Incott's
+ * own mice use `0x622C` for the cable (hardware-verified, see
+ * `INCOTT_PRODUCT_ID_WIRED`), but nothing guarantees an OEM kept that
+ * assignment, so it is recorded per model instead of assumed.
+ */
+export interface IncottOemModel {
+  /** Matched against the raw HID product string, which is the only OEM-specific signal on the wire. */
+  readonly match: RegExp;
+  /** Brand reported in `MouseStatus.brand`. */
+  readonly brand: "Aula";
+  /** `MouseUiHints.family`; the consuming app keys its setting cards on it. */
+  readonly family: string;
+  /** Name shown to the user. Takes priority over the identity reply's model code, which names the Incott platform the OEM is built on. */
+  readonly displayName: string;
+  /** Product id the mouse enumerates as when it is connected by cable. */
+  readonly wiredProductId: number;
+  /** True when the cable limits polling to 1000 Hz (Incott G23V2Pro). False when 8000 Hz works over the cable too. */
+  readonly cablePollingCapped: boolean;
+}
+
+/**
+ * Known OEM models. Add an entry only with evidence for BOTH fields; see
+ * `docs/incott-testing.md` ("Aula SC900 Max") for what each entry rests on.
+ *
+ * - Aula SC900 Max: product string `SC900MAX` on both product ids, observed
+ *   through the OpenMouse Bridge. The owner reports the CABLE as `0x522C` —
+ *   the same assignment as Incott's own mice (0x622C is the cable, 0x522C the
+ *   dongle), confirmed on the owner's unit 2026-11-01 after a first guess to
+ *   the contrary was disproven. Unlike the G23V2Pro, the owner reports 8000 Hz
+ *   over the cable too; provisional until a second owner confirms it.
+ */
+export const INCOTT_OEM_MODELS: readonly IncottOemModel[] = [
+  { match: /^sc900\s*max$/i, brand: "Aula", family: "aula", displayName: "SC900 Max", wiredProductId: INCOTT_PRODUCT_ID_WIRED, cablePollingCapped: false },
+];
+
+/** Finds the OEM entry for a raw HID product string, or `null` for an ordinary Incott mouse. */
+export function incottFindOemModel(productName: string | null | undefined): IncottOemModel | null {
+  const name = productName?.trim();
+  if (!name) return null;
+  return INCOTT_OEM_MODELS.find((model) => model.match.test(name)) ?? null;
 }
 
 /**

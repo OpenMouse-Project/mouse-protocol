@@ -803,6 +803,13 @@ test("setButtonMapping throws when the mouse does not take the binding", async (
   await assert.rejects(() => client.setButtonMapping("Middle", "Mute"), /instead of Mute/);
 });
 
+test("readStatus keeps the Incott brand and family for ordinary Incott mice", async () => {
+  const { device } = fakeDevice({ productName: "incott 8K wireless mouse" });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.brand, "Incott");
+  assert.equal(status.ui?.family, "incott");
+});
+
 test("readStatus reports the same model name wired as wireless", async () => {
   // The wired product string does carry a model ("incott Esports G23V2Pro
   // mouse", verified 2026-09-08) while the dongle's does not, so relying on
@@ -825,6 +832,31 @@ test("readStatus falls back to the product string when the model code is unknown
   });
   const status = await new IncottHidClient(device, fast).readStatus();
   assert.equal(status.name, "Esports G99");
+});
+
+test("readStatus names an Aula SC900 Max from its product string, not the identity model code", async () => {
+  // The identity reply names the Incott platform the OEM is built on
+  // (0x0E = G23V2), which is not the product the user bought.
+  const { device } = fakeDevice({ productId: INCOTT_PRODUCT_ID, productName: "SC900MAX" });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.name, "SC900 Max");
+  assert.equal(status.brand, "Aula");
+  assert.equal(status.ui?.family, "aula");
+  assert.equal(device.productName, "SC900MAX", "the raw string stays available on the device");
+});
+
+test("readStatus treats the SC900 Max's 0x622C as the cable and still offers 8 kHz (hardware-confirmed 2026-11-01)", async () => {
+  const { device } = fakeDevice({ productId: INCOTT_PRODUCT_ID_WIRED, productName: "SC900MAX" });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.connectionType, "Wired");
+  assert.equal(status.supportedPollingRates?.includes(8000), true);
+});
+
+test("readStatus treats the SC900 Max's 0x522C as the 2.4 GHz dongle with the 8 kHz ladder (hardware-confirmed 2026-11-01)", async () => {
+  const { device } = fakeDevice({ productId: INCOTT_PRODUCT_ID, productName: "SC900MAX" });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.connectionType, "Wireless");
+  assert.equal(status.supportedPollingRates?.includes(8000), true);
 });
 
 test("firmware falls back to a plain notice when identity cannot be read", async () => {

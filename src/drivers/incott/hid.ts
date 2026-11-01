@@ -32,6 +32,7 @@ import {
   incottEncodeSetSleep,
   incottEncodeSetToggle,
   incottFrameMatches,
+  incottFindOemModel,
   incottIsWiredProduct,
   incottMacroChunks,
   incottLiftOffLabel,
@@ -618,7 +619,7 @@ export class IncottHidClient {
     // (`incottIsChargingProduct`) — the wrong axis: 0x622C means the
     // CONNECTION is wired, and charging is a consequence of that, not what
     // the id itself encodes. See `incottIsWiredProduct`.
-    const wired = incottIsWiredProduct(this.device.productId);
+    const wired = incottIsWiredProduct(this.device.productId, this.device.productName);
     // Fallback display name only — the model read from the device wins where
     // one is available, and `name` is settled below once the identity query
     // has answered. The product string names a model over the cable
@@ -760,7 +761,13 @@ export class IncottHidClient {
     // query failed or returned a model code outside the known table — an
     // unrecognised model reports whatever the device called itself rather
     // than a guess.
-    const name = identity?.displayName ?? incottNormalizeProductName(rawName);
+    // An OEM that ships Incott's firmware under its own name (Aula SC900 Max)
+    // is named from its own product string: the identity reply's model code
+    // names the Incott platform underneath, not the product the user bought.
+    const oem = incottFindOemModel(rawName);
+    const name = oem?.displayName
+      ?? identity?.displayName
+      ?? incottNormalizeProductName(rawName);
 
     // The owner confirmed on hardware that the mouse only reaches 1000 Hz
     // over the cable — 2000/4000/8000 Hz are wireless-only (see
@@ -768,7 +775,8 @@ export class IncottHidClient {
     // wired would let the shell offer a rate the device silently refuses,
     // which `setPollingRate`'s read-back verification would then report as a
     // failure on every attempt.
-    const supportedPollingRates = wired ? [...INCOTT_POLLING_STEPS_HZ_WIRED] : [...INCOTT_POLLING_STEPS_HZ];
+    const cableCapped = incottFindOemModel(rawName)?.cablePollingCapped ?? true;
+    const supportedPollingRates = wired && cableCapped ? [...INCOTT_POLLING_STEPS_HZ_WIRED] : [...INCOTT_POLLING_STEPS_HZ];
 
     // The receiver LED belongs to the 2.4 GHz dongle and means nothing over
     // the cable, so it is not read at all when wired — the card then hides
@@ -788,7 +796,7 @@ export class IncottHidClient {
     const buttonMappings = dead ? null : await this.readButtonMappings();
 
     const ui: MouseUiHints = {
-      family: "incott",
+      family: oem?.family ?? "incott",
       // The advanced section is the only place debounce, sleep, motion sync,
       // angle snapping and ripple control render; Incott has no lighting and
       // no onboard profiles, so those cards stay hidden on their own
@@ -821,7 +829,9 @@ export class IncottHidClient {
       // let the shell offer a write that read-back verification would then
       // report as failed.
       hideUnsupportedPollingRates: true,
-      pollingNote: wired
+      pollingNote: !cableCapped
+        ? "Up to 8,000 Hz, wired or wireless."
+        : wired
         ? "Up to 1,000 Hz over the cable; 8,000 Hz needs the wireless dongle."
         : "Up to 8,000 Hz wireless; 1,000 Hz over the cable.",
       // Set only when open()'s probe found this specific collection dead —
@@ -854,7 +864,7 @@ export class IncottHidClient {
     };
 
     return {
-      brand: "Incott",
+      brand: oem?.brand ?? "Incott",
       name,
       ui,
       // A genuine live read (the active stage's own value) when it

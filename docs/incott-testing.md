@@ -1308,3 +1308,53 @@ change of the same shape as `applyDeviceButtonMapping` — dispatch through
 `requireClientMethod` instead of a brand check — but it is an upstream call,
 so it is a question for the maintainers rather than something to change
 unilaterally.
+
+## Aula SC900 Max (OEM build of the Incott platform) — owner report, 2026-11-01
+
+Source: one owner's OpenMouse hardware report (Firefox with the OpenMouse
+Bridge, Windows). Single unit, not yet cross-checked by a second owner. Facts
+and hypotheses are kept apart on purpose.
+
+### Observed
+
+- Vendor id `0x093A`; both `0x522C` and `0x622C` enumerate (never at the same
+  time while the owner switched between cable and dongle). Product string
+  `SC900MAX` on both ids — the same ids as the G23V2Pro, so the registry
+  filters already match; no new product id was needed.
+- CORRECTION 2026-11-01: an earlier report that `0x522C` is the cable was
+  WRONG. A first build that followed it showed "Wired" on the dongle and
+  "Wireless" on the cable. As on the G23V2Pro, `0x622C` is the cable and
+  `0x522C` the dongle. The owner also reports 8000 Hz over the cable, unlike
+  the G23V2Pro (1000 Hz cap); one unit, not yet cross-checked.
+- HID collections (both ids carry the same set; only the order differs):
+  `0xFF00` (feature `0x03`), `0xFF05` (input/output/feature `0x09`),
+  `0xFF01` (feature `0x04`), keyboard, mouse, consumer control and `0x01:0x80`.
+  Under `0x522C` the `0xFF00` collection is listed first; under `0x622C` the
+  mouse collection is first and `0xFF00` last.
+- On `0x522C` the identity probe (`09 8f 00`) was never answered, so the
+  status degraded (DPI 0, polling 0, `firmware: ["Identity unavailable"]`),
+  while the unsolicited input report still delivered a battery level (85%,
+  discharging). Button remapping worked in an earlier build.
+
+### Changed because of it
+
+- `incottIsWiredProduct(productId, productName)` now consults
+  `INCOTT_OEM_MODELS`. For `SC900MAX` the cable is `0x622C` (same as Incott's
+  own mice) but the 1000 Hz cable polling cap does not apply
+  (`cablePollingCapped: false`). Incott's own mice are untouched.
+- The name comes from the OEM product string before the identity model code,
+  because the identity reply names the platform (G23V2), not the product.
+- `MouseStatus.brand` is `"Aula"` and `ui.family` is `"aula"` for this model
+  (new `"Aula"` entry in the `brand` union). The consuming app keys its setting
+  cards on `ui.family`, so it needs a matching `aula` entry (OpenMouse
+  `src/device/traits.ts`); without one the advanced, sleep and debounce cards
+  disappear. Ordinary Incott mice keep `"Incott"` / `"incott"`.
+
+### Not changed, and why
+
+- `0x372e:0x103e` is NOT added. The Bridge lists it as "HERO 68 HE" and it stays
+  present while the mouse is off the bus, so nothing in the log ties it to the
+  mouse. Treat it as another peripheral until a capture shows otherwise.
+- Why the probe went unanswered on `0x522C`, and why battery was not read in
+  the owner's other mode, are unresolved. Do not resolve them by guessing:
+  they need the captures listed in the pull request.
