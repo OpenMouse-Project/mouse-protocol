@@ -9,6 +9,7 @@ import {
   ATK_R1_BUTTONS,
   ATK_R1_BUTTON_ACTIONS,
   ATK_R1_MACRO_BASE,
+  ATK_R1_MACRO_MOUSE_BUTTON,
   ATK_R1_MACRO_SLOT_COUNT,
   ATK_R1_MACRO_SLOT_LENGTH,
   ATK_R1_MACRO_START_TYPES,
@@ -351,6 +352,18 @@ test("R1 macro tables match the ATK HUB COMPX slot format", () => {
     atkPackAtkR1MacroTable([{ kind: "wheel-down", keyCode: 0, holdTime: 35 }]).slice(31),
     [2, 6, 255, 0, 0, 35, 6, 0, 0, 0, 35, 0x02],
   );
+  assert.deepEqual(
+    atkPackAtkR1MacroTable([
+      { kind: "mouse-down", keyCode: ATK_R1_MACRO_MOUSE_BUTTON.left, holdTime: 20 },
+      { kind: "mouse-up", keyCode: ATK_R1_MACRO_MOUSE_BUTTON.left, holdTime: 30 },
+    ]).slice(31),
+    [
+      2,
+      0x84, ATK_R1_MACRO_MOUSE_BUTTON.left, 0, 0, 20,
+      0x44, ATK_R1_MACRO_MOUSE_BUTTON.left, 0, 0, 30,
+      0x57,
+    ],
+  );
 
   const keyboard = [
     { kind: "key-down" as const, keyCode: 0x04, holdTime: 20 },
@@ -368,9 +381,19 @@ test("R1 macro tables match the ATK HUB COMPX slot format", () => {
     [{ kind: "wheel-down", keyCode: 0, holdTime: 35 }],
   );
 
+  const mouse = [
+    { kind: "mouse-down" as const, keyCode: ATK_R1_MACRO_MOUSE_BUTTON.right, holdTime: 20 },
+    { kind: "mouse-up" as const, keyCode: ATK_R1_MACRO_MOUSE_BUTTON.right, holdTime: 30 },
+  ];
+  const mouseTable = atkPackAtkR1MacroTable(mouse);
+  assert.deepEqual(
+    atkUnpackAtkR1MacroActions(mouseTable[31]!, mouseTable.slice(32)),
+    mouse,
+  );
+
   assert.throws(
-    () => atkUnpackAtkR1MacroActions(1, [0x04, 0x01, 0, 0, 20]),
-    /vendor action type 4/,
+    () => atkUnpackAtkR1MacroActions(1, [0x05, 0x01, 0, 0, 20]),
+    /vendor action type 5/,
   );
 
   // No steps is the empty slot: header, a zero count and the checksum over it.

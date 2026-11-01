@@ -330,7 +330,9 @@ modulo 256. OpenMouse reads them in the same three eight-byte groups as ATK
 HUB, preserves unknown values, and reports checksum failures. It does not write
 button records. Shortcut slots begin at `0x0100` in 32-byte increments. The
 vendor address table defines 12 macro slots beginning at `0x0300` in 384-byte
-increments and ending at `0x1500`. Neither region is read during ordinary
+increments and ending at `0x1500`. Macro action records use ATK HUB's five-byte
+format: keyboard type `1`, mouse-button type `4` with button masks `1`, `2`,
+`4`, `8`, and `16`, and scroll type `6`. Neither region is read during ordinary
 status polling.
 
 Receiver command `0x03` reports online state and the three-byte RF identifier.

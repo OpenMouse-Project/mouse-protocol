@@ -447,8 +447,8 @@ export const ATK_R1_MACRO_START_TYPES = {
 } as const;
 
 export interface AtkR1MacroStepInput {
-  kind: "key-down" | "key-up" | "wheel-up" | "wheel-down";
-  /** HID usage for keyboard steps. Ignored for wheel steps. */
+  kind: "key-down" | "key-up" | "mouse-down" | "mouse-up" | "wheel-up" | "wheel-down";
+  /** HID usage for keyboard steps, or the button mask for mouse steps. */
   keyCode: number;
   holdTime: number;
 }
@@ -462,8 +462,22 @@ export const ATK_R1_MACRO_KEY_STATE = {
 
 export const ATK_R1_MACRO_KEY_TYPE = {
   generalKey: 1,
+  mouseKey: 4,
   scroll: 6,
 } as const;
+
+/** Mouse-button values carried by an R1 macro's MouseKey action records. */
+export const ATK_R1_MACRO_MOUSE_BUTTON = {
+  left: 0x01,
+  right: 0x02,
+  middle: 0x04,
+  back: 0x08,
+  forward: 0x10,
+} as const;
+
+const ATK_R1_MACRO_MOUSE_BUTTONS: ReadonlySet<number> = new Set(
+  Object.values(ATK_R1_MACRO_MOUSE_BUTTON),
+);
 
 /**
  * Pack one R1 macro into the vendor's 384-byte slot format: a fixed 31-byte
@@ -507,6 +521,19 @@ export function atkPackAtkR1MacroTable(
       );
       continue;
     }
+    if (step.kind === "mouse-down" || step.kind === "mouse-up") {
+      if (!ATK_R1_MACRO_MOUSE_BUTTONS.has(step.keyCode)) {
+        throw new Error("R1 mouse macro values must be left, right, middle, back, or forward.");
+      }
+      records.push(
+        (step.kind === "mouse-up" ? ATK_R1_MACRO_KEY_STATE.up : ATK_R1_MACRO_KEY_STATE.down)
+          | ATK_R1_MACRO_KEY_TYPE.mouseKey,
+        step.keyCode,
+        0,
+        ...packAtkR1MacroDelay(holdTime),
+      );
+      continue;
+    }
     if (step.keyCode < 0 || step.keyCode > 0xff) {
       throw new Error("R1 keyboard macro values must be bytes with a 16-bit hold time.");
     }
@@ -544,8 +571,8 @@ function packAtkR1MacroDelay(value: number): readonly [number, number] {
 
 /**
  * Decode the action records stored in one R1 macro slot. The editor can
- * safely round-trip keyboard and wheel actions; vendor-only action types are
- * rejected so an edit cannot silently replace them with keyboard steps.
+ * safely round-trip keyboard, mouse-button, and wheel actions; vendor-only
+ * action types are rejected so an edit cannot silently replace them.
  *
  * Delays are returned exactly as stored. `atkPackAtkR1MacroTable` floors every
  * non-final delay at 20 ms, so a slot holding a shorter one reads back lower
@@ -594,6 +621,18 @@ export function atkUnpackAtkR1MacroActions(
       }
       steps.push({
         kind: isDown ? "key-down" : "key-up",
+        keyCode: value,
+        holdTime: delay,
+      });
+      continue;
+    }
+
+    if (keyType === ATK_R1_MACRO_KEY_TYPE.mouseKey) {
+      if (isDown === isUp || value2 !== 0 || !ATK_R1_MACRO_MOUSE_BUTTONS.has(value)) {
+        throw new Error("This R1 macro contains a mouse action with no press or release state.");
+      }
+      steps.push({
+        kind: isDown ? "mouse-down" : "mouse-up",
         keyCode: value,
         holdTime: delay,
       });
@@ -686,10 +725,14 @@ export function atkPackAtkR1MacroStep(
   if (!Number.isInteger(input.keyCode) || input.keyCode < 0 || input.keyCode > 0xff) {
     throw new Error("ATK macro keycode must be a byte.");
   }
+  if ((input.kind === "mouse-down" || input.kind === "mouse-up")
+    && !ATK_R1_MACRO_MOUSE_BUTTONS.has(input.keyCode)) {
+    throw new Error("ATK mouse macro keycode must be left, right, middle, back, or forward.");
+  }
   step.push(
     position,
     0,
-    input.kind === "key-up" ? 1 : 0,
+    input.kind === "key-up" || input.kind === "mouse-up" ? 1 : 0,
     input.keyCode,
     0,
     ...packAtkR1Uint16(input.holdTime),
