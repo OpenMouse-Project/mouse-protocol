@@ -266,7 +266,8 @@ describe("MchoseHidClient", () => {
     state.unansweredButtonNames = [1];
     state.buttonNames = { 2: "Spray" };
     const status = await new MchoseHidClient(device).readStatus();
-    assert.ok(Object.values(status.buttonMappings ?? {}).includes("Macro: Spray"));
+    assert.equal(status.buttonMappings?.Right, "Macro: Spray");
+    assert.equal(status.buttonMappings?.Middle, "Macro");
   });
 
   it("identifies an L7 Pro on the shared 5253:1020 receiver by its mouse id", async () => {
