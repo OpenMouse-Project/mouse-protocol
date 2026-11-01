@@ -896,19 +896,36 @@ export class AtkHidClient {
     // The vendor writes the complete 10-byte system row when changing the
     // stage count. Preserve the unknown tail and clamp the active stage in the
     // same transaction so the row can never temporarily point past the end.
-    const system = Array.from(await this.read(REGISTER.system, 10));
-    const previousActive = Math.min(system[4]!, Math.max(system[2]!, 1) - 1);
-    const active = Math.min(previousActive, count - 1);
-    system.splice(2, 2, ...wePackScalarPair(count));
-    system.splice(4, 2, ...wePackScalarPair(active));
+    const buildRow = (current: Uint8Array | readonly number[]): { row: number[]; active: number } => {
+      const row = Array.from(current);
+      const previousActive = Math.min(row[4]!, Math.max(row[2]!, 1) - 1);
+      const active = Math.min(previousActive, count - 1);
+      row.splice(2, 2, ...wePackScalarPair(count));
+      row.splice(4, 2, ...wePackScalarPair(active));
+      return { row, active };
+    };
 
+    let active: number;
+    let confirmedSystem: Uint8Array;
     if (this.usesVerifiedR1ProMaxReceiverTransport()) {
-      await this.writeR1ProMaxReceiverSystem(system);
+      const built = buildRow(await this.read(REGISTER.system, 10));
+      active = built.active;
+      await this.writeR1ProMaxReceiverSystem(built.row);
+      confirmedSystem = await this.read(REGISTER.system, 10);
     } else {
-      await this.write(REGISTER.system, system);
+      // The row also carries the polling code and, on the 0xf58e receiver, the
+      // DPI pair, so the whole read-modify-write-verify holds the queue. An
+      // edit that read the row in between would otherwise put the previous
+      // stage count back.
+      const result = await this.run(async () => {
+        const built = buildRow(await this.readUnqueued(REGISTER.system, 10));
+        await this.writeUnqueued(REGISTER.system, built.row);
+        return { active: built.active, confirmed: await this.readUnqueued(REGISTER.system, 10) };
+      });
+      active = result.active;
+      confirmedSystem = result.confirmed;
     }
 
-    const confirmedSystem = await this.read(REGISTER.system, 10);
     const confirmedCount = this.stageCount(confirmedSystem);
     const confirmedActive = this.stageIndex(confirmedSystem);
     if (confirmedCount !== count || confirmedActive !== active) {
