@@ -11,6 +11,7 @@ import { MICROSOFT_PRODUCT_CLASSIC, MICROSOFT_PRODUCT_PRO, MICROSOFT_VENDOR_ID, 
 import { FINALMOUSE_SLX_DONGLE_PRODUCT_IDS } from "../finalmouse/index.ts";
 import { INCOTT_PRODUCT_IDS, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../incott/index.ts";
 import { GLORIOUS_CORE2_PRODUCTS, GLORIOUS_CORE2_USAGE_PAGE, GLORIOUS_CORE2_VENDOR_ID } from "../glorious-core2/index.ts";
+import { GLORIOUS_SINOWEALTH_PRODUCTS } from "../glorious-sinowealth/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { HITSCAN_PRODUCTS, HITSCAN_VENDOR_ID } from "@openmouse/protocol/hitscan";
 import { VAXEE_PRODUCT_IDS, VAXEE_USAGE, VAXEE_USAGE_PAGE, VAXEE_VENDOR_ID } from "@openmouse/protocol/vaxee";
@@ -416,6 +417,17 @@ export const GLORIOUS_CORE2_HID_FILTERS: HIDDeviceFilter[] = [...GLORIOUS_CORE2_
   vendorId: GLORIOUS_CORE2_VENDOR_ID,
   productId,
   usagePage: GLORIOUS_CORE2_USAGE_PAGE,
+}));
+
+/**
+ * Original wired Model O / D (SinoWealth 258a:0036 / 258a:0033) and Model O
+ * Eternal (3794:a000). Matched by id alone: the settings reports sit on a
+ * 0xff00 vendor collection, which WebHID only matches at top level, so the
+ * driver's isSupported() decides. The classic family is disjoint by product id.
+ */
+export const GLORIOUS_SINOWEALTH_HID_FILTERS: HIDDeviceFilter[] = GLORIOUS_SINOWEALTH_PRODUCTS.map(({ vendorId, productId }) => ({
+  vendorId,
+  productId,
 }));
 
 export const GLORIOUS_CLASSIC_HID_FILTERS: HIDDeviceFilter[] = [...GLORIOUS_CLASSIC_PRODUCTS.keys()].flatMap(
@@ -985,6 +997,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...STEELSERIES_RIVAL3_FILTERS,
   { vendorId: VENDOR_ID.glorious },
   ...GLORIOUS_CLASSIC_HID_FILTERS,
+  ...GLORIOUS_SINOWEALTH_HID_FILTERS,
   ...GLORIOUS_CORE2_HID_FILTERS,
   // K-snake X11 exposes its 0x55-framed control channel on 0xFF01:0x10 for
   // both the wired USB VID and the 2.4 GHz dongle VID.
