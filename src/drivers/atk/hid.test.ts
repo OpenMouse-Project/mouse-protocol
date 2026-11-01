@@ -38,9 +38,11 @@ class FakeAtkDevice {
   }];
 
   readonly sent: Sent[] = [];
+  readonly writeFailures = new Set<number>();
   replies: number[][] = [];
   identifyFailures = 0;
   ignoredCommands = new Set<number>();
+  private writeCount = 0;
   private listeners = new Set<(event: HIDInputReportEvent) => void>();
 
   async open(): Promise<void> {
@@ -74,7 +76,11 @@ class FakeAtkDevice {
     this.sent.push({ reportId, data: frame });
     // EEPROM writes (0x07) are fire-and-forget; read and informational
     // commands (0x04 battery, 0x08 EEPROM, 0x10 identity, 0x12 version) get a reply.
-    if (frame[0] === 0x07) return;
+    if (frame[0] === 0x07) {
+      const writeIndex = this.writeCount++;
+      if (this.writeFailures.has(writeIndex)) throw new Error(`write ${writeIndex + 1} failed`);
+      return;
+    }
     if (frame[0] === 0x10 && this.identifyFailures > 0) {
       this.identifyFailures -= 1;
       throw new Error("mouse asleep");
@@ -757,6 +763,50 @@ test("R1 SE receiver writes the macro slot and binds the macro button record", a
     Array.from(bind!.data.subarray(5, 13)),
     [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)],
   );
+});
+
+test("R1 macro rollback reports when restoring the previous slot fails", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    reply(0x08, 0x0600, new Array<number>(10).fill(0)),
+    reply(0x08, 0x060a, new Array<number>(10).fill(0)),
+    reply(0x08, 0x0614, new Array<number>(10).fill(0)),
+    reply(0x08, 0x061e, new Array<number>(3).fill(0)),
+    // The payload differs, so the upload enters its rollback path.
+    reply(0x08, 0x061f, [1, 0x54]),
+  ];
+  // Four chunk writes upload the empty macro; the next write is the rollback.
+  raw.writeFailures.add(4);
+
+  await assert.rejects(
+    new AtkHidClient(fake).clearR1ButtonMacro(2),
+    /may hold mixed steps because restoring its previous contents failed/,
+  );
+});
+
+test("R1 button write failures clear the cached status", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+  ];
+  raw.writeFailures.add(0);
+
+  const client = new AtkHidClient(fake);
+  (client as unknown as { lastStatus: unknown }).lastStatus = {
+    atkButtonMappings: [{ id: "left", action: "Left Click" }],
+  };
+
+  await assert.rejects(
+    client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
+    /write 1 failed/,
+  );
+  assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
 });
 
 test("R1 SE receiver clears a macro slot without touching any binding", async () => {

@@ -697,12 +697,18 @@ export class AtkHidClient {
           const readback = await this.readUnqueued(base + 31 + offset, expected.length);
           if (!expected.every((byte, at) => readback[at] === byte)) {
             throw new Error(
-              `Macro slot ${macroId + 1} did not keep the uploaded steps; the previous contents were written back as a best effort.`,
+              `Macro slot ${macroId + 1} did not keep the uploaded steps; the previous contents were sent back but not read back to confirm.`,
             );
           }
         }
       } catch (error) {
-        await writeAll(before).catch(() => undefined);
+        try {
+          await writeAll(before);
+        } catch {
+          throw new Error(
+            `Macro slot ${macroId + 1} may hold mixed steps because restoring its previous contents failed. Upload the macro again before using this button.`,
+          );
+        }
         throw error;
       }
     });
@@ -728,7 +734,11 @@ export class AtkHidClient {
       const after = [...before];
       after.splice(recordOffset, record.length, ...record);
 
-      await this.writeUnqueued(groupAddress, after);
+      await this.writeUnqueued(groupAddress, after).catch((error: unknown) => {
+        // The send failed, but the device may already hold the new row.
+        this.lastStatus = null;
+        throw error;
+      });
       await delay(R1_LIVE_WRITE_SETTLE_MS);
       const readback = Array.from(await this.readUnqueued(groupAddress, 8).catch((error: unknown) => {
         // The write already reached the device, so the cached mapping no longer
