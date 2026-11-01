@@ -836,13 +836,23 @@ export class AtkHidClient {
     if (this.usesVerifiedR1ProMaxReceiverTransport()) {
       // ATK Hub writes the complete 10-byte system row through the F58A
       // receiver. Preserve stage count, active stage, and the unknown tail.
-      const system = Array.from(await this.read(REGISTER.system, R1_SYSTEM_ROW_LENGTH));
-      system.splice(0, 2, ...wePackScalarPair(encoded[0]));
-      await this.writeR1ProMaxReceiverSystem(system);
-    } else {
-      await this.write(REGISTER.system, wePackScalarPair(encoded[0]));
+      // The row also carries the DPI pairs, so the read-modify-write and its
+      // confirming read hold the queue together.
+      const confirmed = await this.run(async () => {
+        const system = Array.from(await this.readUnqueued(REGISTER.system, R1_SYSTEM_ROW_LENGTH));
+        system.splice(0, 2, ...wePackScalarPair(encoded[0]));
+        await this.writeR1ProMaxReceiverSystemUnqueued(system);
+        await delay(R1_LIVE_WRITE_SETTLE_MS);
+        return this.decodePollingRate((await this.readUnqueued(REGISTER.system, SYSTEM_LENGTH))[0]);
+      });
+      if (confirmed !== pollingRateHz) {
+        throw new Error(`The mouse kept ${confirmed} Hz instead of ${pollingRateHz} Hz.`);
+      }
+      this.patch({ pollingRateHz: confirmed });
+      return confirmed;
     }
 
+    await this.write(REGISTER.system, wePackScalarPair(encoded[0]));
     if (this.isR1()) await delay(R1_LIVE_WRITE_SETTLE_MS);
     const confirmed = this.decodePollingRate((await this.read(REGISTER.system, SYSTEM_LENGTH))[0]);
     if (confirmed !== pollingRateHz) {
@@ -908,10 +918,13 @@ export class AtkHidClient {
     let active: number;
     let confirmedSystem: Uint8Array;
     if (this.usesVerifiedR1ProMaxReceiverTransport()) {
-      const built = buildRow(await this.read(REGISTER.system, 10));
-      active = built.active;
-      await this.writeR1ProMaxReceiverSystem(built.row);
-      confirmedSystem = await this.read(REGISTER.system, 10);
+      const result = await this.run(async () => {
+        const built = buildRow(await this.readUnqueued(REGISTER.system, 10));
+        await this.writeR1ProMaxReceiverSystemUnqueued(built.row);
+        return { active: built.active, confirmed: await this.readUnqueued(REGISTER.system, 10) };
+      });
+      active = result.active;
+      confirmedSystem = result.confirmed;
     } else {
       // The row also carries the polling code and, on the 0xf58e receiver, the
       // DPI pair, so the whole read-modify-write-verify holds the queue. An
@@ -965,33 +978,29 @@ export class AtkHidClient {
     }
 
     const receiver = this.usesVerifiedR1ProMaxReceiverTransport();
-    const system = await this.read(
-      REGISTER.system,
-      receiver ? R1_SYSTEM_ROW_LENGTH : SYSTEM_LENGTH,
-    );
-    const count = this.stageCount(system);
-
-    if (!Number.isInteger(index) || index < 0 || index >= count) {
-      throw new Error(`DPI stage must be between 1 and ${count}.`);
-    }
-
+    /** Rejects a stage the row does not offer, using that row's own count. */
+    const assertStage = (row: Uint8Array): void => {
+      const count = this.stageCount(row);
+      if (!Number.isInteger(index) || index < 0 || index >= count) {
+        throw new Error(`DPI stage must be between 1 and ${count}.`);
+      }
+    };
     let confirmed: number | null;
 
     if (receiver) {
-      const row = Array.from(system);
-      row.splice(4, 2, ...wePackScalarPair(index));
-
-      await this.writeR1ProMaxReceiverSystem(row);
-
-      const confirmedSystem = await this.read(
-        REGISTER.system,
-        R1_SYSTEM_ROW_LENGTH,
-      );
-      confirmed = weUnpackScalarPair(
-        confirmedSystem[4]!,
-        confirmedSystem[5]!,
-      );
+      // The whole row goes back, so the read that is checked, the edit and the
+      // write hold the queue together — one read, not two.
+      confirmed = await this.run(async () => {
+        const current = await this.readUnqueued(REGISTER.system, R1_SYSTEM_ROW_LENGTH);
+        assertStage(current);
+        const row = Array.from(current);
+        row.splice(4, 2, ...wePackScalarPair(index));
+        await this.writeR1ProMaxReceiverSystemUnqueued(row);
+        const confirmedSystem = await this.readUnqueued(REGISTER.system, R1_SYSTEM_ROW_LENGTH);
+        return weUnpackScalarPair(confirmedSystem[4]!, confirmedSystem[5]!);
+      });
     } else {
+      assertStage(await this.read(REGISTER.system, SYSTEM_LENGTH));
       await this.write(REGISTER.system + 4, wePackScalarPair(index));
       const pair = await this.read(REGISTER.system + 4, 2);
       confirmed = weUnpackScalarPair(pair[0]!, pair[1]!);
@@ -2228,9 +2237,13 @@ export class AtkHidClient {
    * The verified F58A polling path writes the complete system row and echoes
    * the committed row back on report 0x08. No other receiver EEPROM writes
    * are enabled through this helper.
+   *
+   * It takes no queue of its own: every caller is already inside `run()` with
+   * the row it is replacing in hand, and it deliberately does not call
+   * `identify()`, which would send through `exchange` and queue behind the very
+   * task this write is running inside. Callers identify first.
    */
-  private async writeR1ProMaxReceiverSystem(data: readonly number[]): Promise<void> {
-    await this.identify();
+  private async writeR1ProMaxReceiverSystemUnqueued(data: readonly number[]): Promise<void> {
     if (!this.usesVerifiedR1ProMaxReceiverTransport()) {
       throw new Error("R1 Pro Max receiver system writes are not available on this connection.");
     }
@@ -2245,7 +2258,7 @@ export class AtkHidClient {
       [0, 0x00, 0x00, data.length, ...data],
     );
 
-    await this.exchange(
+    await this.exchangeUnqueued(
       payload,
       (frame) => frame[0] === WE_CMD_WRITE_EEPROM
         && frame[1] === 0
