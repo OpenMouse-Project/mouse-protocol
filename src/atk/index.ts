@@ -598,7 +598,10 @@ export function atkUnpackAtkR1MacroActions(
     if (keyType === ATK_R1_MACRO_KEY_TYPE.scroll && !isDown && !isUp && value2 === 0) {
       if (isWheelRelease) {
         const previous = steps.at(-1);
-        if (previous?.kind !== "wheel-up" && previous?.kind !== "wheel-down") {
+        // A release only belongs to the press that opened it: a second release
+        // with the same delay would otherwise decode into no step at all, and a
+        // save would drop the record.
+        if (!wheelPressPending || (previous?.kind !== "wheel-up" && previous?.kind !== "wheel-down")) {
           throw new Error("This R1 macro contains an unmatched wheel release action.");
         }
         // The editor holds one delay for the whole wheel pair, so a pair the
@@ -700,14 +703,19 @@ export function atkBuildAtkR1MacroKey(keyIndex: number, step: readonly number[])
   // index, nine step bytes and the checksum. A ten-byte step would push its
   // last byte into the checksum's slot and be dropped silently.
   if (step.length !== 9) throw new Error("ATK macro step must contain nine bytes.");
-  if (!step.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 0xff)) {
-    throw new Error("ATK macro step bytes must be whole numbers in 0-255.");
-  }
   const payload = new Uint8Array(16);
   payload[0] = ATK_COMPX_COMMAND.setMacroKey;
   payload[4] = 11;
   payload[5] = keyIndex;
-  for (let offset = 0; offset < 9; offset += 1) payload[offset + 6] = step[offset]!;
+  // Indexed rather than `every`, which skips holes: a sparse array would pass
+  // the check and then copy `undefined` in as zero.
+  for (let offset = 0; offset < 9; offset += 1) {
+    const byte: number | undefined = step[offset];
+    if (typeof byte !== "number" || !Number.isInteger(byte) || byte < 0 || byte > 0xff) {
+      throw new Error("ATK macro step bytes must be whole numbers in 0-255.");
+    }
+    payload[offset + 6] = byte;
+  }
   const sum = 0x08 + Array.from(payload.subarray(0, 15)).reduce((total, byte) => (total + byte) & 0xff, 0);
   payload[15] = (CHECKSUM_TOTAL - (sum & 0xff)) & 0xff;
   return payload;

@@ -194,6 +194,15 @@ export class LeobogGm3HidClient {
   /** The last poll's answer, replayed while the device is left alone. */
   private lastStatus: MouseStatus | null = null;
   /**
+   * How the last full poll read the device. A replay rebuilds the notice from
+   * these, so a note about a sleeping mouse or a failed refresh survives the
+   * value refresh a settings write applies to the cache.
+   */
+  private lastStatusFlags: { linked: boolean | null; refreshFailed: boolean } = {
+    linked: null,
+    refreshFailed: false,
+  };
+  /**
    * Operations waiting behind the one in flight. A poll consults it before
    * each optional query, so a user's write does not spend the whole poll
    * waiting for a value the block could answer.
@@ -405,8 +414,15 @@ export class LeobogGm3HidClient {
           replayed.debounceMs = cached.debounceMs;
           replayed.sleepTimeout = cached.sleepMinutes * 60;
           // The hints have to follow the values: leaving them alone would show
-          // current settings behind a "settings are read-only" note.
-          replayed.ui = this.ui(this.product(), null, cached, false, replayed.batteryPercent ?? null);
+          // current settings behind a "settings are read-only" note. The link
+          // and refresh notes stay as the last full poll reported them.
+          replayed.ui = this.ui(
+            this.product(),
+            this.lastStatusFlags.linked,
+            cached,
+            this.lastStatusFlags.refreshFailed,
+            replayed.batteryPercent ?? null,
+          );
         }
         return replayed;
       }
@@ -473,6 +489,7 @@ export class LeobogGm3HidClient {
         this.abandonedReceive = false;
         this.pollRetryAfter = Date.now() + POLL_BACKOFF_MS;
       }
+      this.lastStatusFlags = { linked, refreshFailed: settings.refreshFailed };
       this.lastStatus = status;
       // A poll that waited this long occupied the handle for most of it, and
       // the browser may still be settling the transfer behind it. Measured on

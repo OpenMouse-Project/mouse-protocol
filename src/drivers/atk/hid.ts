@@ -549,24 +549,28 @@ export class AtkHidClient {
 
     const table = atkPackAtkR1MacroTable(steps);
     const base = ATK_R1_MACRO_BASE + macroId * ATK_R1_MACRO_SLOT_LENGTH;
-    for (let offset = 0; offset < table.length; offset += 10) {
-      await this.write(base + offset, table.slice(offset, offset + 10));
-    }
-    // A chunk the receiver dropped would leave the slot holding an older macro,
-    // so the payload it just stored — the action count, the records and the
-    // checksum — is read back before the button is pointed at the slot. The
-    // 31-byte header is skipped: only this region is ever read back elsewhere,
-    // and the device may normalize the constant header on the way in.
-    const payloadBytes = table.length - 31;
-    for (let offset = 0; offset < payloadBytes; offset += 10) {
-      const expected = table.slice(31 + offset, 31 + Math.min(offset + 10, payloadBytes));
-      const readback = await this.read(base + 31 + offset, expected.length);
-      if (!expected.every((byte, at) => readback[at] === byte)) {
-        throw new Error(
-          `Macro slot ${macroId + 1} did not keep the uploaded steps; the button was left unchanged.`,
-        );
+    // Upload and readback share one queued task, so nothing can write the slot
+    // between a chunk and the chunk that confirms it.
+    await this.run(async () => {
+      for (let offset = 0; offset < table.length; offset += 10) {
+        await this.writeUnqueued(base + offset, table.slice(offset, offset + 10));
       }
-    }
+      // A chunk the receiver dropped would leave the slot holding an older
+      // macro, so the payload it just stored — the action count, the records
+      // and the checksum — is read back before the button is pointed at the
+      // slot. The 31-byte header is skipped: only this region is ever read
+      // back elsewhere, and the device may normalize the constant header.
+      const payloadBytes = table.length - 31;
+      for (let offset = 0; offset < payloadBytes; offset += 10) {
+        const expected = table.slice(31 + offset, 31 + Math.min(offset + 10, payloadBytes));
+        const readback = await this.readUnqueued(base + 31 + offset, expected.length);
+        if (!expected.every((byte, at) => readback[at] === byte)) {
+          throw new Error(
+            `Macro slot ${macroId + 1} did not keep the uploaded steps; the button was left unchanged.`,
+          );
+        }
+      }
+    });
 
     const record = atkPackButtonAssignment({
       id: "macro",
@@ -647,6 +651,9 @@ export class AtkHidClient {
       const readback = Array.from(await this.readUnqueued(groupAddress, 8));
       if (!record.every((byte, offset) => readback[recordOffset + offset] === byte)) {
         await this.writeUnqueued(groupAddress, before).catch(() => undefined);
+        // The cached status no longer describes the device, so drop it rather
+        // than let the next read serve the old mapping from memory.
+        this.lastStatus = null;
         // The rollback is best-effort: its own failure is swallowed above, so
         // the message must not promise that the old value is back.
         throw new Error(`The ${button.label.toLowerCase()} assignment did not survive readback; restoring the previous value could not be confirmed.`);

@@ -407,6 +407,11 @@ test("a wheel pair the vendor stored with two delays is refused, not merged", ()
     () => atkUnpackAtkR1MacroActions(1, [0x06, 0x01, 0, 0, 20]),
     /no matching release/,
   );
+  // A duplicate release has no open press, so it cannot be dropped silently.
+  assert.throws(
+    () => atkUnpackAtkR1MacroActions(3, [0x06, 0x01, 0, 0, 20, 0x06, 0, 0, 0, 20, 0x06, 0, 0, 0, 20]),
+    /unmatched wheel release/,
+  );
 });
 
 test("the SetMacroKey frame carries every step byte it is given", () => {
@@ -429,6 +434,8 @@ test("the SetMacroKey frame carries every step byte it is given", () => {
 
   // A tenth byte would land in the checksum slot, so it is rejected instead.
   assert.throws(() => atkBuildAtkR1MacroKey(0, [...step, 0]), /nine bytes/);
+  // `every` skips holes, so a sparse array has to be caught by index.
+  assert.throws(() => atkBuildAtkR1MacroKey(0, new Array<number>(9)), /0-255/);
 });
 
 test("only a single-pass repeat count fits the SetMacroKey frame", () => {
