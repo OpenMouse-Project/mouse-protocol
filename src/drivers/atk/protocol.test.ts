@@ -392,6 +392,21 @@ test("a wheel pair the vendor stored with two delays is refused, not merged", ()
     atkUnpackAtkR1MacroActions(2, [0x06, 0x01, 0, 0, 35, 0x06, 0, 0, 0, 35]),
     [{ kind: "wheel-up", keyCode: 0, holdTime: 35 }],
   );
+
+  // Nothing but its own release may follow a pending press, and a press may not
+  // be the last record.
+  assert.throws(
+    () => atkUnpackAtkR1MacroActions(2, [0x06, 0x01, 0, 0, 20, 0x81, 0x04, 0, 0, 20]),
+    /not followed by its release/,
+  );
+  assert.throws(
+    () => atkUnpackAtkR1MacroActions(2, [0x06, 0x01, 0, 0, 20, 0x06, 0x01, 0, 0, 20]),
+    /not followed by its release/,
+  );
+  assert.throws(
+    () => atkUnpackAtkR1MacroActions(1, [0x06, 0x01, 0, 0, 20]),
+    /no matching release/,
+  );
 });
 
 test("the SetMacroKey frame carries every step byte it is given", () => {

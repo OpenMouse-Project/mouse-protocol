@@ -572,6 +572,16 @@ export function atkUnpackAtkR1MacroActions(
     const keyType = status & 0x07;
     const isDown = (status & ATK_R1_MACRO_KEY_STATE.down) !== 0;
     const isUp = (status & ATK_R1_MACRO_KEY_STATE.up) !== 0;
+    const isWheelRelease = keyType === ATK_R1_MACRO_KEY_TYPE.scroll
+      && !isDown && !isUp && value2 === 0 && value === 0;
+
+    // A wheel press is always followed by its own release: the editor writes
+    // the pair as one step, so any other transition while a press is pending —
+    // a second press, a keyboard action, or the end of the table — would be
+    // saved with a release the slot never held.
+    if (wheelPressPending && !isWheelRelease) {
+      throw new Error("This R1 macro contains a wheel press that is not followed by its release.");
+    }
 
     if (keyType === ATK_R1_MACRO_KEY_TYPE.generalKey) {
       if (isDown === isUp || value2 !== 0) {
@@ -582,12 +592,11 @@ export function atkUnpackAtkR1MacroActions(
         keyCode: value,
         holdTime: delay,
       });
-      wheelPressPending = false;
       continue;
     }
 
     if (keyType === ATK_R1_MACRO_KEY_TYPE.scroll && !isDown && !isUp && value2 === 0) {
-      if (value === 0) {
+      if (isWheelRelease) {
         const previous = steps.at(-1);
         if (previous?.kind !== "wheel-up" && previous?.kind !== "wheel-down") {
           throw new Error("This R1 macro contains an unmatched wheel release action.");
