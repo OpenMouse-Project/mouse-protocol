@@ -20,7 +20,7 @@ ids the other driver handles (`0x373e`, `0x37b0`).
 | --- | --- | --- |
 | `0xf50f` | Mouse on its cable | On hardware |
 | `0xf50d` | 1K receiver | Vendor table only |
-| `0xf510` | 4K receiver | Vendor table only |
+| `0xf510` | 4K receiver | Partial wireless evidence; rate correction below; full test not passed |
 
 `0xf517` was in Lamzu's shipped table as a fourth receiver, but hardware showed it enumerating as a Scyrox Turbo 8k dongle; it moved to `src/scyrox/index.ts`.
 
@@ -163,20 +163,66 @@ deliberately left unmapped rather than guessed at.
 
 ### Polling rate
 
-The rate byte carries the same double encoding of 1,000 Hz that the other
-Lamzu generations use, so `pulsarDecodePollingRate` is wrong for these units —
-it reads `0x10` as 2,000 Hz.
+The wired capture below and the F510 receiver need different rate families.
+The legacy table retains the wired observation of `0x10` beside a vendor UI
+showing 1,000 Hz. That observation must not select the receiver's write table.
 
 | Byte | Rate | Evidence |
 | --- | --- | --- |
 | `0x08`, `0x04`, `0x02`, `0x01` | 125, 250, 500, 1000 | Vendor UI wrote `0x02` when set to 500 Hz |
 | `0x10` | 1000 | Read from the profile with the vendor UI showing 1000 Hz |
-| `0x20`, `0x40`, `0x80` | 2000, 4000, 8000 | Receiver family, from the shared Lamzu table |
+| `0x20`, `0x40`, `0x80` | 2000, 4000, 8000 | Legacy table only; not the F510 receiver mapping |
 
-The wired path offers 125-1000 Hz; the 4K receiver's list is from Lamzu's
-device table and has not been exercised.
+The wired path offers 125-1000 Hz. The F50D 1K receiver remains unverified.
 
-## What was verified on hardware
+### F510 4K receiver: polling-rate correction
+
+Additional evidence from an Atlantis OG V2 4K Nordic on Windows, connected
+through `3554:f510` (`LAMZU 4K Receiver`, USB release `0x0128`), with the mouse
+reporting firmware v1.24, shows that this receiver uses the existing `pulsar`
+CompX table. The UI's former 2,000 Hz request encoded `0x20`, the 4,000 Hz
+value, and its 4,000 Hz request encoded `0x40`, the 8,000 Hz value beyond this
+receiver's ceiling. The owner reported the doubled high-rate behavior and
+loss of detection in the vendor configurator after selecting 4,000 Hz.
+The latter symptom is not established as a consequence of the rate byte.
+
+| Hertz | F510 byte | Evidence |
+| --- | --- | --- |
+| 125 | `0x08` | Vendor packet table / existing CompX encoding |
+| 250 | `0x04` | Wireless read reply with valid field and report checksums |
+| 500 | `0x02` | Previously captured request and identical command ACK |
+| 1000 | `0x01` | Vendor packet table / existing CompX encoding |
+| 2000 | `0x10` | Previously captured request and identical command ACK |
+| 4000 | `0x20` | Vendor packet table / owner-reported 2K-to-4K mismatch |
+
+This mapping also agrees with the existing
+[`lamzu-cfg` polling-rate table](https://github.com/LeadSun/lamzu-cfg/blob/master/src/atlantis.rs#L34-L42).
+
+Report id 8 is shown separately from these 16-byte WebHID bodies:
+
+```text
+Read rate request:   08 00 00 00 02 00 00 00 00 00 00 00 00 00 00 43
+Read rate response:  08 00 00 00 02 04 51 00 00 00 00 00 00 00 00 EE
+500 Hz write + ACK:  07 00 00 00 02 02 53 00 00 00 00 00 00 00 00 EF
+2K Hz write + ACK:   07 00 00 00 02 10 45 00 00 00 00 00 00 00 00 EF
+```
+
+The rate response was independently read on 2026-11-02 with no setting write.
+The write/ACK pairs were recorded on the same F510 receiver on 2026-11-01.
+An ACK confirms command acceptance, not a measured event rate. The six rates
+are now offered, including the 250 Hz value actually returned by this receiver;
+8,000 Hz remains unavailable and is rejected before a write.
+
+OpenMouse BETA v2.0.33d's 2026-11-02 hardware report has 14 passes and one
+failed composite flash-write check: polling (target 2,000 Hz) and lift-off
+(target Medium) did not match the test's read-back. It reports 1,000 Hz while
+browser motion sampling averages 1,631 Hz and peaks at 2,000 Hz. That sample
+is not a calibrated rate measurement and does not identify the write failure.
+F510 therefore remains `verified: false`; successful full read/write/restore
+validation with this corrected catalog is still required. No receiver firmware
+was changed, and no pairing or reset commands were used for this correction.
+
+## What was verified on the original wired hardware
 
 Read, against Lamzu's configurator open on the same mouse: name, firmware
 v1.24, battery percent and voltage, charging state, profile, all five DPI
@@ -196,7 +242,7 @@ Onboard profiles were probed by writing each index and reading it back:
 mouse where it was. Hence four profiles, and the mouse was restored to its
 original one afterwards.
 
-Not exercised: the three receiver product ids, button remapping, macros, and
+Not exercised in that wired validation: receiver paths, button remapping, macros, and
 the pairing and factory-reset controls the vendor app exposes. DPI above
 12,800 — where the stage count no longer fits one byte and the high bits ride
 in the flags byte — is covered by a unit test round trip but was never set on

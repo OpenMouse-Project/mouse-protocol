@@ -119,5 +119,5 @@ test("the wired path offers no rate the cable cannot carry", () => {
   const wired = new LamzuAtlantisHidClient(device(LAMZU_ATLANTIS_VENDOR_ID, 0xf50f));
   assert.deepEqual(wired.getSupportedPollingRates(), [125, 250, 500, 1000]);
   const receiver = new LamzuAtlantisHidClient(device(LAMZU_ATLANTIS_VENDOR_ID, 0xf510));
-  assert.deepEqual(receiver.getSupportedPollingRates(), [500, 1000, 2000, 4000]);
+  assert.deepEqual(receiver.getSupportedPollingRates(), [125, 250, 500, 1000, 2000, 4000]);
 });

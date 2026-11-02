@@ -136,11 +136,13 @@ export const LAMZU_ATLANTIS_SLEEP_OPTIONS = [10, 30, 60, 300, 600, 1800] as cons
  * cable does, so a ceiling test would silently decide its encoding for it, and
  * no 1K receiver has been on hand to check.
  *
- * "wired" and "receiver" are Lamzu's two encodings of 1,000 Hz (see the table
- * below). "pulsar" is CompX's own encoding — the one `pulsarEncodePollingRate`
- * implements — where 0x10 and up carry 2-8 kHz. Scyrox's generation uses it on
- * both the cable and the dongle: its web configurator writes 0x10, 0x20 and
- * 0x40 for 2,000, 4,000 and 8,000 Hz, and a V8S set to 4,000 Hz held 0x20.
+ * "wired" and "receiver" retain the legacy Lamzu table's two encodings of
+ * 1,000 Hz (see below). "pulsar" is CompX's own encoding — the one
+ * `pulsarEncodePollingRate` implements — where 0x10 and up carry 2-8 kHz.
+ * The F510 4K receiver uses that table too: a 2,000 Hz write captured on an
+ * Atlantis OG V2 4K Nordic carries 0x10, not the legacy table's 0x20.
+ * Scyrox's web configurator independently writes 0x10, 0x20 and 0x40 for
+ * 2,000, 4,000 and 8,000 Hz. The product's rate list still enforces its ceiling.
  */
 export type LamzuAtlantisRateFamily = "wired" | "receiver" | "pulsar";
 
@@ -194,7 +196,7 @@ export interface LamzuAtlantisProduct {
 }
 
 const RATES_WIRED = [125, 250, 500, 1000] as const;
-const RATES_4K = [500, 1000, 2000, 4000] as const;
+const RATES_4K = [125, 250, 500, 1000, 2000, 4000] as const;
 
 /**
  * Six models share these ids — Atlantis OG V2, Atlantis Mini, Atlantis Mini
@@ -205,10 +207,10 @@ const RATES_4K = [500, 1000, 2000, 4000] as const;
  * by making the user pick the model from a list, so this catalog names the
  * family rather than pretending to identify one model.
  *
- * 0xf50f (the mouse on its cable) is confirmed on hardware. The two receiver
- * ids come from Lamzu's shipped device table and nothing more: no receiver has
- * been exercised, so neither their rate lists nor the transport itself is
- * established, and they stay `verified: false` until one is.
+ * 0xf50f (the mouse on its cable) is confirmed on hardware. The 1K receiver
+ * still has only vendor-table evidence. F510 has partial wireless read/write
+ * evidence and a corrected polling-rate family (docs/lamzu-atlantis-testing.md),
+ * but its OpenMouse hardware-test round-trip failed, so it stays unverified.
  *
  * 0xf517 was in that table too, but hardware showed it enumerating as a
  * "Scyrox Turbo 8k dongle" that speaks this same protocol; it moved to
@@ -217,7 +219,7 @@ const RATES_4K = [500, 1000, 2000, 4000] as const;
 export const LAMZU_ATLANTIS_PRODUCTS: ReadonlyMap<number, LamzuAtlantisProduct> = new Map([
   [0xf50f, { model: "Atlantis", wireless: false, pollingRates: RATES_WIRED, rateFamily: "wired", verified: true }],
   [0xf50d, { model: "Atlantis", wireless: true, pollingRates: RATES_WIRED, rateFamily: "wired", verified: false }],
-  [0xf510, { model: "Atlantis", wireless: true, pollingRates: RATES_4K, rateFamily: "receiver", verified: false }],
+  [0xf510, { model: "Atlantis", wireless: true, pollingRates: RATES_4K, rateFamily: "pulsar", verified: false }],
 ]);
 
 /**

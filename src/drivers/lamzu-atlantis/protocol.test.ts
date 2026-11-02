@@ -179,7 +179,22 @@ test("the rate family is declared per product, not guessed from the rate list", 
   assert.equal(oneK.wireless, true);
   assert.equal(oneK.verified, false);
   assert.equal(oneK.rateFamily, "wired");
-  assert.equal(LAMZU_ATLANTIS_PRODUCTS.get(0xf510)!.rateFamily, "receiver");
+  assert.equal(LAMZU_ATLANTIS_PRODUCTS.get(0xf510)!.rateFamily, "pulsar");
+});
+
+test("the F510 product selects the captured 2K write packet and the 4K byte", () => {
+  const receiver = LAMZU_ATLANTIS_PRODUCTS.get(0xf510)!;
+  const rate = lamzuAtlantisEncodePollingRate(2000, receiver.rateFamily);
+  assert.equal(rate, 0x10);
+  // Captured request + identical ACK on 3554:F510, report id 8 excluded.
+  assert.deepEqual(
+    lamzuAtlantisEncodeRequest({ command: COMMAND.writeFlashData, address: FLASH.reportRate, payload: lamzuAtlantisSealField([rate!]) }),
+    bytes("07 00 00 00 02 10 45 00 00 00 00 00 00 00 00 ef"),
+  );
+  assert.equal(lamzuAtlantisDecodePollingRate(0x10, receiver.rateFamily), 2000);
+  assert.equal(lamzuAtlantisEncodePollingRate(4000, receiver.rateFamily), 0x20);
+  assert.equal(lamzuAtlantisDecodePollingRate(0x20, receiver.rateFamily), 4000);
+  assert.equal(receiver.verified, false);
 });
 
 test("a DPI stage decodes both axes, including one Lamzu set separately", () => {
