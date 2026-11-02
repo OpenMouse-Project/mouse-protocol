@@ -4,6 +4,9 @@ Hardware report from a **Lamzu Atlantis Mini 4K**, firmware `1.24`, on its
 cable, Windows 11. Serial numbers are redacted. Reads were captured first; the
 setter pass at the end changed one value at a time and restored each.
 
+Additional wired and wireless results for an **Atlantis OG V2 4K Nordic**
+are recorded in the F510 section below.
+
 ## Enumeration
 
 `LAMZU Atlantis Pro`, manufacturer `compx`, release `0x0124` (BCD — firmware
@@ -177,14 +180,10 @@ The wired path offers 125-1000 Hz. The F50D 1K receiver remains unverified.
 
 ### F510 4K receiver: polling-rate correction
 
-Additional evidence from an Atlantis OG V2 4K Nordic on Windows, connected
-through `3554:f510` (`LAMZU 4K Receiver`, USB release `0x0128`), with the mouse
-reporting firmware v1.24, shows that this receiver uses the existing `pulsar`
-CompX table. The UI's former 2,000 Hz request encoded `0x20`, the 4,000 Hz
-value, and its 4,000 Hz request encoded `0x40`, the 8,000 Hz value beyond this
-receiver's ceiling. The owner reported the doubled high-rate behavior and
-loss of detection in the vendor configurator after selecting 4,000 Hz.
-The latter symptom is not established as a consequence of the rate byte.
+An Atlantis OG V2 4K Nordic with receiver `3554:f510` (USB release `0x0128`)
+and mouse firmware v1.24 uses the existing `pulsar` CompX table. The previous
+table encoded 2,000 Hz as `0x20` instead of `0x10`, and 4,000 Hz as `0x40`
+instead of `0x20`.
 
 | Hertz | F510 byte | Evidence |
 | --- | --- | --- |
@@ -193,7 +192,7 @@ The latter symptom is not established as a consequence of the rate byte.
 | 500 | `0x02` | Previously captured request and identical command ACK |
 | 1000 | `0x01` | Vendor packet table / existing CompX encoding |
 | 2000 | `0x10` | Previously captured request and identical command ACK |
-| 4000 | `0x20` | Vendor packet table / owner-reported 2K-to-4K mismatch |
+| 4000 | `0x20` | Vendor packet table / USBPcap write and subsequent field read |
 
 This mapping also agrees with the existing
 [`lamzu-cfg` polling-rate table](https://github.com/LeadSun/lamzu-cfg/blob/master/src/atlantis.rs#L34-L42).
@@ -213,14 +212,23 @@ An ACK confirms command acceptance, not a measured event rate. The six rates
 are now offered, including the 250 Hz value actually returned by this receiver;
 8,000 Hz remains unavailable and is rejected before a write.
 
-OpenMouse BETA v2.0.33d's 2026-11-02 hardware report has 14 passes and one
-failed composite flash-write check: polling (target 2,000 Hz) and lift-off
-(target Medium) did not match the test's read-back. It reports 1,000 Hz while
-browser motion sampling averages 1,631 Hz and peaks at 2,000 Hz. That sample
-is not a calibrated rate measurement and does not identify the write failure.
-F510 therefore remains `verified: false`; successful full read/write/restore
-validation with this corrected catalog is still required. No receiver firmware
-was changed, and no pairing or reset commands were used for this correction.
+Hardware tests with the corrected driver, OpenMouse BETA v2.0.1348, on
+2026-11-02:
+
+- Wired `3554:f50f`: 13 passed, two wireless-only checks skipped. DPI
+  1600 -> 800 -> 1600, polling 1000 -> 500 -> 1000 Hz, and LOD
+  Low -> Medium -> Low write/read/restore all passed.
+- Wireless `3554:f510`: 14 passed, one failed flash-write check (polling
+  target 2000 Hz and LOD target Medium).
+- A separate USBPcap run captured the wireless 2000 -> 4000 Hz transition:
+  the receiver briefly reconnects over USB, interrupting the test. The write
+  is followed by USB request cancellations after 14.849 ms; no rate ACK or
+  LOD write follows. A subsequent read returns the 4000 Hz field. Restoring
+  2000 Hz also reconnects the receiver; its ACK and post-reconnect read were
+  captured. The original 2000 Hz setting was restored and confirmed.
+
+F510 remains `verified: false`. This correction does not add reconnect handling.
+The USB reconnect's firmware-level cause has not been established.
 
 ## What was verified on the original wired hardware
 
