@@ -791,28 +791,32 @@ export class AtkHidClient {
       throw error;
     });
     await delay(R1_LIVE_WRITE_SETTLE_MS);
-    const confirmed = Array.from(await this.readUnqueued(groupAddress, 8).catch((error: unknown) => {
-      // The write already reached the device, so the cached mapping no longer
-      // describes it whether or not this read answers.
-      this.lastStatus = null;
+    let confirmed: number[];
+    try {
+      confirmed = Array.from(await this.readUnqueued(groupAddress, 8));
+    } catch (error) {
+      // The write may have reached the device. Put the captured row back and
+      // require a readback before reporting the original transport failure.
+      await this.restoreR1ButtonRowUnqueued(button, groupAddress, before);
       throw error;
-    }));
+    }
     // The whole row is compared, not just the record this call replaced: a
     // changed neighbour means the row was not rebuilt from the copy read
     // above, and the group has to go back.
     if (!after.every((byte, offset) => confirmed[offset] === byte)) {
-      await this.writeUnqueued(groupAddress, before).catch(() => undefined);
+      await this.restoreR1ButtonRowUnqueued(button, groupAddress, before);
       // The cached status no longer describes the device, so drop it rather
       // than let the next read serve the old mapping from memory.
       this.lastStatus = null;
-      // The rollback is best-effort: its own failure is swallowed above, so
-      // the message must not promise that the old value is back.
-      throw new Error(`The ${button.label.toLowerCase()} assignment did not survive readback; restoring the previous value could not be confirmed.`);
+      throw new Error(`The ${button.label.toLowerCase()} assignment did not survive readback; the previous value was restored.`);
     }
 
     const assignment = atkDecodeButtonAssignment(confirmed.slice(recordOffset, recordOffset + 4));
     if (!assignment) throw new Error("The mouse returned a truncated button assignment.");
-    const buttons = (this.lastStatus?.atkButtonMappings ?? []).map((mapping) =>
+    const cached = this.lastStatus?.atkButtonMappings;
+    // Without cached mappings there is nothing to patch; force a full reload.
+    if (!cached) this.lastStatus = null;
+    const buttons = (cached ?? []).map((mapping) =>
       mapping.id === button.id ? {
         ...mapping,
         keyClass: assignment.keyClass,
@@ -824,6 +828,25 @@ export class AtkHidClient {
       } : mapping);
     this.patch({ atkButtonMappings: buttons });
     return assignment;
+  }
+
+  /** Restores one button row and requires a readback before declaring success. */
+  private async restoreR1ButtonRowUnqueued(
+    button: { label: string },
+    groupAddress: number,
+    before: readonly number[],
+  ): Promise<void> {
+    try {
+      await this.writeUnqueued(groupAddress, before);
+      const readback = Array.from(await this.readUnqueued(groupAddress, 8));
+      if (!before.every((byte, index) => readback[index] === byte)) throw new Error("restore mismatch");
+    } catch {
+      this.lastStatus = null;
+      throw new Error(
+        `The ${button.label.toLowerCase()} assignment could not be confirmed, and restoring its previous value failed.`,
+      );
+    }
+    this.lastStatus = null;
   }
 
   /** Select one of the four verified R1 banks and require readback. */

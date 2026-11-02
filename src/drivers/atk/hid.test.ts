@@ -39,10 +39,12 @@ class FakeAtkDevice {
 
   readonly sent: Sent[] = [];
   readonly writeFailures = new Set<number>();
+  readonly readFailures = new Set<number>();
   replies: number[][] = [];
   identifyFailures = 0;
   ignoredCommands = new Set<number>();
   private writeCount = 0;
+  private readCount = 0;
   private listeners = new Set<(event: HIDInputReportEvent) => void>();
 
   async open(): Promise<void> {
@@ -74,6 +76,10 @@ class FakeAtkDevice {
   async sendReport(reportId: number, data: ArrayBuffer): Promise<void> {
     const frame = new Uint8Array(data);
     this.sent.push({ reportId, data: frame });
+    if (frame[0] === 0x08) {
+      const readIndex = this.readCount++;
+      if (this.readFailures.has(readIndex)) throw new Error(`read ${readIndex + 1} failed`);
+    }
     // EEPROM writes (0x07) are fire-and-forget; read and informational
     // commands (0x04 battery, 0x08 EEPROM, 0x10 identity, 0x12 version) get a reply.
     if (frame[0] === 0x07) {
@@ -872,6 +878,47 @@ test("R1 button write failures clear the cached status", async () => {
     client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
     /write 1 failed/,
   );
+  assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
+});
+
+test("R1 confirmation failures restore the captured button row", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, before),
+  ];
+  // The confirming read is the second EEPROM read; the restore readback follows.
+  raw.readFailures.add(1);
+
+  await assert.rejects(
+    new AtkHidClient(fake).setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
+    /read 2 failed/,
+  );
+
+  const rowWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.equal(rowWrites.length, 2);
+  assert.deepEqual(Array.from(rowWrites.at(-1)!.data.subarray(5, 13)), before);
+});
+
+test("R1 button writes without cached mappings force a full reload", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
+  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  (client as unknown as { lastStatus: unknown }).lastStatus = {};
+  await client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately);
   assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
 });
 
