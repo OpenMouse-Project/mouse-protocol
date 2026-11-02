@@ -785,11 +785,13 @@ export class AtkHidClient {
     const after = [...before];
     after.splice(recordOffset, record.length, ...record);
 
-    await this.writeUnqueued(groupAddress, after).catch((error: unknown) => {
+    try {
+      await this.writeUnqueued(groupAddress, after);
+    } catch (error) {
       // The send failed, but the device may already hold the new row.
-      this.lastStatus = null;
+      await this.restoreR1ButtonRowUnqueued(button, groupAddress, before);
       throw error;
-    });
+    }
     await delay(R1_LIVE_WRITE_SETTLE_MS);
     let confirmed: number[];
     try {

@@ -798,6 +798,7 @@ test("R1 binding failure restores the macro slot it uploaded", async () => {
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
   const before = new Array<number>(38).fill(0);
+  const buttonBefore = [...button(1, 1), ...button(1, 2)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x20]),
     reply(0x08, 0x0600, before.slice(0, 10)),
@@ -805,7 +806,8 @@ test("R1 binding failure restores the macro slot it uploaded", async () => {
     reply(0x08, 0x0614, before.slice(20, 30)),
     reply(0x08, 0x061e, before.slice(30)),
     reply(0x08, 0x061f, [1, 0x81, 4, 0, 0, 20, 0xbb]),
-    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0060, buttonBefore),
+    reply(0x08, 0x0060, buttonBefore),
     reply(0x08, 0x0600, before.slice(0, 10)),
     reply(0x08, 0x060a, before.slice(10, 20)),
     reply(0x08, 0x0614, before.slice(20, 30)),
@@ -832,6 +834,8 @@ test("R1 binding failure restores the macro slot it uploaded", async () => {
     macroWrites.slice(-4).flatMap(({ data }) => Array.from(data.subarray(5, 5 + data[4]!))),
     before,
   );
+  const buttonWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.deepEqual(Array.from(buttonWrites.at(-1)!.data.subarray(5, 13)), buttonBefore);
 });
 
 test("R1 macro rollback verifies the restored slot", async () => {
@@ -863,9 +867,11 @@ test("R1 button write failures clear the cached status", async () => {
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x29]),
-    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, before),
   ];
   raw.writeFailures.add(0);
 
