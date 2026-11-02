@@ -787,6 +787,72 @@ test("R1 macro rollback reports when restoring the previous slot fails", async (
   );
 });
 
+test("R1 binding failure restores the macro slot it uploaded", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = new Array<number>(38).fill(0);
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    reply(0x08, 0x0600, before.slice(0, 10)),
+    reply(0x08, 0x060a, before.slice(10, 20)),
+    reply(0x08, 0x0614, before.slice(20, 30)),
+    reply(0x08, 0x061e, before.slice(30)),
+    reply(0x08, 0x061f, [1, 0x81, 4, 0, 0, 20, 0xbb]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0600, before.slice(0, 10)),
+    reply(0x08, 0x060a, before.slice(10, 20)),
+    reply(0x08, 0x0614, before.slice(20, 30)),
+    reply(0x08, 0x061e, before.slice(30)),
+  ];
+  // The fifth write is the button row; only the macro upload before it lands.
+  raw.writeFailures.add(4);
+
+  await assert.rejects(
+    new AtkHidClient(fake).setR1ButtonMacro(
+      0,
+      [{ kind: "key-down", keyCode: 0x04, holdTime: 20 }],
+      {
+        startType: ATK_R1_MACRO_START_TYPES.stopImmediately,
+        runCount: 1,
+        macroId: 2,
+      },
+    ),
+    /write 5 failed/,
+  );
+
+  const macroWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[2] === 0x06);
+  assert.deepEqual(
+    macroWrites.slice(-4).flatMap(({ data }) => Array.from(data.subarray(5, 5 + data[4]!))),
+    before,
+  );
+});
+
+test("R1 macro rollback verifies the restored slot", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    reply(0x08, 0x0600, new Array<number>(10).fill(0)),
+    reply(0x08, 0x060a, new Array<number>(10).fill(0)),
+    reply(0x08, 0x0614, new Array<number>(10).fill(0)),
+    reply(0x08, 0x061e, new Array<number>(3).fill(0)),
+    // The upload readback differs, so rollback runs.
+    reply(0x08, 0x061f, [1, 0x54]),
+    reply(0x08, 0x0600, new Array<number>(10).fill(0)),
+    reply(0x08, 0x060a, new Array<number>(10).fill(0)),
+    reply(0x08, 0x0614, new Array<number>(10).fill(0)),
+    // The restored tail does not match, so the rollback is unconfirmed.
+    reply(0x08, 0x061e, [0, 0, 1]),
+  ];
+
+  await assert.rejects(
+    new AtkHidClient(fake).clearR1ButtonMacro(2),
+    /may hold mixed steps because restoring its previous contents failed/,
+  );
+});
+
 test("R1 button write failures clear the cached status", async () => {
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });

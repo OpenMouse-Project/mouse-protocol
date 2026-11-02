@@ -582,8 +582,6 @@ export class AtkHidClient {
       );
     }
 
-    await this.writeR1MacroTable(macroId, atkPackAtkR1MacroTable(steps));
-
     const record = atkPackButtonAssignment({
       id: "macro",
       label: "Macro",
@@ -591,7 +589,16 @@ export class AtkHidClient {
       value1: macroId,
       value2: options.startType,
     });
-    await this.writeR1ButtonRecord(index, record);
+    const table = atkPackAtkR1MacroTable(steps);
+    await this.run(async () => {
+      const before = await this.writeR1MacroTableUnqueued(macroId, table);
+      try {
+        await this.writeR1ButtonRecordUnqueued(index, record);
+      } catch (error) {
+        await this.restoreR1MacroTableUnqueued(macroId, before);
+        throw error;
+      }
+    });
     this.lastStatus = null;
   }
 
@@ -672,46 +679,83 @@ export class AtkHidClient {
    * can write the slot between a chunk and the chunk that confirms it.
    */
   private async writeR1MacroTable(macroId: number, table: readonly number[]): Promise<void> {
+    await this.run(() => this.writeR1MacroTableUnqueued(macroId, table));
+  }
+
+  /**
+   * Uploads and verifies one macro table without taking the queue. Returns the
+   * slot contents captured before the upload so a later binding failure can
+   * restore them.
+   */
+  private async writeR1MacroTableUnqueued(
+    macroId: number,
+    table: readonly number[],
+  ): Promise<number[]> {
     const base = ATK_R1_MACRO_BASE + macroId * ATK_R1_MACRO_SLOT_LENGTH;
-    await this.run(async () => {
-      const writeAll = async (bytes: readonly number[]): Promise<void> => {
-        for (let offset = 0; offset < bytes.length; offset += 10) {
-          await this.writeUnqueued(base + offset, bytes.slice(offset, offset + 10));
-        }
-      };
-      const before: number[] = [];
-      for (let offset = 0; offset < table.length; offset += 10) {
-        const chunk = await this.readUnqueued(base + offset, Math.min(10, table.length - offset));
-        before.push(...chunk);
+    const before = await this.readR1MacroBytesUnqueued(base, table.length);
+    try {
+      await this.writeR1MacroBytesUnqueued(base, table);
+      await this.verifyR1MacroPayloadUnqueued(macroId, base, table);
+      return before;
+    } catch (error) {
+      await this.restoreR1MacroTableUnqueued(macroId, before);
+      throw error;
+    }
+  }
+
+  /** Restores a captured macro slot and verifies the whole table came back. */
+  private async restoreR1MacroTableUnqueued(
+    macroId: number,
+    before: readonly number[],
+  ): Promise<void> {
+    const base = ATK_R1_MACRO_BASE + macroId * ATK_R1_MACRO_SLOT_LENGTH;
+    try {
+      await this.writeR1MacroBytesUnqueued(base, before);
+      const readback = await this.readR1MacroBytesUnqueued(base, before.length);
+      if (!before.every((byte, index) => readback[index] === byte)) throw new Error("restore mismatch");
+    } catch {
+      throw new Error(
+        `Macro slot ${macroId + 1} may hold mixed steps because restoring its previous contents failed. Upload the macro again before using this button.`,
+      );
+    }
+  }
+
+  /** Reads the complete stored table, including the vendor header. */
+  private async readR1MacroBytesUnqueued(base: number, length: number): Promise<number[]> {
+    const bytes: number[] = [];
+    for (let offset = 0; offset < length; offset += 10) {
+      const chunk = await this.readUnqueued(base + offset, Math.min(10, length - offset));
+      bytes.push(...chunk);
+    }
+    return bytes;
+  }
+
+  /** Writes a complete table in the vendor's ten-byte chunks. */
+  private async writeR1MacroBytesUnqueued(base: number, bytes: readonly number[]): Promise<void> {
+    for (let offset = 0; offset < bytes.length; offset += 10) {
+      await this.writeUnqueued(base + offset, bytes.slice(offset, offset + 10));
+    }
+  }
+
+  /**
+   * The vendor may normalize the constant 31-byte header, so only the payload
+   * that carries the actual actions is compared after an upload.
+   */
+  private async verifyR1MacroPayloadUnqueued(
+    macroId: number,
+    base: number,
+    table: readonly number[],
+  ): Promise<void> {
+    const payloadBytes = Math.max(0, table.length - 31);
+    for (let offset = 0; offset < payloadBytes; offset += 10) {
+      const expected = table.slice(31 + offset, 31 + Math.min(offset + 10, payloadBytes));
+      const readback = await this.readUnqueued(base + 31 + offset, expected.length);
+      if (!expected.every((byte, index) => readback[index] === byte)) {
+        throw new Error(
+          `Macro slot ${macroId + 1} did not keep the uploaded steps; the previous contents were sent back but not read back to confirm.`,
+        );
       }
-      try {
-        await writeAll(table);
-        // A chunk the receiver dropped would leave the slot holding an older
-        // macro, so the payload it just stored — the action count, the records
-        // and the checksum — is read back. The 31-byte header is skipped here:
-        // only this region is read back elsewhere, and the device may
-        // normalize the constant header.
-        const payloadBytes = table.length - 31;
-        for (let offset = 0; offset < payloadBytes; offset += 10) {
-          const expected = table.slice(31 + offset, 31 + Math.min(offset + 10, payloadBytes));
-          const readback = await this.readUnqueued(base + 31 + offset, expected.length);
-          if (!expected.every((byte, at) => readback[at] === byte)) {
-            throw new Error(
-              `Macro slot ${macroId + 1} did not keep the uploaded steps; the previous contents were sent back but not read back to confirm.`,
-            );
-          }
-        }
-      } catch (error) {
-        try {
-          await writeAll(before);
-        } catch {
-          throw new Error(
-            `Macro slot ${macroId + 1} may hold mixed steps because restoring its previous contents failed. Upload the macro again before using this button.`,
-          );
-        }
-        throw error;
-      }
-    });
+    }
   }
 
   /**
@@ -722,6 +766,14 @@ export class AtkHidClient {
     index: number,
     record: readonly number[],
   ): Promise<AtkButtonAssignment> {
+    return await this.run(() => this.writeR1ButtonRecordUnqueued(index, record));
+  }
+
+  /** Read-modify-write-verify without taking the queue; call only inside `run()`. */
+  private async writeR1ButtonRecordUnqueued(
+    index: number,
+    record: readonly number[],
+  ): Promise<AtkButtonAssignment> {
     const button = ATK_R1_BUTTONS[index];
     if (!button) throw new Error("The selected button is invalid.");
     const groupAddress = button.address - ((button.address - ATK_R1_BUTTONS[0]!.address) % 8);
@@ -729,37 +781,34 @@ export class AtkHidClient {
     // One eight-byte row carries more than one assignment, so the complete
     // read-modify-write-verify sequence holds the queue. Without it a second
     // edit can read the row before this write and put its stale copy back.
-    const confirmed = await this.run(async () => {
-      const before = Array.from(await this.readUnqueued(groupAddress, 8));
-      const after = [...before];
-      after.splice(recordOffset, record.length, ...record);
+    const before = Array.from(await this.readUnqueued(groupAddress, 8));
+    const after = [...before];
+    after.splice(recordOffset, record.length, ...record);
 
-      await this.writeUnqueued(groupAddress, after).catch((error: unknown) => {
-        // The send failed, but the device may already hold the new row.
-        this.lastStatus = null;
-        throw error;
-      });
-      await delay(R1_LIVE_WRITE_SETTLE_MS);
-      const readback = Array.from(await this.readUnqueued(groupAddress, 8).catch((error: unknown) => {
-        // The write already reached the device, so the cached mapping no longer
-        // describes it whether or not this read answers.
-        this.lastStatus = null;
-        throw error;
-      }));
-      // The whole row is compared, not just the record this call replaced: a
-      // changed neighbour means the row was not rebuilt from the copy read
-      // above, and the group has to go back.
-      if (!after.every((byte, offset) => readback[offset] === byte)) {
-        await this.writeUnqueued(groupAddress, before).catch(() => undefined);
-        // The cached status no longer describes the device, so drop it rather
-        // than let the next read serve the old mapping from memory.
-        this.lastStatus = null;
-        // The rollback is best-effort: its own failure is swallowed above, so
-        // the message must not promise that the old value is back.
-        throw new Error(`The ${button.label.toLowerCase()} assignment did not survive readback; restoring the previous value could not be confirmed.`);
-      }
-      return readback;
+    await this.writeUnqueued(groupAddress, after).catch((error: unknown) => {
+      // The send failed, but the device may already hold the new row.
+      this.lastStatus = null;
+      throw error;
     });
+    await delay(R1_LIVE_WRITE_SETTLE_MS);
+    const confirmed = Array.from(await this.readUnqueued(groupAddress, 8).catch((error: unknown) => {
+      // The write already reached the device, so the cached mapping no longer
+      // describes it whether or not this read answers.
+      this.lastStatus = null;
+      throw error;
+    }));
+    // The whole row is compared, not just the record this call replaced: a
+    // changed neighbour means the row was not rebuilt from the copy read
+    // above, and the group has to go back.
+    if (!after.every((byte, offset) => confirmed[offset] === byte)) {
+      await this.writeUnqueued(groupAddress, before).catch(() => undefined);
+      // The cached status no longer describes the device, so drop it rather
+      // than let the next read serve the old mapping from memory.
+      this.lastStatus = null;
+      // The rollback is best-effort: its own failure is swallowed above, so
+      // the message must not promise that the old value is back.
+      throw new Error(`The ${button.label.toLowerCase()} assignment did not survive readback; restoring the previous value could not be confirmed.`);
+    }
 
     const assignment = atkDecodeButtonAssignment(confirmed.slice(recordOffset, recordOffset + 4));
     if (!assignment) throw new Error("The mouse returned a truncated button assignment.");
@@ -1069,10 +1118,14 @@ export class AtkHidClient {
         return weUnpackScalarPair(confirmedSystem[4]!, confirmedSystem[5]!);
       });
     } else {
-      assertStage(await this.read(REGISTER.system, SYSTEM_LENGTH));
-      await this.write(REGISTER.system + 4, wePackScalarPair(index));
-      const pair = await this.read(REGISTER.system + 4, 2);
-      confirmed = weUnpackScalarPair(pair[0]!, pair[1]!);
+      // Hold the queue from the stage-count check through the confirming read,
+      // so a count edit cannot admit an index the next write must not use.
+      confirmed = await this.run(async () => {
+        assertStage(await this.readUnqueued(REGISTER.system, SYSTEM_LENGTH));
+        await this.writeUnqueued(REGISTER.system + 4, wePackScalarPair(index));
+        const pair = await this.readUnqueued(REGISTER.system + 4, 2);
+        return weUnpackScalarPair(pair[0]!, pair[1]!);
+      });
     }
 
     if (confirmed !== index) {
