@@ -38,7 +38,7 @@ const CLAIMED_VGN_PRODUCT_IDS: ReadonlySet<number> = new Set([
   ...ATK_COMPX_PRODUCT_IDS, // VXE wired units
   ...LAMZU_ATLANTIS_PRODUCTS.keys(), // Lamzu Atlantis generation
   ...GRAVASTAR_PRODUCT_IDS, // GravaStarHidClient, a subclass of this client
-  ...SCYROX_PRODUCT_IDS, // Scyrox V8S and its Turbo 8K dongle
+  ...SCYROX_PRODUCT_IDS, // Scyrox V8S, its Turbo 8K dongle and the V8's 8K dongle
 ]);
 const PULSAR_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
 

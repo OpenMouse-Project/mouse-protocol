@@ -27,6 +27,7 @@ import {
   lamzuAtlantisDecodePollingRate,
   lamzuAtlantisDecodeReply,
   lamzuAtlantisEncodeAngleTuning,
+  lamzuAtlantisEncodeDpiStage,
   lamzuAtlantisEncodeDpiStage3955,
   lamzuAtlantisEncodeLiftOffDistance,
   lamzuAtlantisEncodePollingRate,
@@ -41,7 +42,6 @@ import {
   type LamzuAtlantisProduct,
   type LamzuAtlantisRateFamily,
 } from "@openmouse/protocol/lamzu";
-import { pulsarVgnEncodeDpi } from "@openmouse/protocol/pulsar";
 import {
   TEEVOLUTION_SHARED_BUTTON_OPTIONS,
   teevolutionDecodeButtonMappings,
@@ -675,7 +675,7 @@ export class LamzuAtlantisHidClient {
     // hardware to confirm the flags layout for them.
     const record = this.isSensor3955()
       ? lamzuAtlantisEncodeDpiStage3955(dpi)
-      : [...pulsarVgnEncodeDpi(dpi)];
+      : lamzuAtlantisEncodeDpiStage(dpi);
     await this.write(address, record);
     const stored = this.decodeDpiStage(await this.readRaw(address, this.dpiStageStride()));
     const confirmed = stored?.x ?? null;
