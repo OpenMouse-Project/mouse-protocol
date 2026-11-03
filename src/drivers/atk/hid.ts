@@ -808,11 +808,19 @@ export class AtkHidClient {
     // changed neighbour means the row was not rebuilt from the copy read
     // above, and the group has to go back.
     if (!after.every((byte, offset) => confirmed[offset] === byte)) {
-      await this.restoreR1ButtonRowUnqueued(button, groupAddress, before);
+      const restored = await this.restoreR1ButtonRowIfUnchangedUnqueued(
+        button,
+        groupAddress,
+        after,
+        before,
+        confirmed,
+      );
       // The cached status no longer describes the device, so drop it rather
       // than let the next read serve the old mapping from memory.
       this.lastStatus = null;
-      throw new Error(`The ${button.label.toLowerCase()} assignment did not survive readback; the previous value was restored.`);
+      throw new Error(restored
+        ? `The ${button.label.toLowerCase()} assignment did not survive readback; the previous value was restored.`
+        : `The ${button.label.toLowerCase()} assignment did not survive readback; the current row was left untouched.`);
     }
 
     const assignment = atkDecodeButtonAssignment(confirmed.slice(recordOffset, recordOffset + 4));
@@ -843,17 +851,24 @@ export class AtkHidClient {
     groupAddress: number,
     expected: readonly number[],
     before: readonly number[],
-  ): Promise<void> {
+    currentRow?: readonly number[],
+  ): Promise<boolean> {
     this.lastStatus = null;
     let current: number[];
-    try {
-      current = Array.from(await this.readUnqueued(groupAddress, 8));
-    } catch {
-      return;
+    if (currentRow) {
+      current = [...currentRow];
+    } else {
+      try {
+        current = Array.from(await this.readUnqueued(groupAddress, 8));
+      } catch {
+        return false;
+      }
     }
     if (current.every((byte, offset) => byte === expected[offset])) {
       await this.restoreR1ButtonRowUnqueued(button, groupAddress, before);
+      return true;
     }
+    return false;
   }
 
   /** Restores one button row and requires a readback before declaring success. */
