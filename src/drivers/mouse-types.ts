@@ -428,6 +428,19 @@ export interface MouseStatus {
    */
   longRangeMode?: boolean | null;
   hyperMode?: boolean | null;
+  /** Hitscan web-protocol SPDT speed mode, per primary button. */
+  hitscanSpdt?: { left: boolean; right: boolean } | null;
+  /** Hitscan's four-way click timing, milliseconds, when its firmware reports it. */
+  hitscanClickTimings?: {
+    beforePress: number;
+    beforeRelease: number;
+    afterPress: number;
+    afterRelease: number;
+  } | null;
+  /** Hitscan scroll-wheel high-performance ("Tournament scroll") state. */
+  hitscanTournamentScroll?: boolean | null;
+  /** Hitscan competitive/tracking mode, when read. */
+  hitscanCompetitiveMode?: boolean | null;
   /** Sensor pinned to its highest frame rate (WLmouse "Turbo Mode"). */
   turboMode?: boolean | null;
   /** Whether button chords can change mouse settings without the driver. */

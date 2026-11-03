@@ -13,7 +13,7 @@ import { INCOTT_PRODUCT_IDS, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../inco
 import { GLORIOUS_CORE2_PRODUCTS, GLORIOUS_CORE2_USAGE_PAGE, GLORIOUS_CORE2_VENDOR_ID } from "../glorious-core2/index.ts";
 import { GLORIOUS_SINOWEALTH_PRODUCTS } from "../glorious-sinowealth/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
-import { HITSCAN_PRODUCTS, HITSCAN_VENDOR_ID } from "@openmouse/protocol/hitscan";
+import { HITSCAN_PRODUCTS, HITSCAN_VENDOR_ID, HITSCAN_XVI_PRODUCTS } from "@openmouse/protocol/hitscan";
 import { VAXEE_PRODUCT_IDS, VAXEE_USAGE, VAXEE_USAGE_PAGE, VAXEE_VENDOR_ID } from "@openmouse/protocol/vaxee";
 import {
   GEARHUB_BLUETOOTH_USAGE,
@@ -1013,6 +1013,8 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff00 },
   { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff60 },
   // No HID descriptor has been captured, so the usage page is unknown; the
-  // driver selects the report-8 input/output collection by shape.
-  ...[...HITSCAN_PRODUCTS.keys()].map((productId) => ({ vendorId: VENDOR_ID.hitscan, productId })),
+  // drivers select their collection by shape (report 8 for the native Utility,
+  // 64-byte feature report 0 for control.hitscan.com).
+  ...[...new Set([...HITSCAN_PRODUCTS.keys(), ...HITSCAN_XVI_PRODUCTS.keys()])]
+    .map((productId) => ({ vendorId: VENDOR_ID.hitscan, productId })),
 ];

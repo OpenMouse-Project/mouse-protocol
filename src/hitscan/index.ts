@@ -6,6 +6,8 @@
  */
 export * from "./settings.js";
 export * from "./buttons.js";
+export * from "./xvi.js";
+export * from "./xvi-inputs.js";
 export const HITSCAN_REPORT_ID = 0x08;
 export const HITSCAN_PAYLOAD_LENGTH = 16;
 export const HITSCAN_MAX_CHUNK = 10;
