@@ -861,7 +861,9 @@ export class AtkHidClient {
       try {
         current = Array.from(await this.readUnqueued(groupAddress, 8));
       } catch {
-        return false;
+        throw new Error(
+          `The ${button.label.toLowerCase()} assignment state is unknown because the row could not be read after a failed write. Re-read or re-upload the assignment before using this button.`,
+        );
       }
     }
     if (current.every((byte, offset) => byte === expected[offset])) {

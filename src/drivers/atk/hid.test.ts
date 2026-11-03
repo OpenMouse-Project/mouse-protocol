@@ -977,6 +977,32 @@ test("R1 readback mismatch leaves a concurrently changed button row untouched", 
   assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
 });
 
+test("R1 button row state is unknown when confirmation and inspection reads both fail", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, before),
+  ];
+  raw.readFailures.add(1);
+  raw.readFailures.add(2);
+
+  const client = new AtkHidClient(fake);
+  (client as unknown as { lastStatus: unknown }).lastStatus = {
+    atkButtonMappings: [{ id: "left", action: "Left Click" }],
+  };
+
+  await assert.rejects(
+    client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
+    /assignment state is unknown because the row could not be read after a failed write/,
+  );
+  const rowWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.equal(rowWrites.length, 1);
+  assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
+});
+
 test("R1 button writes without cached mappings force a full reload", async () => {
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });
