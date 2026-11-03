@@ -460,15 +460,16 @@ export function razerSetStandardCustomEffectCommand(): RazerCommand {
 /**
  * Diamondback Chroma / Mamba TE single-row frame (`0x03`/`0x0c`), matching
  * OpenRazer's razer_chroma_misc_one_row_set_custom_frame. Columns are inclusive
- * and zero-based. Keep the fixed 0x32 data size; at most 16 RGB cells fit.
- * A partial frame leaves the other cells in the device's frame buffer alone.
+ * and zero-based. The fixed 0x32 header is a firmware convention, not the
+ * argument capacity: the 80-byte argument area holds 26 RGB cells after the
+ * two column bytes. OpenRGB sends all 21 Diamondback cells in one report.
  */
 export function razerSetOneRowCustomFrameCommand(startColumn: number, colors: readonly string[]): RazerCommand {
   if (!Number.isInteger(startColumn) || startColumn < 0 || startColumn > 255) {
     throw new RazerProtocolError("The start column must be a whole byte from 0 to 255.");
   }
-  if (colors.length < 1 || colors.length > 16 || startColumn + colors.length - 1 > 255) {
-    throw new RazerProtocolError("A single-row frame needs 1 to 16 colours within columns 0 to 255.");
+  if (colors.length < 1 || colors.length > 26 || startColumn + colors.length - 1 > 255) {
+    throw new RazerProtocolError("A single-row frame needs 1 to 26 colours within columns 0 to 255.");
   }
   return {
     commandClass: 0x03,
