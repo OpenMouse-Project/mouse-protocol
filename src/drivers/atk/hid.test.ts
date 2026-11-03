@@ -799,6 +799,7 @@ test("R1 binding failure restores the macro slot it uploaded", async () => {
   const raw = fake as unknown as FakeAtkDevice;
   const before = new Array<number>(38).fill(0);
   const buttonBefore = [...button(1, 1), ...button(1, 2)];
+  const buttonAfter = [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x20]),
     reply(0x08, 0x0600, before.slice(0, 10)),
@@ -807,6 +808,7 @@ test("R1 binding failure restores the macro slot it uploaded", async () => {
     reply(0x08, 0x061e, before.slice(30)),
     reply(0x08, 0x061f, [1, 0x81, 4, 0, 0, 20, 0xbb]),
     reply(0x08, 0x0060, buttonBefore),
+    reply(0x08, 0x0060, buttonAfter),
     reply(0x08, 0x0060, buttonBefore),
     reply(0x08, 0x0600, before.slice(0, 10)),
     reply(0x08, 0x060a, before.slice(10, 20)),
@@ -826,7 +828,12 @@ test("R1 binding failure restores the macro slot it uploaded", async () => {
         macroId: 2,
       },
     ),
-    /write 5 failed/,
+    (error: unknown) => {
+      const message = error instanceof Error ? error.message : "";
+      assert.match(message, /write 5 failed/);
+      assert.match(message, /Macro slot 3 was restored/);
+      return true;
+    },
   );
 
   const macroWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[2] === 0x06);
@@ -868,9 +875,11 @@ test("R1 button write failures clear the cached status", async () => {
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
   const before = [...button(1, 1), ...button(1, 2)];
+  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x29]),
     reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, after),
     reply(0x08, 0x0060, before),
   ];
   raw.writeFailures.add(0);
@@ -884,6 +893,9 @@ test("R1 button write failures clear the cached status", async () => {
     client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
     /write 1 failed/,
   );
+  const rowWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.equal(rowWrites.length, 2);
+  assert.deepEqual(Array.from(rowWrites.at(-1)!.data.subarray(5, 13)), before);
   assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
 });
 
@@ -892,9 +904,11 @@ test("R1 confirmation failures restore the captured button row", async () => {
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
   const before = [...button(1, 1), ...button(1, 2)];
+  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x29]),
     reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, after),
     reply(0x08, 0x0060, before),
   ];
   // The confirming read is the second EEPROM read; the restore readback follows.
@@ -908,6 +922,33 @@ test("R1 confirmation failures restore the captured button row", async () => {
   const rowWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
   assert.equal(rowWrites.length, 2);
   assert.deepEqual(Array.from(rowWrites.at(-1)!.data.subarray(5, 13)), before);
+});
+
+test("R1 rejected send does not overwrite a concurrently changed button row", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
+  const concurrent = [...button(1, 3), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, concurrent),
+  ];
+  raw.writeFailures.add(0);
+
+  const client = new AtkHidClient(fake);
+  (client as unknown as { lastStatus: unknown }).lastStatus = {
+    atkButtonMappings: [{ id: "left", action: "Left Click" }],
+  };
+
+  await assert.rejects(
+    client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
+    /write 1 failed/,
+  );
+  const rowWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.equal(rowWrites.length, 1);
+  assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
 });
 
 test("R1 button writes without cached mappings force a full reload", async () => {

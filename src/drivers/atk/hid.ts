@@ -596,7 +596,9 @@ export class AtkHidClient {
         await this.writeR1ButtonRecordUnqueued(index, record);
       } catch (error) {
         await this.restoreR1MacroTableUnqueued(macroId, before);
-        throw error;
+        throw new Error(
+          `${error instanceof Error ? error.message : "The R1 button assignment failed."} Macro slot ${macroId + 1} was restored to its previous steps. If the button row still points to this slot, upload the macro again before using this button.`,
+        );
       }
     });
     this.lastStatus = null;
@@ -789,7 +791,7 @@ export class AtkHidClient {
       await this.writeUnqueued(groupAddress, after);
     } catch (error) {
       // The send failed, but the device may already hold the new row.
-      await this.restoreR1ButtonRowUnqueued(button, groupAddress, before);
+      await this.restoreR1ButtonRowIfUnchangedUnqueued(button, groupAddress, after, before);
       throw error;
     }
     await delay(R1_LIVE_WRITE_SETTLE_MS);
@@ -799,7 +801,7 @@ export class AtkHidClient {
     } catch (error) {
       // The write may have reached the device. Put the captured row back and
       // require a readback before reporting the original transport failure.
-      await this.restoreR1ButtonRowUnqueued(button, groupAddress, before);
+      await this.restoreR1ButtonRowIfUnchangedUnqueued(button, groupAddress, after, before);
       throw error;
     }
     // The whole row is compared, not just the record this call replaced: a
@@ -830,6 +832,28 @@ export class AtkHidClient {
       } : mapping);
     this.patch({ atkButtonMappings: buttons });
     return assignment;
+  }
+
+  /**
+   * Restores one button row only if the device still holds the row this write
+   * attempted, so a concurrent writer's newer row is not overwritten.
+   */
+  private async restoreR1ButtonRowIfUnchangedUnqueued(
+    button: { label: string },
+    groupAddress: number,
+    expected: readonly number[],
+    before: readonly number[],
+  ): Promise<void> {
+    this.lastStatus = null;
+    let current: number[];
+    try {
+      current = Array.from(await this.readUnqueued(groupAddress, 8));
+    } catch {
+      return;
+    }
+    if (current.every((byte, offset) => byte === expected[offset])) {
+      await this.restoreR1ButtonRowUnqueued(button, groupAddress, before);
+    }
   }
 
   /** Restores one button row and requires a readback before declaring success. */
