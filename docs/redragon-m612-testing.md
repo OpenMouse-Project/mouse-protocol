@@ -52,8 +52,8 @@ answer 02 08 addrLo 32+addrHi len 00 FA FA data[len]
 | Address | Length | Meaning |
 | --- | --- | --- |
 | `0x002c` | 1 | active profile, 0-4 |
-| `0x0032` | 6 | `[1000/Hz, 00, 02, 00, 02, 00]`; only byte 0 changes with the rate |
-| `0x0038` | 4 | `02 00 02 00`, constant across every RDCfg change tried |
+| `0x0032` | 6 | `[1000/Hz, 00, ...]` per profile: profile p's code is at `0x32 + 2p` (RDCfg's `SendPollRate` writes all five; see `redragon-m724-testing.md`). The captures changed profile 1's rate only |
+| `0x0038` | 4 | polling codes of profiles 4-5 (`02 00 02 00` = 500 Hz) |
 | `0x003c` | 1 | enabled-stage mask (`0x1f`) |
 | base `+0` | 1 | active DPI stage, 0-4 (the DPI button moves it) |
 | base `+2+6n` | 5 | stage `n`: `[enabled, x, xRange, y, yRange]` |
@@ -102,8 +102,8 @@ writes it immediately, **outside** any `F5` bracket:
 02 F1 02 04 / 01 / 02 / 08 / 10
 ```
 
-DPI stages, the active stage, and button maps are per profile; polling and
-lighting are global. `setProfile` replays that sequence byte for byte.
+DPI stages, the active stage, button maps, and polling are per profile;
+lighting is global. `setProfile` replays that sequence byte for byte.
 
 ## Lighting
 

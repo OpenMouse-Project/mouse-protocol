@@ -262,7 +262,6 @@ export const FATER_HID_FILTERS: HIDDeviceFilter[] = [...FATER_PRODUCT_IDS].map((
   usage: FATER_CONFIG_USAGE,
 }));
 
-/** Holtek config collection measured on the M724 K1NG 1K (usbmon + usbhid-dump). */
 /**
  * Redragon M690 PRO (SinoWealth): cable and 2.4 GHz receiver, both exposing
  * the vendor collection with feature reports 5 and 8 on USB interface 1.
@@ -274,6 +273,7 @@ export const REDRAGON_M690_PRO_HID_FILTERS: HIDDeviceFilter[] = REDRAGON_M690_PR
   usage: REDRAGON_M690_PRO_USAGE,
 }));
 
+/** Holtek config collection `0xFFA0:0x01` on USB interface 2 of the M724 and M612. */
 export const REDRAGON_HID_FILTERS: HIDDeviceFilter[] = [...REDRAGON_PRODUCT_IDS].map((productId) => ({
   vendorId: REDRAGON_VENDOR_ID,
   productId,
