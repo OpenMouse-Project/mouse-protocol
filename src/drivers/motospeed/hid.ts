@@ -405,7 +405,7 @@ export class MotospeedHidClient {
       );
       if (length === 60) {
         data = data.slice(0, 60);
-      } else if (length !== 0) {
+      } else if (length !== 0 && length !== 63) {
         throw new Error(
           `Unsupported Motospeed settings report payload length ${length}.`,
         );
