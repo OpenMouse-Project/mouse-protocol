@@ -881,34 +881,42 @@ see the hardware read in "The mapping depends on the sensor" below.
 
 ### The mapping depends on the sensor
 
-Both readings above were right, for different sensors. The vendor
-configurator's profile apply path, as ported byte-for-byte in
-[oexi/incott-driver-desktop](https://github.com/oexi/incott-driver-desktop)
-(`src/protocol/device.js`, MIT; its tests diff every report against the
-vendor's original JavaScript), remaps lift-off only for the PAW3950:
+The firmware encoding is the same on both sensors; only the steps offered
+differ. The PAW3395 has no 0.7 mm:
 
 | On screen | PAW3950 wire | PAW3395 wire |
 | --- | --- | --- |
 | 0.7 mm | `2` | not offered |
-| 1 mm | `0` | `1` |
-| 2 mm | `1` | `2` |
+| 1 mm | `0` | `0` |
+| 2 mm | `1` | `1` |
 
-For the PAW3395 the profile value goes out unchanged and `lodOptions` offers
-only 1 mm and 2 mm, which is what `lodUI`/`lodHW` describe when read as a
-pair.
+The PAW3395 column comes from
+[oexi/incott-driver-desktop@f31980b](https://github.com/oexi/incott-driver-desktop/commit/f31980b)
+("Fix LOD mapping on PAW3395 mice", 2026-11-03, MIT). Its author reports that
+the official Windows desktop driver (Gaming Mouse Driver) sends 1 mm as `0`
+and 2 mm as `1`. The vendor's WebHID configurator, as ported byte-for-byte in
+that project (`src/protocol/device.js`), remaps lift-off only for the PAW3950
+and sends the PAW3395 profile value unchanged (1 mm as `1`, 2 mm as `2`): one
+step off. That off-by-one path is what `lodUI`/`lodHW` describe when read as a
+pair. In [oexi/incott-driver-desktop#7](https://github.com/oexi/incott-driver-desktop/issues/7)
+a G23 owner reports that lift-off changes made through the web-driver mapping
+have no measurable effect, wired or on the 2.4 GHz receiver, while the official
+desktop driver changes the height. As of 2026-11-03 the reporter has not yet
+confirmed the fixed build, and no identity reply was posted.
 
-The PAW3950 column is now read point by point on hardware (2026-10-30, a G23
+The PAW3950 column is read point by point on hardware (2026-10-30, a G23
 Pro on the 8K dongle, `captures/incott-lift-off/`): each step was set with
 the vendor port, the port was closed, and the OpenMouse hardware test read
 `0x84`/`0x01` back as `2` for 0.7 mm, `0` for 1 mm and `1` for 2 mm.
 
-Until this change the driver applied the PAW3950 table to every unit, so on a
-PAW3395 (non-Pro) mouse it showed 2 mm as "Low" (0.7 mm), 1 mm as "High", and
-writing "Low" set 2 mm. `incottDecodeLiftOffDirect`, `incottDecodeLiftOff` and
-`incottEncodeSetLiftOff` now take the identity reply's `sensorId`, and the
-driver offers only Medium/High on a PAW3395. An unreadable identity keeps the
-PAW3950 table. The PAW3395 column has not been read on hardware: every unit
-tested here is a PAW3950.
+Until this change the driver offered 0.7 mm (wire `2`) on every unit,
+including a PAW3395, where that step does not exist. `incottDecodeLiftOffDirect`,
+`incottDecodeLiftOff` and `incottEncodeSetLiftOff` now take the identity
+reply's `sensorId`, and the driver offers only Medium/High on a PAW3395, where
+wire `2` decodes to no value. An unreadable identity keeps the PAW3950 table.
+The PAW3395 column has not been read on hardware by us: every unit tested
+here is a PAW3950. An owner of a non-Pro G23, G23V2 SE or Ghero could confirm
+it the same way.
 
 ## Model identification: SOLVED 2026-09-10 — it is `0x8F`
 

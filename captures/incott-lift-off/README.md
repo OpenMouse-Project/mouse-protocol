@@ -18,4 +18,6 @@ the files are its exports, unmodified. No serial string is exposed.
 | `lift-off-2mm-wireless.json` | 2 mm | `09 84 01 01 ...` | `1` |
 
 This reads all three PAW3950 points individually; the 2026-09-08 session had
-read only 0.7 mm. No PAW3395 unit has been read.
+read only 0.7 mm. No PAW3395 unit has been read here; the PAW3395 table
+(0 = 1 mm, 1 = 2 mm) follows oexi/incott-driver-desktop@f31980b and
+oexi/incott-driver-desktop#7, see `docs/incott-testing.md`.

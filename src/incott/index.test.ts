@@ -659,11 +659,12 @@ test("lift-off decodes through the sensor's own table", () => {
   assert.equal(incottDecodeLiftOffDirect(reply(2)), 7);
   assert.equal(incottDecodeLiftOffDirect(reply(2), INCOTT_SENSOR_PAW3950), 7);
   assert.equal(incottDecodeLiftOffDirect(reply(0), INCOTT_SENSOR_PAW3950), 10);
-  // PAW3395: the wire value is the millimetre step, and 0 is not offered.
-  assert.equal(incottDecodeLiftOffDirect(reply(1), INCOTT_SENSOR_PAW3395), 10);
-  assert.equal(incottDecodeLiftOffDirect(reply(2), INCOTT_SENSOR_PAW3395), 20);
-  assert.equal(incottDecodeLiftOffDirect(reply(0), INCOTT_SENSOR_PAW3395), null);
-  assert.deepEqual([...incottEncodeSetLiftOff(10, INCOTT_SENSOR_PAW3395)].slice(0, 3), [0x04, 0x01, 0x01]);
+  // PAW3395: same encoding without 0.7 mm, so wire 2 is not offered.
+  assert.equal(incottDecodeLiftOffDirect(reply(0), INCOTT_SENSOR_PAW3395), 10);
+  assert.equal(incottDecodeLiftOffDirect(reply(1), INCOTT_SENSOR_PAW3395), 20);
+  assert.equal(incottDecodeLiftOffDirect(reply(2), INCOTT_SENSOR_PAW3395), null);
+  assert.deepEqual([...incottEncodeSetLiftOff(10, INCOTT_SENSOR_PAW3395)].slice(0, 3), [0x04, 0x01, 0x00]);
+  assert.deepEqual([...incottEncodeSetLiftOff(20, INCOTT_SENSOR_PAW3395)].slice(0, 3), [0x04, 0x01, 0x01]);
   assert.throws(() => incottEncodeSetLiftOff(7, INCOTT_SENSOR_PAW3395), RangeError);
 });
 

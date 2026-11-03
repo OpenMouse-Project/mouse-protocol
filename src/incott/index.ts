@@ -800,21 +800,24 @@ export const INCOTT_LOD_WIRE_TO_TENTHS: Readonly<Record<number, number>> = { 0: 
 export const INCOTT_LOD_TENTHS_TO_WIRE: Readonly<Record<number, number>> = { 10: 0, 20: 1, 7: 2 };
 
 /**
- * The table above is the PAW3950's. The vendor configurator only remaps
- * lift-off for that sensor: its profile apply path (as ported byte-for-byte
- * in oexi/incott-driver-desktop `src/protocol/device.js`, MIT) sends 0.7 mm
- * as 2, 1 mm as 0 and 2 mm as 1 when the sensor is the PAW3950, and the
- * profile value unchanged otherwise. For a PAW3395 it offers only 1 mm and
- * 2 mm (`lodOptions`), so the wire value IS the millimetre step: 1 = 1 mm,
- * 2 = 2 mm, and 0.7 mm does not exist. That is also why `lodUI`/`lodHW`
- * read as a straight pairing: they describe the PAW3395 path.
+ * The table above is the PAW3950's. The PAW3395 uses the same firmware
+ * encoding without 0.7 mm: 0 = 1 mm, 1 = 2 mm. Source:
+ * oexi/incott-driver-desktop commit f31980b ("Fix LOD mapping on PAW3395
+ * mice", 2026-11-03), which reports that the official Windows desktop driver
+ * (Gaming Mouse Driver) sends 1 mm as 0 and 2 mm as 1 on both sensors. The
+ * vendor's WebHID configurator remaps only for the PAW3950 and sends the
+ * PAW3395 profile value unchanged (1 mm as 1, 2 mm as 2), one step off; a
+ * G23 owner reports in oexi/incott-driver-desktop#7 that lift-off changes
+ * through that mapping have no effect but work in the desktop driver. That
+ * off-by-one path is what `lodUI`/`lodHW` describe when read as a pair.
  *
- * Not yet read on PAW3395 hardware; every unit tested here is a PAW3950. The
+ * Not yet read on PAW3395 hardware by us; every unit tested here is a
+ * PAW3950. Wire 2 is not offered on a PAW3395 and decodes to null. The
  * PAW3950 table was read point by point on 2026-10-30 (wire 2/0/1 for
  * 0.7/1/2 mm, captures/incott-lift-off/).
  */
-export const INCOTT_LOD_WIRE_TO_TENTHS_PAW3395: Readonly<Record<number, number>> = { 1: 10, 2: 20 };
-export const INCOTT_LOD_TENTHS_TO_WIRE_PAW3395: Readonly<Record<number, number>> = { 10: 1, 20: 2 };
+export const INCOTT_LOD_WIRE_TO_TENTHS_PAW3395: Readonly<Record<number, number>> = { 0: 10, 1: 20 };
+export const INCOTT_LOD_TENTHS_TO_WIRE_PAW3395: Readonly<Record<number, number>> = { 10: 0, 20: 1 };
 
 /**
  * Lift-off steps (tenths of a millimetre) the fitted sensor offers. An
