@@ -1,0 +1,122 @@
+[
+ {
+  "t": 16134,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "f9 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16142,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a f9 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 16145,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 f9 c8 c7 ea bf df fa fa ff ff c6 fe c6 ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16147,
+  "kind": "feature-out",
+  "reportId": "0x12",
+  "hex": "98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16151,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a 98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 16156,
+  "kind": "feature-in",
+  "reportId": "0x12",
+  "hex": "12 98 ff df df ff df fc df fc bf f9 7f f3 ff e6 6f 9a fe 7e ff fd ff ff ff ff ef ff ff ff df ff ff ff cf ff ff ff bf ff ff ff af ff ff ff ff ff ff ff ff ff 7f df fc df fc bf f9 7f f3 ff e6 6f 9a"
+ },
+ {
+  "t": 16157,
+  "kind": "feature-out",
+  "reportId": "0x12",
+  "hex": "97 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16162,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a 97 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 16167,
+  "kind": "feature-in",
+  "reportId": "0x12",
+  "hex": "12 97 ff af 8d 90 99 96 93 9a df ce ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16167,
+  "kind": "feature-out",
+  "reportId": "0x12",
+  "hex": "97 fe ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16172,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a 97 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 16177,
+  "kind": "feature-in",
+  "reportId": "0x12",
+  "hex": "12 97 fe 16 44 67 17 51 5b 19 62 40 17 42 42 cd ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16178,
+  "kind": "feature-out",
+  "reportId": "0x12",
+  "hex": "97 fd ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16182,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a 97 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 16187,
+  "kind": "feature-in",
+  "reportId": "0x12",
+  "hex": "12 97 fd 16 44 67 17 51 5b 19 62 40 17 42 42 cc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16196,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16200,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 16204,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fb f7 ca d1 cc cd d1 ca d1 cf ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 16496,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1d ff fe fe c6 ff fd fe d8 b3 c8 df af 8d 90 d4 ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 17856,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1d ff fe fe c5 ff fd fe d8 b3 c8 df af 8d 90 d4 ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ }
+]

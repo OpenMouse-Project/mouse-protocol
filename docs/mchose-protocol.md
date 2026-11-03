@@ -221,9 +221,91 @@ used directly when the mouse is on a cable:
 | A7 V2 Pro+ | `0x4023` | 26000 | 1 mm, 2 mm |
 | A7 V2 Ultra | `0x4019` | 42000 | 0.7 mm, 1 mm, 2 mm |
 | A7 V2 Ultra+ | `0x4021` | 42000 | 0.7 mm, 1 mm, 2 mm |
+| L7 Pro+ | `0x4015` | 26000 | 1 mm, 2 mm (indices 1 and 2) |
 
 MCHOSE's own firmware-version table cross-checks this: the Ultra reports
 `5.44.2.4` and the Ultra+ `5.46.2.4`. The test hardware reported `5.46.2.4`.
+
+### Receivers under VID `0x5253`
+
+`0x5253` (manufacturer string "RealTek") is MCHOSE's older vendor id. Some
+**A7 Ultra** units enumerate under it as `5253:1020`, product string "MCHOSE A7
+Ultra". The interface is identical to the A7 V2's — same five collections, same
+report ids and sizes, byte-identical `0xff01` report descriptor — and it speaks
+the same inverted feature-report protocol. `0x1011` is the same mouse on its
+cable, per a user report, and is taken to be its mouse id because a cable link
+enumerates as the mouse itself; it has not been exercised here.
+
+The **L7 Pro** uses the same `5253:1020` receiver and reports mouse id `0x00b0`
+in `0x06`, with 26000 DPI, lift-off 1 mm / 2 mm and 8K on the receiver
+([alexfrih/mchose-linux](https://github.com/alexfrih/mchose-linux/blob/main/PROTOCOL.md),
+verified on that hardware and cross-checked against M HUB's model table).
+
+Observed on an 8K receiver (macOS, `node-hid`):
+
+- `0x11 0x03` answers `01 53 52 20 10 01 00` — bonded, the receiver's own ids,
+  connected.
+- `0x11 0x04` and `0x11 0x06` echo the command but every payload byte is zero,
+  across 60 polls with the mouse awake. There is therefore no battery, firmware
+  string or mouse PID, and the model is identified by the product string. On
+  this vendor id the driver stops sending a command once a full poll has come
+  back as nothing but empty echoes, so later status reads skip the 3.6 s these
+  two would otherwise cost. `0x3837` receivers keep the full poll, because
+  their RF replies are empty until the mouse answers.
+- `0x12 0x67` returns a plausible config:
+  `00 31 31 01 20 03 80 0c 40 06 80 0c 00 19 10 a4 02 81 08 03` — 2000 Hz on
+  both links, stage 1 of 800/3200/1600/3200/6400/42000, two stages, 8 ms
+  debounce, 3 min sleep.
+- A `0x57` write of the wireless byte `0x31 → 0x21` read back as 1000 Hz with
+  no other byte of the 63 changed, and writing `0x31` back restored a
+  byte-identical config.
+
+Because other MCHOSE product lines share `0x5253`, the picker filter and the
+driver match it only together with these two PIDs.
+
+## L7 Pro+
+
+Mouse id `0x4015`, read from the `0x06` reply of mouse firmware 5.32.5.0 (2.4 GHz
+dongle firmware 5.7.6.0, from `0x11 0x04 0xaa`). The captures are in
+`captures/mchose-l7-pro-plus/`, taken from MCHOSE's web driver over the cable
+(`00`-`15`) and the dongle (`16`-`26`). The profile 1 name was
+replaced with `Profile 1`; nothing else in them is personal.
+
+The read layouts are the A7 V2's, so the existing driver reads it. The
+differences found so far:
+
+- **Lift-off indices are 1 and 2**, not 0 and 1. `sensor` reads `0x81` at 1 mm
+  and `0x82` at 2 mm. Index 0 was never seen, so it is not offered
+  (`liftOffIndexBase`).
+- The dongle enumerates as `5253:1020`, the receiver described above. Unlike
+  the A7 Ultra's, it answers `0x04` and `0x06`, so the model is identified by
+  mouse id `0x4015`. The cable enumerates as `3837:4015`, the mouse's own id.
+- Profile names from `0x12 0x68` are UTF-8. The factory names for profiles 2 and
+  3 are Chinese (`默认板载2`, `默认板载3`) and are shown as `Default onboard 2`
+  and `Default onboard 3`.
+
+The vendor driver wrote settings with commands the A7 V2 notes list as
+unsolicited-only. All were acked with an input report `e5 <command>` and read
+back from `0x67`:
+
+| Report | Command | Payload |
+| --- | --- | --- |
+| `0x11` | `0x41 <wired> <wireless>` | polling index (2 = 1000 Hz ... 5 = 8000 Hz), `0` = unchanged |
+| `0x11` | `0x42 <lift-off> ... <mode>` | lift-off 1 or 2 (mm); mode in byte 7: 1 performance, 2 eSports, 3 ultra |
+| `0x11` | `0x43 <ms>` | debounce, 0-8 observed |
+| `0x12` | `0x40 <stage> <stage> 0 <6 x u16> <count> 0xff <6 x u16>` | DPI slots, stage count and active stage |
+| `0x11` | `0x58 <index>` | active profile |
+
+The driver does not send these. Its lift-off write (`0x42`) is byte-identical
+to the vendor's, and its other writes use the `0x57` config echo and `0x58`,
+which the vendor driver never sent to this mouse. The vendor's `0x11` requests
+are 20 bytes and the driver pads them to 64; the mouse accepts both.
+
+Verified on an L7 Pro+ through this driver, over the cable and the 2.4 GHz
+dongle: reading everything above, and writing polling rate, DPI, lift-off and
+motion sync, each reading back correctly with no retries. Not exercised:
+debounce, profile switching, performance mode, sleep, angle tuning, ripple
+control, angle snapping and button mapping. Lift-off index 0 was never seen.
 
 ## Dead ends, so the next person can skip them
 
