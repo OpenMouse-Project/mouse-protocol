@@ -4,8 +4,9 @@ Every mouse OpenMouse recognizes, with the settings each driver exposes.
 "R/W" = readable and writable; "R" = decoded into status, no writer yet.
 "Vendor-only" lists what the official web driver (mouse.xyz,
 `Config/env-models.json` AppVer 1.0.0.50) has and OpenMouse does not (yet).
-VID is 0x33e4 throughout. Only the HTX Ultra pair and the HTX Mini 8K
-receiver are hardware-verified; everything else is recognition-grade.
+VID is 0x33e4 throughout. Only the HTX Ultra pair, the HTX Mini 8K
+receiver and the Fenrir pair (0x3508 / 0x3517) are hardware-verified; everything
+else is recognition-grade.
 
 ## XVI:0 platform — GWolvesHidClient (`gwolves/hid`)
 
@@ -37,7 +38,8 @@ Polling caps: 8000 Hz wired and wireless (shared 3854 receiver).
 
 Base: battery, firmware version, DPI stages (50–26,000), polling
 (wired 1 kHz max; wireless by dongle — 8K: 8000, 4K: 4000, 1K: 1000),
-lift-off (Low/High only), sleep 30–600 s, debounce 0–80 ms, motion sync,
+lift-off (Low/High = 1/2 mm; the 30,000 DPI models add 0.7 mm, so
+Low/Medium/High = 0.7/1/2 mm), sleep 30–600 s, debounce 0–80 ms, motion sync,
 angle snapping, button mapping (5 buttons; HTS Plus / HTX / ACE models
 expose a 6th DPI slot on the vendor page that this driver does not map
 yet). No ripple control on any XVI model (matches the vendor page).
@@ -51,7 +53,7 @@ yet). No ripple control on any XVI model (matches the vendor page).
 | HTS Ultra | 0x5308 / 0x5317 | 30,000 | 1000 wired / 8000 on 8K dongle | recognition-grade |
 | HTR | 0x7704 / 0x7713 | 26,000 | 1000 wired / 8000 on 8K dongle | recognition-grade |
 | HTR Pro | 0x7708 / 0x7717 | 26,000 | 1000 wired / 8000 on 8K dongle | recognition-grade |
-| Fenrir | 0x3508 / 0x3517 | 30,000 | 1000 wired / 8000 on 8K dongle | recognition-grade |
+| Fenrir | 0x3508 / 0x3517 | 30,000 | 1000 wired / 8000 on 8K dongle | verified (wired + 0x3517 receiver, firmware 1.0.39.0; sold as Fenrir Asym) |
 | HT-S2 Pro | 0x7908 / 0x7917 | 30,000 | 1000 wired / 8000 on 8K dongle | recognition-grade |
 | HSK Pro | 0x5808 / 0x5817 (+ 4K 0x5807) | 26,000 | 1000 wired / 8000 / 4000 on 4K | recognition-grade |
 | HTS Plus | 0x5408 / 0x5417 (+ 4K 0x5407) | 26,000 | 1000 wired / 8000 / 4000 on 4K | recognition-grade |

@@ -39,9 +39,10 @@ const SENDS = 5;
 const POLLING_CODES: ReadonlyMap<number, number> = new Map([
   [125, 8], [250, 4], [500, 2], [1000, 1], [2000, 32], [4000, 64], [8000, 128],
 ]);
-// ponytail: every XVI model gets the PAW3395 limits (50-26,000 DPI, 1/2 mm
-// lift-off). The 30,000 DPI models (VUK, Fenrir, Fenir Max, HTS Ultra, HT-S2
-// Pro) also offer 0.7 mm; add per-product limits when one of them is tested.
+// ponytail: every XVI model gets the PAW3395 DPI limit (50-26,000). The
+// 30,000 DPI models (VUK, Fenrir, Fenir Max, HTS Ultra, HT-S2 Pro) also offer
+// a 0.7 mm lift-off (`shortLiftOff`), which the web driver writes as
+// mm * 10 when below 1 mm: 0.7 mm is 7, 1 mm is 1, 2 mm is 2.
 const DPI_STEP = 50;
 const DPI_MAX = 26_000;
 // The web driver's sleep slider, in seconds; the mouse reports "never" as
@@ -121,6 +122,12 @@ export class GWolvesXviHidClient {
     return values;
   }
 
+  private get liftOffCodes(): ReadonlyMap<NonNullable<MouseStatus["liftOffDistance"]>, number> {
+    return this.product.shortLiftOff
+      ? new Map([["Low", 7], ["Medium", 1], ["High", 2]])
+      : new Map([["Low", 1], ["High", 2]]);
+  }
+
   private get supportedPollingRates(): number[] {
     // Wired and the ACE models' 1K receivers (PIDs ending 0x03) stop at 1 kHz;
     // the 4K dongles (PIDs ending 0x07, the _4KDongle entries in
@@ -174,7 +181,7 @@ export class GWolvesXviHidClient {
       rippleControl: null,
       performanceMode: null,
       liftOffDistance,
-      supportedLiftOffDistances: ["Low", "High"],
+      supportedLiftOffDistances: [...this.liftOffCodes.keys()],
       firmware: [`Mouse ${firmware.slice(6, 10).join(".")}`],
       ...(buttons ? { buttonMappings: this.decodeButtons(buttons), buttonOptions: [...BUTTON_ACTIONS.keys()] } : {}),
       ui: {
@@ -212,8 +219,9 @@ export class GWolvesXviHidClient {
   }
 
   async setLiftOffDistance(value: NonNullable<MouseStatus["liftOffDistance"]>): Promise<NonNullable<MouseStatus["liftOffDistance"]>> {
-    if (value === "Medium") throw new Error(`The ${this.product.model} offers only the 1 mm and 2 mm lift-off distances.`);
-    await this.transact(gwolvesXviLegacy(1, 0x06, this.isWirelessPath(), [value === "Low" ? 1 : 2]));
+    const code = this.liftOffCodes.get(value);
+    if (code === undefined) throw new Error(`The ${this.product.model} offers only the 1 mm and 2 mm lift-off distances.`);
+    await this.transact(gwolvesXviLegacy(1, 0x06, this.isWirelessPath(), [code]));
     const confirmed = await this.readLiftOffDistance();
     if (confirmed !== value) throw new Error(`The ${this.product.model} kept ${confirmed ?? "an unknown"} LOD instead of ${value}.`);
     return confirmed;
@@ -320,7 +328,7 @@ export class GWolvesXviHidClient {
 
   private async readLiftOffDistance(): Promise<MouseStatus["liftOffDistance"]> {
     const raw = (await this.transact(gwolvesXviLegacy(1, 0x86, this.isWirelessPath())))[4];
-    return raw === 1 ? "Low" : raw === 2 ? "High" : null;
+    return [...this.liftOffCodes].find(([, code]) => code === raw)?.[0] ?? null;
   }
 
   private async readDpiStages(): Promise<{ stages: Array<[number, number]>; active: number }> {
