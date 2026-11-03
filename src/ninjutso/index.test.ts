@@ -31,6 +31,20 @@ test("matches replies by command and extracts the value bytes", () => {
   assert.equal(ninjutsoResponseValue(reply, 17), null);
 });
 
+test("reads replies whose report id was stripped by the host", () => {
+  const stripped = Uint8Array.from([0xa7, 0, 0, 0, 0, 2, 0, 0x10, 0xe0, 0, 0, 0, 0, 0]);
+  assert.deepEqual([...ninjutsoResponseValue(stripped, 0xa7)!].slice(0, 2), [0x10, 0xe0]);
+  assert.equal(ninjutsoResponseValue(stripped, 0x12), null);
+});
+
+test("does not mistake a busy reply for a stripped polling-rate reply", () => {
+  const busy = new Uint8Array(16);
+  busy[0] = 6;
+  assert.equal(ninjutsoResponseValue(busy, 6), null);
+  const stripped = Uint8Array.from([6, 0, 0, 0, 0, 1, 0, 4, 6, 0, 0, 0, 0, 0, 0]);
+  assert.deepEqual([...ninjutsoResponseValue(stripped, 6)!].slice(0, 1), [4]);
+});
+
 test("converts current and legacy DPI encodings", () => {
   assert.deepEqual(ninjutsoEncodeDpi(1600, false), [31, 0, 0]);
   assert.equal(ninjutsoDecodeDpi(31, 0, 0, false), 1600);
