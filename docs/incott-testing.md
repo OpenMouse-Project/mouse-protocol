@@ -814,17 +814,6 @@ exactly the stale-frame bug this queue exists to prevent.
 Per the "record what didn't work" principle, these are open questions no
 capture session has resolved. **Do not resolve these by guessing.**
 
-- **Lift-off hw -> millimetre label mapping — needs a hardware check.** The
-  hw values 0/1/2 round-trip cleanly (confirmed 2026-09-08, see above), but
-  which physical distance each means is unknown. IncottHIDApp claims hardware
-  `0` = 1 mm, `1` = 2 mm, `2` = 0.7 mm (`INCOTT_LOD_WIRE_TO_TENTHS` in
-  `src/incott/index.ts`). The vendor's own device definition
-  (`js/gvarG23-v102.js`) instead pairs `lodUI = [0.7, 1, 2]` with
-  `lodHW = [0, 1, 2]`, i.e. hardware `0` = 0.7 mm — a different mapping.
-  Neither capture session recorded which on-screen label was selected for a
-  given write. **Left unchanged pending a hardware check**: set 0.7 mm in the
-  vendor tool, then read `0x84`/`0x01` (or the packed form) and see which
-  value comes back.
 - **The remaining `0x8f` identity bytes.** Bytes 2-6 are decoded (model,
   receiver, sensor — see the model-identification section at the end of this
   document). Bytes 7-8 (`00 ff` on this device) are still unknown; a firmware
@@ -832,6 +821,10 @@ capture session has resolved. **Do not resolve these by guessing.**
   Zero 29 only, the vendor reads the shell colour from this area (see "Shell
   colour: Zero 29 only" below).
 Resolved since this list was written (kept for the record):
+
+- ~~**Lift-off hw -> millimetre label mapping.**~~ Settled on a PAW3950 on
+  2026-09-08 (hardware `2` = 0.7 mm), and per sensor since: see "Lift-off
+  distance mapping" below.
 
 - ~~**DPI per-axis read.**~~ It exists: `09 82 <stage> <axis>`, echoed at
   reply byte 8. The earlier probe saw one value for all three axes because X
@@ -884,10 +877,48 @@ The device contradicts that, so the arrays are not a paired lookup. Recording it
 because it is exactly the kind of plausible-but-wrong inference worth warning the
 next contributor about.
 
-Only the 0.7 mm point was read back directly. Hardware `0` and `1` are 1 mm and
-2 mm in that order; the mapping is a bijection over {0,1,2} and the one claim that
-was testable proved correct, but neither of those two values has been read
-individually.
+That session read only the 0.7 mm point; hardware `0` and `1` (1 mm and 2 mm)
+followed from the bijection. All three points have since been read individually,
+see the hardware read in "The mapping depends on the sensor" below.
+
+### The mapping depends on the sensor
+
+The firmware encoding is the same on both sensors; only the steps offered
+differ. The PAW3395 has no 0.7 mm:
+
+| On screen | PAW3950 wire | PAW3395 wire |
+| --- | --- | --- |
+| 0.7 mm | `2` | not offered |
+| 1 mm | `0` | `0` |
+| 2 mm | `1` | `1` |
+
+The PAW3395 column comes from
+[oexi/incott-driver-desktop@f31980b](https://github.com/oexi/incott-driver-desktop/commit/f31980b)
+("Fix LOD mapping on PAW3395 mice", 2026-11-03, MIT). Its author reports that
+the official Windows desktop driver (Gaming Mouse Driver) sends 1 mm as `0`
+and 2 mm as `1`. The vendor's WebHID configurator, as ported byte-for-byte in
+that project (`src/protocol/device.js`), remaps lift-off only for the PAW3950
+and sends the PAW3395 profile value unchanged (1 mm as `1`, 2 mm as `2`): one
+step off. That off-by-one path is what `lodUI`/`lodHW` describe when read as a
+pair. In [oexi/incott-driver-desktop#7](https://github.com/oexi/incott-driver-desktop/issues/7)
+a G23 owner reports that lift-off changes made through the web-driver mapping
+have no measurable effect, wired or on the 2.4 GHz receiver, while the official
+desktop driver changes the height. As of 2026-11-03 the reporter has not yet
+confirmed the fixed build, and no identity reply was posted.
+
+The PAW3950 column is read point by point on hardware (2026-10-30, a G23
+Pro on the 8K dongle, `captures/incott-lift-off/`): each step was set with
+the vendor port, the port was closed, and the OpenMouse hardware test read
+`0x84`/`0x01` back as `2` for 0.7 mm, `0` for 1 mm and `1` for 2 mm.
+
+Until this change the driver offered 0.7 mm (wire `2`) on every unit,
+including a PAW3395, where that step does not exist. `incottDecodeLiftOffDirect`,
+`incottDecodeLiftOff` and `incottEncodeSetLiftOff` now take the identity
+reply's `sensorId`, and the driver offers only Medium/High on a PAW3395, where
+wire `2` decodes to no value. An unreadable identity keeps the PAW3950 table.
+The PAW3395 column has not been read on hardware by us: every unit tested
+here is a PAW3950. An owner of a non-Pro G23, G23V2 SE or Ghero could confirm
+it the same way.
 
 ## Model identification: SOLVED 2026-09-10 — it is `0x8F`
 

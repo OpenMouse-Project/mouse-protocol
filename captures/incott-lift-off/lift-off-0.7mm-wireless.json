@@ -1,0 +1,1706 @@
+{
+  "app": {
+    "build": "BETA · v2.0.828",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+  },
+  "driver": {
+    "brand": "Incott",
+    "family": "incott",
+    "readOk": true,
+    "description": "incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff05:1 feat[0x9])"
+  },
+  "webhid": {
+    "productName": "incott 8K wireless mouse",
+    "vendorId": "0x093A",
+    "productId": "0x522C",
+    "opened": true,
+    "collections": [
+      {
+        "usagePage": "0xFF05",
+        "usage": "0x0001",
+        "inputReports": [
+          "0x09"
+        ],
+        "outputReports": [
+          "0x09"
+        ],
+        "featureReports": [
+          "0x09"
+        ],
+        "children": []
+      }
+    ]
+  },
+  "status": {
+    "brand": "Incott",
+    "name": "G23 Pro",
+    "ui": {
+      "family": "incott",
+      "showAdvancedSection": true,
+      "hideSignalCard": true,
+      "defaultDisplayName": "G23 Pro",
+      "settingsReady": true,
+      "valuesVerified": true,
+      "forceShowBattery": true,
+      "hideUnsupportedPollingRates": true,
+      "pollingNote": "Up to 8,000 Hz wireless; 1,000 Hz over the cable.",
+      "dpiStageEditor": {
+        "maxStages": 6,
+        "countEditable": true,
+        "minDpi": 50,
+        "maxDpi": 45000,
+        "stepDpi": 50
+      }
+    },
+    "dpi": 1600,
+    "dpiY": 1600,
+    "supportsSeparateDpiAxes": true,
+    "incottReceiverLedMode": 1,
+    "incottFireKeyTimes": 3,
+    "incottFireKeyIntervalMs": 10,
+    "dpiStages": [
+      400,
+      800,
+      1600,
+      2400,
+      3200,
+      6400
+    ],
+    "activeDpiStage": 2,
+    "pollingRateHz": 8000,
+    "supportedPollingRates": [
+      125,
+      250,
+      500,
+      1000,
+      2000,
+      4000,
+      8000
+    ],
+    "activeProfile": null,
+    "connectionType": "Wireless",
+    "batteryPercent": 95,
+    "batteryState": "Discharging",
+    "liftOffDistance": "Low",
+    "supportedLiftOffDistances": [
+      "Low",
+      "Medium",
+      "High"
+    ],
+    "buttonMappings": {
+      "Left": "Left click",
+      "Right": "Right click",
+      "Middle": "Middle click",
+      "Forward": "Forward",
+      "Back": "Back",
+      "DPI": "DPI cycle"
+    },
+    "buttonOptions": [
+      "Left click",
+      "Right click",
+      "Middle click",
+      "Forward",
+      "Back",
+      "DPI cycle",
+      "DPI +",
+      "DPI -",
+      "Rapid fire",
+      "Profile switch",
+      "Media player",
+      "Play/Pause",
+      "Stop",
+      "Previous track",
+      "Next track",
+      "Volume up",
+      "Volume down",
+      "Mute",
+      "Email",
+      "Calculator",
+      "File explorer",
+      "Browser home",
+      "Browser refresh",
+      "Browser forward",
+      "Browser back",
+      "Browser search",
+      "Disabled",
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "M",
+      "N",
+      "O",
+      "P",
+      "Q",
+      "R",
+      "S",
+      "T",
+      "U",
+      "V",
+      "W",
+      "X",
+      "Y",
+      "Z",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "0",
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5",
+      "F6",
+      "F7",
+      "F8",
+      "F9",
+      "F10",
+      "F11",
+      "F12",
+      "Enter",
+      "Escape",
+      "Backspace",
+      "Tab",
+      "Space",
+      "Insert",
+      "Delete",
+      "Home",
+      "End",
+      "Page Up",
+      "Page Down",
+      "Up",
+      "Down",
+      "Left",
+      "Right",
+      "Caps Lock",
+      "Num Lock",
+      "Scroll Lock",
+      "Print Screen",
+      "Pause",
+      "Context Menu",
+      "Left Ctrl",
+      "Left Shift",
+      "Left Alt",
+      "Left Windows",
+      "Right Ctrl",
+      "Right Shift",
+      "Right Alt",
+      "Right Windows",
+      "Ctrl + A",
+      "Ctrl + C",
+      "Ctrl + V",
+      "Ctrl + X",
+      "Ctrl + Z",
+      "Ctrl + Y",
+      "Ctrl + S",
+      "Ctrl + O",
+      "Ctrl + N",
+      "Ctrl + T",
+      "Ctrl + W",
+      "Ctrl + F",
+      "Ctrl + Shift + Escape",
+      "Alt + Tab",
+      "Alt + F4",
+      "Alt + Left",
+      "Alt + Right",
+      "Win + D",
+      "Win + E",
+      "Win + L",
+      "Win + R",
+      "Win + S",
+      "Win + Tab"
+    ],
+    "motionSync": true,
+    "rippleControl": true,
+    "angleSnapping": true,
+    "debounceMs": 8,
+    "sleepTimeout": 30,
+    "powerMode": "HP",
+    "powerModes": [
+      "HP",
+      "Corded",
+      "LP"
+    ],
+    "firmware": [
+      "Identity 01 02 02 f0 f1 00 02"
+    ],
+    "pollingRateWirelessHz": 8000
+  },
+  "diagnostics": {
+    "lastCommand": "Read device status",
+    "lastError": null
+  },
+  "logStart": "2026-10-30T17:24:59.522Z",
+  "log": [
+    {
+      "at": 0,
+      "kind": "event",
+      "label": "Bridge connecting",
+      "detail": "{\"url\":\"ws://127.0.0.1:17846/v1/hid\"}",
+      "failed": false
+    },
+    {
+      "at": 0.051,
+      "kind": "event",
+      "label": "Bridge socket error",
+      "detail": "{\"phase\":\"connecting\"}",
+      "failed": true
+    },
+    {
+      "at": 0.396,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff05:1 feat[0x9]) · incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff00:1 feat[0x3] | usage 0xff01:1 feat[0x4] | usage 0xc:1 feat[none])",
+      "failed": false
+    },
+    {
+      "at": 0.91,
+      "kind": "event",
+      "label": "Read device status",
+      "detail": null,
+      "failed": false
+    },
+    {
+      "at": 0.913,
+      "kind": "event",
+      "label": "WebHID open: incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff05:1 feat[0x9])",
+      "detail": null,
+      "failed": false
+    },
+    {
+      "at": 0.913,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "A1 01 09 03 03 00 09 00 61",
+      "error": null
+    },
+    {
+      "at": 0.914,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "8F 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 0.969,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 8F 01 02 02 F0 F1 00 02",
+      "error": null
+    },
+    {
+      "at": 0.97,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 8F 01 02 02 F0 F0 F1 02",
+      "error": null
+    },
+    {
+      "at": 0.971,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "83 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.023,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 83 06 02 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.024,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 83 06 02 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.024,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.078,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.079,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.079,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.139,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.139,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.139,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.196,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.196,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.196,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.262,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.262,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.262,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.322,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.323,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.323,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.384,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.384,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 1.385,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 02 02 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.445,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.445,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.446,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "81 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.506,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 81 04 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.506,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 81 04 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.507,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "84 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.568,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 01 02 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.568,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 01 02 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.569,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "84 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.629,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 04 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.63,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 04 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.63,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "84 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.691,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 02 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.691,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 02 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.692,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "84 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.753,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 03 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.753,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 03 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.754,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "84 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.814,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 05 02 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.815,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 05 02 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.815,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "85 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.875,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 01 08 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.876,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 01 08 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.876,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "85 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.936,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 85 03 1E 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.937,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 03 1E 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 1.937,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "8F 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 1.998,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 8F 01 02 02 F0 F1 00 02",
+      "error": null
+    },
+    {
+      "at": 1.998,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 8F 01 02 02 F0 F0 F1 02",
+      "error": null
+    },
+    {
+      "at": 1.998,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "88 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 2.059,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 88 01 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 2.059,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 88 01 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 2.06,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "85 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 2.12,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 02 03 0A F1 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.12,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 02 03 0A F1 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.121,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "86 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 2.182,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 00 01 00 F0 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.182,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 00 01 00 F0 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.182,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "86 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 2.243,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 01 01 00 F1 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.244,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 01 01 00 F1 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.244,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "86 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 2.304,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 02 01 00 F2 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.305,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 02 01 00 F2 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.305,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "86 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 2.365,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 04 01 00 F4 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.365,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 04 01 00 F4 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.366,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "86 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 2.427,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 03 01 00 F3 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.427,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 03 01 00 F3 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.428,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "86 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 2.489,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 86 05 07 00 03 00 00 02",
+      "error": null
+    },
+    {
+      "at": 2.496,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff05:1 feat[0x9]) · incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff00:1 feat[0x3] | usage 0xff01:1 feat[0x4] | usage 0xc:1 feat[none])",
+      "failed": false
+    },
+    {
+      "at": 2.496,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff05:1 feat[0x9]) · incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff00:1 feat[0x3] | usage 0xff01:1 feat[0x4] | usage 0xc:1 feat[none])",
+      "failed": false
+    },
+    {
+      "at": 4.215,
+      "kind": "report",
+      "dir": "IN",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "5F 24 08 04 1F 1F 21 00  (32B)",
+      "error": null
+    },
+    {
+      "at": 5.126,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff05:1 feat[0x9]) · incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff00:1 feat[0x3] | usage 0xff01:1 feat[0x4] | usage 0xc:1 feat[none])",
+      "failed": false
+    },
+    {
+      "at": 7.504,
+      "kind": "event",
+      "label": "Background refresh",
+      "detail": null,
+      "failed": false
+    },
+    {
+      "at": 7.504,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 05 07 00 03 00 00 02",
+      "error": null
+    },
+    {
+      "at": 7.505,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "83 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 7.558,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 83 06 02 00 00 00 21 02",
+      "error": null
+    },
+    {
+      "at": 7.559,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 83 06 02 00 00 00 21 02",
+      "error": null
+    },
+    {
+      "at": 7.559,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 7.612,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.612,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 00 07 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.613,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 7.668,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.669,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 01 0F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.669,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 7.73,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.73,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 02 1F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.731,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 7.786,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.786,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 03 2F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.787,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 7.837,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.838,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 04 3F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.838,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 7.894,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.894,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 05 7F 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 7.895,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "82 02 02 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 7.946,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 7.947,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 82 02 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 7.948,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "81 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 7.998,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 81 04 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 7.999,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 81 04 1F 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 7.999,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "84 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.05,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 01 02 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.05,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 01 02 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.051,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "84 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.102,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 04 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.102,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 04 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.102,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "84 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.159,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 02 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.159,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 84 02 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.16,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "84 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.22,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 03 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.22,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 03 01 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.221,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "84 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.28,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 05 02 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.28,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 84 05 02 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.28,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "85 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.342,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 01 08 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.342,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 01 08 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.342,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "85 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.403,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 03 1E 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.403,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 03 1E 00 00 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.403,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "8F 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.465,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 8F 01 02 02 F0 F1 00 02",
+      "error": null
+    },
+    {
+      "at": 8.465,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 8F 01 02 02 F0 F0 F1 02",
+      "error": null
+    },
+    {
+      "at": 8.465,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "88 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.525,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "09 88 01 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 8.525,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 88 01 00 00 00 00 00  (9B)",
+      "error": null
+    },
+    {
+      "at": 8.526,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "85 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.587,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 02 03 0A F1 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.587,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 85 02 03 0A F1 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.587,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "86 00 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.639,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 00 01 00 F0 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.639,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 00 01 00 F0 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.639,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "86 01 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.694,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 01 01 00 F1 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.696,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 2,
+      "bytes": "09 86 01 01 00 F1 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.698,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "86 02 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.753,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 02 01 00 F2 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.753,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 02 01 00 F2 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.753,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 1,
+      "bytes": "86 04 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.805,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 04 01 00 F4 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.805,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 04 01 00 F4 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.805,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "86 03 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.856,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 03 01 00 F3 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.856,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 03 01 00 F3 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.857,
+      "kind": "report",
+      "dir": "SET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "86 05 00 00 00 00 00 00",
+      "error": null
+    },
+    {
+      "at": 8.911,
+      "kind": "report",
+      "dir": "GET",
+      "reportId": 9,
+      "ms": 0,
+      "bytes": "09 86 05 07 00 03 00 00 02",
+      "error": null
+    },
+    {
+      "at": 8.917,
+      "kind": "event",
+      "label": "WebHID authorized-device scan",
+      "detail": "incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff05:1 feat[0x9]) · incott 8K wireless mouse (VID 0x93a PID 0x522c; usage 0xff00:1 feat[0x3] | usage 0xff01:1 feat[0x4] | usage 0xc:1 feat[none])",
+      "failed": false
+    }
+  ]
+}
