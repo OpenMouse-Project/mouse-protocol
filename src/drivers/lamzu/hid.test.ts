@@ -525,3 +525,70 @@ test("the Inca 8K capture decodes into the settings the mouse was holding", asyn
   assert.equal(status.activeProfile, 1);
   assert.deepEqual(status.firmware, ["Mouse 0.18", "Dongle 0.18"]);
 });
+
+test("the shared Aurora 8K and 1K (nano) receivers are catalogued with their rate ladders", () => {
+  assert.equal(lamzuProduct(LAMZU_INCA_VENDOR_ID, 0x0001)?.model, "Aurora 8K Receiver");
+  assert.equal(lamzuProduct(LAMZU_INCA_VENDOR_ID, 0x0003)?.model, "Aurora 1K Receiver");
+  assert.deepEqual(LAMZU_INCA_PRODUCTS.get(0x0001)?.pollingRates, [500, 1000, 2000, 4000, 8000]);
+  assert.deepEqual(LAMZU_INCA_PRODUCTS.get(0x0003)?.pollingRates, [125, 250, 500, 1000]);
+  assert.equal(LAMZU_INCA_PRODUCTS.get(0x0001)?.wireless, true);
+  assert.equal(LAMZU_INCA_PRODUCTS.get(0x0003)?.wireless, true);
+});
+
+test("the Paro Aurora is recognised on the Aurora 8K receiver and discovers the paired mouse", async () => {
+  const receiver = fakeInca(0x0001, {
+    "0:0:129": [0x00, 0x00, 0x00, 0x13, 0x00, 0x37, 0xb0, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0],
+    "1:0:139": [0x02, 0x01, 0x37, 0xb0, 0x00, 0x07], // paired with Paro Aurora (0x0007)
+    "2:0:129": [0x00, 0x00, 0x00, 0x13, 0x00, 0x07],
+  });
+  assert.equal(LamzuHidClient.isSupported(receiver), true);
+  const client = new LamzuHidClient(receiver);
+  assert.equal(client.displayName(), "Lamzu Aurora 8K Receiver");
+
+  const status = await client.readStatus();
+  assert.equal(status.brand, "Lamzu");
+  assert.equal(status.name, "Lamzu Paro Aurora");
+  assert.equal(status.connectionType, "Wireless");
+  assert.equal(status.connectionDetail, "2.4 GHz receiver");
+  assert.deepEqual(status.supportedPollingRates, [500, 1000, 2000, 4000, 8000]);
+  assert.deepEqual(status.firmware, ["Mouse 0.19", "Dongle 0.19"]);
+  assert.equal(client.displayName(), "Lamzu Paro Aurora");
+});
+
+test("the Paro Aurora is recognised on the Aurora 1K (nano) receiver", async () => {
+  const receiver = fakeInca(0x0003, {
+    "0:0:129": [0x00, 0x00, 0x00, 0x13, 0x00, 0x37, 0xb0, 0x00, 0x03, 0, 0, 0, 0, 0, 0, 0],
+    "1:0:139": [0x02, 0x01, 0x37, 0xb0, 0x00, 0x07], // paired with Paro Aurora (0x0007)
+    "2:0:129": [0x00, 0x00, 0x00, 0x13, 0x00, 0x07],
+    "2:1:128": [0x01, 0x01],
+  });
+  assert.equal(LamzuHidClient.isSupported(receiver), true);
+  const client = new LamzuHidClient(receiver);
+  assert.equal(client.displayName(), "Lamzu Aurora 1K Receiver");
+
+  const status = await client.readStatus();
+  assert.equal(status.brand, "Lamzu");
+  assert.equal(status.name, "Lamzu Paro Aurora");
+  assert.equal(status.connectionType, "Wireless");
+  assert.equal(status.connectionDetail, "2.4 GHz receiver");
+  assert.equal(status.pollingRateHz, 1000);
+  assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
+  assert.equal(client.displayName(), "Lamzu Paro Aurora");
+});
+
+test("the Paro Aurora on dedicated 1K (nano) and 8K receivers read model and rates directly", async () => {
+  const nano = fakeInca(0x000d, { "2:1:128": [0x01, 0x01] });
+  assert.equal(LamzuHidClient.isSupported(nano), true);
+  const nanoStatus = await new LamzuHidClient(nano).readStatus();
+  assert.equal(nanoStatus.name, "Lamzu Paro Aurora");
+  assert.equal(nanoStatus.connectionType, "Wireless");
+  assert.deepEqual(nanoStatus.supportedPollingRates, [125, 250, 500, 1000]);
+
+  const eightK = fakeInca(0x000e);
+  assert.equal(LamzuHidClient.isSupported(eightK), true);
+  const eightKStatus = await new LamzuHidClient(eightK).readStatus();
+  assert.equal(eightKStatus.name, "Lamzu Paro Aurora");
+  assert.equal(eightKStatus.connectionType, "Wireless");
+  assert.deepEqual(eightKStatus.supportedPollingRates, [500, 1000, 2000, 4000, 8000]);
+});
+
