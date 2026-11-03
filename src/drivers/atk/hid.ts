@@ -45,7 +45,7 @@ import {
   atkUnpackDpiStage,
   atkUnpackDpiStageForSensor,
 } from "@openmouse/protocol/atk";
-import { type AtkProduct, ATK_COMPX_PRODUCT_IDS, ATK_PRODUCTS, atkCatalogDevice, atkCatalogSensorToSensor } from "./products.ts";
+import { type AtkProduct, ATK_COMPX_PRODUCT_IDS, ATK_PRODUCTS, atkCatalogDevice, atkCatalogSensorForCidMid, atkCatalogSensorToSensor } from "./products.ts";
 import type { AtkDeviceDescriptor, AtkDeviceFeatures } from "./device-catalog.generated.ts";
 import type { AtkSensor } from "@openmouse/protocol/atk";
 
@@ -1615,7 +1615,7 @@ export class AtkHidClient {
    */
   private sensorKey(): AtkSensor | null {
     if (this.product) return this.product.sensor;
-    return atkCatalogSensorToSensor(this.catalogEntry()?.sensor ?? null);
+    return atkCatalogSensorToSensor(this.catalogEntry()?.sensor ?? null) ?? atkCatalogSensorForCidMid(this.cidMid);
   }
 
   private usesSharedR1Transport(): boolean {
