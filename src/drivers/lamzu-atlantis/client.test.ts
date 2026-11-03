@@ -228,12 +228,29 @@ test("setters land in flash and read back through the device", async () => {
   await client.close();
 });
 
-test("the 4K receiver writes the receiver encoding of 1,000 Hz", async () => {
+test("the F510 receiver reads its captured 250 Hz field and offers the lower rates", async () => {
+  const device = new FakeAtlantis(0xf510);
+  // The F510 receiver (release 1.28) returned 04 51 at address 0 on hardware.
+  device.writeField(FLASH.reportRate, [0x04]);
+  const client = clientFor(device);
+  const status = await client.readStatus();
+  assert.equal(status.pollingRateHz, 250);
+  assert.ok(status.supportedPollingRates?.includes(status.pollingRateHz));
+  await client.close();
+});
+
+test("the F510 receiver uses CompX rate bytes and refuses the 8K byte", async () => {
   const device = new FakeAtlantis(0xf510);
   const client = clientFor(device);
   await client.readStatus();
-  assert.equal(await client.setPollingRate(1000), 1000);
-  assert.equal(device.flash[FLASH.reportRate], 0x10);
+  for (const [rate, raw] of [[125, 0x08], [250, 0x04], [500, 0x02], [1000, 0x01], [2000, 0x10], [4000, 0x20]] as const) {
+    assert.equal(await client.setPollingRate(rate), rate);
+    assert.equal(device.flash[FLASH.reportRate], raw);
+    assert.equal((await client.readStatus()).pollingRateHz, rate);
+  }
+  const sent = device.sent.length;
+  await assert.rejects(client.setPollingRate(8000), /does not support 8000 Hz/);
+  assert.equal(device.sent.length, sent);
   await client.close();
 });
 
