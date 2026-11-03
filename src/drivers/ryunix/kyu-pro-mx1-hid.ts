@@ -88,7 +88,10 @@ export class KyuProMx1Client {
       },
       batteryPercent: telemetry?.batteryPercent ?? null,
       batteryState: telemetry
-        ? telemetry.charging ? "Charging" : "Discharging"
+        // Status 2 is the cable at full charge; the decoder used to drop it.
+        ? telemetry.batteryStatusCode === 2
+          ? telemetry.batteryPercent === 100 ? "Full" : "Unknown"
+          : telemetry.charging ? "Charging" : "Discharging"
         : "Unknown",
       dpi: 0,
       pollingRateHz: telemetry?.pollingRateHz ?? 0,

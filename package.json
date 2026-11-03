@@ -206,6 +206,10 @@
       "types": "./dist/ryunix/index.d.ts",
       "import": "./dist/ryunix/index.js"
     },
+    "./amkette": {
+      "types": "./dist/amkette/index.d.ts",
+      "import": "./dist/amkette/index.js"
+    },
     "./rapoo": {
       "types": "./dist/rapoo/index.d.ts",
       "import": "./dist/rapoo/index.js"

@@ -97,6 +97,17 @@ test("Kyu Pro MX1 exposes observed telemetry without advertising writes", async 
   assert.equal("setPollingRate" in client, false);
 });
 
+test("Kyu Pro MX1 reports battery status 2 as full, not discharging", async () => {
+  const transport = fakeDevice();
+  const client = new KyuProMx1Client(transport.device);
+  await client.open();
+
+  transport.emit(RYUNIX_TELEMETRY_REPORT_ID, Uint8Array.of(1, 2, 0x01, 100, 2, 0x03));
+  assert.equal((await client.readStatus()).batteryState, "Full");
+  transport.emit(RYUNIX_TELEMETRY_REPORT_ID, Uint8Array.of(1, 2, 0x01, 90, 2, 0x03));
+  assert.equal((await client.readStatus()).batteryState, "Unknown");
+});
+
 test("Kyu Pro MX1 ignores malformed telemetry and detaches on close", async () => {
   const transport = fakeDevice();
   const client = new KyuProMx1Client(transport.device);

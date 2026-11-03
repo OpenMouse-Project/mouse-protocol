@@ -33,6 +33,7 @@ export * as valkyrie from "./valkyrie/index.js";
 export * as vaxee from "./vaxee/index.js";
 export * as incott from "./incott/index.js";
 export * as ryunix from "./ryunix/index.js";
+export * as amkette from "./amkette/index.js";
 export * as redragon from "./redragon/index.js";
 export * as delux from "./delux/index.js";
 export * as bytech from "./bytech/index.js";
