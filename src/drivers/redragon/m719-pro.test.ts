@@ -32,6 +32,7 @@ import {
   redragonM719ProDecodeDpiStages,
   redragonM719ProDecodeHardwareNotification,
   redragonM719ProDecodePollingRate,
+  redragonM719ProDecodeReadEeprom,
   redragonM719ProDecodeRgbLighting,
   redragonM719ProEncodeButtonAction,
   redragonM719ProEncodeDpiLedEffect,
@@ -47,6 +48,7 @@ import {
   redragonM719ProUnpackScalar,
   redragonM719ProVerifyDataChecksum,
   redragonM719ProVerifyHandshakeReply,
+  redragonM719ProVerifyPacketChecksum,
 } from "@openmouse/protocol/redragon";
 import { createSupportedClient, deviceBrand } from "../registry.ts";
 import { RedragonM719ProHidClient } from "./m719-pro-hid.ts";
@@ -57,6 +59,10 @@ test("computes packet and EEPROM data checksums (0x55 - sum)", () => {
   payload[4] = 0x02;
   const csum = redragonM719ProPacketChecksum(payload, REDRAGON_M719_PRO_COMMAND_REPORT_ID);
   assert.equal(csum, (0x55 - (0x08 + 0x04 + 0x02)) & 0xff);
+  payload[15] = csum;
+  assert.equal(redragonM719ProVerifyPacketChecksum(payload, REDRAGON_M719_PRO_COMMAND_REPORT_ID), true);
+  payload[15] ^= 0xff;
+  assert.equal(redragonM719ProVerifyPacketChecksum(payload, REDRAGON_M719_PRO_COMMAND_REPORT_ID), false);
 
   const scalar = redragonM719ProPackScalar(0x02);
   assert.deepEqual([...scalar], [0x02, 0x53]);
@@ -72,6 +78,7 @@ test("computes and verifies handshake challenge/response", () => {
   const challenge: [number, number, number, number] = [0x10, 0x20, 0x30, 0x40];
   const expected = redragonM719ProComputeHandshakeResponse(challenge);
   assert.equal(expected.length, 4);
+  assert.deepEqual([...expected], [0x35, 0x70, 0xd0, 0x10]);
 
   const req = redragonM719ProEncodeHandshake(challenge);
   assert.equal(req[0], REDRAGON_M719_PRO_COMMAND.handshake);
@@ -91,7 +98,7 @@ test("computes and verifies handshake challenge/response", () => {
   assert.equal(redragonM719ProVerifyHandshakeReply(challenge, badResp), false);
 });
 
-test("decodes connect status, battery, and hardware notifications", () => {
+test("decodes connect status, battery, EEPROM read replies, and hardware notifications", () => {
   const connResp = new Uint8Array(17);
   connResp[0] = REDRAGON_M719_PRO_RESPONSE_REPORT_ID;
   connResp[1] = REDRAGON_M719_PRO_COMMAND.getConnectStatus;
@@ -105,6 +112,7 @@ test("decodes connect status, battery, and hardware notifications", () => {
   const batResp = new Uint8Array(17);
   batResp[0] = REDRAGON_M719_PRO_RESPONSE_REPORT_ID;
   batResp[1] = REDRAGON_M719_PRO_COMMAND.getBattery;
+  batResp[5] = 0x02;
   batResp[6] = 85;
   batResp[7] = 1;
   assert.deepEqual(redragonM719ProDecodeBattery(batResp), {
@@ -113,7 +121,18 @@ test("decodes connect status, battery, and hardware notifications", () => {
     rawLevel: 85,
   });
 
-  // 0..10 scale battery reply
+  // Direct percentage <= 10 stays direct percentage (e.g. 5 -> 5%)
+  batResp[5] = 0x02;
+  batResp[6] = 5;
+  batResp[7] = 0;
+  assert.deepEqual(redragonM719ProDecodeBattery(batResp), {
+    percent: 5,
+    charging: false,
+    rawLevel: 5,
+  });
+
+  // 0..10 ten-percent scale battery reply (paramLen === 0x01 or scale byte === 0x0a)
+  batResp[5] = 0x01;
   batResp[6] = 7;
   batResp[7] = 0;
   assert.deepEqual(redragonM719ProDecodeBattery(batResp), {
@@ -121,6 +140,18 @@ test("decodes connect status, battery, and hardware notifications", () => {
     charging: false,
     rawLevel: 7,
   });
+
+  // EEPROM read reply validates declared length at payload[4]
+  const readReply = new Uint8Array(16);
+  readReply[0] = REDRAGON_M719_PRO_COMMAND.readEeprom;
+  readReply[1] = 0x00;
+  readReply[2] = 0x00;
+  readReply[3] = 0x0c;
+  readReply[4] = 0x02; // declared length 2 < expected 4
+  assert.equal(redragonM719ProDecodeReadEeprom(readReply, 0x000c, 4), null);
+  readReply[4] = 0x04;
+  readReply.set([0x12, 0x12, 0x00, 0x2f], 5);
+  assert.deepEqual([...(redragonM719ProDecodeReadEeprom(readReply, 0x000c, 4) ?? [])], [0x12, 0x12, 0x00, 0x2f]);
 
   // Hardware notification on Report 0x09 (Cmd 0x0a)
   const notify09 = new Uint8Array(16);
@@ -265,7 +296,7 @@ test("encodes and decodes direct, multimedia, and keyboard shortcut button actio
     "Copy (Ctrl+C)",
   );
 
-  // Single key and multi-modifier key combination
+  // Single key and multi-modifier key combinations (including 4-modifier combo capped at 32 bytes)
   const keyA = redragonM719ProEncodeButtonAction("Key A");
   assert.equal(
     redragonM719ProDecodeButtonAction(keyA.slotBytes, keyA.comboPayload),
@@ -276,6 +307,14 @@ test("encodes and decodes direct, multimedia, and keyboard shortcut button actio
     redragonM719ProDecodeButtonAction(ctrlShiftR.slotBytes, ctrlShiftR.comboPayload),
     "Keys Ctrl+Shift+R",
   );
+  const fourModCombo = redragonM719ProEncodeButtonAction("Keys Ctrl+Shift+Alt+Win+A");
+  assert.ok(fourModCombo.comboPayload);
+  assert.equal(fourModCombo.comboPayload.length, REDRAGON_M719_PRO_EEPROM.comboSlotStride);
+  assert.equal(redragonM719ProVerifyDataChecksum(fourModCombo.comboPayload), true);
+  assert.equal(
+    redragonM719ProDecodeButtonAction(fourModCombo.slotBytes, fourModCombo.comboPayload),
+    "Keys Ctrl+Shift+Alt+Win+A",
+  );
 });
 
 /**
@@ -284,6 +323,7 @@ test("encodes and decodes direct, multimedia, and keyboard shortcut button actio
  */
 class FakeM719Pro {
   vendorId = REDRAGON_M719_PRO_VENDOR_ID;
+  productId: number;
   productName = "Redragon M719RGB-PRO";
   opened = false;
   collections: HIDCollectionInfo[];
@@ -295,9 +335,10 @@ class FakeM719Pro {
   notifyPeer: FakeM719Pro | null = null;
 
   constructor(
-    public productId: number = REDRAGON_M719_PRO_RECEIVER_PRODUCT_ID,
+    productId: number = REDRAGON_M719_PRO_RECEIVER_PRODUCT_ID,
     mode: "combined" | "command-only" | "notify-only" = "combined",
   ) {
+    this.productId = productId;
     const cmdCol = {
       usagePage: REDRAGON_M719_PRO_COMMAND_USAGE_PAGE,
       usage: REDRAGON_M719_PRO_COMMAND_USAGE,
@@ -485,33 +526,40 @@ test("reads status, updates polling, DPI, stage colors, dual lighting zones, and
   assert.equal(await client.setDpiStageCount(3), 3);
   assert.equal(await client.setDpiStageColor(2, "#112233"), "#112233");
 
-  // Update main RGB zone ("Mouse")
-  const afterRgb = await client.setLighting({
+  // Update main RGB zone ("Mouse") and verify back-to-back queued calls preserve color/speed/brightness
+  const firstRgbPromise = client.setLighting({
     zone: "Mouse",
-    mode: "Neon",
+    mode: "Static",
     color: "#0080ff",
     brightness: 40,
-    speed: 5,
+    speed: 7,
   });
-  assert.equal(afterRgb.mode, "Neon");
+  const secondRgbPromise = client.setLighting({
+    zone: "Mouse",
+    mode: "Breathing single",
+  });
+  const [, afterRgb] = await Promise.all([firstRgbPromise, secondRgbPromise]);
+  assert.equal(afterRgb.mode, "Breathing single");
+  assert.equal(afterRgb.color, "#0080ff");
   assert.equal(afterRgb.brightness, 40);
-  assert.equal(afterRgb.speed, 5);
+  assert.equal(afterRgb.speed, 7);
 
-  // Update DPI indicator zone ("DPI indicator")
+  // Update DPI indicator zone ("DPI indicator") and verify it returns the active stage's EEPROM colour
   const afterInd = await client.setLighting({
     zone: "DPI indicator",
     mode: "Breathing single",
   });
   assert.equal(afterInd.mode, "Breathing single");
+  assert.equal(afterInd.color, "#112233");
 
-  // Update button mappings (multimedia and keyboard shortcut) and verify left-click guard
+  // Update button mappings (multimedia and 3-modifier key combo) and verify left-click guard
   await assert.rejects(
     () => client.setButtonMapping(REDRAGON_M719_PRO_BUTTONS[0].label, "Right click"),
     /Keep Left click/,
   );
 
   await client.setButtonMapping(REDRAGON_M719_PRO_BUTTONS[4].label, "Calculator");
-  await client.setButtonMapping(REDRAGON_M719_PRO_BUTTONS[3].label, "Copy (Ctrl+C)");
+  await client.setButtonMapping(REDRAGON_M719_PRO_BUTTONS[3].label, "Task Manager (Ctrl+Shift+Esc)");
 
   const refreshed = await client.readStatus();
   assert.equal(refreshed.pollingRateHz, 500);
@@ -519,27 +567,18 @@ test("reads status, updates polling, DPI, stage colors, dual lighting zones, and
   assert.equal(refreshed.activeDpiStage, 2);
   assert.equal(refreshed.dpiStages?.[1], 5200);
   assert.equal(refreshed.dpiStageColors?.[2], "#112233");
-  assert.equal(refreshed.lighting?.mode, "Neon");
+  assert.equal(refreshed.lighting?.mode, "Breathing single");
   assert.equal(refreshed.lightingZones?.[1]?.mode, "Breathing single");
+  assert.equal(refreshed.lightingZones?.[1]?.color, "#112233");
   assert.equal(refreshed.buttonMappings?.[REDRAGON_M719_PRO_BUTTONS[4].label], "Calculator");
-  assert.equal(refreshed.buttonMappings?.[REDRAGON_M719_PRO_BUTTONS[3].label], "Copy (Ctrl+C)");
-
-  const slot4ComboOffset =
-    REDRAGON_M719_PRO_EEPROM.comboBase +
-    REDRAGON_M719_PRO_BUTTONS[3].slot * REDRAGON_M719_PRO_EEPROM.comboSlotStride;
-  assert.deepEqual(
-    [...fake.eeprom.subarray(slot4ComboOffset, slot4ComboOffset + 13)],
-    [
-      0x04,
-      0x80, 0x01, 0x00,
-      0x81, 0x06, 0x00,
-      0x40, 0x01, 0x00,
-      0x41, 0x06, 0x00,
-    ],
+  assert.equal(
+    refreshed.buttonMappings?.[REDRAGON_M719_PRO_BUTTONS[3].label],
+    "Task Manager (Ctrl+Shift+Esc)",
   );
+  assert.deepEqual(refreshed.fixedButtons, []);
 });
 
-test("supports split sibling command/notify HIDDevices via bindPeers and hardware notifications", async () => {
+test("supports split sibling command/notify HIDDevices via bindPeers and rejects incomplete or ambiguous pairs", async () => {
   const cmdDevice = new FakeM719Pro(REDRAGON_M719_PRO_WIRED_PRODUCT_ID, "command-only");
   const notifyDevice = new FakeM719Pro(REDRAGON_M719_PRO_WIRED_PRODUCT_ID, "notify-only");
   cmdDevice.notifyPeer = notifyDevice;
@@ -549,6 +588,22 @@ test("supports split sibling command/notify HIDDevices via bindPeers and hardwar
       RedragonM719ProHidClient.supportScore(notifyDevice as unknown as HIDDevice),
   );
 
+  // Incomplete pair: only command-only device is authorized without its notify sibling
+  const incompleteClient = new RedragonM719ProHidClient(cmdDevice as unknown as HIDDevice);
+  incompleteClient.bindPeers([cmdDevice as unknown as HIDDevice]);
+  await assert.rejects(() => incompleteClient.open(), /response collection .* is missing/);
+
+  // Ambiguous pair: two distinct notify-only devices with the same VID/PID/productName
+  const extraNotifyDevice = new FakeM719Pro(REDRAGON_M719_PRO_WIRED_PRODUCT_ID, "notify-only");
+  const ambiguousClient = new RedragonM719ProHidClient(cmdDevice as unknown as HIDDevice);
+  ambiguousClient.bindPeers([
+    cmdDevice as unknown as HIDDevice,
+    notifyDevice as unknown as HIDDevice,
+    extraNotifyDevice as unknown as HIDDevice,
+  ]);
+  await assert.rejects(() => ambiguousClient.open(), /cannot unambiguously pair/);
+
+  // Valid pair
   const client = new RedragonM719ProHidClient(cmdDevice as unknown as HIDDevice);
   client.bindPeers([
     cmdDevice as unknown as HIDDevice,

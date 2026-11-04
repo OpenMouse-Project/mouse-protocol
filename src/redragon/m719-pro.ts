@@ -187,6 +187,29 @@ export function redragonM719ProPacketChecksum(
 }
 
 /**
+ * Verify that a 16-byte WebHID payload (or 17-byte raw report frame) carries a
+ * valid trailing packet checksum byte so `(reportId + sum(payload[0..15])) & 0xff === 0x55`.
+ */
+export function redragonM719ProVerifyPacketChecksum(
+  rawPayload: Uint8Array,
+  reportId = REDRAGON_M719_PRO_RESPONSE_REPORT_ID,
+): boolean {
+  let effectiveReportId = reportId;
+  let payload = rawPayload;
+  if (
+    rawPayload.length === REDRAGON_M719_PRO_PACKET_LENGTH + 1
+    && (rawPayload[0] === REDRAGON_M719_PRO_RESPONSE_REPORT_ID
+      || rawPayload[0] === REDRAGON_M719_PRO_COMMAND_REPORT_ID
+      || rawPayload[0] === REDRAGON_M719_PRO_NOTIFY_REPORT_ID)
+  ) {
+    effectiveReportId = rawPayload[0]!;
+    payload = rawPayload.subarray(1);
+  }
+  if (payload.length < REDRAGON_M719_PRO_PACKET_LENGTH) return false;
+  return payload[15] === redragonM719ProPacketChecksum(payload, effectiveReportId);
+}
+
+/**
  * Pack a 2-byte scalar record `[value, (0x55 - value) & 0xff]`.
  */
 export function redragonM719ProPackScalar(value: number): Uint8Array {
@@ -274,6 +297,9 @@ export function redragonM719ProComputeHandshakeResponse(
   ];
 }
 
+/**
+ * Encode a `Handshake` (`0x01`) command packet with a 4-byte challenge.
+ */
 export function redragonM719ProEncodeHandshake(
   challenge: readonly [number, number, number, number],
 ): Uint8Array {
@@ -282,6 +308,10 @@ export function redragonM719ProEncodeHandshake(
   });
 }
 
+/**
+ * Verify the device's reply to a `Handshake` (`0x01`) challenge against the
+ * expected 4-byte response derived from `challenge`.
+ */
 export function redragonM719ProVerifyHandshakeReply(
   challenge: readonly [number, number, number, number],
   rawReply: Uint8Array,
@@ -297,12 +327,20 @@ export function redragonM719ProVerifyHandshakeReply(
     && reply[8] === expected[3];
 }
 
+/**
+ * Encode a `TellDriverStatus` (`0x02`) command packet notifying the mouse
+ * whether the host driver is active (`online = true`).
+ */
 export function redragonM719ProEncodeTellDriverStatus(online = true): Uint8Array {
   return redragonM719ProEncodeCommand(REDRAGON_M719_PRO_COMMAND.tellDriverStatus, {
     data: [online ? 0x01 : 0x00],
   });
 }
 
+/**
+ * Encode a `GetConnectStatus` (`0x03`) command packet querying whether the
+ * wireless mouse is awake and linked to the 2.4 GHz receiver.
+ */
 export function redragonM719ProEncodeGetConnectStatus(): Uint8Array {
   return redragonM719ProEncodeCommand(REDRAGON_M719_PRO_COMMAND.getConnectStatus);
 }
@@ -324,6 +362,10 @@ export function redragonM719ProDecodeConnectStatus(rawReply: Uint8Array): boolea
   return (reply[5] ?? 0) !== 0 || (reply[4] ?? 0) !== 0;
 }
 
+/**
+ * Encode a `GetBattery` (`0x04`) command packet querying the current battery
+ * level and charging flag.
+ */
 export function redragonM719ProEncodeGetBattery(): Uint8Array {
   return redragonM719ProEncodeCommand(REDRAGON_M719_PRO_COMMAND.getBattery);
 }
@@ -336,28 +378,35 @@ export interface RedragonM719ProBatteryStatus {
 
 /**
  * Decode a `GetBattery` (`0x04`) reply.
- * Verified from OEM `FUN_00409d00`: `reply[5]` is the battery level (either
- * `0..10` in 10% steps or `0..100` directly; bit 7 may also flag charging),
- * and `reply[6]` is the charging flag (`0x01` = charging, `0x00` = discharging).
+ * Verified from OEM `FUN_00409d00`:
+ * - `reply[5]` carries the battery level (`0..100` directly in 2-byte replies where
+ *   `reply[4]` is `0x02` or `0x00`, or `0..10` in 10% steps when `reply[3] === 0x0a`
+ *   or `reply[4] === 0x01`; bit 7 may also flag charging).
+ * - `reply[6]` is the charging flag (`0x01` = charging, `0x00` = discharging).
  */
 export function redragonM719ProDecodeBattery(rawReply: Uint8Array): RedragonM719ProBatteryStatus | null {
   const reply = redragonM719ProNormalizeReply(rawReply);
   if (reply.length < 7 || reply[0] !== REDRAGON_M719_PRO_COMMAND.getBattery || reply[1] !== 0x00) {
     return null;
   }
+  const paramLen = reply[4] ?? 0;
   const rawByte = reply[5] ?? 0;
   const chargeByte = reply[6] ?? 0;
   const rawLevel = rawByte & 0x7f;
-  if (rawLevel === 0 && chargeByte === 0 && (reply[4] ?? 0) === 0) {
+  if (rawLevel === 0 && chargeByte === 0 && paramLen === 0) {
     return null;
   }
   const charging = chargeByte !== 0 || (rawByte & 0x80) !== 0;
-  const percent = rawLevel <= 10
+  const isTenStep = reply[3] === 0x0a || paramLen === 0x01;
+  const percent = isTenStep && rawLevel <= 10
     ? Math.max(0, Math.min(100, rawLevel * 10))
     : Math.max(0, Math.min(100, rawLevel));
   return { percent, charging, rawLevel };
 }
 
+/**
+ * Encode a `ReadEeprom` (`0x08`) command packet for `1..10` bytes at `address`.
+ */
 export function redragonM719ProEncodeReadEeprom(address: number, length: number): Uint8Array {
   if (!Number.isInteger(length) || length < 1 || length > REDRAGON_M719_PRO_MAX_CHUNK_LENGTH) {
     throw new RangeError(`EEPROM read length must be 1–${REDRAGON_M719_PRO_MAX_CHUNK_LENGTH}, got ${length}.`);
@@ -368,6 +417,10 @@ export function redragonM719ProEncodeReadEeprom(address: number, length: number)
   });
 }
 
+/**
+ * Decode and validate a `ReadEeprom` (`0x08`) reply, checking the echoed
+ * 16-bit EEPROM address (`reply[2..3]`) and declared data length (`reply[4]`).
+ */
 export function redragonM719ProDecodeReadEeprom(
   rawReply: Uint8Array,
   expectedAddress: number,
@@ -379,9 +432,13 @@ export function redragonM719ProDecodeReadEeprom(
   const addrHi = (expectedAddress >> 8) & 0xff;
   const addrLo = expectedAddress & 0xff;
   if (reply[2] !== addrHi || reply[3] !== addrLo) return null;
+  if ((reply[4] ?? 0) < expectedLength) return null;
   return Uint8Array.from(reply.subarray(5, 5 + expectedLength));
 }
 
+/**
+ * Encode a `WriteEeprom` (`0x07`) command packet for `1..10` bytes at `address`.
+ */
 export function redragonM719ProEncodeWriteEeprom(address: number, data: ArrayLike<number>): Uint8Array {
   if (data.length < 1 || data.length > REDRAGON_M719_PRO_MAX_CHUNK_LENGTH) {
     throw new RangeError(`EEPROM write length must be 1–${REDRAGON_M719_PRO_MAX_CHUNK_LENGTH}, got ${data.length}.`);
@@ -392,6 +449,10 @@ export function redragonM719ProEncodeWriteEeprom(address: number, data: ArrayLik
   });
 }
 
+/**
+ * Decode the status byte (`reply[1]`) of a `WriteEeprom` (`0x07`) response into
+ * `"ack"` (`0x00`), `"busy"` (`0x01`), or `"error"`.
+ */
 export function redragonM719ProDecodeWriteEeprom(rawReply: Uint8Array): "ack" | "busy" | "error" {
   const reply = redragonM719ProNormalizeReply(rawReply);
   if (reply.length < 2 || reply[0] !== REDRAGON_M719_PRO_COMMAND.writeEeprom) return "error";
@@ -469,6 +530,10 @@ const CODE_TO_POLLING_RATE: ReadonlyMap<number, number> = new Map([
   [0x08, 125],
 ]);
 
+/**
+ * Encode a polling rate in Hz (`125`, `250`, `500`, or `1000`) into its 2-byte
+ * EEPROM scalar record at `0x0000`.
+ */
 export function redragonM719ProEncodePollingRate(hz: number): Uint8Array {
   const code = POLLING_RATE_TO_CODE.get(hz);
   if (code === undefined) {
@@ -477,6 +542,9 @@ export function redragonM719ProEncodePollingRate(hz: number): Uint8Array {
   return redragonM719ProPackScalar(code);
 }
 
+/**
+ * Decode a 2-byte polling-rate record from EEPROM `0x0000` into Hz.
+ */
 export function redragonM719ProDecodePollingRate(bytes: ArrayLike<number>): number {
   const code = bytes[0] ?? 0x01;
   return CODE_TO_POLLING_RATE.get(code) ?? 1000;
@@ -515,6 +583,9 @@ export const REDRAGON_M719_PRO_DPI_OPTIONS: readonly number[] = [
   ...REDRAGON_M719_PRO_PAW3325_DPI_TABLE.filter((dpi) => dpi >= 2600).map((dpi) => dpi * 2),
 ];
 
+/**
+ * Snap an arbitrary DPI number to the nearest supported PAW3325 hardware step.
+ */
 export function redragonM719ProNearestDpi(dpi: number): number {
   const clamped = Math.max(REDRAGON_M719_PRO_DPI_MIN, Math.min(REDRAGON_M719_PRO_DPI_MAX, Math.round(dpi)));
   let best = REDRAGON_M719_PRO_DPI_OPTIONS[0]!;
@@ -608,6 +679,9 @@ export function redragonM719ProDecodeDpiStages(bytes: Uint8Array): number[] {
 
 // ── DPI Stage Colors & DPI Indicator LED Codec (EEPROM 0x002C & 0x004C) ────
 
+/**
+ * Encode a single DPI stage's RGB colour into a 4-byte EEPROM record `[r, g, b, checksum]`.
+ */
 export function redragonM719ProEncodeDpiStageColor(color: RedragonM719ProRgb): Uint8Array {
   const r = color.r & 0xff;
   const g = color.g & 0xff;
@@ -616,6 +690,9 @@ export function redragonM719ProEncodeDpiStageColor(color: RedragonM719ProRgb): U
   return new Uint8Array([r, g, b, chk]);
 }
 
+/**
+ * Decode a 4-byte DPI stage colour record `[r, g, b, checksum]` into RGB channels.
+ */
 export function redragonM719ProDecodeDpiStageColor(bytes: ArrayLike<number>): RedragonM719ProRgb {
   return {
     r: (bytes[0] ?? 0xff) & 0xff,
@@ -624,6 +701,9 @@ export function redragonM719ProDecodeDpiStageColor(bytes: ArrayLike<number>): Re
   };
 }
 
+/**
+ * Encode all 5 DPI stage RGB colours into the 20-byte block at EEPROM `0x002c`.
+ */
 export function redragonM719ProEncodeDpiStageColors(colors: readonly RedragonM719ProRgb[]): Uint8Array {
   const block = new Uint8Array(REDRAGON_M719_PRO_MAX_DPI_STAGES * 4);
   for (let i = 0; i < REDRAGON_M719_PRO_MAX_DPI_STAGES; i += 1) {
@@ -633,6 +713,9 @@ export function redragonM719ProEncodeDpiStageColors(colors: readonly RedragonM71
   return block;
 }
 
+/**
+ * Decode the 20-byte DPI stage colour block at EEPROM `0x002c` into 5 RGB objects.
+ */
 export function redragonM719ProDecodeDpiStageColors(bytes: Uint8Array): RedragonM719ProRgb[] {
   const colors: RedragonM719ProRgb[] = [];
   for (let i = 0; i < REDRAGON_M719_PRO_MAX_DPI_STAGES; i += 1) {
@@ -680,6 +763,10 @@ export function redragonM719ProEncodeDpiLedEffect(
   ]);
 }
 
+/**
+ * Decode the DPI indicator LED mode byte from EEPROM `0x004c` into `0` (Off),
+ * `1` (Steady), or `2` (Breathing).
+ */
 export function redragonM719ProDecodeDpiLedEffect(bytes: ArrayLike<number>): RedragonM719ProDpiLedMode {
   const raw = bytes[0] ?? 0;
   if (raw === 1 || raw === 2) return raw;
@@ -716,6 +803,9 @@ export const REDRAGON_M719_PRO_BRIGHTNESS_LUT: readonly number[] = [
 export const REDRAGON_M719_PRO_SPEED_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 export const REDRAGON_M719_PRO_BRIGHTNESS_PERCENTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100] as const;
 
+/**
+ * Find the 1-based level (`1..10`) in a hardware lookup table closest to `rawByte`.
+ */
 function reverseLut(lut: readonly number[], rawByte: number): number {
   let bestIndex = 0;
   let minDiff = 0xff;
@@ -949,7 +1039,8 @@ export function redragonM719ProEncodeMultimediaPayload(consumerCode: number): Ui
 
 /**
  * Encode a modifier mask (`0x01` Ctrl, `0x02` Shift, `0x04` Alt, `0x08` Win) and
- * HID keyboard usage into the EEPROM block at `0x0100 + slot * 0x20`.
+ * HID keyboard usage into the EEPROM block at `0x0100 + slot * 0x20` (capped at
+ * the 32-byte `comboSlotStride`).
  * Verified from OEM `FUN_0040af50` (`dec2.c` lines 3466–3521).
  */
 export function redragonM719ProEncodeKeyComboPayload(modifierMask: number, hidKey: number): Uint8Array {
@@ -972,7 +1063,10 @@ export function redragonM719ProEncodeKeyComboPayload(modifierMask: number, hidKe
   }
 
   const rawLen = 1 + events.length * 3 + 1;
-  const totalLen = Math.max(1, Math.ceil(rawLen / 10)) * 10;
+  const totalLen = Math.min(
+    REDRAGON_M719_PRO_EEPROM.comboSlotStride,
+    Math.max(1, Math.ceil(rawLen / REDRAGON_M719_PRO_MAX_CHUNK_LENGTH)) * REDRAGON_M719_PRO_MAX_CHUNK_LENGTH,
+  );
   const buf = new Uint8Array(totalLen);
   buf[0] = events.length & 0xff;
   let idx = 1;
@@ -986,6 +1080,10 @@ export function redragonM719ProEncodeKeyComboPayload(modifierMask: number, hidKe
   return buf;
 }
 
+/**
+ * Parse a generic `"Key <name>"`, `"Keys <Mod+...+Key>"`, or `"Combo:<Mod+...+Key>"`
+ * action label into a `[modifierMask, hidKeyUsage]` pair.
+ */
 function parseGenericKeyAction(action: string): readonly [number, number] | null {
   if (action.startsWith("Key ")) {
     const keyName = action.slice(4).trim().toLowerCase();

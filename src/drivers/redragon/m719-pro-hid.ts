@@ -52,7 +52,9 @@ import {
   redragonM719ProNormalizeReply,
   redragonM719ProPackScalar,
   redragonM719ProUnpackScalar,
+  redragonM719ProVerifyDataChecksum,
   redragonM719ProVerifyHandshakeReply,
+  redragonM719ProVerifyPacketChecksum,
   type RedragonM719ProDpiLedMode,
   type RedragonM719ProRgb,
   type RedragonM719ProRgbEffectCode,
@@ -79,10 +81,16 @@ const DPI_INDICATOR_MODES: readonly MouseLightingMode[] = [
   "Off",
 ];
 
+/**
+ * Format an `{ r, g, b }` object into a lowercase `#rrggbb` hex colour string.
+ */
 function rgbToHex({ r, g, b }: RedragonM719ProRgb): string {
   return `#${[r, g, b].map((channel) => (channel & 0xff).toString(16).padStart(2, "0")).join("")}`;
 }
 
+/**
+ * Parse a `#rrggbb` hex colour string into `{ r, g, b }` channels.
+ */
 function hexToRgb(color: string): RedragonM719ProRgb {
   const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color.trim());
   if (!match) throw new Error(`Expected a #rrggbb colour, got "${color}".`);
@@ -93,6 +101,9 @@ function hexToRgb(color: string): RedragonM719ProRgb {
   };
 }
 
+/**
+ * Convert an EEPROM RGB effect code (`0x00`, `0x01`, `0x02`, `0x04`) into a UI `MouseLightingMode`.
+ */
 function effectToMode(effect: RedragonM719ProRgbEffectCode): MouseLightingMode {
   switch (effect) {
     case REDRAGON_M719_PRO_RGB_EFFECT.steady:
@@ -106,6 +117,9 @@ function effectToMode(effect: RedragonM719ProRgbEffectCode): MouseLightingMode {
   }
 }
 
+/**
+ * Convert a UI `MouseLightingMode` into the hardware RGB effect code for EEPROM `0x00a0`.
+ */
 function modeToEffect(mode: MouseLightingMode | null): RedragonM719ProRgbEffectCode {
   switch (mode) {
     case "Static":
@@ -121,12 +135,18 @@ function modeToEffect(mode: MouseLightingMode | null): RedragonM719ProRgbEffectC
   }
 }
 
+/**
+ * Convert a DPI indicator LED mode byte (`0`, `1`, `2`) into a UI `MouseLightingMode`.
+ */
 function dpiLedCodeToMode(code: RedragonM719ProDpiLedMode): MouseLightingMode {
   if (code === 1) return "Static";
   if (code === 2) return "Breathing single";
   return "Off";
 }
 
+/**
+ * Convert a UI `MouseLightingMode` into a DPI indicator LED mode byte (`0`, `1`, `2`).
+ */
 function modeToDpiLedCode(mode: MouseLightingMode | null): RedragonM719ProDpiLedMode {
   switch (mode) {
     case "Static":
@@ -140,6 +160,9 @@ function modeToDpiLedCode(mode: MouseLightingMode | null): RedragonM719ProDpiLed
   }
 }
 
+/**
+ * Recursively check whether any HID collection exposes a Feature Report with `reportId`.
+ */
 function hasFeatureReport(
   collections: readonly HIDCollectionInfo[] | undefined,
   reportId: number,
@@ -153,6 +176,9 @@ function hasFeatureReport(
   return false;
 }
 
+/**
+ * Recursively check whether any HID collection exposes an Input Report with `reportId`.
+ */
 function hasInputReport(
   collections: readonly HIDCollectionInfo[] | undefined,
   reportId: number,
@@ -166,6 +192,9 @@ function hasInputReport(
   return false;
 }
 
+/**
+ * Recursively check whether any HID collection matches `usagePage`.
+ */
 function hasUsagePage(
   collections: readonly HIDCollectionInfo[] | undefined,
   usagePage: number,
@@ -177,24 +206,40 @@ function hasUsagePage(
   return false;
 }
 
+/**
+ * Check whether `device` exposes the Redragon M719RGB-PRO command collection
+ * (Feature Report `0x08` on Usage Page `0xff02`).
+ */
 function hasCommandChannel(device: HIDDevice): boolean {
   return hasFeatureReport(device.collections, REDRAGON_M719_PRO_COMMAND_REPORT_ID)
     || hasUsagePage(device.collections, REDRAGON_M719_PRO_COMMAND_USAGE_PAGE);
 }
 
+/**
+ * Check whether `device` exposes the Redragon M719RGB-PRO response/notification
+ * collection (Input Report `0x09` on Usage Page `0xff01`).
+ */
 function hasResponseChannel(device: HIDDevice): boolean {
   return hasInputReport(device.collections, REDRAGON_M719_PRO_RESPONSE_REPORT_ID)
     || hasUsagePage(device.collections, REDRAGON_M719_PRO_NOTIFY_USAGE_PAGE);
 }
 
+/**
+ * Sleep for `ms` milliseconds between multi-chunk or retried EEPROM writes.
+ */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * WebHID driver client for the Redragon M719RGB-PRO (INVADER PRO) gaming mouse
+ * (`0x25a7:0xfa7e` 2.4 GHz wireless receiver and `0x25a7:0xfab0` wired USB).
+ */
 export class RedragonM719ProHidClient {
   readonly device: HIDDevice;
   private cmdDevice: HIDDevice | null = null;
   private notifyDevice: HIDDevice | null = null;
+  private ambiguousPeers = false;
   private channelsResolved = false;
   private handshakeCompleted = false;
   private queue: Promise<unknown> = Promise.resolve();
@@ -205,6 +250,7 @@ export class RedragonM719ProHidClient {
 
   private waiter: {
     command: number;
+    address?: number;
     resolve: (reply: Uint8Array) => void;
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
@@ -236,23 +282,41 @@ export class RedragonM719ProHidClient {
       return;
     }
 
+    if (!redragonM719ProVerifyPacketChecksum(payload, event.reportId)) return;
+
     const waiter = this.waiter;
     if (!waiter || payload[0] !== waiter.command) return;
+    if (
+      waiter.address !== undefined
+      && ((((payload[2] ?? 0) << 8) | (payload[3] ?? 0)) & 0xffff) !== waiter.address
+    ) {
+      return;
+    }
     clearTimeout(waiter.timer);
     this.waiter = null;
     waiter.resolve(payload);
   };
 
+  /**
+   * Create a new Redragon M719RGB-PRO WebHID client bound to `device`.
+   */
   constructor(device: HIDDevice) {
     this.device = device;
   }
 
+  /**
+   * Return `true` when `device` is a Redragon M719RGB-PRO command or response HID collection.
+   */
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== REDRAGON_M719_PRO_VENDOR_ID) return false;
     if (!REDRAGON_M719_PRO_PRODUCTS.has(device.productId)) return false;
     return hasCommandChannel(device) || hasResponseChannel(device);
   }
 
+  /**
+   * Score how suitable `device` is as the primary handle for a Redragon M719RGB-PRO,
+   * preferring combined or command (`0xff02`) collections over notify-only (`0xff01`) siblings.
+   */
   static supportScore(device: HIDDevice): number {
     if (!this.isSupported(device)) return 0;
     let score = 2;
@@ -262,22 +326,37 @@ export class RedragonM719ProHidClient {
     return score;
   }
 
+  /**
+   * Return the human-readable model name (`"Redragon M719RGB-PRO"`).
+   */
   displayName(): string {
     return DISPLAY_NAME;
   }
 
+  /**
+   * Return the canonical brand identifier (`"Redragon"`).
+   */
   deviceBrand(): "Redragon" {
     return "Redragon";
   }
 
+  /**
+   * Return `true` when connected via the `0x25a7:0xfa7e` 2.4 GHz wireless receiver.
+   */
   isWireless(): boolean {
     return this.device.productId === REDRAGON_M719_PRO_WIRELESS_PRODUCT_ID;
   }
 
+  /**
+   * Return all discrete DPI steps supported by the PAW3325 hardware lookup table.
+   */
   getDpiOptions(): number[] {
     return [...REDRAGON_M719_PRO_DPI_OPTIONS];
   }
 
+  /**
+   * Return the supported USB polling rates in Hz (`[125, 250, 500, 1000]`).
+   */
   getSupportedPollingRates(): number[] {
     return [...REDRAGON_M719_PRO_POLLING_RATES];
   }
@@ -286,25 +365,46 @@ export class RedragonM719ProHidClient {
    * Bind command (`0xff02`, Feature Report 8) and response (`0xff01`, Input Report 9)
    * collections whether the platform exposes them on one `HIDDevice` or across
    * sibling `HIDDevice` entries in `navigator.hid.getDevices()`.
+   * Marks the pairing ambiguous if multiple distinct split devices match the missing channel.
    */
   bindPeers(devices: readonly HIDDevice[]): void {
+    this.ambiguousPeers = false;
+    if (hasCommandChannel(this.device) && hasResponseChannel(this.device)) {
+      this.cmdDevice = this.device;
+      this.notifyDevice = this.device;
+      this.channelsResolved = true;
+      return;
+    }
+
     const peers = devices.filter(
       (candidate) =>
         candidate.vendorId === this.device.vendorId
         && candidate.productId === this.device.productId,
     );
     const pool = peers.length > 0 ? peers : [this.device];
-    const cmd = hasCommandChannel(this.device)
-      ? this.device
-      : (pool.find((candidate) => hasCommandChannel(candidate)) ?? this.device);
-    const notify = hasResponseChannel(this.device)
-      ? this.device
-      : (pool.find((candidate) => hasResponseChannel(candidate)) ?? cmd);
-    this.cmdDevice = cmd;
-    this.notifyDevice = notify;
+
+    const selectPeer = (predicate: (candidate: HIDDevice) => boolean): HIDDevice | null => {
+      if (predicate(this.device)) return this.device;
+      let candidates = pool.filter(predicate);
+      if (candidates.length > 1 && this.device.productName) {
+        const sameName = candidates.filter((c) => c.productName === this.device.productName);
+        if (sameName.length > 0) candidates = sameName;
+      }
+      if (candidates.length > 1) {
+        this.ambiguousPeers = true;
+        return null;
+      }
+      return candidates[0] ?? null;
+    };
+
+    this.cmdDevice = selectPeer(hasCommandChannel);
+    this.notifyDevice = selectPeer(hasResponseChannel);
     this.channelsResolved = true;
   }
 
+  /**
+   * Open the command and response HID collections and attach the input report listener.
+   */
   async open(): Promise<void> {
     if (!RedragonM719ProHidClient.isSupported(this.device)) {
       throw new Error("The Redragon M719RGB-PRO vendor configuration collection is not present on this HID interface.");
@@ -313,6 +413,7 @@ export class RedragonM719ProHidClient {
       if (hasCommandChannel(this.device) && hasResponseChannel(this.device)) {
         this.cmdDevice = this.device;
         this.notifyDevice = this.device;
+        this.ambiguousPeers = false;
         this.channelsResolved = true;
       } else {
         const authorized = typeof navigator !== "undefined" && navigator.hid?.getDevices
@@ -322,8 +423,20 @@ export class RedragonM719ProHidClient {
       }
     }
 
-    const cmd = this.cmdDevice ?? this.device;
-    const notify = this.notifyDevice ?? cmd;
+    if (this.ambiguousPeers) {
+      throw new Error(
+        "Multiple Redragon M719RGB-PRO split HID interfaces are authorized; cannot unambiguously pair command (0xff02) and response (0xff01) collections.",
+      );
+    }
+    const cmd = this.cmdDevice;
+    if (!cmd || !hasCommandChannel(cmd)) {
+      throw new Error("The Redragon M719RGB-PRO command collection (0xff02, feature report 8) is missing.");
+    }
+    const notify = this.notifyDevice;
+    if (!notify || !hasResponseChannel(notify)) {
+      throw new Error("The Redragon M719RGB-PRO response collection (0xff01, input report 9) is missing.");
+    }
+
     if (!cmd.opened) await cmd.open();
     if (notify !== cmd && !notify.opened) await notify.open();
 
@@ -336,30 +449,43 @@ export class RedragonM719ProHidClient {
     }
   }
 
+  /**
+   * Abort any in-flight command waiter and close all bound HID interfaces in serialized order.
+   */
   async close(): Promise<void> {
     this.failWaiter(new Error("The Redragon M719RGB-PRO device was closed."));
-    this.notificationListener = null;
-    this.handshakeCompleted = false;
-    const devices = new Set<HIDDevice>([
-      this.device,
-      ...(this.cmdDevice ? [this.cmdDevice] : []),
-      ...(this.notifyDevice ? [this.notifyDevice] : []),
-    ]);
-    for (const dev of devices) {
-      dev.removeEventListener("inputreport", this.onInputReport);
-      if (dev.opened) await dev.close().catch(() => undefined);
-    }
-    this.cmdDevice = null;
-    this.notifyDevice = null;
-    this.channelsResolved = false;
+    await this.serialized(async () => {
+      this.failWaiter(new Error("The Redragon M719RGB-PRO device was closed."));
+      this.notificationListener = null;
+      this.handshakeCompleted = false;
+      const devices = new Set<HIDDevice>([
+        this.device,
+        ...(this.cmdDevice ? [this.cmdDevice] : []),
+        ...(this.notifyDevice ? [this.notifyDevice] : []),
+      ]);
+      for (const dev of devices) {
+        dev.removeEventListener("inputreport", this.onInputReport);
+        if (dev.opened) await dev.close().catch(() => undefined);
+      }
+      this.cmdDevice = null;
+      this.notifyDevice = null;
+      this.ambiguousPeers = false;
+      this.channelsResolved = false;
+    });
   }
 
+  /**
+   * Subscribe to asynchronous hardware notifications (physical DPI stage or profile button changes).
+   */
   async startNotifications(onChange?: () => void): Promise<boolean> {
     await this.open();
     this.notificationListener = onChange ?? null;
     return true;
   }
 
+  /**
+   * Read the full mouse configuration, battery state, DPI stages, lighting zones, and button mappings.
+   */
   async readStatus(): Promise<MouseStatus> {
     return await this.serialized(async () => {
       await this.open();
@@ -444,20 +570,26 @@ export class RedragonM719ProHidClient {
     });
   }
 
+  /**
+   * Write and verify the USB polling rate (`125`, `250`, `500`, or `1000` Hz) at EEPROM `0x0000`.
+   */
   async setPollingRate(hz: number): Promise<number> {
     const encoded = redragonM719ProEncodePollingRate(hz);
     return await this.serialized(async () => {
       await this.requireReady();
       await this.writeEeprom(REDRAGON_M719_PRO_EEPROM.pollingRate, encoded);
       const readBack = await this.readEeprom(REDRAGON_M719_PRO_EEPROM.pollingRate, 2);
-      const confirmed = redragonM719ProDecodePollingRate(readBack);
-      if (confirmed !== hz) {
+      if (readBack[0] !== encoded[0] || readBack[1] !== encoded[1]) {
+        const confirmed = redragonM719ProDecodePollingRate(readBack);
         throw new Error(`The mouse kept ${confirmed} Hz instead of ${hz} Hz.`);
       }
-      return confirmed;
+      return hz;
     });
   }
 
+  /**
+   * Update the DPI value of the currently active DPI stage.
+   */
   async setDpi(dpi: number): Promise<number> {
     if (!Number.isFinite(dpi) || dpi < REDRAGON_M719_PRO_DPI_MIN || dpi > REDRAGON_M719_PRO_DPI_MAX) {
       throw new RangeError(
@@ -472,6 +604,9 @@ export class RedragonM719ProHidClient {
     });
   }
 
+  /**
+   * Update the DPI value for a specific 0-based stage index (`0..4`).
+   */
   async setDpiStageValue(stage: number, dpi: number): Promise<number> {
     if (!Number.isInteger(stage) || stage < 0 || stage >= REDRAGON_M719_PRO_MAX_DPI_STAGES) {
       throw new RangeError(`Redragon M719RGB-PRO DPI stage must be 0–${REDRAGON_M719_PRO_MAX_DPI_STAGES - 1}.`);
@@ -488,6 +623,9 @@ export class RedragonM719ProHidClient {
     });
   }
 
+  /**
+   * Switch the active 0-based DPI stage index (`0..stageCount-1`) at EEPROM `0x0004`.
+   */
   async setActiveDpiStage(stage: number): Promise<number> {
     if (!Number.isInteger(stage) || stage < 0 || stage >= REDRAGON_M719_PRO_MAX_DPI_STAGES) {
       throw new RangeError(`Redragon M719RGB-PRO active DPI stage must be 0–${REDRAGON_M719_PRO_MAX_DPI_STAGES - 1}.`);
@@ -507,6 +645,10 @@ export class RedragonM719ProHidClient {
     });
   }
 
+  /**
+   * Set the number of enabled DPI stages (`1..5`) at EEPROM `0x0002`, clamping
+   * `activeDpiStage` first if the active stage index would exceed `count - 1`.
+   */
   async setDpiStageCount(count: number): Promise<number> {
     if (!Number.isInteger(count) || count < 1 || count > REDRAGON_M719_PRO_MAX_DPI_STAGES) {
       throw new RangeError(`Redragon M719RGB-PRO supports 1–${REDRAGON_M719_PRO_MAX_DPI_STAGES} DPI stages.`);
@@ -514,10 +656,15 @@ export class RedragonM719ProHidClient {
     return await this.serialized(async () => {
       await this.requireReady();
       const currentActive = await this.readActiveStageIndex();
-      await this.writeEeprom(REDRAGON_M719_PRO_EEPROM.dpiStageCount, redragonM719ProPackScalar(count));
       if (currentActive >= count) {
-        await this.writeEeprom(REDRAGON_M719_PRO_EEPROM.activeDpiStage, redragonM719ProPackScalar(count - 1));
+        const targetActive = count - 1;
+        await this.writeEeprom(REDRAGON_M719_PRO_EEPROM.activeDpiStage, redragonM719ProPackScalar(targetActive));
+        const confirmedActive = await this.readActiveStageIndex();
+        if (confirmedActive !== targetActive) {
+          throw new Error(`The mouse kept DPI stage ${confirmedActive + 1} instead of ${targetActive + 1}.`);
+        }
       }
+      await this.writeEeprom(REDRAGON_M719_PRO_EEPROM.dpiStageCount, redragonM719ProPackScalar(count));
       const confirmed = await this.readStageCount();
       if (confirmed !== count) {
         throw new Error(`The mouse kept ${confirmed} DPI stages instead of ${count}.`);
@@ -526,6 +673,9 @@ export class RedragonM719ProHidClient {
     });
   }
 
+  /**
+   * Set the indicator RGB colour (`#rrggbb`) for a specific 0-based DPI stage (`0..4`).
+   */
   async setDpiStageColor(stage: number, color: string): Promise<string> {
     if (!Number.isInteger(stage) || stage < 0 || stage >= REDRAGON_M719_PRO_MAX_DPI_STAGES) {
       throw new RangeError(`Redragon M719RGB-PRO DPI stage must be 0–${REDRAGON_M719_PRO_MAX_DPI_STAGES - 1}.`);
@@ -545,6 +695,9 @@ export class RedragonM719ProHidClient {
     });
   }
 
+  /**
+   * Set the DPI indicator / logo LED mode (`0` Off, `1` Steady, `2` Breathing) at EEPROM `0x004c`.
+   */
   async setDpiIndicatorMode(mode: RedragonM719ProDpiLedMode): Promise<RedragonM719ProDpiLedMode> {
     if (mode !== 0 && mode !== 1 && mode !== 2) {
       throw new RangeError(`Redragon M719RGB-PRO DPI indicator mode must be 0, 1, or 2.`);
@@ -565,6 +718,10 @@ export class RedragonM719ProHidClient {
     });
   }
 
+  /**
+   * Update either the main RGB zone (`"Mouse"`, EEPROM `0x00a0`) or the DPI indicator
+   * LED zone (`"DPI indicator"`, EEPROM `0x004c`).
+   */
   async setLighting(lighting: MouseLighting): Promise<MouseLighting> {
     if (lighting.zone === "DPI indicator") {
       const code = modeToDpiLedCode(lighting.mode);
@@ -580,7 +737,12 @@ export class RedragonM719ProHidClient {
         if (confirmed !== code) {
           throw new Error("The mouse did not confirm the requested DPI indicator effect.");
         }
-        return this.buildDpiIndicatorLighting(confirmed, lighting.color ?? "#ff0000");
+        const stageColorRaw = await this.readEeprom(
+          REDRAGON_M719_PRO_EEPROM.dpiColors + activeStage * 4,
+          4,
+        );
+        const activeStageColorHex = rgbToHex(redragonM719ProDecodeDpiStageColor(stageColorRaw));
+        return this.buildDpiIndicatorLighting(confirmed, activeStageColorHex);
       });
     }
 
@@ -589,17 +751,27 @@ export class RedragonM719ProHidClient {
     }
 
     const effect = modeToEffect(lighting.mode);
-    const color = lighting.color ? hexToRgb(lighting.color) : this.lastRgbColor;
-    const speed = lighting.speed != null
-      ? Math.max(1, Math.min(10, Math.round(lighting.speed)))
-      : this.lastRgbSpeed;
-    const brightnessPercent = lighting.brightness != null
-      ? Math.max(10, Math.min(100, Math.round(lighting.brightness / 10) * 10))
-      : this.lastRgbBrightness * 10;
-    const brightnessLevel = Math.max(1, Math.min(10, Math.round(brightnessPercent / 10)));
+    const explicitColor = lighting.color ? hexToRgb(lighting.color) : null;
 
     return await this.serialized(async () => {
       await this.requireReady();
+      const currentRaw = await this.readEeprom(REDRAGON_M719_PRO_EEPROM.rgbLighting, 7);
+      const current = redragonM719ProDecodeRgbLighting(currentRaw);
+      this.lastRgbColor = current.color;
+      if (current.effect !== REDRAGON_M719_PRO_RGB_EFFECT.off) {
+        this.lastRgbSpeed = current.speed;
+        this.lastRgbBrightness = current.brightness;
+      }
+
+      const color = explicitColor ?? this.lastRgbColor;
+      const speed = lighting.speed != null
+        ? Math.max(1, Math.min(10, Math.round(lighting.speed)))
+        : this.lastRgbSpeed;
+      const brightnessPercent = lighting.brightness != null
+        ? Math.max(10, Math.min(100, Math.round(lighting.brightness / 10) * 10))
+        : this.lastRgbBrightness * 10;
+      const brightnessLevel = Math.max(1, Math.min(10, Math.round(brightnessPercent / 10)));
+
       this.lastRgbColor = color;
       this.lastRgbSpeed = speed;
       this.lastRgbBrightness = brightnessLevel;
@@ -620,6 +792,10 @@ export class RedragonM719ProHidClient {
     });
   }
 
+  /**
+   * Assign an action (direct click, DPI/profile control, multimedia key, or keyboard shortcut)
+   * to one of the 8 physical buttons, ensuring at least one button retains `"Left click"`.
+   */
   async setButtonMapping(button: string, action: string): Promise<void> {
     const entry = REDRAGON_M719_PRO_BUTTONS.find((candidate) => candidate.label === button);
     if (!entry) {
@@ -659,6 +835,9 @@ export class RedragonM719ProHidClient {
 
   // ── Internal Transport & EEPROM Helpers ──────────────────────────────────
 
+  /**
+   * Build a placeholder `MouseStatus` when the wireless mouse is asleep or an EEPROM read fails.
+   */
   private unreadyStatus(statusNote: string): MouseStatus {
     const wireless = this.isWireless();
     return {
@@ -684,12 +863,15 @@ export class RedragonM719ProHidClient {
     };
   }
 
+  /**
+   * Build the `"Mouse"` main RGB zone descriptor from a decoded 7-byte EEPROM record.
+   */
   private buildMainLighting(rgb: ReturnType<typeof redragonM719ProDecodeRgbLighting>): MouseLighting {
     const mode = effectToMode(rgb.effect);
+    this.lastRgbColor = rgb.color;
     if (rgb.effect !== REDRAGON_M719_PRO_RGB_EFFECT.off) {
       this.lastRgbSpeed = rgb.speed;
       this.lastRgbBrightness = rgb.brightness;
-      this.lastRgbColor = rgb.color;
     }
     const shownSpeed = rgb.effect === REDRAGON_M719_PRO_RGB_EFFECT.off ? this.lastRgbSpeed : rgb.speed;
     const shownBrightness = (rgb.effect === REDRAGON_M719_PRO_RGB_EFFECT.off ? this.lastRgbBrightness : rgb.brightness) * 10;
@@ -709,6 +891,9 @@ export class RedragonM719ProHidClient {
     };
   }
 
+  /**
+   * Build the `"DPI indicator"` zone descriptor using the active stage's colour.
+   */
   private buildDpiIndicatorLighting(modeCode: RedragonM719ProDpiLedMode, activeStageColorHex: string): MouseLighting {
     return {
       zone: "DPI indicator",
@@ -724,6 +909,9 @@ export class RedragonM719ProHidClient {
     };
   }
 
+  /**
+   * Ensure the HID interfaces are open, the wireless mouse is awake, and the handshake has run.
+   */
   private async requireReady(): Promise<void> {
     await this.open();
     if (this.isWireless()) {
@@ -735,6 +923,9 @@ export class RedragonM719ProHidClient {
     await this.ensureHandshake();
   }
 
+  /**
+   * Query `GetConnectStatus` (`0x03`) to check whether the wireless mouse is awake.
+   */
   private async checkOnline(): Promise<boolean> {
     try {
       const reply = await this.exchange(redragonM719ProEncodeGetConnectStatus());
@@ -744,6 +935,9 @@ export class RedragonM719ProHidClient {
     }
   }
 
+  /**
+   * Perform the `Cmd 0x01` 4-byte challenge/response handshake and `Cmd 0x02` driver-status notice once per session.
+   */
   private async ensureHandshake(): Promise<void> {
     if (this.handshakeCompleted) return;
     const challenge: [number, number, number, number] = [0x17, 0x2a, 0x3d, 0x50];
@@ -758,34 +952,57 @@ export class RedragonM719ProHidClient {
     this.handshakeCompleted = true;
   }
 
+  /**
+   * Query `GetBattery` (`0x04`) and decode the current battery percentage and charging flag.
+   */
   private async readBattery() {
     const reply = await this.exchange(redragonM719ProEncodeGetBattery());
     return redragonM719ProDecodeBattery(reply);
   }
 
+  /**
+   * Read the number of active DPI stages (`1..5`) from EEPROM `0x0002`.
+   */
   private async readStageCount(): Promise<number> {
     const raw = await this.readEeprom(REDRAGON_M719_PRO_EEPROM.dpiStageCount, 2);
     const count = redragonM719ProUnpackScalar(raw) ?? raw[0] ?? REDRAGON_M719_PRO_MAX_DPI_STAGES;
     return Math.max(1, Math.min(REDRAGON_M719_PRO_MAX_DPI_STAGES, count));
   }
 
+  /**
+   * Read the 0-based active DPI stage index (`0..4`) from EEPROM `0x0004`.
+   */
   private async readActiveStageIndex(): Promise<number> {
     const raw = await this.readEeprom(REDRAGON_M719_PRO_EEPROM.activeDpiStage, 2);
     const index = (redragonM719ProUnpackScalar(raw) ?? raw[0] ?? 0) & 0x0f;
     return Math.max(0, Math.min(REDRAGON_M719_PRO_MAX_DPI_STAGES - 1, index));
   }
 
+  /**
+   * Write a 4-byte PAW3325 DPI stage record and verify all 4 read-back bytes and checksum.
+   */
   private async writeStageDpi(stage: number, targetDpi: number): Promise<number> {
     const address = REDRAGON_M719_PRO_EEPROM.dpiStages + stage * 4;
-    await this.writeEeprom(address, redragonM719ProEncodeDpiStage(targetDpi));
+    const encoded = redragonM719ProEncodeDpiStage(targetDpi);
+    await this.writeEeprom(address, encoded);
     const readBack = await this.readEeprom(address, 4);
     const confirmed = redragonM719ProDecodeDpiStage(readBack);
-    if (confirmed !== targetDpi) {
+    const exactMatch =
+      redragonM719ProVerifyDataChecksum(readBack)
+      && readBack[0] === encoded[0]
+      && readBack[1] === encoded[1]
+      && readBack[2] === encoded[2]
+      && readBack[3] === encoded[3];
+    if (!exactMatch || confirmed !== targetDpi) {
       throw new Error(`The mouse kept ${confirmed} DPI instead of ${targetDpi} DPI.`);
     }
     return confirmed;
   }
 
+  /**
+   * Read all 8 physical button slots from the matrix at `0x0060` and any extended
+   * 32-byte combo payloads from `0x0100 + slot * 0x20`.
+   */
   private async readButtons(): Promise<{
     buttonMappings: Record<string, string>;
     fixedButtons: string[];
@@ -815,7 +1032,7 @@ export class RedragonM719ProHidClient {
       let comboBytes: Uint8Array | null = null;
       if (slotBytes[0] === 0x05) {
         const comboAddress = REDRAGON_M719_PRO_EEPROM.comboBase + button.slot * REDRAGON_M719_PRO_EEPROM.comboSlotStride;
-        comboBytes = await this.readEeprom(comboAddress, 10).catch(() => null);
+        comboBytes = await this.readEeprom(comboAddress, REDRAGON_M719_PRO_EEPROM.comboSlotStride).catch(() => null);
       }
       const action = redragonM719ProDecodeButtonAction(slotBytes, comboBytes);
       buttonMappings[button.label] = action;
@@ -827,6 +1044,10 @@ export class RedragonM719ProHidClient {
     return { buttonMappings, fixedButtons };
   }
 
+  /**
+   * Read the full EEPROM configuration snapshot (polling rate, stages, stage colours,
+   * DPI indicator LED mode, button matrix, and main RGB lighting).
+   */
   private async readHardwareSnapshot() {
     const pollingRaw = await this.readEeprom(REDRAGON_M719_PRO_EEPROM.pollingRate, 2);
     const pollingHz = redragonM719ProDecodePollingRate(pollingRaw);
@@ -868,6 +1089,9 @@ export class RedragonM719ProHidClient {
     };
   }
 
+  /**
+   * Read `length` bytes from EEPROM starting at `address` in chunks of up to 10 bytes.
+   */
   private async readEeprom(address: number, length: number): Promise<Uint8Array> {
     const out = new Uint8Array(length);
     for (let offset = 0; offset < length; offset += REDRAGON_M719_PRO_MAX_CHUNK_LENGTH) {
@@ -886,6 +1110,9 @@ export class RedragonM719ProHidClient {
     return out;
   }
 
+  /**
+   * Write `data` to EEPROM starting at `address` in chunks of up to 10 bytes, retrying on MCU busy replies.
+   */
   private async writeEeprom(address: number, data: Uint8Array): Promise<void> {
     for (let offset = 0; offset < data.length; offset += REDRAGON_M719_PRO_MAX_CHUNK_LENGTH) {
       const chunk = data.subarray(offset, Math.min(data.length, offset + REDRAGON_M719_PRO_MAX_CHUNK_LENGTH));
@@ -917,15 +1144,25 @@ export class RedragonM719ProHidClient {
     }
   }
 
+  /**
+   * Send a 16-byte Feature Report `0x08` command without waiting for a response report.
+   */
   private async sendOnly(payload: Uint8Array): Promise<void> {
     const cmd = this.cmdDevice ?? this.device;
     const copy = new Uint8Array(payload);
     await cmd.sendFeatureReport(REDRAGON_M719_PRO_COMMAND_REPORT_ID, copy);
   }
 
+  /**
+   * Send a 16-byte Feature Report `0x08` command and await its matching Input Report `0x09` response.
+   */
   private async exchange(payload: Uint8Array): Promise<Uint8Array> {
     this.failWaiter(new Error("Superseded by another Redragon M719RGB-PRO request."));
     const command = payload[0]!;
+    const address =
+      command === REDRAGON_M719_PRO_COMMAND.readEeprom || command === REDRAGON_M719_PRO_COMMAND.writeEeprom
+        ? (((payload[2] ?? 0) << 8) | (payload[3] ?? 0)) & 0xffff
+        : undefined;
     const cmd = this.cmdDevice ?? this.device;
 
     const promise = new Promise<Uint8Array>((resolve, reject) => {
@@ -937,7 +1174,7 @@ export class RedragonM719ProHidClient {
           ),
         );
       }, COMMAND_TIMEOUT_MS);
-      this.waiter = { command, resolve, reject, timer };
+      this.waiter = { command, address, resolve, reject, timer };
     });
 
     const copy = new Uint8Array(payload);
@@ -950,6 +1187,9 @@ export class RedragonM719ProHidClient {
     return await promise;
   }
 
+  /**
+   * Reject and clear the current command waiter if one is active.
+   */
   private failWaiter(error: Error): void {
     const waiter = this.waiter;
     if (!waiter) return;
@@ -958,6 +1198,9 @@ export class RedragonM719ProHidClient {
     waiter.reject(error);
   }
 
+  /**
+   * Enqueue an async operation on the client's serial execution promise chain.
+   */
   private serialized<T>(action: () => Promise<T>): Promise<T> {
     const next = this.queue.then(action, action);
     this.queue = next.then(() => undefined, () => undefined);
