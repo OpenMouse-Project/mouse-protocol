@@ -127,7 +127,7 @@ export class GWolvesXviHidClient {
     // env-models.json) stop at 4 kHz; every other XVI receiver in that config
     // is its 8K dongle.
     const lowByte = this.device.productId & 0xff;
-    const max = this.isWirelessPath() ? (lowByte === 0x03 ? 1000 : lowByte === 0xaa ? 4000 : 8000) : 1000;
+    const max = this.isWirelessPath() ? (lowByte === 0x03 || lowByte === 0xaa ? 1000 : lowByte === 0x07 ? 4000 : 8000) : 1000;
     return [...POLLING_CODES.keys()].filter((rate) => rate <= max);
   }
 
