@@ -2,6 +2,7 @@ import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
 import { LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
 import { DELUX_M600_PRO_MODEL_ID, DELUX_UNBRANDED_PRODUCT_IDS } from "@openmouse/protocol/delux";
+import { REDRAGON_M719_PRO_PRODUCTS } from "@openmouse/protocol/redragon";
 import {
   buildX11DpiReport,
   decodeX11DpiReport,
@@ -409,6 +410,7 @@ function detectFamily(device: HIDDevice): ProtocolFamily {
     // Same native-adapter reasoning as VID_1D57 above: with no report
     // descriptor to inspect, the vendor id alone identifies the GearHub
     // family.
+    if (REDRAGON_M719_PRO_PRODUCTS.has(device.productId)) return null;
     if (device.collections.length === 0) return "25a7";
     return device.collections.some(hasVendorControl) ? "25a7" : null;
   }

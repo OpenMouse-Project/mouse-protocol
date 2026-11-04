@@ -135,6 +135,12 @@ import {
   REDRAGON_M690_PRO_USAGE,
   REDRAGON_M690_PRO_USAGE_PAGE,
   REDRAGON_M690_PRO_VENDOR_ID,
+  REDRAGON_M719_PRO_COMMAND_USAGE,
+  REDRAGON_M719_PRO_COMMAND_USAGE_PAGE,
+  REDRAGON_M719_PRO_NOTIFY_USAGE,
+  REDRAGON_M719_PRO_NOTIFY_USAGE_PAGE,
+  REDRAGON_M719_PRO_PRODUCT_IDS,
+  REDRAGON_M719_PRO_VENDOR_ID,
   REDRAGON_PRODUCT_IDS,
   REDRAGON_VENDOR_ID,
 } from "@openmouse/protocol/redragon";
@@ -219,6 +225,9 @@ export const VENDOR_ID = {
   // Shares SinoWealth's 0x258a with the Glorious classic line (see
   // `gloriousClassic` above); disjoint by product id.
   redragonM690Pro: REDRAGON_M690_PRO_VENDOR_ID,
+  // Shares Compx/Areson's 0x25a7 with Attack Shark (see `attackShark` above);
+  // disjoint by product id and usage page (0xff02/0xff01 vs 0xffff).
+  redragonM719Pro: REDRAGON_M719_PRO_VENDOR_ID,
   fater: FATER_VENDOR_ID,
   // Shares 0x093a with Glorious's Pixart-based Model O 2 / I 2 family (see
   // `glorious` above); GloriousHidClient.isSupported() only claims its own
@@ -288,6 +297,26 @@ export const REDRAGON_M690_PRO_HID_FILTERS: HIDDeviceFilter[] = REDRAGON_M690_PR
   usagePage: REDRAGON_M690_PRO_USAGE_PAGE,
   usage: REDRAGON_M690_PRO_USAGE,
 }));
+
+/**
+ * Redragon M719RGB-PRO (INVADER PRO, Compx/Areson 0x25a7): cable (0xfab0) and
+ * 2.4 GHz receiver (0xfa7e), offering both the 0xff02:0x0002 command feature
+ * report collection and the 0xff01:0x0001 response/notify collection.
+ */
+export const REDRAGON_M719_PRO_HID_FILTERS: HIDDeviceFilter[] = REDRAGON_M719_PRO_PRODUCT_IDS.flatMap((productId) => [
+  {
+    vendorId: REDRAGON_M719_PRO_VENDOR_ID,
+    productId,
+    usagePage: REDRAGON_M719_PRO_COMMAND_USAGE_PAGE,
+    usage: REDRAGON_M719_PRO_COMMAND_USAGE,
+  },
+  {
+    vendorId: REDRAGON_M719_PRO_VENDOR_ID,
+    productId,
+    usagePage: REDRAGON_M719_PRO_NOTIFY_USAGE_PAGE,
+    usage: REDRAGON_M719_PRO_NOTIFY_USAGE,
+  },
+]);
 
 /** Holtek config collection `0xFFA0:0x01` on USB interface 2 of the M724 and M612. */
 export const REDRAGON_HID_FILTERS: HIDDeviceFilter[] = [...REDRAGON_PRODUCT_IDS].map((productId) => ({
@@ -926,6 +955,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...DAREU_HID_FILTERS,
   ...REDRAGON_HID_FILTERS,
   ...REDRAGON_M690_PRO_HID_FILTERS,
+  ...REDRAGON_M719_PRO_HID_FILTERS,
   ...FATER_HID_FILTERS,
   ...MOTOSPEED_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
