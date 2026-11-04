@@ -69,6 +69,12 @@ interface FakeOptions {
   /** Keep the write instead of storing it, to simulate a mouse that ignores it. */
   ignoreWrites?: boolean;
   debounce?: number;
+  /**
+   * Blocks the mouse answers for profile commands 0x21 / 0x31 (report id
+   * first). Unset: it answers with profile 1's block, as a single-profile
+   * firmware that ignores the command would.
+   */
+  profiles?: Partial<Record<0x21 | 0x31, Uint8Array>>;
 }
 
 function fakeDevice(options: FakeOptions = {}) {
@@ -98,7 +104,10 @@ function fakeDevice(options: FakeOptions = {}) {
       }
     },
     receiveFeatureReport: async (reportId: number) => {
-      if (reportId === 4) return new DataView(Uint8Array.from(block.subarray(1)).buffer);
+      if (reportId === 4) {
+        const other = options.profiles?.[lastCommand as 0x21 | 0x31];
+        return new DataView(Uint8Array.from((other ?? block).subarray(1)).buffer);
+      }
       if (options.stallShort) throw new Error("stall");
       return new DataView(Uint8Array.from([lastCommand, (options.debounce ?? 8) / 2, 0, 0, 0]).buffer);
     },
@@ -413,4 +422,45 @@ test("offers the DPI choices of the sensor it read, none before", async () => {
   const options = client.getDpiOptions();
   assert.equal(options[0], 400);
   assert.equal(options[options.length - 1], 12000);
+});
+
+function profileBlock(command: 0x21 | 0x31, edit?: (block: Uint8Array) => void): Uint8Array {
+  const block = configBlock();
+  block[1] = command;
+  edit?.(block);
+  return block;
+}
+
+test("probes profiles 2 and 3 read-only, once per connection", async () => {
+  const fake = fakeDevice({ profiles: { 0x21: profileBlock(0x21), 0x31: profileBlock(0x31, (block) => { block[0x35] = GLORIOUS_SINOWEALTH_EFFECT_WAVE; }) } });
+  const client = new GloriousSinowealthHidClient(fake.device);
+  const status = await client.readStatus();
+  assert.deepEqual([...client.getOtherProfiles()!], [[2, "same"], [3, "differs"]]);
+  assert.match(status.ui!.statusNote!, /profile 3 holds different settings/);
+  const commands = fake.writes.filter((write) => write.reportId === 5).map((write) => write.payload[0]);
+  assert.deepEqual(commands, [0x11, 0x1a, 0x21, 0x31]);
+  assert.equal(fake.writes.some((write) => write.reportId === 4), false, "the probe writes nothing");
+
+  await client.readStatus();
+  const after = fake.writes.filter((write) => write.reportId === 5).map((write) => write.payload[0]);
+  assert.deepEqual(after.slice(4), [0x11, 0x1a], "a later refresh does not probe again");
+});
+
+test("treats an answer for another command as no such profile", async () => {
+  // Single-profile firmware: 0x21 and 0x31 come back as profile 1's 0x11 block.
+  const client = new GloriousSinowealthHidClient(fakeDevice().device);
+  const status = await client.readStatus();
+  assert.deepEqual([...client.getOtherProfiles()!], [[2, "absent"], [3, "absent"]]);
+  assert.match(status.ui!.statusNote!, /Please report whether changes stick\.$/);
+});
+
+test("still edits profile 1 after probing the others", async () => {
+  const fake = fakeDevice({ profiles: { 0x21: profileBlock(0x21, (block) => { block[10] = 0x01; }) } });
+  const client = new GloriousSinowealthHidClient(fake.device);
+  await client.readStatus();
+  await client.setPollingRate(500);
+  const settings = fake.writes.filter((write) => write.reportId === 4);
+  assert.equal(settings.length, 1);
+  assert.equal(settings[0]!.payload[0], 0x11, "the write is addressed to profile 1");
+  assert.equal(fake.current()[10]! & 0x0f, 0x03);
 });
