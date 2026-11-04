@@ -2,6 +2,8 @@ import type { MouseLighting, MouseLightingMode, MouseStatus } from "../mouse-typ
 import {
   GLORIOUS_SINOWEALTH_CMD_DEBOUNCE,
   GLORIOUS_SINOWEALTH_CMD_GET_CONFIG,
+  GLORIOUS_SINOWEALTH_CMD_GET_CONFIG2,
+  GLORIOUS_SINOWEALTH_CMD_GET_CONFIG3,
   GLORIOUS_SINOWEALTH_COMMAND_REPORT_ID,
   GLORIOUS_SINOWEALTH_CONFIG_LONG_REPORT_ID,
   GLORIOUS_SINOWEALTH_CONFIG_REPORT_ID,
@@ -72,6 +74,14 @@ const SPEEDS = [1, 2, 3] as const;
 const DEFAULT_BRIGHTNESS = 50;
 const DEFAULT_SPEED = 2;
 
+/** What a read-only request for one of the other profiles' blocks gave back. */
+export type GloriousSinowealthProfileProbe = "absent" | "same" | "differs";
+
+const OTHER_PROFILES: ReadonlyArray<readonly [profile: 2 | 3, command: number]> = [
+  [2, GLORIOUS_SINOWEALTH_CMD_GET_CONFIG2],
+  [3, GLORIOUS_SINOWEALTH_CMD_GET_CONFIG3],
+];
+
 function collectReports(collections: readonly HIDCollectionInfo[], found = new Map<number, number | null>()): Map<number, number | null> {
   for (const collection of collections) {
     if (collection.usagePage === GLORIOUS_SINOWEALTH_USAGE_PAGE) {
@@ -116,6 +126,15 @@ export class GloriousSinowealthHidClient {
   /** Whether report-5 answers can be read here: null until the first try. */
   private shortAnswers: boolean | null = null;
   private dpiOptions: number[] = [];
+  /**
+   * Profiles 2 and 3's blocks (null: no such profile), fetched once per
+   * connection. Every edit goes to profile 1 (0x11); a mouse running another
+   * profile would store the edit and show no change, which is what this is
+   * here to tell apart.
+   */
+  private otherBlocks: Map<2 | 3, Uint8Array | null> | null = null;
+  /** The comparison with profile 1 as of the latest status read. */
+  private otherProfiles: Map<2 | 3, GloriousSinowealthProfileProbe> | null = null;
   private readonly configReportId: number;
   /** Declared byte length (report id included) of the settings report, when the descriptor says. */
   private readonly declaredLength: number | null;
@@ -177,6 +196,7 @@ export class GloriousSinowealthHidClient {
     const block = await this.readConfig();
     const config = gloriousSinowealthDecodeConfig(block);
     const debounceMs = await this.readDebounce();
+    const otherProfiles = await this.probeOtherProfiles(block);
     const product = this.product();
     const name = `Glorious ${product.name}`;
     const stages = config.stages.map((stage) => stage.dpi ?? 0);
@@ -204,7 +224,7 @@ export class GloriousSinowealthHidClient {
         defaultDisplayName: name,
         statusNote: config.sensorName === null
           ? `This mouse reports an unknown sensor (0x${config.sensor.toString(16)}), so DPI is left alone.`
-          : "Experimental: this mouse's protocol is documented by libratbag and OpenRGB but has not been confirmed on hardware here yet. Please report whether changes stick.",
+          : this.experimentalNote(otherProfiles),
       },
       batteryPercent: null,
       batteryState: "Unknown",
@@ -221,6 +241,19 @@ export class GloriousSinowealthHidClient {
       liftOffDistance: null,
       firmware: [],
     };
+  }
+
+  /** Profiles 2 and 3 as probed on this connection; null before the first full status read. */
+  getOtherProfiles(): ReadonlyMap<2 | 3, GloriousSinowealthProfileProbe> | null {
+    return this.otherProfiles;
+  }
+
+  private experimentalNote(otherProfiles: ReadonlyMap<2 | 3, GloriousSinowealthProfileProbe>): string {
+    const base = "Experimental: this mouse's protocol is documented by libratbag and OpenRGB but has not been confirmed on hardware here yet.";
+    const differing = [...otherProfiles].filter(([, probe]) => probe === "differs").map(([profile]) => profile);
+    if (differing.length === 0) return `${base} Please report whether changes stick.`;
+    const which = differing.length === 1 ? `profile ${differing[0]} holds` : `profiles ${differing.join(" and ")} hold`;
+    return `${base} OpenMouse edits profile 1, and this mouse's ${which} different settings. If a change does not show on the mouse, it may be running another profile: please report that, with what the mouse shows.`;
   }
 
   /** Sets the `stage`-th enabled DPI stage (0-based) and returns the DPI written. */
@@ -392,12 +425,7 @@ export class GloriousSinowealthHidClient {
     for (let attempt = 0; attempt < READ_ATTEMPTS; attempt++) {
       if (attempt > 0) await sleep(READ_RETRY_DELAY_MS);
       try {
-        await this.device.sendFeatureReport(
-          GLORIOUS_SINOWEALTH_COMMAND_REPORT_ID,
-          gloriousSinowealthEncodeCommand(GLORIOUS_SINOWEALTH_CMD_GET_CONFIG).slice(1).buffer as ArrayBuffer,
-        );
-        await sleep(COMMAND_DELAY_MS);
-        const block = await this.receive(this.configReportId);
+        const block = await this.requestConfig(GLORIOUS_SINOWEALTH_CMD_GET_CONFIG);
         gloriousSinowealthCheckConfig(block);
         return block;
       } catch (error) {
@@ -406,6 +434,52 @@ export class GloriousSinowealthHidClient {
     }
     const reason = failure instanceof Error ? failure.message : String(failure);
     throw new Error(`The Glorious mouse did not answer its settings request (${reason}).`);
+  }
+
+  /**
+   * Asks once per connection for profiles 2 and 3 (commands 0x21 / 0x31,
+   * read-only, the requests libratbag makes on multi-profile SinoWealth mice),
+   * then compares their settings with the current profile 1 on every call, so
+   * an edit to profile 1 is reflected. Any failure or an answer for another
+   * command counts as "absent"; nothing is written.
+   */
+  private async probeOtherProfiles(profile1: Uint8Array): Promise<ReadonlyMap<2 | 3, GloriousSinowealthProfileProbe>> {
+    if (!this.otherBlocks) {
+      const blocks = new Map<2 | 3, Uint8Array | null>();
+      for (const [profile, command] of OTHER_PROFILES) {
+        try {
+          const block = await this.requestConfig(command);
+          gloriousSinowealthCheckConfig(block, command);
+          blocks.set(profile, block);
+        } catch {
+          blocks.set(profile, null);
+        }
+      }
+      this.otherBlocks = blocks;
+    }
+    const size = gloriousSinowealthConfigSize(profile1.length, this.declaredLength) ?? profile1.length;
+    const ours = profile1.subarray(SETTINGS_START, size);
+    const found = new Map<2 | 3, GloriousSinowealthProfileProbe>();
+    for (const [profile, block] of this.otherBlocks) {
+      if (!block) {
+        found.set(profile, "absent");
+        continue;
+      }
+      const theirs = block.subarray(SETTINGS_START, size);
+      const same = theirs.length === ours.length && theirs.every((byte, index) => byte === ours[index]);
+      found.set(profile, same ? "same" : "differs");
+    }
+    this.otherProfiles = found;
+    return found;
+  }
+
+  private async requestConfig(command: number): Promise<Uint8Array> {
+    await this.device.sendFeatureReport(
+      GLORIOUS_SINOWEALTH_COMMAND_REPORT_ID,
+      gloriousSinowealthEncodeCommand(command).slice(1).buffer as ArrayBuffer,
+    );
+    await sleep(COMMAND_DELAY_MS);
+    return await this.receive(this.configReportId);
   }
 
   /** The debounce time, tried once: null when the answer cannot be read here. */

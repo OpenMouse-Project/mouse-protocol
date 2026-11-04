@@ -32,6 +32,9 @@ export const GLORIOUS_SINOWEALTH_CONFIG_SIZE_MAX = 167;
 
 export const GLORIOUS_SINOWEALTH_CMD_FIRMWARE = 0x01;
 export const GLORIOUS_SINOWEALTH_CMD_GET_CONFIG = 0x11;
+/** Same block for the second and third profile (libratbag `GET_CONFIG2` / `GET_CONFIG3`). */
+export const GLORIOUS_SINOWEALTH_CMD_GET_CONFIG2 = 0x21;
+export const GLORIOUS_SINOWEALTH_CMD_GET_CONFIG3 = 0x31;
 export const GLORIOUS_SINOWEALTH_CMD_DEBOUNCE = 0x1a;
 
 export const GLORIOUS_SINOWEALTH_VENDOR_ID = 0x258a;
@@ -203,12 +206,13 @@ export function gloriousSinowealthEncodeDebounce(milliseconds: number): Uint8Arr
 }
 
 /**
- * Throws unless `block` is a settings answer (report 4 or 6, command 0x11)
- * with at least the bytes every firmware has.
+ * Throws unless `block` is a settings answer (report 4 or 6, answering
+ * `command`, by default profile 1's 0x11) with at least the bytes every
+ * firmware has.
  */
-export function gloriousSinowealthCheckConfig(block: Uint8Array): void {
+export function gloriousSinowealthCheckConfig(block: Uint8Array, command: number = GLORIOUS_SINOWEALTH_CMD_GET_CONFIG): void {
   const reportOk = block[0] === GLORIOUS_SINOWEALTH_CONFIG_REPORT_ID || block[0] === GLORIOUS_SINOWEALTH_CONFIG_LONG_REPORT_ID;
-  if (block.length < GLORIOUS_SINOWEALTH_CONFIG_SIZE_MIN || !reportOk || block[1] !== GLORIOUS_SINOWEALTH_CMD_GET_CONFIG) {
+  if (block.length < GLORIOUS_SINOWEALTH_CONFIG_SIZE_MIN || !reportOk || block[1] !== command) {
     throw new Error(`The Glorious mouse answered its settings request with ${block.length} bytes starting ${hex(block.subarray(0, 8))}.`);
   }
 }
