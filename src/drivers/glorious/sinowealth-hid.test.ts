@@ -464,3 +464,19 @@ test("still edits profile 1 after probing the others", async () => {
   assert.equal(settings[0]!.payload[0], 0x11, "the write is addressed to profile 1");
   assert.equal(fake.current()[10]! & 0x0f, 0x03);
 });
+
+test("compares the probed profiles with profile 1 as it is now, without probing again", async () => {
+  // Profile 2 differs from profile 1 only in its polling rate (500 Hz).
+  const fake = fakeDevice({ profiles: { 0x21: profileBlock(0x21, (block) => { block[10] = 0x03; }) } });
+  const client = new GloriousSinowealthHidClient(fake.device);
+  const before = await client.readStatus();
+  assert.equal(client.getOtherProfiles()!.get(2), "differs");
+  assert.match(before.ui!.statusNote!, /profile 2 holds different settings/);
+
+  await client.setPollingRate(500);
+  const after = await client.readStatus();
+  assert.equal(client.getOtherProfiles()!.get(2), "same");
+  assert.match(after.ui!.statusNote!, /Please report whether changes stick\.$/);
+  const probes = fake.writes.filter((write) => write.reportId === 5 && write.payload[0] === 0x21);
+  assert.equal(probes.length, 1);
+});

@@ -127,10 +127,13 @@ export class GloriousSinowealthHidClient {
   private shortAnswers: boolean | null = null;
   private dpiOptions: number[] = [];
   /**
-   * Profiles 2 and 3 as first seen, probed once per connection. Every edit
-   * goes to profile 1 (0x11); a mouse running another profile would store
-   * the edit and show no change, which is what this is here to tell apart.
+   * Profiles 2 and 3's blocks (null: no such profile), fetched once per
+   * connection. Every edit goes to profile 1 (0x11); a mouse running another
+   * profile would store the edit and show no change, which is what this is
+   * here to tell apart.
    */
+  private otherBlocks: Map<2 | 3, Uint8Array | null> | null = null;
+  /** The comparison with profile 1 as of the latest status read. */
   private otherProfiles: Map<2 | 3, GloriousSinowealthProfileProbe> | null = null;
   private readonly configReportId: number;
   /** Declared byte length (report id included) of the settings report, when the descriptor says. */
@@ -434,26 +437,37 @@ export class GloriousSinowealthHidClient {
   }
 
   /**
-   * Asks once for profiles 2 and 3 (commands 0x21 / 0x31, read-only, the
-   * requests libratbag makes on multi-profile SinoWealth mice) and compares
-   * each answer's settings with profile 1's. Any failure or an answer for
-   * another command counts as "absent"; nothing is written.
+   * Asks once per connection for profiles 2 and 3 (commands 0x21 / 0x31,
+   * read-only, the requests libratbag makes on multi-profile SinoWealth mice),
+   * then compares their settings with the current profile 1 on every call, so
+   * an edit to profile 1 is reflected. Any failure or an answer for another
+   * command counts as "absent"; nothing is written.
    */
   private async probeOtherProfiles(profile1: Uint8Array): Promise<ReadonlyMap<2 | 3, GloriousSinowealthProfileProbe>> {
-    if (this.otherProfiles) return this.otherProfiles;
+    if (!this.otherBlocks) {
+      const blocks = new Map<2 | 3, Uint8Array | null>();
+      for (const [profile, command] of OTHER_PROFILES) {
+        try {
+          const block = await this.requestConfig(command);
+          gloriousSinowealthCheckConfig(block, command);
+          blocks.set(profile, block);
+        } catch {
+          blocks.set(profile, null);
+        }
+      }
+      this.otherBlocks = blocks;
+    }
     const size = gloriousSinowealthConfigSize(profile1.length, this.declaredLength) ?? profile1.length;
     const ours = profile1.subarray(SETTINGS_START, size);
     const found = new Map<2 | 3, GloriousSinowealthProfileProbe>();
-    for (const [profile, command] of OTHER_PROFILES) {
-      try {
-        const block = await this.requestConfig(command);
-        gloriousSinowealthCheckConfig(block, command);
-        const theirs = block.subarray(SETTINGS_START, size);
-        const same = theirs.length === ours.length && theirs.every((byte, index) => byte === ours[index]);
-        found.set(profile, same ? "same" : "differs");
-      } catch {
+    for (const [profile, block] of this.otherBlocks) {
+      if (!block) {
         found.set(profile, "absent");
+        continue;
       }
+      const theirs = block.subarray(SETTINGS_START, size);
+      const same = theirs.length === ours.length && theirs.every((byte, index) => byte === ours[index]);
+      found.set(profile, same ? "same" : "differs");
     }
     this.otherProfiles = found;
     return found;
