@@ -84,23 +84,35 @@ export function encodeReceiverPairingRequest(productId: number, slot: number): U
 }
 
 /**
+ * HID++ 1.0 errors that mean "nothing on this slot": invalid address, invalid
+ * value and unknown device. Busy, resource and other errors leave the slot
+ * unknown, so an occupied slot is never reported empty by a passing error.
+ */
+const EMPTY_SLOT_ERRORS: ReadonlySet<number> = new Set([0x02, 0x03, 0x08]);
+
+/** One slot's answer: its kind, an empty slot, or an error that says nothing. */
+export type ReceiverPairingReply = LogitechDeviceKind | "empty" | "failed";
+
+/**
  * Decode a reply to `encodeReceiverPairingRequest`, given without its report
- * id. Returns the kind for a pairing reply, `null` for an empty slot (the
- * receiver answers an HID++ 1.0 error), and `undefined` for any other report.
+ * id. Returns the slot's kind for a pairing reply, `"empty"` or `"failed"` for
+ * an HID++ 1.0 error on the register, and `undefined` for any other report.
  */
 export function decodeReceiverPairingReply(
   productId: number,
   slot: number,
   reportId: number,
   report: Uint8Array,
-): LogitechDeviceKind | null | undefined {
+): ReceiverPairingReply | undefined {
   const subRegister = receiverPairingSubRegister(productId, slot);
   if (report[0] !== RECEIVER_DEVICE_INDEX) return undefined;
   // An HID++ 1.0 error echoes the sub-ID and register, then the error code
-  // (`[0xFF, 0x8F, 0x83, 0xB5, code]`); only one read is in flight at a time.
+  // (`[0xFF, 0x8F, 0x83, 0xB5, code]`), but not the sub-register. Only one read
+  // is in flight at a time, and the reader stops at the first slot that does
+  // not answer, so a late error can never be taken for another slot's.
   if (reportId === SHORT_REPORT_ID && report[1] === HIDPP1_ERROR
     && report[2] === HIDPP1_GET_LONG_REGISTER && report[3] === RECEIVER_INFO_REGISTER) {
-    return null;
+    return EMPTY_SLOT_ERRORS.has(report[4] ?? -1) ? "empty" : "failed";
   }
   if (reportId !== LONG_REPORT_ID || report[1] !== HIDPP1_GET_LONG_REGISTER
     || report[2] !== RECEIVER_INFO_REGISTER || report[3] !== subRegister) {
@@ -126,9 +138,12 @@ export function isPointingKind(kind: LogitechDeviceKind): boolean {
  * the long reply arrives on the long one). Interfaces this call opened are
  * closed again; one that was already open is left open.
  *
- * Resolves `null` when no slot answers with a pairing (an older Nano
- * receiver, a receiver that cannot be opened, or one with nothing paired), so
- * the caller keeps its descriptor-level guess instead of treating it as empty.
+ * The result is all or nothing. It resolves `null`, so the caller keeps its
+ * descriptor-level guess, whenever the table cannot be read in full: a slot
+ * that does not answer in time, an error that does not mean "empty", a send
+ * that fails or hangs, a receiver that cannot be opened (an older Nano
+ * receiver), or one where every slot is empty, which looks the same as a
+ * receiver without the register. A list is never partial.
  */
 export async function readLogitechReceiverPairings(
   interfaces: readonly HIDDevice[],
@@ -139,15 +154,15 @@ export async function readLogitechReceiverPairings(
   const listeners = interfaces.filter((device) => hasHidppShortCollection(device) || hasHidppLongCollection(device));
   const productId = sender.productId;
   const opened: HIDDevice[] = [];
-  let pending: { slot: number; resolve: (kind: LogitechDeviceKind | null | undefined) => void } | null = null;
+  let pending: { slot: number; resolve: (reply: ReceiverPairingReply | undefined) => void } | null = null;
   const onInputReport = (event: HIDInputReportEvent): void => {
     if (!pending) return;
     const report = new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength);
-    const kind = decodeReceiverPairingReply(productId, pending.slot, event.reportId, report);
-    if (kind === undefined) return;
+    const reply = decodeReceiverPairingReply(productId, pending.slot, event.reportId, report);
+    if (reply === undefined) return;
     const { resolve } = pending;
     pending = null;
-    resolve(kind);
+    resolve(reply);
   };
 
   try {
@@ -160,32 +175,26 @@ export async function readLogitechReceiverPairings(
     }
 
     const pairings: LogitechReceiverPairing[] = [];
-    let answered = false;
     for (const slot of RECEIVER_PAIRING_SLOTS) {
-      const reply = new Promise<LogitechDeviceKind | null | undefined>((resolve) => {
-        const timer = setTimeout(() => {
+      // One deadline covers both the send and the reply, so a send that never
+      // settles cannot hold the interfaces open.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const reply = await new Promise<ReceiverPairingReply | undefined>((resolve) => {
+        timer = setTimeout(() => {
           pending = null;
           resolve(undefined);
         }, timeoutMs);
-        pending = {
-          slot,
-          resolve: (kind) => {
-            clearTimeout(timer);
-            resolve(kind);
-          },
-        };
+        pending = { slot, resolve };
+        sender.sendReport(SHORT_REPORT_ID, encodeReceiverPairingRequest(productId, slot)).catch(() => {
+          pending = null;
+          resolve("failed");
+        });
       });
-      await sender.sendReport(SHORT_REPORT_ID, encodeReceiverPairingRequest(productId, slot));
-      const kind = await reply;
-      // No answer to the first slot: this receiver has no pairing register.
-      if (kind === undefined && slot === RECEIVER_PAIRING_SLOTS[0]) return null;
-      if (kind === undefined || kind === null) continue;
-      answered = true;
-      pairings.push({ slot, kind });
+      clearTimeout(timer);
+      if (reply === undefined || reply === "failed") return null;
+      if (reply !== "empty") pairings.push({ slot, kind: reply });
     }
-    // Every slot refused: either nothing is paired or the register is not
-    // supported, and the two look the same. Say "unknown", not "empty".
-    return answered ? pairings : null;
+    return pairings.length > 0 ? pairings : null;
   } catch {
     return null;
   } finally {

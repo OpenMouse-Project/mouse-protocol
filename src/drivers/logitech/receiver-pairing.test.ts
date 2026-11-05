@@ -38,7 +38,11 @@ interface FakeReceiver {
  * as WebHID reports them on Windows: requests go out on the short one and
  * long replies come back on the long one.
  */
-function fakeReceiver(productId: number, slots: Record<number, number | "error">, options: { silent?: boolean } = {}): FakeReceiver {
+function fakeReceiver(
+  productId: number,
+  slots: Record<number, number | "busy" | "silent">,
+  options: { silent?: boolean; hangSend?: boolean } = {},
+): FakeReceiver {
   const sent: Uint8Array[] = [];
   const closed: HIDDevice[] = [];
   const listeners = new Map<HIDDevice, Set<(event: HIDInputReportEvent) => void>>();
@@ -66,6 +70,7 @@ function fakeReceiver(productId: number, slots: Record<number, number | "error">
       async sendReport(reportId: number, data: Uint8Array) {
         assert.equal(reportId, 0x10);
         sent.push(data);
+        if (options.hangSend) return new Promise<void>(() => undefined);
         if (options.silent) return;
         const subRegister = data[3]!;
         const slot = [1, 2, 3, 4, 5, 6].find((candidate) => receiverPairingSubRegister(productId, candidate) === subRegister)!;
@@ -73,8 +78,10 @@ function fakeReceiver(productId: number, slots: Record<number, number | "error">
         queueMicrotask(() => {
           // An unrelated report first: the reader must skip it.
           deliver(longInterface, 0x11, new Uint8Array([0x01, 0x04, 0x00, 0x00]));
-          if (answer === undefined || answer === "error") {
-            deliver(shortInterface, 0x10, new Uint8Array([0xff, 0x8f, 0x83, 0xb5, 0x03, 0x00]));
+          if (answer === "silent") return;
+          if (answer === undefined || answer === "busy") {
+            // 0x03 invalid value: nothing on the slot. 0x07 busy: says nothing.
+            deliver(shortInterface, 0x10, new Uint8Array([0xff, 0x8f, 0x83, 0xb5, answer === "busy" ? 0x07 : 0x03, 0x00]));
           } else {
             deliver(longInterface, 0x11, pairingReply(productId, slot, answer));
           }
@@ -101,8 +108,13 @@ test("a pairing reply decodes the kind from the low nibble at the receiver's off
   // A reply for another slot, or a HID++ 2.0 report, is not this answer.
   assert.equal(decodeReceiverPairingReply(LIGHTSPEED, 2, 0x11, pairingReply(LIGHTSPEED, 1, 0x02)), undefined);
   assert.equal(decodeReceiverPairingReply(LIGHTSPEED, 1, 0x11, new Uint8Array([0x01, 0x04, 0, 0])), undefined);
-  // An HID++ 1.0 error on the register is an empty slot.
-  assert.equal(decodeReceiverPairingReply(LIGHTSPEED, 1, 0x10, new Uint8Array([0xff, 0x8f, 0x83, 0xb5, 0x03, 0])), null);
+  // Only the errors that mean "nothing here" make a slot empty.
+  for (const code of [0x02, 0x03, 0x08]) {
+    assert.equal(decodeReceiverPairingReply(LIGHTSPEED, 1, 0x10, new Uint8Array([0xff, 0x8f, 0x83, 0xb5, code, 0])), "empty");
+  }
+  for (const code of [0x04, 0x07, 0x09, 0x0a]) {
+    assert.equal(decodeReceiverPairingReply(LIGHTSPEED, 1, 0x10, new Uint8Array([0xff, 0x8f, 0x83, 0xb5, code, 0])), "failed");
+  }
 });
 
 test("a LIGHTSPEED receiver with only a mouse reports one pointing slot", async () => {
@@ -146,4 +158,25 @@ test("without a short HID++ collection there is nothing to ask", async () => {
 test("mice, trackballs and touchpads are pointing kinds; keyboards are not", () => {
   const kinds: LogitechDeviceKind[] = ["mouse", "trackball", "touchpad", "keyboard", "numpad", "unknown"];
   assert.deepEqual(kinds.map(isPointingKind), [true, true, true, false, false, false]);
+});
+
+test("an error that does not mean empty, on any slot, makes the table unknown", async () => {
+  // Slot 2 is occupied but busy: dropping it would read as nothing paired there.
+  const receiver = fakeReceiver(LIGHTSPEED, { 1: 0x02, 2: "busy" });
+  assert.equal(await readLogitechReceiverPairings(receiver.interfaces), null);
+  assert.equal(receiver.sent.length, 2);
+  assert.equal(receiver.closed.length, 2);
+});
+
+test("a later slot that times out makes the table unknown instead of partial", async () => {
+  const receiver = fakeReceiver(BOLT, { 1: 0x02, 3: "silent" }, {});
+  assert.equal(await readLogitechReceiverPairings(receiver.interfaces, 20), null);
+  // It stops at the silent slot, so no late reply can answer a later one.
+  assert.equal(receiver.sent.length, 3);
+});
+
+test("a send that never settles is bounded by the reply deadline and still closes", async () => {
+  const receiver = fakeReceiver(LIGHTSPEED, { 1: 0x02 }, { hangSend: true });
+  assert.equal(await readLogitechReceiverPairings(receiver.interfaces, 20), null);
+  assert.equal(receiver.closed.length, 2);
 });
