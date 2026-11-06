@@ -130,8 +130,8 @@ export const GWOLVES_PRODUCTS: ReadonlyMap<number, GWolvesProduct> = new Map([
   [0x5904, { model: "HSK Plus ACE", wireless: false, verified: false, protocol: "xvi" }],
   [0x5903, { model: "HSK Plus ACE", wireless: true, verified: false, protocol: "xvi" }],
   // G-Wolves HT-S ACE Wireless (Verified via hardware analysis and reverse engineering)
-  [0x001a, { model: "HT-S ACE", wireless: true, verified: true, protocol: "gwolves" }],
-  [0x00aa, { model: "HT-S ACE", wireless: false, verified: true, protocol: "gwolves" }],
+  [0x001a, { model: "HT-S ACE", wireless: false, verified: true, protocol: "xvi" }],
+  [0x00aa, { model: "HT-S ACE", wireless: true, verified: true, protocol: "xvi" }],
   // "TEST HTS Plus" in that config (wired 0x5428, wireless 0x3854) is
   // deliberately skipped: its own name marks it a dev/test entry, and its
   // wireless id collides with the already-verified HTX Ultra's 0x3854.
