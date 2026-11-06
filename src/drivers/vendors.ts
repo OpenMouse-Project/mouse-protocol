@@ -151,6 +151,12 @@ import {
   FATER_VENDOR_ID,
 } from "@openmouse/protocol/fater";
 import {
+  THERMALTAKE_CONFIG_USAGE,
+  THERMALTAKE_CONFIG_USAGE_PAGE,
+  THERMALTAKE_PRODUCT_IDS,
+  THERMALTAKE_VENDOR_ID,
+} from "@openmouse/protocol/thermaltake";
+import {
   AJAZZ_DONGLE_VENDOR_ID,
   AJAZZ_PRODUCTS,
   AJAZZ_USAGE,
@@ -239,6 +245,7 @@ export const VENDOR_ID = {
   hyperxHp: HYPERX_VENDOR_ID_HP,
   hitscan: HITSCAN_VENDOR_ID,
   roccat: ROCCAT_VENDOR_ID,
+  thermaltake: THERMALTAKE_VENDOR_ID,
 } as const;
 
 /**
@@ -288,6 +295,17 @@ export const FATER_HID_FILTERS: HIDDeviceFilter[] = [...FATER_PRODUCT_IDS].map((
   usagePage: FATER_CONFIG_USAGE_PAGE,
   usage: FATER_CONFIG_USAGE,
 }));
+
+/**
+ * The Iris's LED-page config collection (interface 1) and its mouse collection
+ * (interface 0), read from the mouse with HidP_GetCaps. Chrome on Windows drops
+ * the first, so the second, with its 8-byte command report, is the one a
+ * browser can use there.
+ */
+export const THERMALTAKE_HID_FILTERS: HIDDeviceFilter[] = [...THERMALTAKE_PRODUCT_IDS].flatMap((productId) => [
+  { vendorId: THERMALTAKE_VENDOR_ID, productId, usagePage: THERMALTAKE_CONFIG_USAGE_PAGE, usage: THERMALTAKE_CONFIG_USAGE },
+  { vendorId: THERMALTAKE_VENDOR_ID, productId, usagePage: 0x01, usage: 0x02 },
+]);
 
 /**
  * Redragon M690 PRO (SinoWealth): cable and 2.4 GHz receiver, both exposing
@@ -960,6 +978,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...REDRAGON_M690_PRO_HID_FILTERS,
   ...REDRAGON_M719_PRO_HID_FILTERS,
   ...FATER_HID_FILTERS,
+  ...THERMALTAKE_HID_FILTERS,
   ...MOTOSPEED_HID_FILTERS,
   ...ZAUNKOENIG_PRODUCT_IDS.map((productId) => ({
     vendorId: ZAUNKOENIG_VENDOR_ID,
