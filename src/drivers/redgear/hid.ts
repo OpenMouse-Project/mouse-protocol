@@ -1,4 +1,4 @@
-import type { MouseStatus, MouseLighting } from "../mouse-types.js";
+import type { MouseStatus, MouseLighting } from "../mouse-types.ts";
 import {
   REDGEAR_X13_VENDOR_ID,
   REDGEAR_X13_PRODUCT_ID,
@@ -19,7 +19,7 @@ import {
   redgearEncodeButton,
   X13_BUTTON_NAMES,
   X13_BUTTON_ACTIONS,
-} from "../../redgear/index.js";
+} from "../../redgear/index.ts";
 
 function hasStatusCollection(
   collections: readonly HIDCollectionInfo[],
@@ -86,6 +86,8 @@ export class RedgearX13HidClient {
 
   async close(): Promise<void> {
     this.generation++;
+    this.pending = null;
+    this.queue = Promise.resolve();
     this.rawStatus = null;
     this.readFailed = false;
     this.lastError = null;
@@ -124,7 +126,10 @@ export class RedgearX13HidClient {
     return task;
   }
 
-  private async transfer<T>(action: () => Promise<T>): Promise<T> {
+  private async transfer<T>(
+    action: () => Promise<T>,
+    optional = false,
+  ): Promise<T> {
     const generation = this.generation;
     if (this.readFailed)
       throw new Error(
@@ -150,7 +155,7 @@ export class RedgearX13HidClient {
         throw new Error("X13 Pro disconnected during transfer");
       return value;
     } catch (error) {
-      if (generation === this.generation) {
+      if (generation === this.generation && !optional) {
         this.readFailed = true;
         this.rawStatus = null;
         this.lastError = error instanceof Error ? error.message : String(error);
@@ -207,8 +212,11 @@ export class RedgearX13HidClient {
     );
   }
 
-  private async freshButtons(): Promise<Uint8Array> {
-    const view = await this.transfer(() => this.device.receiveFeatureReport(4));
+  private async freshButtons(optional = false): Promise<Uint8Array> {
+    const view = await this.transfer(
+      () => this.device.receiveFeatureReport(4),
+      optional,
+    );
     const payload = new Uint8Array(
       view.buffer,
       view.byteOffset,
@@ -340,10 +348,10 @@ export class RedgearX13HidClient {
           );
         if (offersButtons(this.device.collections)) {
           try {
-            this.buttons = redgearDecodeButtons(await this.freshButtons());
+            this.buttons = redgearDecodeButtons(await this.freshButtons(true));
           } catch (error) {
-            this.buttons = null;
             if (generation !== this.generation) throw error;
+            this.buttons = null;
           }
         }
       } catch (error) {

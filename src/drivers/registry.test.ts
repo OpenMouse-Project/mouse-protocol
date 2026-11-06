@@ -18,6 +18,21 @@ import {
   DELUX_OEM_VENDOR_ID,
 } from "@openmouse/protocol/delux";
 import { COOLERMASTER_PRODUCT_IDS } from "@openmouse/protocol/coolermaster";
+import {
+  REDGEAR_X13_VENDOR_ID,
+  REDGEAR_X13_PRODUCT_ID,
+  REDGEAR_X13_USAGE_PAGE,
+  REDGEAR_X13_USAGE,
+} from "../redgear/index.ts";
+
+test("Redgear picker filter uses the protocol identity constants", () => {
+  assert.equal(VENDOR_ID.redgear, REDGEAR_X13_VENDOR_ID);
+  assert.deepEqual(
+    SUPPORTED_HID_FILTERS.filter((filter) => filter.vendorId === REDGEAR_X13_VENDOR_ID),
+    [{ vendorId: REDGEAR_X13_VENDOR_ID, productId: REDGEAR_X13_PRODUCT_ID,
+      usagePage: REDGEAR_X13_USAGE_PAGE, usage: REDGEAR_X13_USAGE }],
+  );
+});
 
 const DEVICES_DIR = dirname(fileURLToPath(import.meta.url));
 

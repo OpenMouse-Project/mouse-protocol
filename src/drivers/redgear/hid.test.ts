@@ -3,9 +3,9 @@ import test from "node:test";
 import {
   redgearDecodeRawStatus,
   redgearDecodeStatusPayload,
-} from "../../redgear/index.js";
-import { RedgearX13HidClient } from "./hid.js";
-import { X13_NATIVE_STATUS_HEX } from "./status-fixture.js";
+} from "../../redgear/index.ts";
+import { RedgearX13HidClient } from "./hid.ts";
+import { X13_NATIVE_STATUS_HEX } from "./status-fixture.ts";
 
 const fixture = Uint8Array.from(Buffer.from(X13_NATIVE_STATUS_HEX, "hex"));
 function mock() {
@@ -347,6 +347,62 @@ test("disconnect prevents an outstanding reply from repopulating cached status",
   resolve(new DataView(fixture.slice(1).buffer));
   await assert.rejects(pending, /disconnected/);
   assert.equal(client.getRawStatusReport(), null);
+});
+
+test("optional button failures preserve settings and allow settings writes", async () => {
+  for (const failure of ["rejected", "malformed", "timeout"]) {
+    const { device, state, calls, writes } = writableMock();
+    state.collections[0]!.featureReports.push({
+      reportId: 4,
+      items: [{ reportSize: 8, reportCount: 2048 }],
+    });
+    const receive = state.receiveFeatureReport;
+    state.receiveFeatureReport = async (id) => {
+      if (id !== 4) return receive(id);
+      if (failure === "rejected") throw new Error("Buttons unavailable");
+      if (failure === "timeout") return new Promise<DataView>(() => {});
+      return new DataView(new ArrayBuffer(2));
+    };
+    const client = new RedgearX13HidClient(device);
+    const status = await client.readStatus();
+    assert.equal(status.ui?.settingsReady, true, failure);
+    assert.equal(status.ui?.valuesVerified, true);
+    assert.equal(status.dpi, 4000);
+    assert.equal(status.pollingRateHz, 1000);
+    assert.ok(status.lighting);
+    assert.equal(status.buttonMappings, undefined);
+    assert.deepEqual(client.getRawStatusReport(), fixture);
+    assert.equal(await client.setDpi(2400), 2400);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(calls, ["open", "read:3", "read:3", "write:3", "read:3"]);
+    await client.close();
+  }
+});
+
+test("reopening starts a fresh status read before an old read settles", async () => {
+  const { device, state } = mock();
+  const receive = state.receiveFeatureReport;
+  let resolve!: (value: DataView) => void;
+  let started!: () => void;
+  const reading = new Promise<void>((r) => { started = r; });
+  state.receiveFeatureReport = () => new Promise<DataView>((r) => {
+    resolve = r;
+    started();
+  });
+  const client = new RedgearX13HidClient(device);
+  const old = client.readStatus();
+  const disconnected = assert.rejects(old, /disconnected/);
+  await reading;
+  await client.close();
+  state.receiveFeatureReport = receive;
+  await client.open();
+  const fresh = client.readStatus();
+  assert.notEqual(fresh, old);
+  assert.equal((await fresh).ui?.settingsReady, true);
+  resolve(new DataView(fixture.slice(1).buffer));
+  await disconnected;
+  assert.deepEqual(client.getRawStatusReport(), fixture);
+  assert.equal((await client.readStatus()).dpi, 4000);
 });
 
 test("timeout falls back to identity without issuing overlapping retries", async () => {

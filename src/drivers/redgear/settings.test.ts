@@ -8,8 +8,8 @@ import {
   redgearEncodeStaticColor,
   redgearEncodeVendorStaticColor,
   redgearDecodeStaticColor,
-} from "../../redgear/index.js";
-import { X13_NATIVE_STATUS_HEX } from "./status-fixture.js";
+} from "../../redgear/index.ts";
+import { X13_NATIVE_STATUS_HEX } from "./status-fixture.ts";
 
 // Independent intercepted vendor API arguments. Calls were denied before USB transmission.
 const vendor = [

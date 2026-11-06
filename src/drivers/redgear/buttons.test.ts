@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   redgearDecodeButtons,
   redgearEncodeButton,
-} from "../../redgear/buttons.js";
+} from "../../redgear/buttons.ts";
 // Minimal independent records from blocked vendor baseline/changed report-4 calls.
 const records = [
   "2101000000000000ffff",

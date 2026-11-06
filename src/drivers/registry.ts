@@ -1,4 +1,4 @@
-import { RedgearX13HidClient } from "./redgear/hid.js";
+import { RedgearX13HidClient } from "./redgear/hid.ts";
 import { AsusHidClient } from "./asus/hid.ts";
 import { AtkBitmouseHidClient } from "./atk/bitmouse-hid.ts";
 import { AtkHidClient } from "./atk/hid.ts";

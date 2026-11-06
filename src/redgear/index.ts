@@ -136,4 +136,4 @@ export {
   redgearEncodeButton,
   X13_BUTTON_NAMES,
   X13_BUTTON_ACTIONS,
-} from "./buttons.js";
+} from "./buttons.ts";
