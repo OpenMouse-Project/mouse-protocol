@@ -263,9 +263,25 @@ test("a stale handle that rejects the first write is closed, reopened and retrie
 
 test("a write that still fails after the reopen surfaces the error", async () => {
   const mouse = fake4kV2();
-  const device = mouse.device as unknown as { sendFeatureReport(): Promise<void> };
-  device.sendFeatureReport = async () => { throw new Error("Failed to write the feature report."); };
+  const device = mouse.device as unknown as {
+    opened: boolean;
+    open(): Promise<void>;
+    close(): Promise<void>;
+    sendFeatureReport(): Promise<void>;
+  };
+  const calls: string[] = [];
+  device.open = async () => { calls.push("open"); device.opened = true; };
+  device.close = async () => { calls.push("close"); device.opened = false; };
+  device.sendFeatureReport = async () => {
+    calls.push("send");
+    throw new DOMException("Failed to write the feature report.", "NetworkError");
+  };
   await assert.rejects(new EggOp1HidClient(mouse.device).readStatus(), /Failed to write the feature report/);
+  // First send fails, then exactly one close -> open -> send before the error surfaces.
+  const at = calls.indexOf("close");
+  assert.equal(calls.filter((call) => call === "close").length, 1);
+  assert.deepEqual(calls.slice(at, at + 3), ["close", "open", "send"]);
+  assert.equal(calls.filter((call) => call === "send").length, 2);
 });
 
 test("a non-stale write error is not closed and reopened", async () => {
