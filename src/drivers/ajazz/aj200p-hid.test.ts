@@ -305,6 +305,37 @@ function fakeMouse(options: MockOptions = {}) {
 }
 
 describe("AjazzAj200pHidClient", () => {
+  it("memoizes the model-specific DPI options", () => {
+    for (const [productId, product] of AJ200P_PRODUCTS) {
+      const { client } = fakeMouse({ productId });
+      const options = client.getDpiOptions();
+      assert.strictEqual(client.getDpiOptions(), options);
+      assert.equal(options.length, (product.maxDpi - product.minDpi) / product.stepDpi + 1);
+      assert.equal(options[0], product.minDpi);
+      assert.equal(options.at(-1), product.maxDpi);
+    }
+  });
+  it("surfaces partial stage-count writes when settings fail after DPI initialization", async () => {
+    const mockOptions: MockOptions = {};
+    const { client, banks, state, listeners } = fakeMouse(mockOptions);
+    banks[0].settings[2] = 1;
+    banks[0].settings[3] = 0;
+    banks[0].dpi.fill(0, 8, 16);
+    const before = banks[0].dpi.slice();
+    state.beforeCommand = (command) => {
+      if (command === 0x18) mockOptions.rejectWrites = true;
+    };
+    await assert.rejects(client.setDpiStageCount(2), (error: Error) => {
+      assert.match(error.message, /DPI table was updated.*stage count could not be verified/);
+      assert.match((error.cause as Error).message, /status 255/);
+      return true;
+    });
+    assert.notDeepEqual(banks[0].dpi, before);
+    assert.deepEqual(aj200pDecodeDpi(banks[0].dpi)[1], aj200pDecodeDpi(banks[0].dpi)[0]);
+    assert.equal(banks[0].settings[2], 1);
+    assert.equal(listeners.size, 0);
+    assert.equal((await client.readStatus()).dpiStages?.length, 1);
+  });
   it("claims only exact product ids and configuration collections, and is registered", () => {
     const { device } = fakeMouse();
     assert.ok(AjazzAj200pHidClient.isSupported(device));
@@ -548,7 +579,9 @@ describe("AjazzAj200pHidClient", () => {
       await client.setButtonMapping("Forward", "W");
       assert.deepEqual([...banks[0].keys.slice(12, 15)], [11, 26, 0]);
       const unsupportedRate = product.wired
-        ? 16000
+        ? product.wiredRates.includes(8000)
+          ? 16000
+          : 2000
         : product.wirelessRates.includes(8000)
           ? 16000
           : 8000;

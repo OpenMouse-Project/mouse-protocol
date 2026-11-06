@@ -164,7 +164,7 @@ import {
   COOLERMASTER_VENDOR_ID,
 } from "@openmouse/protocol/coolermaster";
 import { AJAZZ_AK820_WIRED_PID } from "../ajazz/ak820.ts";
-import { AJ200P_PRODUCTS, AJ200P_USAGE, AJ200P_USAGE_PAGE, AJ200P_VENDOR_ID } from "../ajazz/aj200p.js";
+import { AJ200P_PRODUCTS, AJ200P_USAGE, AJ200P_USAGE_PAGE, AJ200P_VENDOR_ID } from "../ajazz/aj200p.ts";
 
 export const VENDOR_ID = {
   ajazzAj200p: AJ200P_VENDOR_ID,

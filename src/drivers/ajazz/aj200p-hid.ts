@@ -52,6 +52,7 @@ export class AjazzAj200pHidClient {
   private epoch = 0;
   private knownProfile: number | null = null;
   private wireless: boolean;
+  private dpiOptions: number[] | null = null;
 
   constructor(device: HIDDevice, options: AjazzAj200pOptions = {}) {
     this.device = device;
@@ -83,7 +84,10 @@ export class AjazzAj200pHidClient {
   }
   getDpiOptions(): number[] {
     const { minDpi, maxDpi, stepDpi } = this.product;
-    return Array.from({ length: (maxDpi - minDpi) / stepDpi + 1 }, (_, i) => minDpi + i * stepDpi);
+    return (this.dpiOptions ??= Array.from(
+      { length: (maxDpi - minDpi) / stepDpi + 1 },
+      (_, i) => minDpi + i * stepDpi,
+    ));
   }
   private validateDpi(dpi: number): void {
     aj200pInteger(dpi, this.product.minDpi, this.product.maxDpi, "DPI");
@@ -220,6 +224,8 @@ export class AjazzAj200pHidClient {
     data: Uint8Array,
     profile: number,
   ): Promise<void> {
+    // The device cannot atomically check and write a profile: a physical profile
+    // switch can still race this check and redirect the write to another bank.
     await this.checkProfile(profile);
     await this.exchange(command, data);
     await pause(this.settleAfterWriteMs);
@@ -426,8 +432,19 @@ export class AjazzAj200pHidClient {
       const next = config.raw.slice();
       next[2] = count;
       next[3] = Math.min(config.active, count - 1);
-      if (!equal(next, config.raw))
-        await this.writeBlock(AJ200P_COMMAND.setSettings, AJ200P_COMMAND.settings, next, profile);
+      if (!equal(next, config.raw)) {
+        try {
+          await this.writeBlock(AJ200P_COMMAND.setSettings, AJ200P_COMMAND.settings, next, profile);
+        } catch (error) {
+          if (!equal(initialized, data)) {
+            throw new Error(
+              "The DPI table was updated, but the stage count could not be verified. Refresh the mouse before retrying.",
+              { cause: error },
+            );
+          }
+          throw error;
+        }
+      }
       return count;
     });
   }
