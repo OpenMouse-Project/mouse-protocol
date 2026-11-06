@@ -1529,6 +1529,26 @@ test("uploadMacro interleaves ten headers with ten 32-byte output reports", asyn
   assert.deepEqual(rejoined.slice(0, 8), [0x03, 0x01, 0x01, 0x00, 0x01, 0x0f, 0x7c, 0x00]);
 });
 
+test("uploadMacro stops before sending a chunk whose header failed", async () => {
+  const { device, outputs } = fakeDevice();
+  const sendFeatureReport = device.sendFeatureReport.bind(device);
+  const failure = new Error("macro header failed");
+  let headers = 0;
+  device.sendFeatureReport = async (reportId, data) => {
+    if (++headers === 2) throw failure;
+    return sendFeatureReport(reportId, data);
+  };
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(
+    () => client.uploadMacro({ bufferId: 0, loop: "cycle", cycles: 1, uid: 0, steps: [] }),
+    (error: unknown) => error === failure,
+  );
+  assert.equal(headers, 2, "no later chunk headers are sent");
+  assert.equal(outputs.length, 1, "only the chunk with a successful header is sent");
+  // A rejected upload must not poison the transaction queue.
+  assert.ok(await client.getFireKey());
+});
+
 test("uploadMacro waits the vendor's 80 ms between each header and its chunk", async () => {
   // Load-bearing, not cosmetic: nothing acknowledges a chunk, so one sent
   // before the device is ready is dropped in silence and that slice of the

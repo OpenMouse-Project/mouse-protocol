@@ -198,12 +198,7 @@ export class IncottTransactionQueue {
       if (!this.transport.sendReport) {
         throw new Error("This transport cannot send output reports, which the macro upload needs.");
       }
-      try {
-        await this.transport.sendFeatureReport(INCOTT_REPORT_ID, toArrayBuffer(header));
-      } catch {
-        // A failed header leaves the chunk unaddressed; there is nothing to
-        // read back that would reveal it either way.
-      }
+      await this.transport.sendFeatureReport(INCOTT_REPORT_ID, toArrayBuffer(header));
       // The settle happens BETWEEN the header and the chunk. The vendor waits
       // there — not after — which reads as the device needing that gap to get
       // ready for the output report.

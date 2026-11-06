@@ -463,8 +463,9 @@ same approach `src/mchose/buttons.ts` already takes in this repo. 127 actions
 in total. This was initially recorded as impossible to offer; that was wrong,
 and the MCHOSE driver was the counter-example sitting in the same tree.
 
-Macros (`slot << 16 | 9`) are offered as `Macro 1`-`Macro 10`, generated
-rather than listed in the table.
+Macros (`displayIndex << 16 | 9`) are offered as a single `Macro` action.
+`setButtonMapping` resolves it through `incottMacroBindingForButton`, using
+the button's display index so it runs its own buffer.
 
 ### Battery (2026-09-07, DISPROVEN 2026-09-08 — see the top of this document)
 
@@ -1251,7 +1252,7 @@ instrumentation, and `captures/incott-8k-wireless/macro-upload-2026-09-11.hex`
 for the capture and its decode.
 
 There is no macro READ command, so `uploadMacro` is the one writer in this
-driver with nothing to verify against. Binding a button to `Macro <n>` and
+driver with nothing to verify against. Binding a button to `Macro` and
 pressing it is the only confirmation available.
 
 ### The correction this forced
@@ -1269,13 +1270,12 @@ did. The encoder is now pinned byte-for-byte to that capture.
 
 The capture ended with `06 04 09 00 03 00`, binding wire button 4 to
 `0x00030009` — the `fJuji` encoding `slot << 16 | 9`.
-`incottButtonActionLabel` names these (`Macro 4`) and
-`incottButtonActionCode` now writes them, via `incottMacroButtonCode`. That
-reversal was deliberately absent at first: until `uploadMacro` existed,
-offering a macro as a writable action would have bound a button to a buffer
-nothing could fill. All ten slots are published in `buttonOptions`, because
-the device offers no way to ask which slots hold a macro — binding an empty
-one is accepted and does nothing, exactly as it does in the vendor tool.
+`incottButtonActionLabel` names these `Macro`. `buttonOptions` offers only
+that single action; `setButtonMapping` resolves it through
+`incottMacroBindingForButton` using the button's display index, which differs
+from its wire index. `incottButtonActionCode` cannot resolve `Macro` without
+that button context. A button can only run its own buffer, so numbered-slot
+choices would offer bindings the hardware silently ignores.
 
 ### Why there is no UI for this either
 
