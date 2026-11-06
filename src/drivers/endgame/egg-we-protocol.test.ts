@@ -262,3 +262,26 @@ test("transact does not retry a non-stale write error", async () => {
   await assert.rejects(t.run(), /Rejected by device/);
   assert.deepEqual(t.calls, []);
 });
+
+test("close() during a slow reopen leaves no open channel and no attached listener", async () => {
+  let listeners = 0;
+  const t = transactDevice(async () => { throw new DOMException("Failed to write the feature report.", "NetworkError"); });
+  const dev = t.device as unknown as {
+    addEventListener(type: string, l: unknown): void;
+    removeEventListener(type: string, l: unknown): void;
+    open(): Promise<void>;
+    opened: boolean;
+  };
+  const add = dev.addEventListener.bind(dev);
+  const remove = dev.removeEventListener.bind(dev);
+  dev.addEventListener = (type, l) => { listeners += 1; add(type, l); };
+  dev.removeEventListener = (type, l) => { listeners -= 1; remove(type, l); };
+  const original = dev.open.bind(dev);
+  dev.open = async () => { await wait(30); await original(); };
+  const outcome = assert.rejects(t.run(), /cancelled|closed/);
+  await wait(10);
+  await t.client.close();
+  await outcome;
+  assert.equal(dev.opened, false);
+  assert.equal(listeners <= 0 ? 0 : listeners, 0);
+});

@@ -527,7 +527,13 @@ export class EggWeHidClient {
       if (!isStaleHandleError(error)) throw error;
       await channels.cmd.close().catch(() => undefined);
       await this.open();
-      if (!isCurrent()) throw new Error("The OP1we request was cancelled before it could be retried.");
+      if (!isCurrent()) {
+        // close() returned while open() was pending, so open() just re-acquired the
+        // channels. A null activeRequest means shutdown (a newer request would own
+        // its own token), so release them; otherwise leave the newer request alone.
+        if (this.activeRequest === null) await this.close();
+        throw new Error("The OP1we request was cancelled before it could be retried.");
+      }
       const fresh = this.resolvedChannels() ?? channels;
       fresh.notify.removeEventListener("inputreport", this.onInputReport);
       fresh.notify.addEventListener("inputreport", this.onInputReport);
