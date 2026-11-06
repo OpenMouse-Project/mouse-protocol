@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { atkDpiOptionsForSensor, atkPackDpiStage, atkPackDpiStageForSensor, atkUnpackDpiStageForSensor } from "@openmouse/protocol/atk";
+import {
+  ATK_BUTTON_CLASS,
+  ATK_R1_MACRO_START_TYPES,
+  atkDpiOptionsForSensor,
+  atkPackDpiStage,
+  atkPackDpiStageForSensor,
+  atkUnpackDpiStageForSensor,
+} from "@openmouse/protocol/atk";
 import { wePackScalarPair } from "@openmouse/protocol/endgame-gear-we";
 import { AtkHidClient } from "./hid.ts";
 import { atkCatalogDevice, atkCatalogSensorForCidMid } from "./products.ts";
@@ -31,9 +38,13 @@ class FakeAtkDevice {
   }];
 
   readonly sent: Sent[] = [];
+  readonly writeFailures = new Set<number>();
+  readonly readFailures = new Set<number>();
   replies: number[][] = [];
   identifyFailures = 0;
   ignoredCommands = new Set<number>();
+  private writeCount = 0;
+  private readCount = 0;
   private listeners = new Set<(event: HIDInputReportEvent) => void>();
 
   async open(): Promise<void> {
@@ -65,9 +76,17 @@ class FakeAtkDevice {
   async sendReport(reportId: number, data: ArrayBuffer): Promise<void> {
     const frame = new Uint8Array(data);
     this.sent.push({ reportId, data: frame });
+    if (frame[0] === 0x08) {
+      const readIndex = this.readCount++;
+      if (this.readFailures.has(readIndex)) throw new Error(`read ${readIndex + 1} failed`);
+    }
     // EEPROM writes (0x07) are fire-and-forget; read and informational
     // commands (0x04 battery, 0x08 EEPROM, 0x10 identity, 0x12 version) get a reply.
-    if (frame[0] === 0x07) return;
+    if (frame[0] === 0x07) {
+      const writeIndex = this.writeCount++;
+      if (this.writeFailures.has(writeIndex)) throw new Error(`write ${writeIndex + 1} failed`);
+      return;
+    }
     if (frame[0] === 0x10 && this.identifyFailures > 0) {
       this.identifyFailures -= 1;
       throw new Error("mouse asleep");
@@ -240,6 +259,39 @@ test("wired R1 switches configuration banks with readback", async () => {
   assert.ok(selection);
   assert.deepEqual([...selection!.subarray(0, 7)], [0x0f, 0, 0, 0, 1, 2, 0]);
   assert.equal(sumFrame(8, selection!), 0x55);
+});
+
+test("R1 SE receiver switches banks after its silent profile command", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const transport = fake as unknown as FakeAtkDevice;
+  // The receiver does not echo SetCurrentConfig; the applied bank is proven by getCurrentConfig.
+  transport.ignoredCommands.add(0x0f);
+  transport.replies = [reply(0x10, 0x0000, [0x02, 0x29]), reply(0x0e, 0x0000, [1])];
+
+  assert.equal(await new AtkHidClient(fake).setR1ActiveProfile(2), 2);
+  const selection = transport.sent.find(({ data }) => data[0] === 0x0f)?.data;
+  assert.ok(selection);
+  assert.deepEqual([...selection!.subarray(0, 7)], [0x0f, 0, 0, 0, 1, 1, 0]);
+  assert.equal(sumFrame(8, selection!), 0x55);
+});
+
+test("an ATK NearLink mouse sharing the R1 SE CID/MID does not become an R1", async () => {
+  // 0x373b:0x1305 (ATK A9 3.0 NK) reports the same "2,29" pair as the VXE R1
+  // SE, so the CID/MID table must not hand it the R1 codecs.
+  const near = device(0x1305, "ATK A9 3.0 NK");
+  (near as unknown as FakeAtkDevice).replies = [reply(0x10, 0, [0x02, 0x29])];
+  const client = new AtkHidClient(near);
+
+  await assert.rejects(
+    client.setR1ActiveProfile(1),
+    /not available on this connection/,
+  );
+  // The transport gate would reject this device even without the CID/MID
+  // filter, so pin the identity itself: catalog model, and not R1.
+  assert.equal(client.displayName(), "ATK A9 3.0 NK");
+  assert.equal(client.isR1(), false);
+  assert.deepEqual(client.getDpiOptions(), atkDpiOptionsForSensor("CORE26K"));
 });
 
 test("R1 receiver telemetry reads online identity and pairing countdown without entering pairing", async () => {
@@ -593,6 +645,429 @@ test("wired R1 SE+ status uses identity, PAW3395SE, and all configured DPI stage
   assert.equal(status.dpiLedMode, 0);
   assert.equal(status.dpiLedBrightness, 1);
   assert.equal(status.dpiLedSpeed, 2);
+});
+
+test("R1 SE receiver exposes read-only button assignments through the shared EEPROM rows", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x0e, 0x0000, [0x00]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0068, [...button(1, 4), ...button(1, 8)]),
+    reply(0x08, 0x0070, [...button(1, 16), ...button(2, 1)]),
+  ];
+
+  const config = await new AtkHidClient(fake).readR1StoredConfiguration();
+  assert.equal(config.activeProfile, 1);
+  assert.deepEqual(
+    config.buttons.map(({ id, action, checksumValid }) => ({ id, action, checksumValid })),
+    [
+      { id: "left", action: "Left click", checksumValid: true },
+      { id: "right", action: "Right click", checksumValid: true },
+      { id: "middle", action: "Middle click", checksumValid: true },
+      { id: "back", action: "Back", checksumValid: true },
+      { id: "forward", action: "Forward", checksumValid: true },
+      { id: "bottom", action: "DPI cycle", checksumValid: true },
+    ],
+  );
+});
+
+test("R1 SE receiver writes one button record and preserves its paired neighbour", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(2, 1)]),
+  ];
+
+  const assignment = await new AtkHidClient(fake).setR1ButtonAssignment(1, "dpi-cycle");
+  assert.equal(assignment.label, "DPI cycle");
+  const write = wrote(fake);
+  assert.deepEqual(
+    [write[2], write[3], write[4]],
+    [0x00, 0x60, 0x08],
+  );
+  assert.deepEqual(
+    Array.from(write.subarray(5, 13)),
+    [...button(1, 1), ...button(2, 1)],
+  );
+});
+
+test("R1 SE receiver binds an existing macro slot without rewriting it", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0060, [
+      ...button(6, 7, ATK_R1_MACRO_START_TYPES.repeatUntilAnyKeyPress),
+      ...button(1, 2),
+    ]),
+  ];
+
+  const assignment = await new AtkHidClient(fake).setR1ButtonMacroBinding(
+    0,
+    7,
+    ATK_R1_MACRO_START_TYPES.repeatUntilAnyKeyPress,
+  );
+  assert.equal(assignment.keyClass, ATK_BUTTON_CLASS.macro);
+  assert.equal(assignment.value1, 7);
+  assert.equal(assignment.value2, ATK_R1_MACRO_START_TYPES.repeatUntilAnyKeyPress);
+
+  const writes = (fake as unknown as FakeAtkDevice).sent
+    .filter(({ data }) => data[0] === 0x07);
+  assert.equal(writes.some(({ data }) => data[2] === 0x06), false);
+  const bind = writes.find(({ data }) => data[2] === 0x00 && data[3] === 0x60);
+  assert.ok(bind);
+  assert.deepEqual(
+    Array.from(bind!.data.subarray(5, 13)),
+    [
+      ...button(6, 7, ATK_R1_MACRO_START_TYPES.repeatUntilAnyKeyPress),
+      ...button(1, 2),
+    ],
+  );
+});
+
+test("R1 SE receiver writes the macro slot and binds the macro button record", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    // The upload captures the slot first so a failed write can be undone.
+    reply(0x08, 0x0600, new Array<number>(10).fill(0)),
+    reply(0x08, 0x060a, new Array<number>(10).fill(0)),
+    reply(0x08, 0x0614, new Array<number>(10).fill(0)),
+    reply(0x08, 0x061e, new Array<number>(8).fill(0)),
+    // The uploaded payload is read back before the button is bound.
+    reply(0x08, 0x061f, [1, 0x81, 4, 0, 0, 20, 0xbb]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0060, [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)]),
+  ];
+
+  await new AtkHidClient(fake).setR1ButtonMacro(
+    0,
+    [{ kind: "key-down", keyCode: 0x04, holdTime: 20 }],
+    {
+      startType: ATK_R1_MACRO_START_TYPES.stopImmediately,
+      runCount: 1,
+      macroId: 2,
+    },
+  );
+
+  const writes = (fake as unknown as FakeAtkDevice).sent
+    .filter(({ data }) => data[0] === 0x07);
+  const macroWrites = writes.filter(({ data }) => data[2] === 0x06);
+  assert.equal(macroWrites.length, 4);
+  const table = macroWrites.flatMap(({ data }) => Array.from(data.subarray(5, 5 + data[4]!)));
+  assert.deepEqual(table.slice(0, 10), [8, 2, 2, 2, 2, 2, 2, 2, 2, 255]);
+  assert.deepEqual(table.slice(31, 38), [1, 0x81, 4, 0, 0, 20, 0xbb]);
+
+  const bind = writes.find(({ data }) => data[2] === 0x00 && data[3] === 0x60);
+  assert.ok(bind);
+  assert.deepEqual(
+    Array.from(bind!.data.subarray(5, 13)),
+    [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)],
+  );
+});
+
+test("R1 macro rollback reports when restoring the previous slot fails", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    reply(0x08, 0x0600, new Array<number>(10).fill(0)),
+    reply(0x08, 0x060a, new Array<number>(10).fill(0)),
+    reply(0x08, 0x0614, new Array<number>(10).fill(0)),
+    reply(0x08, 0x061e, new Array<number>(3).fill(0)),
+    // The payload differs, so the upload enters its rollback path.
+    reply(0x08, 0x061f, [1, 0x54]),
+  ];
+  // Four chunk writes upload the empty macro; the next write is the rollback.
+  raw.writeFailures.add(4);
+
+  await assert.rejects(
+    new AtkHidClient(fake).clearR1ButtonMacro(2),
+    /may hold mixed steps because restoring its previous contents failed/,
+  );
+});
+
+test("R1 binding failure restores the macro slot it uploaded", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = new Array<number>(38).fill(0);
+  const buttonBefore = [...button(1, 1), ...button(1, 2)];
+  const buttonAfter = [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    reply(0x08, 0x0600, before.slice(0, 10)),
+    reply(0x08, 0x060a, before.slice(10, 20)),
+    reply(0x08, 0x0614, before.slice(20, 30)),
+    reply(0x08, 0x061e, before.slice(30)),
+    reply(0x08, 0x061f, [1, 0x81, 4, 0, 0, 20, 0xbb]),
+    reply(0x08, 0x0060, buttonBefore),
+    reply(0x08, 0x0060, buttonAfter),
+    reply(0x08, 0x0060, buttonBefore),
+    reply(0x08, 0x0600, before.slice(0, 10)),
+    reply(0x08, 0x060a, before.slice(10, 20)),
+    reply(0x08, 0x0614, before.slice(20, 30)),
+    reply(0x08, 0x061e, before.slice(30)),
+  ];
+  // The fifth write is the button row; only the macro upload before it lands.
+  raw.writeFailures.add(4);
+
+  await assert.rejects(
+    new AtkHidClient(fake).setR1ButtonMacro(
+      0,
+      [{ kind: "key-down", keyCode: 0x04, holdTime: 20 }],
+      {
+        startType: ATK_R1_MACRO_START_TYPES.stopImmediately,
+        runCount: 1,
+        macroId: 2,
+      },
+    ),
+    (error: unknown) => {
+      const message = error instanceof Error ? error.message : "";
+      assert.match(message, /write 5 failed/);
+      assert.match(message, /Macro slot 3 was restored/);
+      return true;
+    },
+  );
+
+  const macroWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[2] === 0x06);
+  assert.deepEqual(
+    macroWrites.slice(-4).flatMap(({ data }) => Array.from(data.subarray(5, 5 + data[4]!))),
+    before,
+  );
+  const buttonWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.deepEqual(Array.from(buttonWrites.at(-1)!.data.subarray(5, 13)), buttonBefore);
+});
+
+test("R1 macro rollback verifies the restored slot", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    reply(0x08, 0x0600, new Array<number>(10).fill(0)),
+    reply(0x08, 0x060a, new Array<number>(10).fill(0)),
+    reply(0x08, 0x0614, new Array<number>(10).fill(0)),
+    reply(0x08, 0x061e, new Array<number>(3).fill(0)),
+    // The upload readback differs, so rollback runs.
+    reply(0x08, 0x061f, [1, 0x54]),
+    reply(0x08, 0x0600, new Array<number>(10).fill(0)),
+    reply(0x08, 0x060a, new Array<number>(10).fill(0)),
+    reply(0x08, 0x0614, new Array<number>(10).fill(0)),
+    // The restored tail does not match, so the rollback is unconfirmed.
+    reply(0x08, 0x061e, [0, 0, 1]),
+  ];
+
+  await assert.rejects(
+    new AtkHidClient(fake).clearR1ButtonMacro(2),
+    /may hold mixed steps because restoring its previous contents failed/,
+  );
+});
+
+test("R1 button write failures clear the cached status", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
+  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, after),
+    reply(0x08, 0x0060, before),
+  ];
+  raw.writeFailures.add(0);
+
+  const client = new AtkHidClient(fake);
+  (client as unknown as { lastStatus: unknown }).lastStatus = {
+    atkButtonMappings: [{ id: "left", action: "Left Click" }],
+  };
+
+  await assert.rejects(
+    client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
+    /write 1 failed/,
+  );
+  const rowWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.equal(rowWrites.length, 2);
+  assert.deepEqual(Array.from(rowWrites.at(-1)!.data.subarray(5, 13)), before);
+  assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
+});
+
+test("R1 confirmation failures restore the captured button row", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
+  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, after),
+    reply(0x08, 0x0060, before),
+  ];
+  // The confirming read is the second EEPROM read; the restore readback follows.
+  raw.readFailures.add(1);
+
+  await assert.rejects(
+    new AtkHidClient(fake).setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
+    /read 2 failed/,
+  );
+
+  const rowWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.equal(rowWrites.length, 2);
+  assert.deepEqual(Array.from(rowWrites.at(-1)!.data.subarray(5, 13)), before);
+});
+
+test("R1 rejected send does not overwrite a concurrently changed button row", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
+  const concurrent = [...button(1, 3), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, concurrent),
+  ];
+  raw.writeFailures.add(0);
+
+  const client = new AtkHidClient(fake);
+  (client as unknown as { lastStatus: unknown }).lastStatus = {
+    atkButtonMappings: [{ id: "left", action: "Left Click" }],
+  };
+
+  await assert.rejects(
+    client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
+    /write 1 failed/,
+  );
+  const rowWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.equal(rowWrites.length, 1);
+  assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
+});
+
+test("R1 readback mismatch leaves a concurrently changed button row untouched", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
+  const concurrent = [...button(1, 3), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, concurrent),
+  ];
+
+  const client = new AtkHidClient(fake);
+  (client as unknown as { lastStatus: unknown }).lastStatus = {
+    atkButtonMappings: [{ id: "left", action: "Left Click" }],
+  };
+
+  await assert.rejects(
+    client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
+    /did not survive readback; the current row was left untouched/,
+  );
+  const rowWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.equal(rowWrites.length, 1);
+  assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
+});
+
+test("R1 button row state is unknown when confirmation and inspection reads both fail", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, before),
+  ];
+  raw.readFailures.add(1);
+  raw.readFailures.add(2);
+
+  const client = new AtkHidClient(fake);
+  (client as unknown as { lastStatus: unknown }).lastStatus = {
+    atkButtonMappings: [{ id: "left", action: "Left Click" }],
+  };
+
+  await assert.rejects(
+    client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately),
+    /assignment state is unknown because the row could not be read after a failed write/,
+  );
+  const rowWrites = raw.sent.filter(({ data }) => data[0] === 0x07 && data[3] === 0x60);
+  assert.equal(rowWrites.length, 1);
+  assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
+});
+
+test("R1 button writes without cached mappings force a full reload", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  const raw = fake as unknown as FakeAtkDevice;
+  const before = [...button(1, 1), ...button(1, 2)];
+  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
+  raw.replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, before),
+    reply(0x08, 0x0060, after),
+  ];
+
+  const client = new AtkHidClient(fake);
+  (client as unknown as { lastStatus: unknown }).lastStatus = {};
+  await client.setR1ButtonMacroBinding(0, 1, ATK_R1_MACRO_START_TYPES.stopImmediately);
+  assert.equal((client as unknown as { lastStatus: unknown }).lastStatus, null);
+});
+
+test("R1 SE receiver clears a macro slot without touching any binding", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x20]),
+    // The slot is captured before it is overwritten, so a failed write can be
+    // undone: 33 bytes = the 31-byte header, the count and the checksum.
+    reply(0x08, 0x0600, new Array<number>(10).fill(0)),
+    reply(0x08, 0x060a, new Array<number>(10).fill(0)),
+    reply(0x08, 0x0614, new Array<number>(10).fill(0)),
+    reply(0x08, 0x061e, new Array<number>(3).fill(0)),
+    // The payload the write must leave behind: a zero count and its checksum.
+    reply(0x08, 0x061f, [0, 0x55]),
+  ];
+
+  await new AtkHidClient(fake).clearR1ButtonMacro(2);
+
+  const writes = (fake as unknown as FakeAtkDevice).sent.filter(({ data }) => data[0] === 0x07);
+  const macroWrites = writes.filter(({ data }) => data[2] === 0x06);
+  assert.equal(macroWrites.length, 4);
+  const table = macroWrites.flatMap(({ data }) => Array.from(data.subarray(5, 5 + data[4]!)));
+  assert.equal(table.length, 33);
+  assert.deepEqual(table.slice(31), [0, 0x55]);
+  // Clearing the slot is not a button edit.
+  assert.equal(writes.some(({ data }) => data[3] === 0x60), false);
+});
+
+test("R1 SE receiver reads a stored macro slot into editable steps", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x031f, [2]),
+    reply(0x08, 0x0320, [
+      0x81, 0x04, 0, 0, 20,
+      0x41, 0x04, 0, 0, 30,
+    ]),
+    // The slot's trailing checksum byte completes the 0x55 total.
+    reply(0x08, 0x032a, [0x57]),
+  ];
+
+  const steps = await new AtkHidClient(fake).readR1ButtonMacro(0);
+  assert.deepEqual(steps, [
+    { kind: "key-down", keyCode: 0x04, holdTime: 20 },
+    { kind: "key-up", keyCode: 0x04, holdTime: 30 },
+  ]);
 });
 
 test("R1 receiver readStatus fails before fallback decoding when CID/MID times out", async () => {
@@ -1307,4 +1782,13 @@ test("a CID/MID shared by models with different sensors stays on the generic cod
   assert.equal(atkCatalogSensorForCidMid(null), null);
   assert.equal(atkCatalogDevice(0x373b, 0x1278, "2,77")?.model, "ATK X1 SE NK");
   assert.equal(atkCatalogDevice(0x373b, 0x1278, "2,5"), undefined);
+});
+
+test("R1 CID/MID overrides require USB identity even with an R1 product string", async () => {
+  const near = device(0x1305, "VXE R1 SE");
+  (near as unknown as FakeAtkDevice).replies = [reply(0x10, 0, [0x02, 0x29])];
+  const client = new AtkHidClient(near);
+  await assert.rejects(client.setR1ActiveProfile(1), /not available on this connection/);
+  assert.equal(client.isR1(), false);
+  assert.deepEqual(client.getDpiOptions(), atkDpiOptionsForSensor("CORE26K"));
 });
