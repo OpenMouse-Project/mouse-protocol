@@ -1014,6 +1014,14 @@ export class IncottHidClient {
    * dropped in silence and the buffer keeps whatever that region held before
    * — so a short macro can replay the tail of a longer one it replaced, or a
    * setting can survive the upload meant to change it.
+   *
+   * Re-bind the button AFTER every upload, even when it is already on
+   * `Macro`: `setButtonMapping(button, "Macro")`. HARDWARE-CONFIRMED
+   * 2026-11-06: the loop mode and repeat count take effect when the binding is
+   * written, not when the buffer is. Uploading alone replaced the steps but
+   * kept the old loop mode, so a macro set to repeat ran only while held. The
+   * vendor writes the binding after the buffer on every save, which is why
+   * its own captures never show the problem.
    */
   async uploadMacro(macro: IncottMacro): Promise<void> {
     const chunks = incottMacroChunks(incottEncodeMacroBuffer(macro));
