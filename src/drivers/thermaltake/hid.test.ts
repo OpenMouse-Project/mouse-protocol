@@ -367,6 +367,17 @@ test("a Bridge that refuses undeclared reads falls back to status only", async (
   assert.equal(mouse.profiles[0]![0], 0x01);
 });
 
+test("concurrent status reads against a refusing Bridge both fall back to status only", async (t) => {
+  const { device } = fakeBridgeInterface(fakeMouse(), true);
+  t.mock.method(console, "warn", () => {});
+  const client = new ThermaltakeHidClient(device);
+  const [a, b] = await Promise.all([client.readStatus(), client.readStatus()]);
+  for (const status of [a, b]) {
+    assert.equal(status.ui?.settingsReady, false);
+    assert.match(status.ui?.statusNote ?? "", /Update OpenMouse Bridge/);
+  }
+});
+
 test("a transient failure while probing is reported and the probe runs again", async () => {
   const { device } = fakeBridgeInterface(fakeMouse());
   const receive = device.receiveFeatureReport.bind(device);

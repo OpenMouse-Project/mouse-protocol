@@ -114,6 +114,8 @@ export class ThermaltakeHidClient {
   /** The rebuilt config collection's probe outcome; "pending" until one read settles it. */
   private rebuiltConfig: "pending" | "answered" | "refused" = "pending";
 
+  private rebuiltProbe: Promise<void> | null = null;
+
   constructor(device: HIDDevice) {
     this.device = device;
   }
@@ -140,8 +142,14 @@ export class ThermaltakeHidClient {
    * Only Bridge's refusal of an undeclared report marks it refused; other
    * errors propagate and leave the probe pending.
    */
-  private async settleRebuiltConfig(): Promise<void> {
-    if (this.rebuiltConfig !== "pending" || !this.probingRebuiltConfig) return;
+  private settleRebuiltConfig(): Promise<void> {
+    if (this.rebuiltConfig !== "pending" || !this.probingRebuiltConfig) return Promise.resolve();
+    // Concurrent callers share one probe so a later one cannot re-read after it settled.
+    this.rebuiltProbe ??= this.probeRebuiltConfig().finally(() => { this.rebuiltProbe = null; });
+    return this.rebuiltProbe;
+  }
+
+  private async probeRebuiltConfig(): Promise<void> {
     try {
       await this.run(() => this.readActiveProfileNow());
       this.rebuiltConfig = "answered";
