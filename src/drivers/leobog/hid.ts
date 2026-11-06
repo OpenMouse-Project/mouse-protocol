@@ -21,12 +21,10 @@ import {
   leobogGm3BuildConfigWriteRequest,
   leobogGm3BuildButtonRequest,
   leobogGm3BuildLinkRequest,
-  leobogGm3BuildMacroRequest,
   leobogGm3BuildPowerRequest,
   leobogGm3ButtonLabel,
   leobogGm3DecodeOnboard,
   leobogGm3EncodeButtonTable,
-  leobogGm3EncodeMacroRecord,
   leobogGm3FindButtonAction,
   leobogGm3IsMacroBinding,
   leobogGm3IsDpiValue,
@@ -219,9 +217,10 @@ export class LeobogGm3HidClient {
    * write would have to come from the vendor application's own profile file.
    */
   private buttonTable: LeobogGm3ButtonCode[] = defaultButtonTable();
+  private buttonTableKnown = false;
   /**
-   * Macros are write-only too: the device answers no read for `03 00`, so this
-   * mirrors whatever this client uploaded.
+   * Macro contents cannot be read. Uploads remain unavailable until slot
+   * addressing is verified, so these entries carry no claimed device state.
    */
   private macros: Array<LeobogGm3Macro | null> =
     Array.from({ length: LEOBOG_GM3_MACRO_SLOTS }, () => null);
@@ -296,7 +295,11 @@ export class LeobogGm3HidClient {
    * read back, so the write either lands or it does not; the local copy is
    * updated only after the frame was handed to the device.
    */
-  async setButtonMapping(button: string, actionLabel: string): Promise<void> {
+  async setButtonMapping(
+    button: string,
+    actionLabel: string,
+    options: { overwriteUnknownBindings?: boolean } = {},
+  ): Promise<void> {
     return await this.run(async () => {
       const slot = LEOBOG_GM3_BUTTON_NAMES.indexOf(button as LeobogGm3ButtonName);
       if (slot < 0) {
@@ -306,10 +309,14 @@ export class LeobogGm3HidClient {
       if (code === null) {
         throw new Error(`"${actionLabel}" is not one of the GM3 button actions.`);
       }
+      if (!this.buttonTableKnown && options.overwriteUnknownBindings !== true) {
+        throw new Error("The button list contains factory defaults, not the mouse's bindings. Confirm replacing all unknown bindings with overwriteUnknownBindings: true, or explicitly reset the button mappings first.");
+      }
       const table = this.buttonTable.map((entry, index) => (index === slot ? code : entry));
       await this.open();
       await this.writeButtonTable(leobogGm3EncodeButtonTable(table));
       this.buttonTable = table;
+      this.buttonTableKnown = true;
     });
   }
 
@@ -334,6 +341,7 @@ export class LeobogGm3HidClient {
       await this.open();
       await this.writeButtonTable(leobogGm3EncodeButtonTable(table));
       this.buttonTable = table;
+      this.buttonTableKnown = true;
     });
   }
 
@@ -345,36 +353,12 @@ export class LeobogGm3HidClient {
     }));
   }
 
-  /**
-   * Uploads one macro with vendor command `03 00`. The device answers no read
-   * for it, so there is nothing to confirm against — the local copy is only
-   * updated after the frame was handed over, exactly like the button table.
-   *
-   * `slot` names this client's copy, not a field in the frame: the record
-   * carries the name, the steps and nothing else, so the mouse numbers the
-   * macros it receives in upload order. Labels and button bindings are built
-   * from the same local slot, so they line up while every upload goes through
-   * one client. A macro uploaded by the vendor application can shift the
-   * indices, and with no readback that cannot be detected from here — see
-   * `docs/leobog-gm3-buttons.md`.
-   */
-  async setMacro(slot: number, name: string, steps: readonly LeobogGm3MacroStep[]): Promise<void> {
-    return await this.run(async () => {
-      if (!Number.isInteger(slot) || slot < 0 || slot >= LEOBOG_GM3_MACRO_SLOTS) {
-        throw new Error(`The GM3 has ${LEOBOG_GM3_MACRO_SLOTS} macro slots.`);
-      }
-      const payload = leobogGm3EncodeMacroRecord(name, steps);
-      await this.open();
-      const request = leobogGm3BuildMacroRequest(payload);
-      await this.device.sendFeatureReport(
-        LEOBOG_GM3_POWER_REPORT_ID,
-        request.slice(1).buffer as ArrayBuffer,
-      );
-      this.macros[slot] = {
-        name,
-        steps: steps.map((step) => ({ ...step, event: { ...step.event } })),
-      };
-    });
+  /** Slot addressing for the captured write-only macro record is unverified. */
+  async setMacro(slot: number, _name: string, _steps: readonly LeobogGm3MacroStep[]): Promise<void> {
+    if (!Number.isInteger(slot) || slot < 0 || slot >= LEOBOG_GM3_MACRO_SLOTS) {
+      throw new Error(`The GM3 has ${LEOBOG_GM3_MACRO_SLOTS} macro slots.`);
+    }
+    throw new Error("GM3 macro uploads are unavailable: the captured record has no verified slot selector. Use the vendor application to upload macros.");
   }
 
   async open(): Promise<void> {
@@ -631,7 +615,9 @@ export class LeobogGm3HidClient {
       ? " Battery level is not reported on this connection."
       : "";
     const buttonNote = " Button assignments are write-only: the mouse cannot report them back, so"
-      + " the list starts from the factory bindings and follows writes made here.";
+      + (this.buttonTableKnown
+        ? " the list follows writes made here."
+        : " the list shows factory defaults, not verified device bindings; the first remap requires confirmation to replace all unknown bindings.");
     const notes = (refreshFailed
       ? "The mouse did not answer a settings refresh — it may be asleep. Press a button on the mouse; the values below are the last ones it reported."
       // The link flag is checked before the missing block: a sleeping mouse
@@ -779,11 +765,11 @@ export class LeobogGm3HidClient {
    * `message` may be a thunk when the caller only learns what it was writing
    * from the transform.
    *
-   * The block is read, held for the vendor's settle gap and written back in
-   * full, so a change the mouse makes by itself inside that window — pressing
-   * the DPI-cycle button, say — is replaced by the copy this write started
-   * from. The gap is a measured cable requirement; narrowing the window needs a
-   * command that writes a single field.
+   * The full-block write must wait at least 60 ms after the final read reply
+   * (we use the measured 80 ms gap). A DPI-button press during that gap can be
+   * overwritten, including during polling-rate edits. Re-reading restarts the
+   * required gap, so it cannot close this race. No single-field write or lock
+   * is verified; retain the hardware-tested write until one is captured.
    */
   private async apply(
     transform: (block: Uint8Array) => Uint8Array,

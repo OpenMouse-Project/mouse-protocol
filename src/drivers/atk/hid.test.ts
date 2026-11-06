@@ -291,6 +291,7 @@ test("an ATK NearLink mouse sharing the R1 SE CID/MID does not become an R1", as
   // filter, so pin the identity itself: catalog model, and not R1.
   assert.equal(client.displayName(), "ATK A9 3.0 NK");
   assert.equal(client.isR1(), false);
+  assert.deepEqual(client.getDpiOptions(), atkDpiOptionsForSensor("CORE26K"));
 });
 
 test("R1 receiver telemetry reads online identity and pairing countdown without entering pairing", async () => {
@@ -1781,4 +1782,13 @@ test("a CID/MID shared by models with different sensors stays on the generic cod
   assert.equal(atkCatalogSensorForCidMid(null), null);
   assert.equal(atkCatalogDevice(0x373b, 0x1278, "2,77")?.model, "ATK X1 SE NK");
   assert.equal(atkCatalogDevice(0x373b, 0x1278, "2,5"), undefined);
+});
+
+test("R1 CID/MID overrides require USB identity even with an R1 product string", async () => {
+  const near = device(0x1305, "VXE R1 SE");
+  (near as unknown as FakeAtkDevice).replies = [reply(0x10, 0, [0x02, 0x29])];
+  const client = new AtkHidClient(near);
+  await assert.rejects(client.setR1ActiveProfile(1), /not available on this connection/);
+  assert.equal(client.isR1(), false);
+  assert.deepEqual(client.getDpiOptions(), atkDpiOptionsForSensor("CORE26K"));
 });

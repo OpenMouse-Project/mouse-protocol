@@ -628,7 +628,7 @@ test("offers the button catalog seeded with the factory assignments", async () =
 test("writes the whole table for a single remap", async () => {
   const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
   const device = client(fake);
-  await device.setButtonMapping("Forward", "Disabled");
+  await device.setButtonMapping("Forward", "Disabled", { overwriteUnknownBindings: true });
 
   const writes = buttonTableWrites(fake);
   assert.equal(writes.length, 1);
@@ -648,7 +648,7 @@ test("writes the whole table for a single remap", async () => {
 test("the client's own copy carries earlier remaps into the next write", async () => {
   const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
   const device = client(fake);
-  await device.setButtonMapping("Left", "Disabled");
+  await device.setButtonMapping("Left", "Disabled", { overwriteUnknownBindings: true });
   await device.setButtonMapping("Right", "Volume +");
 
   const writes = buttonTableWrites(fake);
@@ -681,7 +681,7 @@ test("refuses a button or an action this model does not have", async () => {
 test("restores the factory table, remaps it again afterwards", async () => {
   const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
   const device = client(fake);
-  await device.setButtonMapping("Left", "Disabled");
+  await device.setButtonMapping("Left", "Disabled", { overwriteUnknownBindings: true });
 
   const status = await device.readStatus();
   assert.equal(status.defaultButtonMappings?.Left, "Left click");
@@ -697,7 +697,7 @@ test("restores the factory table, remaps it again afterwards", async () => {
   assert.deepEqual(restored.buttonMappings, status.defaultButtonMappings);
 
   // The restored table stays resident, so a later remap writes the rest of it.
-  await device.setButtonMapping("Right", "Volume +");
+  await device.setButtonMapping("Right", "Volume +", { overwriteUnknownBindings: true });
   assert.deepEqual([...buttonTableWrites(fake)[2]!.slice(0, 12)], [
     0x01, 0x01, 0x01, 0x00,
     0x01, 0x02, 0x01, 0x00,
@@ -736,13 +736,6 @@ function macroWrites(fake: FakeGm3): Uint8Array[] {
     });
 }
 
-/** The vendor's OM2 record: press C, release C, press D, release D. */
-const OM2_RECORD = [
-  0x04, 0x00, 0x17, 0x00, 0x06, 0x4f, 0x00, 0x4d, 0x00, 0x32,
-  0x00, 0x00, 0x00, 0xea, 0x06, 0x80, 0x01, 0xd5, 0x06, 0x00,
-  0x00, 0x7d, 0x07, 0x80, 0x00, 0x00, 0x07,
-];
-
 const OM2_STEPS = [
   { delayMs: 234, event: { type: "keyDown" as const, hidUsage: 0x06 } },
   { delayMs: 469, event: { type: "keyUp" as const, hidUsage: 0x06 } },
@@ -750,18 +743,14 @@ const OM2_STEPS = [
   { delayMs: 0, event: { type: "keyUp" as const, hidUsage: 0x07 } },
 ];
 
-test("uploads a macro as the captured 03 00 record", async () => {
+test("rejects every unverified macro slot without sending or changing the local cache", async () => {
   const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
   const device = client(fake);
-  await device.setMacro(0, "OM2", OM2_STEPS);
-
-  const writes = macroWrites(fake);
-  assert.equal(writes.length, 1);
-  assert.deepEqual([...writes[0]!], OM2_RECORD);
-  const macros = (await device.readStatus()).leobogMacros;
-  assert.equal(macros?.length, 3);
-  assert.deepEqual(macros?.[0], { name: "OM2", steps: OM2_STEPS });
-  assert.equal(macros?.[1], null);
+  for (const slot of [0, 1, 2, 0]) {
+    await assert.rejects(device.setMacro(slot, "OM2", OM2_STEPS), /no verified slot selector/);
+  }
+  assert.equal(macroWrites(fake).length, 0);
+  assert.deepEqual(device.getMacros(), [null, null, null]);
 });
 
 test("the button catalog gains one entry per macro slot", async () => {
@@ -777,7 +766,7 @@ test("the button catalog gains one entry per macro slot", async () => {
 test("binding a macro writes 03 <mode> <count> <slot>", async () => {
   const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
   const device = client(fake);
-  await device.setButtonMapping("Forward", "Macro 2");
+  await device.setButtonMapping("Forward", "Macro 2", { overwriteUnknownBindings: true });
 
   const writes = buttonTableWrites(fake);
   assert.equal(writes.length, 1);
@@ -794,3 +783,47 @@ test("refuses a macro slot this model does not have", async () => {
   assert.equal(macroWrites(fake).length, 0);
   assert.equal(buttonTableWrites(fake).length, 0);
 });
+
+test("requires explicit consent before replacing unknown button bindings", async () => {
+  const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
+  const device = client(fake);
+  assert.match((await device.readStatus()).ui?.statusNote ?? "", /factory defaults, not verified/);
+  await assert.rejects(device.setButtonMapping("Left", "Disabled"), /Confirm replacing all unknown bindings/);
+  assert.equal(buttonTableWrites(fake).length, 0);
+  await device.resetButtonMappings();
+  await device.setButtonMapping("Left", "Disabled");
+  assert.equal(buttonTableWrites(fake).length, 2);
+});
+
+test("a successful receive cancels its deadline without backing off the next poll", async () => {
+  const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
+  const device = client(fake);
+  await device.readStatus();
+  const sent = fake.sent.length;
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  await device.readStatus();
+  assert.ok(fake.sent.length > sent, "healthy poll must query the device after the old deadline");
+  const afterSecondPoll = fake.sent.length;
+  await device.readStatus();
+  assert.ok(fake.sent.length > afterSecondPoll, "the old deadline must not make the following poll back off");
+});
+
+for (const failRead of [1, 2]) {
+  test(`configuration write resets the HID handle when read ${failRead} times out`, async () => {
+    const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
+    const receive = fake.receiveFeatureReport.bind(fake);
+    fake.receiveFeatureReport = async (reportId) => {
+      if (fake.configReadAttempts === failRead - 1) fake.hangConfig = true;
+      return await receive(reportId);
+    };
+    let closes = 0;
+    const close = fake.close.bind(fake);
+    fake.close = async () => { closes++; await close(); fake.hangConfig = false; };
+    const device = client(fake);
+    await assert.rejects(device.setDebounceTime(4), /did not answer within/);
+    assert.ok(closes > 0, "timed-out receive must not survive on the same handle");
+    fake.receiveFeatureReport = receive;
+    await device.setDebounceTime(4);
+    assert.equal(leobogGm3DecodeOnboard(fake.block)?.debounceMs, 4);
+  });
+}

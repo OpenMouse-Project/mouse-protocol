@@ -305,3 +305,20 @@ test("frames the button table as vendor command 01 00", () => {
     /must be 80 bytes/,
   );
 });
+
+test("configuration parsing handles a stripped report with checksum 0x09", () => {
+  const reply = new Uint8Array(520);
+  reply[0] = 0x09;
+  reply[1] = 0x09;
+  reply[2] = 0x44;
+  reply.set(CAPTURED_ONBOARD, 8);
+  assert.deepEqual(leobogGm3ParseConfig(reply.subarray(1)), CAPTURED_ONBOARD);
+});
+
+test("rejects disagreeing DPI table copies", () => {
+  for (const offset of [7, 27]) {
+    const block = CAPTURED_ONBOARD.slice();
+    block[offset] = block[offset]! + 1;
+    assert.equal(leobogGm3DecodeOnboard(block), null);
+  }
+});

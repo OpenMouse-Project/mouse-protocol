@@ -2096,9 +2096,8 @@ export class AtkHidClient {
   private productForCidMid(cidMid: string): AtkProduct | null {
     const product = ATK_PRODUCTS[cidMid] ?? null;
     if (product === null) return null;
-    // `usesSharedR1Transport` covers the R1 mouse, cable and receiver USB ids
-    // plus a product string that names the family, so a device the catalog
-    // lists under an R1 name keeps its entry.
+    // Product strings are not USB identities and cannot disambiguate a shared
+    // CID/MID. Restrict the R1 overrides to its known receivers and mice.
     if (product.family === "r1" && !this.usesSharedR1Transport()) return null;
     return product;
   }
@@ -2136,9 +2135,8 @@ export class AtkHidClient {
   }
 
   private usesSharedR1Transport(): boolean {
-    return this.device.productId === VXE_R1_RECEIVER_PID
-      || (this.device.vendorId === VENDOR_ID.vgn && ATK_COMPX_PRODUCT_IDS.includes(this.device.productId))
-      || /\bvxe\s+r1(?:\s*(?:se\+?|pro\s+max))?\b/i.test(this.device.productName || "");
+    return (this.device.vendorId === VENDOR_ID.atk && this.device.productId === VXE_R1_RECEIVER_PID)
+      || (this.device.vendorId === VENDOR_ID.vgn && ATK_COMPX_PRODUCT_IDS.includes(this.device.productId));
   }
 
   /** Only the SE/SE+ receiver family uses the selector-based 0x0070 live row. */

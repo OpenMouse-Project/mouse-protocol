@@ -251,3 +251,15 @@ Scratch tooling lives in `.tmp/re/`: `disasm.py` (PE + Capstone helper),
 `switch.py` (jump-table extractor), `trace.js`/`trace_host.py` (Frida capture of
 the vendor's HID writes), plus `.tmp/gm3_verify.py` for reading and writing the
 device directly.
+
+### Driver write safeguards
+
+The button list starts from factory defaults, not a read of the device. The first
+`setButtonMapping` call requires `{ overwriteUnknownBindings: true }` after the
+caller confirms replacing all unknown bindings; an explicit `resetButtonMappings`
+also establishes the local table. Later remaps preserve that local copy.
+
+Macro record encoding remains available for captured-frame analysis, but
+`setMacro` rejects every slot without sending a frame: no slot selector or
+repeat-upload addressing has been verified. Upload macros with the vendor
+application until the wire addressing is measured.

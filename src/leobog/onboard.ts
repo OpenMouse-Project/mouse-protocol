@@ -102,10 +102,8 @@ export function leobogGm3DecodeOnboard(payload: Uint8Array): LeobogGm3OnboardCon
   // idle times should still read back rather than hiding every setting.
   if (sleepMinutes > 120) return null;
 
-  // Only the first table is decoded. The vendor keeps both copies in sync, but
-  // a block whose copies disagree is still read from table A: nothing measured
-  // says which one the firmware applies, so a difference is not treated as a
-  // read error. `leobogGm3DpiTablesAgree` reports it to callers that care.
+  // Neither table is authoritative when the firmware copies disagree.
+  if (!leobogGm3DpiTablesAgree(payload)) return null;
   const dpiStages = DPI_TABLE_OFFSETS[0] === undefined
     ? []
     : Array.from(

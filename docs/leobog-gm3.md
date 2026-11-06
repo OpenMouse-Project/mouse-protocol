@@ -105,15 +105,16 @@ polling and debounce fields sit in its first 44 bytes and are decoded normally.
 The driver covers the battery, the wake/link flag and the onboard
 configuration block: DPI stages and their values, the active stage, the stage
 count, the polling rate, the button debounce and the auto-sleep idle timer. It
-also writes the `01 00` button table and uploads `03 00` macros.
+also writes the `01 00` button table after explicit confirmation of the first
+whole-table replacement.
 
-Two of those writes are one-way. The device answers no read for the button
-table, so the driver keeps a copy seeded from the factory bindings and sends
-the whole table on every write: the first write replaces any binding made in
-the vendor application, and there is no way to read the current table back
-first. Macros are write-only in the same way, and the record carries no slot
-field, so the mouse assigns indices in upload order — see
-`docs/leobog-gm3-buttons.md`.
+The device cannot read the button table back, so the driver keeps a copy seeded
+from factory defaults. The first remap requires `overwriteUnknownBindings: true`
+after the caller confirms replacing unknown vendor-app bindings; explicitly
+resetting the table also establishes that copy. Macro uploads are unavailable:
+the captured `03 00` record has no verified slot selector, and upload order or
+replacement behavior has not been established. The standalone macro codec and
+button binding encoders remain documented in `docs/leobog-gm3-buttons.md`.
 
 Lighting lives in the same block but its fields have not been located, so the
 driver leaves it alone.
