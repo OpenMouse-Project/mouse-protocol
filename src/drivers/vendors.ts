@@ -1,4 +1,10 @@
 import {
+  REDGEAR_X13_VENDOR_ID,
+  REDGEAR_X13_PRODUCT_ID,
+  REDGEAR_X13_USAGE_PAGE,
+  REDGEAR_X13_USAGE,
+} from "../redgear/index.ts";
+import {
   ASUS_OMNI_PRODUCT_ID,
   ASUS_OMNI_USAGE_PAGE,
   ASUS_PRODUCT_IDS,
@@ -174,6 +180,7 @@ import { AJ200P_PRODUCTS, AJ200P_USAGE, AJ200P_USAGE_PAGE, AJ200P_VENDOR_ID } fr
 
 export const VENDOR_ID = {
   ajazzAj200p: AJ200P_VENDOR_ID,
+  redgear: REDGEAR_X13_VENDOR_ID,
   coolermaster: COOLERMASTER_VENDOR_ID,
   ajazz: 0x1a2c,
   vaxee: VAXEE_VENDOR_ID,
@@ -971,6 +978,7 @@ export const VAXEE_HID_FILTERS: HIDDeviceFilter[] = VAXEE_PRODUCT_IDS.map((produ
 
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...[...AJ200P_PRODUCTS.keys()].map((productId) => ({ vendorId: AJ200P_VENDOR_ID, productId, usagePage: AJ200P_USAGE_PAGE, usage: AJ200P_USAGE })),
+  { vendorId: VENDOR_ID.redgear, productId: REDGEAR_X13_PRODUCT_ID, usagePage: REDGEAR_X13_USAGE_PAGE, usage: REDGEAR_X13_USAGE },
   ...VAXEE_HID_FILTERS,
   ...ASUS_HID_FILTERS,
   ...DAREU_HID_FILTERS,
