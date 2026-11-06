@@ -313,6 +313,113 @@ test("config collections require feature reports and preserve the short fallback
   assert.equal(thermaltakeChannel(device), "config");
 });
 
+/**
+ * Interface 1 as OpenMouse Bridge lists it on Windows, measured on the Miku
+ * Edition: the config collection carries only the input report 0 hidapi
+ * rebuilt, and replies lose their first byte and stop where the device's
+ * transfer ended (7 bytes for 0x0C, 2051 for a profile). `refuses` mimics
+ * Bridge v1.0.0-beta.20, which will not read an undeclared feature report.
+ */
+function fakeBridgeInterface(mouse: FakeMouse, refuses = false) {
+  const fake = fakeDevice(mouse);
+  const config = fake.device.collections[1]!;
+  config.featureReports.length = 0;
+  (config.inputReports as HIDReportInfo[]).push({ reportId: 0, items: [] } as unknown as HIDReportInfo);
+  const receive = fake.device.receiveFeatureReport.bind(fake.device);
+  fake.device.receiveFeatureReport = async (reportId) => {
+    if (refuses) throw new Error(`feature report ${reportId} is not declared by this interface`);
+    const reply = await receive(reportId);
+    const bytes = new Uint8Array(reply.buffer, reply.byteOffset, reply.byteLength);
+    const end = reportId === THERMALTAKE_REPORT_ID.profile ? THERMALTAKE_PROFILE_SIZE + 4 : 8;
+    return new DataView(bytes.slice(1, end).buffer);
+  };
+  return fake;
+}
+
+test("a Bridge-rebuilt config collection is probed and used once it answers", async () => {
+  const mouse = fakeMouse();
+  const { device } = fakeBridgeInterface(mouse);
+  assert.equal(thermaltakeChannel(device), null);
+  const client = new ThermaltakeHidClient(device);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.settingsReady, undefined);
+  assert.deepEqual(status.firmware, ["Firmware V1.128"]);
+  assert.deepEqual(status.dpiStages, [400]);
+  assert.equal(status.pollingRateHz, 1000);
+  assert.equal(await client.setPollingRate(500), 500);
+  assert.equal(mouse.profiles[0]![0], 0x02);
+});
+
+test("a Bridge that refuses undeclared reads falls back to status only", async (t) => {
+  const mouse = fakeMouse();
+  const { device, sent } = fakeBridgeInterface(mouse, true);
+  const warning = t.mock.method(console, "warn", () => {});
+  const client = new ThermaltakeHidClient(device);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.settingsReady, false);
+  assert.match(status.ui?.statusNote ?? "", /Update OpenMouse Bridge/);
+  assert.ok(warning.mock.calls.some((call) => call.arguments[0] === "OpenMouse Bridge could not read the Thermaltake settings collection."));
+  // The refusal sticks: later reads send nothing and settings explain why.
+  const probe = sent.length;
+  assert.match((await client.readStatus()).ui?.statusNote ?? "", /Update OpenMouse Bridge/);
+  await assert.rejects(client.setPollingRate(500), /Update OpenMouse Bridge/);
+  assert.equal(sent.length, probe);
+  assert.equal(mouse.profiles[0]![0], 0x01);
+});
+
+test("concurrent status reads against a refusing Bridge both fall back to status only", async (t) => {
+  const { device } = fakeBridgeInterface(fakeMouse(), true);
+  t.mock.method(console, "warn", () => {});
+  const client = new ThermaltakeHidClient(device);
+  const [a, b] = await Promise.all([client.readStatus(), client.readStatus()]);
+  for (const status of [a, b]) {
+    assert.equal(status.ui?.settingsReady, false);
+    assert.match(status.ui?.statusNote ?? "", /Update OpenMouse Bridge/);
+  }
+});
+
+test("a transient failure while probing is reported and the probe runs again", async () => {
+  const { device } = fakeBridgeInterface(fakeMouse());
+  const receive = device.receiveFeatureReport.bind(device);
+  let fail = true;
+  device.receiveFeatureReport = async (reportId) => {
+    if (fail) { fail = false; throw new Error("STALL"); }
+    return receive(reportId);
+  };
+  const client = new ThermaltakeHidClient(device);
+  await assert.rejects(client.readStatus(), /STALL/);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.settingsReady, undefined);
+  assert.equal(status.pollingRateHz, 1000);
+});
+
+test("once the rebuilt collection answered, a later failure does not lock settings", async () => {
+  const { device } = fakeBridgeInterface(fakeMouse());
+  const client = new ThermaltakeHidClient(device);
+  assert.equal((await client.readStatus()).pollingRateHz, 1000);
+  const receive = device.receiveFeatureReport.bind(device);
+  device.receiveFeatureReport = async (reportId) => {
+    if (reportId === THERMALTAKE_REPORT_ID.profile) {
+      device.receiveFeatureReport = receive;
+      return new DataView(new Uint8Array(16).buffer);
+    }
+    return receive(reportId);
+  };
+  await assert.rejects(client.readStatus(), /damaged copy/);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.settingsReady, undefined);
+  assert.equal(await client.setPollingRate(250), 250);
+});
+
+test("a setter probes a refusing Bridge before it sends anything", async (t) => {
+  const mouse = fakeMouse();
+  const { device, sent } = fakeBridgeInterface(mouse, true);
+  t.mock.method(console, "warn", () => {});
+  await assert.rejects(new ThermaltakeHidClient(device).setProfile(2), /Update OpenMouse Bridge/);
+  assert.deepEqual(sent, ["df 0d 00 00 00"]);
+  assert.equal(mouse.active, 0);
+});
+
 test("firmware transport failures are logged while settings remain readable", async (t) => {
   const { device } = fakeDevice(fakeMouse());
   const receive = device.receiveFeatureReport.bind(device);
