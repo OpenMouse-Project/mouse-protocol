@@ -538,7 +538,7 @@ export class RedragonM719ProHidClient {
           family: "redragon",
           defaultDisplayName: DISPLAY_NAME,
           settingsReady: true,
-          valuesVerified: true,
+          valuesVerified: snapshot.dpiLedMode !== null,
           hideUnsupportedPollingRates: true,
           dpiStageEditor: {
             maxStages: REDRAGON_M719_PRO_MAX_DPI_STAGES,
@@ -824,6 +824,16 @@ export class RedragonM719ProHidClient {
       pairChunk.set(encoded.slotBytes, inPairOffset);
       await this.writeEeprom(pairAddress, pairChunk);
 
+      if (encoded.comboPayload) {
+        const comboAddress = REDRAGON_M719_PRO_EEPROM.comboBase + entry.slot * REDRAGON_M719_PRO_EEPROM.comboSlotStride;
+        const comboBack = await this.readEeprom(comboAddress, encoded.comboPayload.length);
+        for (let i = 0; i < encoded.comboPayload.length; i += 1) {
+          if (comboBack[i] !== encoded.comboPayload[i]) {
+            throw new Error(`The mouse did not confirm the ${button} shortcut payload.`);
+          }
+        }
+      }
+
       const confirmedChunk = await this.readEeprom(entry.offset, 4);
       for (let i = 0; i < 4; i += 1) {
         if (confirmedChunk[i] !== encoded.slotBytes[i]) {
@@ -894,11 +904,11 @@ export class RedragonM719ProHidClient {
   /**
    * Build the `"DPI indicator"` zone descriptor using the active stage's colour.
    */
-  private buildDpiIndicatorLighting(modeCode: RedragonM719ProDpiLedMode, activeStageColorHex: string): MouseLighting {
+  private buildDpiIndicatorLighting(modeCode: RedragonM719ProDpiLedMode | null, activeStageColorHex: string): MouseLighting {
     return {
       zone: "DPI indicator",
       modes: DPI_INDICATOR_MODES,
-      mode: dpiLedCodeToMode(modeCode),
+      mode: modeCode === null ? null : dpiLedCodeToMode(modeCode),
       color: activeStageColorHex,
       color2: null,
       colorModes: [],
@@ -965,7 +975,10 @@ export class RedragonM719ProHidClient {
    */
   private async readStageCount(): Promise<number> {
     const raw = await this.readEeprom(REDRAGON_M719_PRO_EEPROM.dpiStageCount, 2);
-    const count = redragonM719ProUnpackScalar(raw) ?? raw[0] ?? REDRAGON_M719_PRO_MAX_DPI_STAGES;
+    const count = redragonM719ProUnpackScalar(raw);
+    if (count === null) {
+      throw new Error("The mouse returned a corrupt DPI stage count record.");
+    }
     return Math.max(1, Math.min(REDRAGON_M719_PRO_MAX_DPI_STAGES, count));
   }
 
@@ -974,7 +987,11 @@ export class RedragonM719ProHidClient {
    */
   private async readActiveStageIndex(): Promise<number> {
     const raw = await this.readEeprom(REDRAGON_M719_PRO_EEPROM.activeDpiStage, 2);
-    const index = (redragonM719ProUnpackScalar(raw) ?? raw[0] ?? 0) & 0x0f;
+    const scalar = redragonM719ProUnpackScalar(raw);
+    if (scalar === null) {
+      throw new Error("The mouse returned a corrupt active DPI stage record.");
+    }
+    const index = scalar & 0x0f;
     return Math.max(0, Math.min(REDRAGON_M719_PRO_MAX_DPI_STAGES - 1, index));
   }
 
@@ -1066,10 +1083,9 @@ export class RedragonM719ProHidClient {
     colorsRaw.set(await this.readEeprom(0x003c, 4), 16);
     const stageColors = redragonM719ProDecodeDpiStageColors(colorsRaw);
 
-    const dpiLedRaw = await this.readEeprom(REDRAGON_M719_PRO_EEPROM.dpiLedEffect, 6).catch(
-      () => new Uint8Array([0x01, 0x54]),
-    );
-    const dpiLedMode = redragonM719ProDecodeDpiLedEffect(dpiLedRaw);
+    // A failed read stays unknown (null) instead of being decoded as a made-up mode.
+    const dpiLedRaw = await this.readEeprom(REDRAGON_M719_PRO_EEPROM.dpiLedEffect, 6).catch(() => null);
+    const dpiLedMode = dpiLedRaw ? redragonM719ProDecodeDpiLedEffect(dpiLedRaw) : null;
 
     const { buttonMappings, fixedButtons } = await this.readButtons();
 

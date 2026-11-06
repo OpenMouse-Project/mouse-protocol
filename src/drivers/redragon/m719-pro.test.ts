@@ -333,6 +333,10 @@ class FakeM719Pro {
   readonly eeprom = new Uint8Array(0x0400);
   private readonly listeners = new Set<(event: HIDInputReportEvent) => void>();
   notifyPeer: FakeM719Pro | null = null;
+  /** EEPROM addresses whose reads come back with a mismatched address (rejected). */
+  failReadAddresses = new Set<number>();
+  /** Addresses whose writes are silently dropped. */
+  dropWriteAddresses = new Set<number>();
 
   constructor(
     productId: number = REDRAGON_M719_PRO_RECEIVER_PRODUCT_ID,
@@ -481,8 +485,9 @@ class FakeM719Pro {
       resp[6] = this.batteryCharging ? 0x01 : 0x00;
     } else if (cmd === REDRAGON_M719_PRO_COMMAND.readEeprom) {
       resp.set(this.eeprom.subarray(addr, addr + len), 5);
+      if (this.failReadAddresses.has(addr)) resp[3] = (resp[3]! ^ 0xff) & 0xff;
     } else if (cmd === REDRAGON_M719_PRO_COMMAND.writeEeprom) {
-      this.eeprom.set(body.subarray(5, 5 + len), addr);
+      if (!this.dropWriteAddresses.has(addr)) this.eeprom.set(body.subarray(5, 5 + len), addr);
     }
 
     resp[15] = redragonM719ProPacketChecksum(resp, REDRAGON_M719_PRO_RESPONSE_REPORT_ID);
@@ -627,6 +632,46 @@ test("supports split sibling command/notify HIDDevices via bindPeers and rejects
   assert.equal(notified, 1);
 
   await client.close();
+});
+
+test("rejects corrupt DPI stage count and active stage records instead of guessing", async () => {
+  for (const address of [REDRAGON_M719_PRO_EEPROM.dpiStageCount, REDRAGON_M719_PRO_EEPROM.activeDpiStage]) {
+    const fake = new FakeM719Pro(REDRAGON_M719_PRO_WIRED_PRODUCT_ID);
+    fake.eeprom[address] = 0x03;
+    fake.eeprom[address + 1] = 0x00; // invalid checksum byte
+    const client = new RedragonM719ProHidClient(fake as unknown as HIDDevice);
+    const status = await client.readStatus();
+    assert.equal(status.ui?.settingsReady, false);
+    assert.match(String(status.ui?.statusNote ?? ""), /corrupt/);
+  }
+});
+
+test("reports DPI indicator mode as unknown and unverified when its EEPROM read fails", async () => {
+  const fake = new FakeM719Pro(REDRAGON_M719_PRO_WIRED_PRODUCT_ID);
+  fake.failReadAddresses.add(REDRAGON_M719_PRO_EEPROM.dpiLedEffect);
+  const client = new RedragonM719ProHidClient(fake as unknown as HIDDevice);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.valuesVerified, false);
+  const zone = status.lightingZones?.find((z) => z.zone === "DPI indicator");
+  assert.equal(zone?.mode, null);
+});
+
+test("verifies the extended shortcut payload when reassigning a button", async () => {
+  const label = REDRAGON_M719_PRO_BUTTONS[3].label;
+  const entry = REDRAGON_M719_PRO_BUTTONS[3];
+  const comboAddress = REDRAGON_M719_PRO_EEPROM.comboBase + entry.slot * REDRAGON_M719_PRO_EEPROM.comboSlotStride;
+
+  const dropping = new FakeM719Pro(REDRAGON_M719_PRO_WIRED_PRODUCT_ID);
+  dropping.dropWriteAddresses.add(comboAddress);
+  const droppingClient = new RedragonM719ProHidClient(dropping as unknown as HIDDevice);
+  await assert.rejects(
+    () => droppingClient.setButtonMapping(label, "Keys Ctrl+Shift+Alt+R"),
+    /did not confirm/,
+  );
+
+  const healthy = new FakeM719Pro(REDRAGON_M719_PRO_WIRED_PRODUCT_ID);
+  const healthyClient = new RedragonM719ProHidClient(healthy as unknown as HIDDevice);
+  await healthyClient.setButtonMapping(label, "Keys Ctrl+Shift+Alt+R");
 });
 
 test("reports offline receiver gracefully when wireless mouse is asleep", async () => {
