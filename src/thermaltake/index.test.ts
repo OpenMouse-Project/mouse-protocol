@@ -181,3 +181,11 @@ test("failed active-profile replies are rejected on both channels", () => {
     assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array([0, ...short]), "short"), null);
   }
 });
+
+test("firmware replies must include a version byte before normalization", () => {
+  for (const bytes of [[], [0x55], [0x55, 0xaa]]) {
+    assert.equal(thermaltakeDecodeFirmware(new Uint8Array(bytes)), null);
+  }
+  assert.equal(thermaltakeDecodeFirmware(new Uint8Array([0x55, 0xaa, 0x80])), 0x80);
+  assert.equal(thermaltakeDecodeFirmware(new Uint8Array([0x55, 0xaa, 0])), 0);
+});

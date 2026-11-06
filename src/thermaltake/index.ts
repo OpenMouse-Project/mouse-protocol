@@ -177,6 +177,7 @@ function commandFrame(reply: Uint8Array, channel: ThermaltakeChannel): Uint8Arra
 
 /** Firmware byte from a `C4 08` reply (`B0 55 AA <version>`), or null. */
 export function thermaltakeDecodeFirmware(reply: Uint8Array, channel: ThermaltakeChannel = "config"): number | null {
+  if (reply.length < 3) return null;
   const full = commandFrame(reply, channel);
   if (!full || full[1] !== 0x55 || full[2] !== 0xaa) return null;
   return full[3]!;

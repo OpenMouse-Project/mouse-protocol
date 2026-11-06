@@ -351,3 +351,19 @@ test("a truncated profile prevents all flash writes", async () => {
   await assert.rejects(new ThermaltakeHidClient(device).setPollingRate(500), /damaged copy/);
   assert.deepEqual(sent, ["df 0d 00 00 00", "c4 0c 00 00 00"]);
 });
+
+test("a truncated firmware reply is not displayed or cached", async () => {
+  const { device } = fakeDevice(fakeMouse());
+  const receive = device.receiveFeatureReport.bind(device);
+  let first = true;
+  device.receiveFeatureReport = async (reportId) => {
+    if (first) {
+      first = false;
+      return new DataView(new Uint8Array([0x55, 0xaa]).buffer);
+    }
+    return receive(reportId);
+  };
+  const client = new ThermaltakeHidClient(device);
+  assert.deepEqual((await client.readStatus()).firmware, []);
+  assert.deepEqual((await client.readStatus()).firmware, ["Firmware V1.128"]);
+});
