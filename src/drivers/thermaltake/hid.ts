@@ -101,16 +101,18 @@ const BRIDGE_REFUSED_NOTE = "Status only: this OpenMouse Bridge lists the mouse'
  * The keyboard interface alone offers neither and reports identity only.
  *
  * Bridge's rebuilt descriptor lists the config collection without the reports
- * it carries, so that shape is probed rather than trusted: the first full read
- * decides. A Bridge that cannot read undeclared feature reports fails it, and
- * the client falls back as if the collection were absent.
+ * it carries, so that shape is probed rather than trusted before the first
+ * read or write: one active-profile read decides. A Bridge that refuses
+ * undeclared feature reports ("… is not declared by this interface") makes the
+ * client fall back as if the collection were absent; any other failure is
+ * reported and the probe runs again next time.
  */
 export class ThermaltakeHidClient {
   readonly device: HIDDevice;
   private queue: Promise<unknown> = Promise.resolve();
   private firmware: number | null = null;
-  /** Set once a rebuilt config collection failed its first read. */
-  private rebuiltConfigRefused = false;
+  /** The rebuilt config collection's probe outcome; "pending" until one read settles it. */
+  private rebuiltConfig: "pending" | "answered" | "refused" = "pending";
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -126,11 +128,28 @@ export class ThermaltakeHidClient {
     return "config";
   }
 
-  /** True while a rebuilt config collection is used without knowing it answers. */
+  /** True while a rebuilt config collection is in use or still to be probed. */
   private get probingRebuiltConfig(): boolean {
-    return !this.rebuiltConfigRefused
+    return this.rebuiltConfig !== "refused"
       && thermaltakeChannel(this.device) !== "config"
       && this.device.collections.some(hasRebuiltConfigCollection);
+  }
+
+  /**
+   * Settles a pending rebuilt config collection with one active-profile read.
+   * Only Bridge's refusal of an undeclared report marks it refused; other
+   * errors propagate and leave the probe pending.
+   */
+  private async settleRebuiltConfig(): Promise<void> {
+    if (this.rebuiltConfig !== "pending" || !this.probingRebuiltConfig) return;
+    try {
+      await this.run(() => this.readActiveProfileNow());
+      this.rebuiltConfig = "answered";
+    } catch (error) {
+      if (!(error instanceof Error) || !/not declared/i.test(error.message)) throw error;
+      console.warn("OpenMouse Bridge could not read the Thermaltake settings collection.", error);
+      this.rebuiltConfig = "refused";
+    }
   }
 
   displayName(): string {
@@ -163,14 +182,8 @@ export class ThermaltakeHidClient {
     if (this.device.opened) await this.device.close();
   }
 
-  readStatus(): Promise<MouseStatus> {
-    if (this.probingRebuiltConfig) {
-      return this.readConfigStatus().catch((error: unknown) => {
-        console.warn("OpenMouse Bridge could not read the Thermaltake settings collection.", error);
-        this.rebuiltConfigRefused = true;
-        return this.readStatus();
-      });
-    }
+  async readStatus(): Promise<MouseStatus> {
+    await this.settleRebuiltConfig();
     if (this.channel === "short") return this.readShortStatus();
     if (this.channel === null) {
       return Promise.resolve({
@@ -179,7 +192,7 @@ export class ThermaltakeHidClient {
         ui: {
           family: "thermaltake",
           settingsReady: false,
-          statusNote: this.rebuiltConfigRefused ? BRIDGE_REFUSED_NOTE : UNREACHABLE_NOTE,
+          statusNote: this.rebuiltConfig === "refused" ? BRIDGE_REFUSED_NOTE : UNREACHABLE_NOTE,
         },
         batteryPercent: null,
         batteryState: "Unknown",
@@ -328,7 +341,8 @@ export class ThermaltakeHidClient {
   }
 
   /** One-based, as the profile selector counts. Works on either channel. */
-  setProfile(profile: number): Promise<number> {
+  async setProfile(profile: number): Promise<number> {
+    await this.settleRebuiltConfig();
     return this.run(async () => {
       const index = profile - 1;
       await this.command(thermaltakeCommands.writeActiveProfile(index), DELAY_MS.profileSwitch);
@@ -344,9 +358,10 @@ export class ThermaltakeHidClient {
    * back the way the vendor tool does, then reads it again and fails unless
    * every byte matches.
    */
-  private patchActiveProfile(
+  private async patchActiveProfile(
     patch: ThermaltakeSettingsPatch | ((current: ReturnType<typeof thermaltakeDecodeSettings>) => ThermaltakeSettingsPatch),
   ): Promise<void> {
+    await this.settleRebuiltConfig();
     return this.run(async () => {
       if (this.channel !== "config") throw new Error(NEEDS_CONFIG);
       const profile = await this.readActiveProfileNow();
@@ -413,7 +428,7 @@ export class ThermaltakeHidClient {
 
   private run<T>(action: () => Promise<T>): Promise<T> {
     const result = this.queue.then(async () => {
-      if (this.channel === null) throw new Error(this.rebuiltConfigRefused ? BRIDGE_REFUSED_NOTE : UNREACHABLE_NOTE);
+      if (this.channel === null) throw new Error(this.rebuiltConfig === "refused" ? BRIDGE_REFUSED_NOTE : UNREACHABLE_NOTE);
       await this.open();
       return action();
     });

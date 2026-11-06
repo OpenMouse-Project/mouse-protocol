@@ -367,6 +367,48 @@ test("a Bridge that refuses undeclared reads falls back to status only", async (
   assert.equal(mouse.profiles[0]![0], 0x01);
 });
 
+test("a transient failure while probing is reported and the probe runs again", async () => {
+  const { device } = fakeBridgeInterface(fakeMouse());
+  const receive = device.receiveFeatureReport.bind(device);
+  let fail = true;
+  device.receiveFeatureReport = async (reportId) => {
+    if (fail) { fail = false; throw new Error("STALL"); }
+    return receive(reportId);
+  };
+  const client = new ThermaltakeHidClient(device);
+  await assert.rejects(client.readStatus(), /STALL/);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.settingsReady, undefined);
+  assert.equal(status.pollingRateHz, 1000);
+});
+
+test("once the rebuilt collection answered, a later failure does not lock settings", async () => {
+  const { device } = fakeBridgeInterface(fakeMouse());
+  const client = new ThermaltakeHidClient(device);
+  assert.equal((await client.readStatus()).pollingRateHz, 1000);
+  const receive = device.receiveFeatureReport.bind(device);
+  device.receiveFeatureReport = async (reportId) => {
+    if (reportId === THERMALTAKE_REPORT_ID.profile) {
+      device.receiveFeatureReport = receive;
+      return new DataView(new Uint8Array(16).buffer);
+    }
+    return receive(reportId);
+  };
+  await assert.rejects(client.readStatus(), /damaged copy/);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.settingsReady, undefined);
+  assert.equal(await client.setPollingRate(250), 250);
+});
+
+test("a setter probes a refusing Bridge before it sends anything", async (t) => {
+  const mouse = fakeMouse();
+  const { device, sent } = fakeBridgeInterface(mouse, true);
+  t.mock.method(console, "warn", () => {});
+  await assert.rejects(new ThermaltakeHidClient(device).setProfile(2), /Update OpenMouse Bridge/);
+  assert.deepEqual(sent, ["df 0d 00 00 00"]);
+  assert.equal(mouse.active, 0);
+});
+
 test("firmware transport failures are logged while settings remain readable", async (t) => {
   const { device } = fakeDevice(fakeMouse());
   const receive = device.receiveFeatureReport.bind(device);

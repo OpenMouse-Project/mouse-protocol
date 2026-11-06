@@ -70,8 +70,10 @@ Native `HidD_SetFeature` / `HidD_GetFeature` on it work.
   Bridge never declares the collection's feature reports, with or without
   that fallback, so the driver cannot tell the two apart from the descriptor.
   It treats a listed `0x08/0x4B` collection with no reports as Bridge's and
-  probes it: the first full read decides between every setting and a
-  status-only connection that asks for a Bridge update.
+  probes it before the first read or write: one active-profile read decides
+  between every setting and, when Bridge answers "not declared", a
+  status-only connection that asks for a Bridge update. Any other failure
+  is reported and the probe runs again.
 
 ## Evidence
 
