@@ -427,7 +427,20 @@ export const INCOTT_BUTTON_ACTIONS: ReadonlyArray<readonly [string, number]> = [
   ),
 ];
 
-/** Macro loop modes, in wire order. */
+/**
+ * Macro loop modes, in wire order.
+ *
+ * All three are captured, not inferred: the vendor tool was recorded saving
+ * the same ten-step macro three times, once per mode, and the mouse was
+ * watched running each (2026-09-14). Its own UI numbers them from 1
+ * (`looptype:1/2/3` in an exported macro) while the wire takes 0/1/2, so the
+ * two are off by one and reading the export as the wire value would shift
+ * every mode by one place.
+ *
+ *     looptype 1  lpUntilKeyRelease  ->  byte 1 = 0   repeats while held
+ *     looptype 2  lpUntilAnyKey      ->  byte 1 = 1   repeats until a key
+ *     looptype 3  lpCycle            ->  byte 1 = 2   repeats bytes 2..3 times
+ */
 export const INCOTT_MACRO_LOOP_MODES = ["untilKeyRelease", "untilAnyKey", "cycle"] as const;
 export type IncottMacroLoop = (typeof INCOTT_MACRO_LOOP_MODES)[number];
 
@@ -490,6 +503,17 @@ export const INCOTT_MACRO_BUFFER_BYTES = 320;
 export const INCOTT_MACRO_CHUNK_BYTES = 32;
 export const INCOTT_MACRO_CHUNK_COUNT = INCOTT_MACRO_BUFFER_BYTES / INCOTT_MACRO_CHUNK_BYTES;
 export const INCOTT_MACRO_BUFFER_COUNT = 10;
+/**
+ * Milliseconds to wait between announcing a chunk and sending it.
+ *
+ * The vendor waits exactly this long (`await mySleep80` inside its `setJuJi`
+ * loop), which reads as the device needing the gap to get ready for the
+ * output report. It is not the queue's generic settle delay and must not be
+ * shortened to match it: nothing acknowledges a chunk, so a chunk the device
+ * was not ready for is lost silently, leaving whatever the buffer held before
+ * in its place.
+ */
+export const INCOTT_MACRO_CHUNK_SETTLE_MS = 80;
 /** Steps occupy bytes 4..287 at four bytes each, so 71 fit. */
 export const INCOTT_MACRO_MAX_STEPS = 71;
 
@@ -576,10 +600,8 @@ export function incottEncodeMacroBuffer(macro: IncottMacro): Uint8Array {
  * The 8-byte header announcing one chunk of a macro buffer:
  * `09 07 0a <chunk index> 20 <buffer id>`.
  *
- * See `incottEncodeMacroBuffer` for why nothing sends this yet. Note the
- * vendor slices its own payload as `mda.slice(i * 32, i * 64)`, which yields
- * an EMPTY chunk for `i = 0` and over-long ones after — visibly a bug in its
- * own uploader, and not reproduced here.
+ * The vendor pairs each header with `mda.slice(i * 32, i * 32 + 32)`, which
+ * is what this splits into as well — see `incottMacroChunks`.
  */
 export function incottEncodeMacroChunkHeader(chunkIndex: number, bufferId: number): Uint8Array {
   if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= INCOTT_MACRO_CHUNK_COUNT) {

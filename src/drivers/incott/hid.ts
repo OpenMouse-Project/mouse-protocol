@@ -63,6 +63,7 @@ import {
   INCOTT_DPI_STAGE_COUNT,
   INCOTT_DPI_STEP,
   INCOTT_INPUT_REPORT_ID,
+  INCOTT_MACRO_CHUNK_SETTLE_MS,
   INCOTT_PERFORMANCE_MODE_NAMES,
   INCOTT_POLLING_STEPS_HZ,
   INCOTT_POLLING_STEPS_HZ_WIRED,
@@ -180,23 +181,34 @@ export class IncottTransactionQueue {
   }
 
   /**
-   * Sends a 32-byte OUTPUT report, the macro upload's data path. Queued with
-   * everything else so it cannot interleave with the 8-byte header that
-   * announces it, and followed by a settle delay because the vendor waits
-   * 80 ms between the two halves of each chunk.
+   * Sends one macro chunk: the 8-byte feature report announcing it, the gap
+   * the device needs to get ready, then the 32-byte OUTPUT report carrying
+   * it — as ONE queue entry.
+   *
+   * The two halves must be one entry, not two. Queueing them separately looks
+   * ordered and is not: `await`ing the header hands control back to the event
+   * loop, so anything queued meanwhile — a status refresh, a battery read,
+   * any of the app's background polling — runs between a header and the chunk
+   * it announced. The device is waiting for an output report at that point
+   * and gets a feature query instead. Nothing acknowledges a chunk, so the
+   * damage is silent.
    */
-  sendOutput(reportId: number, payload: Uint8Array): Promise<void> {
+  sendChunk(header: Uint8Array, reportId: number, chunk: Uint8Array, settleMs = this.settleMs): Promise<void> {
     const run = this.tail.then(async () => {
       if (!this.transport.sendReport) {
         throw new Error("This transport cannot send output reports, which the macro upload needs.");
       }
-      // The settle happens BEFORE the chunk, not after it. The vendor waits
-      // 80 ms between announcing a chunk and sending it, which reads as the
-      // device needing that gap to get ready for the output report; waiting
-      // afterwards instead would leave the header and its payload
-      // back-to-back with the pause in the wrong place.
-      await this.sleep(this.settleMs);
-      await this.transport.sendReport(reportId, toArrayBuffer(payload));
+      try {
+        await this.transport.sendFeatureReport(INCOTT_REPORT_ID, toArrayBuffer(header));
+      } catch {
+        // A failed header leaves the chunk unaddressed; there is nothing to
+        // read back that would reveal it either way.
+      }
+      // The settle happens BETWEEN the header and the chunk. The vendor waits
+      // there — not after — which reads as the device needing that gap to get
+      // ready for the output report.
+      await this.sleep(settleMs);
+      await this.transport.sendReport(reportId, toArrayBuffer(chunk));
     });
     this.tail = run.catch(() => undefined);
     return run;
@@ -997,13 +1009,21 @@ export class IncottHidClient {
    * The device does not acknowledge any of it, so unlike every other setter
    * here there is nothing to verify against: there is no macro read command.
    * Bind a button to `Macro <n>` and press it — that is the only confirmation
-   * available.
+   * available. That makes both halves of `sendChunk` load-bearing: a chunk
+   * sent too early, or after something else has been allowed in between, is
+   * dropped in silence and the buffer keeps whatever that region held before
+   * — so a short macro can replay the tail of a longer one it replaced, or a
+   * setting can survive the upload meant to change it.
    */
   async uploadMacro(macro: IncottMacro): Promise<void> {
     const chunks = incottMacroChunks(incottEncodeMacroBuffer(macro));
     for (const [index, chunk] of chunks.entries()) {
-      await this.write(incottEncodeMacroChunkHeader(index, macro.bufferId));
-      await this.queue.sendOutput(INCOTT_REPORT_ID, chunk);
+      await this.queue.sendChunk(
+        incottEncodeMacroChunkHeader(index, macro.bufferId),
+        INCOTT_REPORT_ID,
+        chunk,
+        INCOTT_MACRO_CHUNK_SETTLE_MS,
+      );
     }
   }
 

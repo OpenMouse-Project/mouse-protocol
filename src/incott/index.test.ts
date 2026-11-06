@@ -853,11 +853,16 @@ test("REGRESSION: the performance-mode mapping is NOT the vendor UI's left-to-ri
 });
 
 test("macro loop modes map to their wire values in order", () => {
+  // Each value captured from the vendor tool saving the same macro in that
+  // mode, with the mouse watched running it (2026-09-14). The vendor's own
+  // export numbers the modes from 1 and the wire from 0, so these are off by
+  // one from `looptype:` in a saved .txt — taking that number as the wire
+  // value would shift every mode one place.
   const at = (loop: IncottMacroLoop): number =>
     incottEncodeMacroBuffer({ bufferId: 0, loop, cycles: 0, uid: 0, steps: [] })[1]!;
-  assert.equal(at("untilKeyRelease"), 0);
-  assert.equal(at("untilAnyKey"), 1);
-  assert.equal(at("cycle"), 2);
+  assert.equal(at("untilKeyRelease"), 0, "looptype:1, captured as 03 00 01 00");
+  assert.equal(at("untilAnyKey"), 1, "looptype:2, captured as 03 01 01 00");
+  assert.equal(at("cycle"), 2, "looptype:3, captured as 03 02 03 00");
 });
 
 test("macro encoders reject an out-of-range buffer, chunk or step count", () => {
@@ -957,6 +962,47 @@ test("the macro buffer reproduces a real capture byte for byte", () => {
   assert.equal(
     hex(288, 320),
     "4d 61 63 72 6f 34 00 00 00 00 00 00 00 00 00 00 a4 00 00 00 10 00 e8 e8 90 0e ba 8f 10 00 08 00",
+  );
+});
+
+test("the macro buffer reproduces a repeat-count capture byte for byte", () => {
+  // A second capture, 2026-09-14, and the only one where the repeat count is
+  // above 1: the vendor tool saving a ten-step macro set to "cycle, 3 times"
+  // — which repeats three times on hardware. It pins bytes 1..3, the loop
+  // mode and the count, which the first capture could only show at their
+  // do-nothing values (loop 1, one cycle).
+  const buffer = incottEncodeMacroBuffer({
+    bufferId: 3,
+    loop: "cycle",
+    cycles: 3,
+    // The vendor uses a millisecond timestamp, truncated to the 32 bits the
+    // field holds: 1789388200304 & 0xffffffff.
+    uid: 0x9fd91970,
+    steps: [
+      { key: 0x19, press: true, delayMs: 53 },   // V down
+      { key: 0x19, press: false, delayMs: 350 }, // V up
+      { key: 0x0f, press: true, delayMs: 84 },   // L down
+      { key: 0x0f, press: false, delayMs: 31 },  // L up
+      { key: 0x04, press: true, delayMs: 70 },   // A down
+      { key: 0x07, press: true, delayMs: 43 },   // D down — overlaps A
+      { key: 0x04, press: false, delayMs: 70 },  // A up
+      { key: 0x07, press: false, delayMs: 1 },   // D up
+      { key: 0x0c, press: true, delayMs: 55 },   // I down
+      { key: 0x0c, press: false, delayMs: 0 },   // I up
+    ],
+  });
+  const hex = (from: number, to: number): string =>
+    [...buffer.slice(from, to)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+
+  // `03 02 03 00`: buffer 3, loop 2 (cycle), three cycles.
+  assert.equal(
+    hex(0, 32),
+    "03 02 03 00 01 19 35 00 81 19 5e 01 01 0f 54 00 81 0f 1f 00 01 04 46 00 01 07 2b 00 81 04 46 00",
+  );
+  assert.equal(hex(32, 44), "81 07 01 00 01 0c 37 00 81 0c 00 00");
+  assert.equal(
+    hex(288, 320),
+    "4d 61 63 72 6f 34 00 00 00 00 00 00 00 00 00 00 ac 00 00 00 10 00 e8 e8 70 19 d9 9f 14 00 0a 00",
   );
 });
 
