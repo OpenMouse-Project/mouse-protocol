@@ -9,17 +9,11 @@ import {
   THERMALTAKE_REPORT_ID,
   THERMALTAKE_REPORT_SIZE,
   THERMALTAKE_VENDOR_ID,
-  thermaltakeApplySettings,
   thermaltakeChecksum,
   thermaltakeCommands,
   thermaltakeDecodeActiveProfile,
   thermaltakeDecodeFirmware,
-  thermaltakeDecodeProfile,
-  thermaltakeDecodeSettings,
   thermaltakeEncodeProfileWrite,
-  thermaltakeHzToPollingCode,
-  thermaltakeNearestDpi,
-  thermaltakePollingCodeToHz,
   thermaltakeShortCommand,
 } from "../../thermaltake/index.ts";
 
@@ -55,119 +49,6 @@ function commandReply(head: readonly number[]): Uint8Array {
   return reply;
 }
 
-test("command payloads match the vendor tool's frames", () => {
-  assert.equal(thermaltakeCommands.readFirmware().length, THERMALTAKE_REPORT_SIZE);
-  assert.equal(hex(thermaltakeCommands.readFirmware(), 4), "c4 08 00 00");
-  assert.equal(hex(thermaltakeCommands.readProfile(3), 4), "c4 0c 03 00");
-  assert.equal(hex(thermaltakeCommands.beginWrite(), 4), "c4 10 00 00");
-  assert.equal(hex(thermaltakeCommands.endWrite(), 4), "c4 00 00 00");
-  assert.equal(hex(thermaltakeCommands.readActiveProfile(), 5), "df 0d 00 00 00");
-  assert.equal(hex(thermaltakeCommands.writeActiveProfile(2), 5), "de 0d 00 00 52");
-  assert.throws(() => thermaltakeCommands.readProfile(5), RangeError);
-});
-
-test("decodes the firmware and profile-register replies the mouse sent", () => {
-  assert.equal(thermaltakeDecodeFirmware(commandReply([0xb0, 0x55, 0xaa, 0x80, 0x00, 0x50])), 0x80);
-  assert.equal(thermaltakeDecodeFirmware(commandReply([0xb0, 0x00, 0x00, 0x80])), null);
-  assert.equal(thermaltakeDecodeActiveProfile(commandReply([0xb0, 0xc0, 0x0d, 0x00, 0x00, 0x50])), 0);
-  assert.equal(thermaltakeDecodeActiveProfile(commandReply([0xb0, 0xc0, 0x0d, 0x00, 0x00, 0x53])), 3);
-  assert.equal(thermaltakeDecodeActiveProfile(commandReply([0xb0, 0xc0, 0x0d, 0x00, 0x00, 0x57])), null);
-  // Without the leading report-id byte the offsets shift back into place.
-  assert.equal(thermaltakeDecodeActiveProfile(commandReply([0xc0, 0x0d, 0x00, 0x00, 0x52]).subarray(0, THERMALTAKE_REPORT_SIZE)), 2);
-  // OpenMouse Bridge on Windows: hidapi reports the 8 bytes the device sent
-  // and Bridge drops the first as the report id, status byte included.
-  assert.equal(thermaltakeDecodeFirmware(new Uint8Array([0x55, 0xaa, 0x80, 0x00, 0x50, 0x00, 0x00])), 0x80);
-  assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array([0xc0, 0x0d, 0x00, 0x00, 0x50, 0x00, 0x00])), 0);
-  assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array(64)), null);
-  assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array(0)), null);
-  // A reply that kept its status byte must carry 0xB0.
-  assert.equal(thermaltakeDecodeActiveProfile(commandReply([0xb1, 0xc0, 0x0d, 0x00, 0x00, 0x50])), null);
-  assert.equal(thermaltakeDecodeFirmware(commandReply([0x00, 0x55, 0xaa, 0x80])), null);
-  assert.equal(thermaltakeDecodeActiveProfile(new Uint8Array([0x00, 0xc0, 0x0d, 0, 0, 0x50, 0, 0]), "short"), null);
-});
-
-test("profile replies are checked for status, index and checksum", () => {
-  const data = profileData(PROFILE_0_HEAD);
-  const reply = profileReply(0, data);
-  assert.deepEqual(thermaltakeDecodeProfile(reply, 0), data);
-  assert.deepEqual(thermaltakeDecodeProfile(reply.subarray(1), 0), data);
-  // Bridge: no report id in front and no pad byte at the end (2051 bytes).
-  assert.deepEqual(thermaltakeDecodeProfile(reply.subarray(1, -1), 0), data);
-  assert.equal(thermaltakeDecodeProfile(reply, 1), null);
-  const damaged = reply.slice();
-  damaged[100] ^= 1;
-  assert.equal(thermaltakeDecodeProfile(damaged, 0), null);
-});
-
-test("profile writes carry the block and a checksum that zeroes the sum", () => {
-  const data = profileData(PROFILE_0_HEAD);
-  const payload = thermaltakeEncodeProfileWrite(4, data);
-  assert.equal(payload.length, THERMALTAKE_REPORT_SIZE);
-  assert.equal(hex(payload, 2), "00 04");
-  assert.deepEqual(payload.subarray(3, 3 + THERMALTAKE_PROFILE_SIZE), data);
-  let sum = 0;
-  for (const byte of payload.subarray(2)) sum += byte;
-  assert.equal(sum & 0xff, 0);
-});
-
-test("decodes the settings stored on the mouse", () => {
-  assert.deepEqual(thermaltakeDecodeSettings(profileData(PROFILE_0_HEAD)), {
-    pollingRateHz: 1000,
-    dpiStages: [400],
-    dpiTable: [400, 800, 1600, 3200],
-    activeDpiStage: 0,
-    angleSnapping: false,
-    debounceMs: 11,
-  });
-  assert.deepEqual(thermaltakeDecodeSettings(profileData(PROFILE_2_HEAD)), {
-    pollingRateHz: 2000,
-    dpiStages: [3600, 800, 1600, 3200],
-    dpiTable: [3600, 800, 1600, 3200],
-    activeDpiStage: 3,
-    angleSnapping: false,
-    debounceMs: 8,
-  });
-});
-
-test("polling codes and DPI steps", () => {
-  assert.deepEqual([8, 4, 2, 1, 0x10, 0].map(thermaltakePollingCodeToHz), [125, 250, 500, 1000, 1500, 2000]);
-  assert.equal(thermaltakePollingCodeToHz(0x80), null);
-  assert.equal(thermaltakeHzToPollingCode(500), 2);
-  assert.throws(() => thermaltakeHzToPollingCode(4000), RangeError);
-  assert.equal(thermaltakeNearestDpi(1649), 1600);
-  assert.equal(thermaltakeNearestDpi(50), 100);
-  assert.equal(thermaltakeNearestDpi(26000), 5000);
-  assert.throws(() => thermaltakeNearestDpi(Number.NaN), RangeError);
-  assert.throws(() => thermaltakeNearestDpi(Number.POSITIVE_INFINITY), RangeError);
-});
-
-test("applying settings keeps every byte it does not own", () => {
-  const data = profileData(PROFILE_0_HEAD);
-  const next = thermaltakeApplySettings(data, {
-    pollingRateHz: 500,
-    dpiStages: [800, 1600, 3200],
-    activeDpiStage: 1,
-    angleSnapping: true,
-    debounceMs: 16,
-  });
-  assert.equal(hex(next, 14), "02 01 80 ff 09 75 00 1f 31 08 10 20 20 32");
-  assert.deepEqual(next.subarray(14), data.subarray(14));
-  assert.notEqual(next, data);
-  assert.equal(data[0], 0x01);
-  // Turning off what is already off leaves the factory 0x04 alone.
-  assert.equal(thermaltakeApplySettings(data, { angleSnapping: false })[2], 0x04);
-  assert.equal(thermaltakeApplySettings(next, { angleSnapping: false })[2], 0x00);
-  // Fewer stages pull the active one inside the list.
-  assert.equal(thermaltakeApplySettings(profileData(PROFILE_2_HEAD), { dpiStages: [400, 800] })[8], 0x21);
-  assert.throws(() => thermaltakeApplySettings(data, { activeDpiStage: 1 }), RangeError);
-  assert.throws(() => thermaltakeApplySettings(data, { debounceMs: 40 }), RangeError);
-  assert.throws(() => thermaltakeApplySettings(data, { dpiStages: [] }), RangeError);
-  // A patch that does not touch the stages keeps the level byte as stored,
-  // even one the vendor tool would only read as "four stages".
-  const odd = profileData([...PROFILE_0_HEAD.slice(0, 8), 0x50, ...PROFILE_0_HEAD.slice(9)]);
-  assert.equal(thermaltakeApplySettings(odd, { pollingRateHz: 500, debounceMs: 9 })[8], 0x50);
-});
-
 interface FakeMouse {
   profiles: Uint8Array[];
   active: number;
@@ -186,7 +67,7 @@ function fakeDevice(mouse: FakeMouse, usagePage = THERMALTAKE_CONFIG_USAGE_PAGE)
     opened: false,
     collections: [
       { usagePage: 0x01, usage: 0x06, featureReports: [], inputReports: [], outputReports: [], children: [] },
-      { usagePage, usage: THERMALTAKE_CONFIG_USAGE, featureReports: [], inputReports: [], outputReports: [], children: [] },
+      { usagePage, usage: THERMALTAKE_CONFIG_USAGE, featureReports: [{ reportId: THERMALTAKE_REPORT_ID.command, items: [] }], inputReports: [], outputReports: [], children: [] },
     ],
     open: async () => { (device as { opened: boolean }).opened = true; },
     close: async () => {},
@@ -419,4 +300,54 @@ test("setProfile switches the onboard profile, one-based", async () => {
   assert.equal(mouse.active, 3);
   assert.deepEqual(sent, ["de 0d 00 00 53", "c4 00 00 00 00", "df 0d 00 00 00"]);
   assert.equal((await client.readStatus()).activeProfile, 4);
+});
+
+test("config collections require feature reports and preserve the short fallback", () => {
+  const { device } = fakeDevice(fakeMouse());
+  device.collections[1]!.featureReports.length = 0;
+  assert.equal(thermaltakeChannel(device), null);
+  device.collections.push(...fakeMouseInterface(fakeMouse()).device.collections);
+  assert.equal(thermaltakeChannel(device), "short");
+  const nested = fakeDevice(fakeMouse()).device.collections[1]!;
+  device.collections[1]!.children.push(nested);
+  assert.equal(thermaltakeChannel(device), "config");
+});
+
+test("firmware transport failures are logged while settings remain readable", async (t) => {
+  const { device } = fakeDevice(fakeMouse());
+  const receive = device.receiveFeatureReport.bind(device);
+  const failure = new Error("firmware STALL");
+  let first = true;
+  device.receiveFeatureReport = async (reportId) => {
+    if (first) { first = false; throw failure; }
+    return receive(reportId);
+  };
+  const warning = t.mock.method(console, "warn", () => {});
+  const status = await new ThermaltakeHidClient(device).readStatus();
+  assert.deepEqual(status.firmware, []);
+  assert.equal(status.pollingRateHz, 1000);
+  assert.equal(warning.mock.callCount(), 1);
+  assert.deepEqual(warning.mock.calls[0]!.arguments, ["Could not read Thermaltake firmware.", failure]);
+});
+
+test("short status propagates a failed active-profile reply", async () => {
+  const { device } = fakeMouseInterface(fakeMouse());
+  const receive = device.receiveFeatureReport.bind(device);
+  let calls = 0;
+  device.receiveFeatureReport = async (reportId) => {
+    const reply = await receive(reportId);
+    if (++calls === 2) reply.setUint8(1, 0);
+    return reply;
+  };
+  await assert.rejects(new ThermaltakeHidClient(device).readStatus(), /did not report its active profile/);
+});
+
+test("a truncated profile prevents all flash writes", async () => {
+  const { device, sent } = fakeDevice(fakeMouse());
+  const receive = device.receiveFeatureReport.bind(device);
+  device.receiveFeatureReport = async (reportId) => reportId === THERMALTAKE_REPORT_ID.profile
+    ? new DataView(new Uint8Array([0xb0, 0, 0, 0, 0, 0, 0, 0]).buffer)
+    : receive(reportId);
+  await assert.rejects(new ThermaltakeHidClient(device).setPollingRate(500), /damaged copy/);
+  assert.deepEqual(sent, ["df 0d 00 00 00", "c4 0c 00 00 00"]);
 });

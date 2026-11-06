@@ -39,7 +39,8 @@ const DELAY_MS = {
 } as const;
 
 function hasConfigCollection(collection: HIDCollectionInfo): boolean {
-  return (collection.usagePage === THERMALTAKE_CONFIG_USAGE_PAGE && collection.usage === THERMALTAKE_CONFIG_USAGE)
+  return (collection.usagePage === THERMALTAKE_CONFIG_USAGE_PAGE && collection.usage === THERMALTAKE_CONFIG_USAGE
+    && collection.featureReports.length > 0)
     || collection.children.some(hasConfigCollection);
 }
 
@@ -328,7 +329,8 @@ export class ThermaltakeHidClient {
     try {
       await this.command(thermaltakeCommands.readFirmware(), DELAY_MS.firmware);
       return thermaltakeDecodeFirmware(await this.receiveCommandReply(), this.channel ?? "config");
-    } catch {
+    } catch (error) {
+      console.warn("Could not read Thermaltake firmware.", error);
       return null;
     }
   }

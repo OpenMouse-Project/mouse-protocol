@@ -307,7 +307,6 @@ export const THERMALTAKE_HID_FILTERS: HIDDeviceFilter[] = [...THERMALTAKE_PRODUC
   { vendorId: THERMALTAKE_VENDOR_ID, productId, usagePage: 0x01, usage: 0x02 },
 ]);
 
-/** Holtek config collection measured on the M724 K1NG 1K (usbmon + usbhid-dump). */
 /**
  * Redragon M690 PRO (SinoWealth): cable and 2.4 GHz receiver, both exposing
  * the vendor collection with feature reports 5 and 8 on USB interface 1.

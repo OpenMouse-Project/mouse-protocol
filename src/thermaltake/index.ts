@@ -203,6 +203,7 @@ export function thermaltakeChecksum(data: Uint8Array): number {
  * index or checksum is wrong.
  */
 export function thermaltakeDecodeProfile(reply: Uint8Array, profile: number): Uint8Array | null {
+  if (reply.length < THERMALTAKE_PROFILE_SIZE + 3) return null;
   const full = thermaltakeNormalizeReply(THERMALTAKE_REPORT_ID.profile, reply);
   if (!full || full[1] !== THERMALTAKE_STATUS_OK || full[2] !== profile) return null;
   const data = full.slice(4, 4 + THERMALTAKE_PROFILE_SIZE);
