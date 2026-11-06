@@ -72,6 +72,7 @@ checklist.
 | Razer legacy/current | `@openmouse/protocol/razer` |
 | Rapoo VT9 Pro | `@openmouse/protocol/rapoo` |
 | Razer V4 | `@openmouse/protocol/razer-v4` |
+| Redragon (M612 / M724 / M690 PRO / M719RGB-PRO) | `@openmouse/protocol/redragon` |
 | Ryunix | `@openmouse/protocol/ryunix` |
 | Amkette XS series | `@openmouse/protocol/amkette` |
 | SteelSeries Rival 3 (Gen 1) | `@openmouse/protocol/steelseries` |

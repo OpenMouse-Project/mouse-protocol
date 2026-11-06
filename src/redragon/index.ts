@@ -46,3 +46,4 @@ export * from "./m612.js";
 export * from "./m724.js";
 export * from "./deprecated.js";
 export * from "./m690-pro.js";
+export * from "./m719-pro.js";
