@@ -44,3 +44,4 @@ export * as coolermaster from "./coolermaster/index.js";
 export * as ajazz from "./ajazz/index.js";
 export * as scyrox from "./scyrox/index.js";
 export * as roccat from "./roccat/index.js";
+export * as ajazzAj200p from "./ajazz/aj200p.js";
