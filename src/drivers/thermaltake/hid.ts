@@ -44,6 +44,20 @@ function hasConfigCollection(collection: HIDCollectionInfo): boolean {
     || collection.children.some(hasConfigCollection);
 }
 
+/**
+ * The config collection listed with no reports at all: the descriptor
+ * OpenMouse Bridge rebuilds on Windows, where the collection's constant-only
+ * items leave hidapi nothing to declare. Chrome on Windows drops the
+ * collection instead, so only a rebuilt descriptor looks like this.
+ */
+function hasRebuiltConfigCollection(collection: HIDCollectionInfo): boolean {
+  return (collection.usagePage === THERMALTAKE_CONFIG_USAGE_PAGE && collection.usage === THERMALTAKE_CONFIG_USAGE
+    && collection.featureReports.length === 0
+    && collection.inputReports.every((report) => report.reportId === 0)
+    && collection.outputReports.length === 0)
+    || collection.children.some(hasRebuiltConfigCollection);
+}
+
 /** Interface 0: the Generic Desktop Mouse collection with its unnumbered 8-byte feature report. */
 function hasShortChannel(collection: HIDCollectionInfo): boolean {
   return (collection.usagePage === 0x01 && collection.usage === 0x02
@@ -68,6 +82,8 @@ const UNREACHABLE_NOTE = "Status only: this is the mouse's keyboard interface. R
   + "Iris Optical RGB entry to switch profiles, or run OpenMouse Bridge to change every setting.";
 const NEEDS_CONFIG = "Changing this needs the mouse's settings collection, which Chrome on Windows hides. "
   + "Run OpenMouse Bridge to change it.";
+const BRIDGE_REFUSED_NOTE = "Status only: this OpenMouse Bridge lists the mouse's settings collection but "
+  + "cannot read it yet. Update OpenMouse Bridge to change settings.";
 
 /**
  * Tt eSPORTS Iris Optical RGB and its Hatsune Miku Edition (see
@@ -83,11 +99,18 @@ const NEEDS_CONFIG = "Changing this needs the mouse's settings collection, which
  *   falls back to the 8-byte report on the mouse interface: firmware, the
  *   active profile and switching between the five profiles.
  * The keyboard interface alone offers neither and reports identity only.
+ *
+ * Bridge's rebuilt descriptor lists the config collection without the reports
+ * it carries, so that shape is probed rather than trusted: the first full read
+ * decides. A Bridge that cannot read undeclared feature reports fails it, and
+ * the client falls back as if the collection were absent.
  */
 export class ThermaltakeHidClient {
   readonly device: HIDDevice;
   private queue: Promise<unknown> = Promise.resolve();
   private firmware: number | null = null;
+  /** Set once a rebuilt config collection failed its first read. */
+  private rebuiltConfigRefused = false;
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -98,7 +121,16 @@ export class ThermaltakeHidClient {
   }
 
   private get channel(): "config" | "short" | null {
-    return thermaltakeChannel(this.device);
+    const declared = thermaltakeChannel(this.device);
+    if (declared === "config" || !this.probingRebuiltConfig) return declared;
+    return "config";
+  }
+
+  /** True while a rebuilt config collection is used without knowing it answers. */
+  private get probingRebuiltConfig(): boolean {
+    return !this.rebuiltConfigRefused
+      && thermaltakeChannel(this.device) !== "config"
+      && this.device.collections.some(hasRebuiltConfigCollection);
   }
 
   displayName(): string {
@@ -132,12 +164,23 @@ export class ThermaltakeHidClient {
   }
 
   readStatus(): Promise<MouseStatus> {
+    if (this.probingRebuiltConfig) {
+      return this.readConfigStatus().catch((error: unknown) => {
+        console.warn("OpenMouse Bridge could not read the Thermaltake settings collection.", error);
+        this.rebuiltConfigRefused = true;
+        return this.readStatus();
+      });
+    }
     if (this.channel === "short") return this.readShortStatus();
     if (this.channel === null) {
       return Promise.resolve({
         brand: "Thermaltake",
         name: this.displayName(),
-        ui: { family: "thermaltake", settingsReady: false, statusNote: UNREACHABLE_NOTE },
+        ui: {
+          family: "thermaltake",
+          settingsReady: false,
+          statusNote: this.rebuiltConfigRefused ? BRIDGE_REFUSED_NOTE : UNREACHABLE_NOTE,
+        },
         batteryPercent: null,
         batteryState: "Unknown",
         dpi: 0,
@@ -148,6 +191,10 @@ export class ThermaltakeHidClient {
         firmware: [],
       });
     }
+    return this.readConfigStatus();
+  }
+
+  private readConfigStatus(): Promise<MouseStatus> {
     return this.run(async () => {
       if (this.firmware === null) this.firmware = await this.readFirmwareNow();
       const profile = await this.readActiveProfileNow();
@@ -366,7 +413,7 @@ export class ThermaltakeHidClient {
 
   private run<T>(action: () => Promise<T>): Promise<T> {
     const result = this.queue.then(async () => {
-      if (this.channel === null) throw new Error(UNREACHABLE_NOTE);
+      if (this.channel === null) throw new Error(this.rebuiltConfigRefused ? BRIDGE_REFUSED_NOTE : UNREACHABLE_NOTE);
       await this.open();
       return action();
     });

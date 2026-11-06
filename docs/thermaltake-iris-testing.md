@@ -67,6 +67,11 @@ Native `HidD_SetFeature` / `HidD_GetFeature` on it work.
   reply arrives as 7 bytes without the `B0` status (`55 AA 80 00 50 00 00`)
   and a profile as 2051 bytes (`B0 p checksum data`, no trailing pad). The
   codec pads anything shorter than the full report back into place.
+  Bridge never declares the collection's feature reports, with or without
+  that fallback, so the driver cannot tell the two apart from the descriptor.
+  It treats a listed `0x08/0x4B` collection with no reports as Bridge's and
+  probes it: the first full read decides between every setting and a
+  status-only connection that asks for a Bridge update.
 
 ## Evidence
 
