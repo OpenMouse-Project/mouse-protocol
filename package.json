@@ -237,6 +237,10 @@
     "./hitscan": {
       "types": "./dist/hitscan/index.d.ts",
       "import": "./dist/hitscan/index.js"
+    },
+    "./bloody": {
+      "types": "./dist/bloody/index.d.ts",
+      "import": "./dist/bloody/index.js"
     }
   },
   "scripts": {

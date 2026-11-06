@@ -151,6 +151,7 @@ import {
   COOLERMASTER_VENDOR_ID,
 } from "@openmouse/protocol/coolermaster";
 import { AJAZZ_AK820_WIRED_PID } from "../ajazz/ak820.ts";
+import { BLOODY_PRODUCT_IDS, BLOODY_VENDOR_ID } from "../bloody/index.ts";
 
 export const VENDOR_ID = {
   coolermaster: COOLERMASTER_VENDOR_ID,
@@ -220,6 +221,7 @@ export const VENDOR_ID = {
   hyperxKingston: HYPERX_VENDOR_ID_KINGSTON,
   hyperxHp: HYPERX_VENDOR_ID_HP,
   hitscan: HITSCAN_VENDOR_ID,
+  bloody: BLOODY_VENDOR_ID,
 } as const;
 
 /**
@@ -904,6 +906,10 @@ export const VAXEE_HID_FILTERS: HIDDeviceFilter[] = VAXEE_PRODUCT_IDS.map((produ
   vendorId: VAXEE_VENDOR_ID, productId, usagePage: VAXEE_USAGE_PAGE, usage: VAXEE_USAGE,
 }));
 
+export const BLOODY_HID_FILTERS: HIDDeviceFilter[] = BLOODY_PRODUCT_IDS.map((productId) => ({
+  vendorId: BLOODY_VENDOR_ID, productId, usagePage: 0xff00,
+}));
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...VAXEE_HID_FILTERS,
   ...ASUS_HID_FILTERS,
@@ -1046,4 +1052,5 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // 64-byte feature report 0 for control.hitscan.com).
   ...[...new Set([...HITSCAN_PRODUCTS.keys(), ...HITSCAN_XVI_PRODUCTS.keys()])]
     .map((productId) => ({ vendorId: VENDOR_ID.hitscan, productId })),
+  ...BLOODY_HID_FILTERS,
 ];
