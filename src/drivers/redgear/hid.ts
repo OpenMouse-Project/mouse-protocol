@@ -21,6 +21,17 @@ import {
   X13_BUTTON_ACTIONS,
 } from "../../redgear/index.ts";
 
+function featurePayload(
+  view: DataView,
+  reportId: number,
+  payloadLength: number,
+): Uint8Array {
+  const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  if (bytes.length !== payloadLength + 1) return bytes;
+  if (bytes[0] !== reportId) throw new Error("Unexpected X13 Pro report ID");
+  return bytes.subarray(1);
+}
+
 function hasStatusCollection(
   collections: readonly HIDCollectionInfo[],
 ): boolean {
@@ -45,6 +56,7 @@ function hasStatusCollection(
 export class RedgearX13HidClient {
   readonly device: HIDDevice;
   private pending: Promise<MouseStatus> | null = null;
+  private opening: Promise<void> | null = null;
   private generation = 0;
   private readFailed = false;
   private rawStatus: Uint8Array | null = null;
@@ -81,7 +93,22 @@ export class RedgearX13HidClient {
   async open(): Promise<void> {
     if (!RedgearX13HidClient.isSupported(this.device))
       throw new Error("Unsupported X13 Pro HID interface");
-    if (!this.device.opened) await this.device.open();
+    if (this.opening) return this.opening;
+    if (this.device.opened) return;
+    const generation = this.generation;
+    const task = (async () => {
+      await this.device.open();
+      if (generation !== this.generation) {
+        if (this.device.opened) await this.device.close();
+        throw new Error("X13 Pro disconnected while opening");
+      }
+    })();
+    this.opening = task;
+    try {
+      await task;
+    } finally {
+      if (this.opening === task) this.opening = null;
+    }
   }
 
   async close(): Promise<void> {
@@ -92,6 +119,7 @@ export class RedgearX13HidClient {
     this.readFailed = false;
     this.lastError = null;
     this.buttons = null;
+    await this.opening?.catch(() => undefined);
     if (this.device.opened) await this.device.close();
   }
 
@@ -174,7 +202,11 @@ export class RedgearX13HidClient {
     return this.transfer(async () => {
       const view = await this.device.receiveFeatureReport(REDGEAR_X13_STATUS_REPORT_ID);
       const { payload } = redgearDecodeStatusPayload(
-        new Uint8Array(view.buffer, view.byteOffset, view.byteLength),
+        featurePayload(
+          view,
+          REDGEAR_X13_STATUS_REPORT_ID,
+          REDGEAR_X13_STATUS_BYTES - 1,
+        ),
       );
       redgearDecodeSettings(payload);
       return payload;
@@ -219,11 +251,7 @@ export class RedgearX13HidClient {
   private async freshButtons(optional = false): Promise<Uint8Array> {
     return this.transfer(async () => {
       const view = await this.device.receiveFeatureReport(4);
-      const payload = new Uint8Array(
-        view.buffer,
-        view.byteOffset,
-        view.byteLength,
-      ).slice();
+      const payload = featurePayload(view, 4, 2048).slice();
       redgearDecodeButtons(payload);
       return payload;
     }, optional);
@@ -323,10 +351,10 @@ export class RedgearX13HidClient {
         ]);
         if (generation !== this.generation)
           throw new Error("X13 Pro disconnected during status read");
-        const bytes = new Uint8Array(
-          view.buffer,
-          view.byteOffset,
-          view.byteLength,
+        const bytes = featurePayload(
+          view,
+          REDGEAR_X13_STATUS_REPORT_ID,
+          REDGEAR_X13_STATUS_BYTES - 1,
         );
         const { payload } = redgearDecodeStatusPayload(bytes);
         redgearDecodeSettings(payload);

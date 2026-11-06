@@ -163,6 +163,72 @@ test("writes read fresh, preserve unknown bytes, serialize and verify each exact
   assert.equal(writes.length, 2); // unchanged setting sends no write.
 });
 
+test("ID-prefixed settings replies support status and verified writes at nonzero offsets", async () => {
+  const { device, state, writes } = writableMock();
+  const receive = state.receiveFeatureReport;
+  state.receiveFeatureReport = async (id) => {
+    const view = await receive(id);
+    const framed = new Uint8Array(view.byteLength + 5);
+    framed[2] = id;
+    framed.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength), 3);
+    return new DataView(framed.buffer, 2, view.byteLength + 1);
+  };
+  const client = new RedgearX13HidClient(device);
+  assert.equal((await client.readStatus()).dpi, 4000);
+  assert.deepEqual(client.getRawStatusReport(), fixture);
+  await client.setDpi(2400);
+  await client.setPollingRate(500);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.settingsReady, true);
+  assert.equal(status.dpi, 2400);
+  assert.equal(status.pollingRateHz, 500);
+  assert.equal(writes.length, 2);
+});
+
+test("wrong report ID in a prefixed status reply disables settings", async () => {
+  const { device, state } = mock();
+  state.receiveFeatureReport = async () => {
+    const framed = fixture.slice();
+    framed[0] = 4;
+    return new DataView(framed.buffer);
+  };
+  const client = new RedgearX13HidClient(device);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.settingsReady, false);
+  assert.match(status.ui!.statusNote!, /report ID/);
+  assert.equal(client.getRawStatusReport(), null);
+});
+
+test("close waits for an in-flight open and closes its cancelled handle", async () => {
+  for (const action of ["status", "dpi", "buttons"]) {
+    const { device, state, calls } = mock();
+    let started!: () => void;
+    let finish!: () => void;
+    const opening = new Promise<void>((r) => { started = r; });
+    const open = state.open;
+    state.open = async () => {
+      started();
+      await new Promise<void>((r) => { finish = r; });
+      await open();
+    };
+    const client = new RedgearX13HidClient(device);
+    const operation = action === "status" ? client.readStatus()
+      : action === "dpi" ? client.setDpi(2400)
+      : client.setButtonMapping("Forward", "Back");
+    const rejected = assert.rejects(operation, /disconnected while opening/);
+    await opening;
+    const closing = client.close();
+    assert.equal(state.opened, false);
+    finish();
+    await Promise.all([closing, rejected]);
+    assert.equal(state.opened, false, action);
+    assert.deepEqual(calls, ["open", "close"]);
+    state.open = open;
+    assert.equal((await client.readStatus()).ui?.settingsReady, true);
+    await client.close();
+  }
+});
+
 test("invalid values never open or touch hardware", async () => {
   const { device, calls } = writableMock();
   const client = new RedgearX13HidClient(device);
@@ -193,7 +259,7 @@ test("static lighting corrects the physical green/blue swap and rejects unsuppor
   assert.equal((await client.readStatus()).lighting!.color, "#00ff00");
 });
 
-test("button client reads report 4, edits one record, verifies, and leaves macros private", async () => {
+test("button client accepts ID-prefixed report 4, edits and verifies one record", async () => {
   const { device, state, calls } = mock();
   state.collections[0]!.featureReports.push({
     reportId: 4,
@@ -217,7 +283,11 @@ test("button client reads report 4, edits one record, verifies, and leaves macro
   let current = buttons.slice();
   state.receiveFeatureReport = async (id: number) => {
     calls.push(`read:${id}`);
-    return new DataView((id === 4 ? current : fixture.slice(1)).slice().buffer);
+    const payload = id === 4 ? current : fixture.slice(1);
+    const framed = new Uint8Array(payload.length + 5);
+    framed[2] = id;
+    framed.set(payload, 3);
+    return new DataView(framed.buffer, 2, payload.length + 1);
   };
   device.sendFeatureReport = async (id: number, data: BufferSource) => {
     assert.equal(id, 4);
@@ -242,7 +312,7 @@ test("button client reads report 4, edits one record, verifies, and leaves macro
 });
 
 test("invalid button read-back locks out subsequent settings writes", async () => {
-  for (const failure of ["mismatch", "short", "invalid"]) {
+  for (const failure of ["mismatch", "short", "invalid", "wrong-id"]) {
     const { device, state, calls } = mock();
     const buttons = new Uint8Array(2048);
     const records = [
@@ -266,6 +336,7 @@ test("invalid button read-back locks out subsequent settings writes", async () =
       calls.push(`read:${id}`);
       if (id === 3) return new DataView(fixture.slice(1).buffer);
       if (written && failure === "short") return new DataView(new ArrayBuffer(2));
+      if (written && failure === "wrong-id") return new DataView(new ArrayBuffer(2049));
       const reply = buttons.slice();
       if (written && failure === "invalid") reply[0] = 255;
       return new DataView(reply.buffer);
@@ -295,13 +366,14 @@ test("invalid button read-back locks out subsequent settings writes", async () =
 });
 
 test("malformed settings read-back clears cached status and blocks queued writes", async () => {
-  for (const failure of ["short", "dpi", "rate"]) {
+  for (const failure of ["short", "dpi", "rate", "wrong-id"]) {
     const { device, state, calls } = mock();
     const receive = state.receiveFeatureReport;
     let written = false;
     state.receiveFeatureReport = async (id) => {
       if (!written) return receive(id);
       calls.push(`read:${id}`);
+      if (failure === "wrong-id") return new DataView(new ArrayBuffer(40));
       const payload = failure === "short" ? new Uint8Array(2) : fixture.slice(1);
       if (failure === "dpi") payload[0] = 255;
       if (failure === "rate") payload[1] = 255;
@@ -410,7 +482,7 @@ test("disconnect prevents an outstanding reply from repopulating cached status",
 });
 
 test("optional button failures preserve settings and allow settings writes", async () => {
-  for (const failure of ["rejected", "malformed"]) {
+  for (const failure of ["rejected", "malformed", "wrong-id"]) {
     const { device, state, calls, writes } = writableMock();
     state.collections[0]!.featureReports.push({
       reportId: 4,
@@ -420,6 +492,7 @@ test("optional button failures preserve settings and allow settings writes", asy
     state.receiveFeatureReport = async (id) => {
       if (id !== 4) return receive(id);
       if (failure === "rejected") throw new Error("Buttons unavailable");
+      if (failure === "wrong-id") return new DataView(new ArrayBuffer(2049));
       return new DataView(new ArrayBuffer(2));
     };
     const client = new RedgearX13HidClient(device);
