@@ -15,12 +15,14 @@ import {
   bloodyBuildFlashMagicCommit,
   bloodyBuildFlashReset,
   bloodyBuildFlashSector,
+  bloodyDecodeFlashSector,
   bloodyBuildFlashUnlock,
   bloodyBuildPollingQuery,
   bloodyBuildSensitivityQuery,
   bloodyBuildSensitivitySet,
   bloodyBuildSetBacklight,
   bloodyBuildSetDpi,
+  bloodyDpiToRawStep,
   bloodyDecodeBacklight,
   bloodyDecodeDeviceStatus,
   bloodyDecodePollingRate,
@@ -171,11 +173,11 @@ test("bloodyDecodeBacklight decodes backlight packet correctly", () => {
   assert.equal(bloodyDecodeBacklight(buffer), 2);
 });
 
-test("bloodyGetDpiOptions generates valid 50-DPI steps up to 16,000", () => {
+test("bloodyGetDpiOptions generates valid 100-DPI steps up to 10,000", () => {
   const options = bloodyGetDpiOptions();
   assert.equal(options[0], 100);
-  assert.equal(options[1], 150);
-  assert.equal(options[options.length - 1], 16000);
+  assert.equal(options[1], 200);
+  assert.equal(options[options.length - 1], 10000);
 });
 
 test("bloodyBuildFlashUnlock creates valid unlock and lock commands", () => {
@@ -228,64 +230,57 @@ test("bloodyBuildFlashReset produces reset notification packet", () => {
   assert.equal(reset[7], 0x80);
 });
 
-test("bloodyBuildFlashSector formats 256-byte sector with stage counts and raw steps", () => {
-  const sector = bloodyBuildFlashSector([1000, 1200, 1600, 2000, 4000], 3);
-  assert.equal(sector.length, 256);
-  assert.equal(sector[0], 0xff);
-  assert.equal(sector[1], 0xff);
-  assert.equal(sector[2], 0xff);
-  assert.equal(sector[3], 0xff);
-  assert.equal(sector[4], 0xd4);
-  assert.equal(sector[5], 0x92);
-  assert.equal(sector[6], 0x45);
-  assert.equal(sector[7], 0x97);
-  // Stage count - 1 (3 stages - 1 = 2)
-  assert.equal(sector[8], 2);
-  assert.equal(sector[9], 0);
-
-  // Stage 0: 1000 DPI -> offset 12: 40 00 40 00 16 00
-  assert.equal(sector[12], 0x40);
-  assert.equal(sector[14], 0x40);
-  assert.equal(sector[16], 0x16);
-
-  // Stage 1: 1200 DPI -> offset 18: 40 00 40 00 1b 00
-  assert.equal(sector[18], 0x40);
-  assert.equal(sector[20], 0x40);
-  assert.equal(sector[22], 0x1b);
-
-  // Stage 2: 1600 DPI -> offset 24: 40 00 40 00 24 00
-  assert.equal(sector[24], 0x40);
-  assert.equal(sector[26], 0x40);
-  assert.equal(sector[28], 0x24);
-
-  // Button mapping table at 0x48
-  assert.equal(sector[0x48], 0x07);
-  assert.equal(sector[0x49], 0x00);
-  assert.equal(sector[0x4a], 0x40);
-  assert.equal(sector[0x4b], 0x00);
-});
-
-test("bloodyBuildFlashSector preserves base sector contents when provided", () => {
+function makeSector(): Uint8Array {
   const base = new Uint8Array(256);
   base.fill(0xee);
+  base.set([0xff, 0xff, 0xff, 0xff, 0xd4, 0x92, 0x45, 0x97], 0);
   base[0x3c] = 0x77;
   base[0x48] = 0x99;
+  return base;
+}
 
-  const sector = bloodyBuildFlashSector([800, 1600], 2, base);
+test("bloodyBuildFlashSector patches only stage count and raw step bytes of the base sector", () => {
+  const base = makeSector();
+  const sector = bloodyBuildFlashSector([1000, 1200, 1600, 2000, 4000], 3, base);
   assert.equal(sector.length, 256);
-  // Preserved custom values
-  assert.equal(sector[0], 0xee);
-  assert.equal(sector[0x3c], 0x77);
-  assert.equal(sector[0x48], 0x99);
-  assert.equal(sector[200], 0xee);
+  assert.notEqual(sector, base);
 
-  // Updated stage count: 2 stages -> 2 - 1 = 1
-  assert.equal(sector[8], 1);
-  // Updated Stage 0: 800 DPI (raw step 18)
-  assert.equal(sector[12], 0x40);
-  assert.equal(sector[16], 18);
-  // Updated Stage 1: 1600 DPI (raw step 36)
-  assert.equal(sector[18], 0x40);
-  assert.equal(sector[22], 36);
+  // Stage count - 1 (3 stages - 1 = 2)
+  assert.equal(sector[8], 2);
+  // Raw steps live at offset 12 + i * 6 + 4
+  assert.equal(sector[16], 0x16); // 1000
+  assert.equal(sector[22], 0x1b); // 1200
+  assert.equal(sector[28], 0x24); // 1600
+
+  const patched = new Set([8, 16, 22, 28, 34, 40]);
+  for (let i = 0; i < 256; i++) {
+    if (!patched.has(i)) assert.equal(sector[i], base[i], `byte ${i} must be preserved`);
+  }
 });
+
+test("bloodyBuildFlashSector refuses a missing or invalid base sector", () => {
+  const stages = [1000, 1200, 1600, 2000, 4000];
+  assert.throws(() => bloodyBuildFlashSector(stages, 5, undefined as unknown as Uint8Array), /refusing/);
+  assert.throws(() => bloodyBuildFlashSector(stages, 5, new Uint8Array(256)), /refusing/);
+  assert.throws(() => bloodyBuildFlashSector(stages, 5, makeSector().subarray(0, 128)), /refusing/);
+});
+
+test("bloodyDecodeFlashSector round-trips built sectors", () => {
+  const stages = [800, 1600, 2400, 6400, 10000];
+  const decoded = bloodyDecodeFlashSector(bloodyBuildFlashSector(stages, 4, makeSector()));
+  assert.deepEqual(decoded, { enabledStageCount: 4, stages });
+  assert.equal(bloodyDecodeFlashSector(new Uint8Array(256)), null);
+});
+
+test("bloodyDpiToRawStep and bloodyBuildSetDpi reject unencodable DPI", () => {
+  for (const bad of [0, 50, 150, 10100, 16000, -100, Number.NaN]) {
+    assert.throws(() => bloodyDpiToRawStep(bad), RangeError);
+    assert.throws(() => bloodyBuildSetDpi(bad), RangeError);
+  }
+  // Every advertised option fits in a byte and is unique
+  const raws = bloodyGetDpiOptions().map(bloodyDpiToRawStep);
+  assert.equal(new Set(raws).size, raws.length);
+  assert.ok(raws.every((r) => r >= 1 && r <= 255));
+});
+
 

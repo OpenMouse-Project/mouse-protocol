@@ -1,5 +1,9 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import {
+  BLOODY_DPI_MAX,
+  BLOODY_DPI_MIN,
+  BLOODY_DPI_STEP,
+  BLOODY_FLASH_SECTOR_SIZE,
   BLOODY_PRODUCT_IDS,
   BLOODY_PRODUCT_NAMES,
   BLOODY_REPORT_ID,
@@ -7,6 +11,7 @@ import {
   BLOODY_VENDOR_ID,
   bloodyBuildFlashChunk,
   bloodyBuildFlashMagicCommit,
+  bloodyBuildFlashReadChunk,
   bloodyBuildFlashReset,
   bloodyBuildFlashSector,
   bloodyBuildFlashUnlock,
@@ -15,8 +20,12 @@ import {
   bloodyBuildSensitivitySet,
   bloodyBuildSetBacklight,
   bloodyBuildSetDpi,
+  bloodyDecodeFlashSector,
   bloodyDecodeSensitivity,
   bloodyGetDpiOptions,
+  bloodyIsValidFlashSector,
+  bloodyParseFlashReadChunk,
+  bloodyValidateDpi,
 } from "../../bloody/index.ts";
 
 /**
@@ -64,9 +73,12 @@ export class BloodyHidClient {
   private lastSensRaw: Uint8Array | null = null;
   private activeDpi: number | null = null;
   private activeStageIndex = 0;
-  private stagePool: number[] = [1000, 1200, 1600, 2000, 4000];
-  private enabledStageCount = 5;
-  private currentStages: number[] = [1000, 1200, 1600, 2000, 4000];
+  /** Stage DPI values as read from the device; empty until a read succeeds. */
+  private stagePool: number[] = [];
+  private enabledStageCount = 0;
+  private currentStages: number[] = [];
+  /** True only once stages were read from the device; writes are refused otherwise. */
+  private stagesKnown = false;
 
   /**
    * Creates a new Bloody WebHID driver instance.
@@ -90,7 +102,7 @@ export class BloodyHidClient {
   }
 
   /**
-   * Returns selectable DPI values for Bloody mice (100 to 16,000 in 50-DPI steps).
+   * Returns selectable DPI values for Bloody mice (100 to 10,000 in 100-DPI steps).
    *
    * @returns Array of supported DPI integers.
    */
@@ -138,6 +150,10 @@ export class BloodyHidClient {
   /**
    * Reads current operational state, sensitivity stages, and configuration from the mouse.
    *
+   * Stages come from the 0x02 sensitivity table, or from the flash profile sector when the
+   * device does not answer 0x02. If neither can be read the stages are reported as unknown
+   * (empty) and all writes are refused.
+   *
    * @returns Snapshot of the mouse status.
    */
   async readStatus(): Promise<MouseStatus> {
@@ -145,23 +161,33 @@ export class BloodyHidClient {
 
     const sensRaw = await this.query(bloodyBuildSensitivityQuery());
     const sens = sensRaw ? bloodyDecodeSensitivity(sensRaw) : null;
-    if (sens && sensRaw) this.lastSensRaw = sensRaw;
 
     const name = BLOODY_PRODUCT_NAMES.get(this.device.productId)
       ?? (this.device.productName?.trim() || "Bloody mouse");
 
-    if (sens?.stages && sens.stages.length > 0) {
-      this.stagePool.splice(0, sens.stages.length, ...sens.stages);
+    if (sens && sensRaw) {
+      this.lastSensRaw = sensRaw;
+      this.stagePool = [...sens.stages];
       this.enabledStageCount = sens.stages.length;
       this.activeStageIndex = sens.activeStageIndex;
       this.activeDpi = sens.currentDpi;
-    } else if (this.lastStatus === null) {
-      // First read initialization for W70/W90 Max:
-      // Provide full 5-stage profile pool (enabled 5 / 5) and default active stage 0
-      this.enabledStageCount = 5;
-      this.activeStageIndex = 0;
-      if (this.activeDpi === null) {
-        this.activeDpi = this.stagePool[0] ?? 1000;
+      this.stagesKnown = true;
+    } else {
+      this.lastSensRaw = null;
+      const sector = await this.enqueue(() => this.readFlashSector());
+      const profile = sector ? bloodyDecodeFlashSector(sector) : null;
+      if (profile) {
+        this.stagePool = [...profile.stages];
+        this.enabledStageCount = profile.enabledStageCount;
+        if (this.lastStatus === null) {
+          this.activeStageIndex = 0;
+          this.activeDpi = this.stagePool[0] ?? null;
+        }
+        this.stagesKnown = true;
+      } else {
+        this.stagePool = [];
+        this.enabledStageCount = 0;
+        this.stagesKnown = false;
       }
     }
 
@@ -172,23 +198,23 @@ export class BloodyHidClient {
 
     const currentActiveStage = this.activeStageIndex;
     const currentStages = [...this.currentStages];
-    const currentDpi = this.activeDpi ?? currentStages[currentActiveStage] ?? 1000;
+    const currentDpi = this.stagesKnown ? (this.activeDpi ?? currentStages[currentActiveStage] ?? 0) : 0;
 
     const status: MouseStatus = {
       brand: "Bloody",
       name,
       ui: {
         family: "bloody",
-        settingsReady: true,
-        valuesVerified: Boolean(sens),
+        settingsReady: this.stagesKnown,
+        valuesVerified: this.stagesKnown,
         hidePollingCard: true,
         hideUnsupportedPollingRates: true,
         dpiStageEditor: {
           maxStages: 5,
           countEditable: true,
-          minDpi: 100,
-          maxDpi: 16000,
-          stepDpi: 50,
+          minDpi: BLOODY_DPI_MIN,
+          maxDpi: BLOODY_DPI_MAX,
+          stepDpi: BLOODY_DPI_STEP,
         },
       },
       batteryPercent: null,
@@ -209,6 +235,15 @@ export class BloodyHidClient {
   }
 
   /**
+   * Throws unless stages were successfully read from the device.
+   */
+  private requireStagesKnown(): void {
+    if (!this.stagesKnown) {
+      throw new Error("Bloody DPI stages are unknown (device state could not be read); refusing to write");
+    }
+  }
+
+  /**
    * Enqueues an asynchronous operation to serialize HID command execution.
    *
    * @param operation - Async function returning a promise.
@@ -221,12 +256,46 @@ export class BloodyHidClient {
   }
 
   /**
+   * Sends one feature report and waits for the controller to settle.
+   *
+   * @param packet - Report payload.
+   * @param delayMs - Settle time after the write.
+   */
+  private async sendStep(packet: Uint8Array, delayMs: number): Promise<void> {
+    await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(packet));
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  /**
+   * Reads the 256-byte profile sector (0xe000) from the device in 32-byte chunks.
+   * Must run inside the queue. Never throws.
+   *
+   * @returns The sector, or null if any chunk could not be read or the sector is invalid.
+   */
+  private async readFlashSector(): Promise<Uint8Array | null> {
+    try {
+      const sector = new Uint8Array(BLOODY_FLASH_SECTOR_SIZE);
+      for (let offset = 0; offset < sector.length; offset += 32) {
+        await this.sendStep(bloodyBuildFlashReadChunk(offset, 0xe0), 20);
+        const view = await this.device.receiveFeatureReport(BLOODY_REPORT_ID);
+        const chunk = bloodyParseFlashReadChunk(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+        if (!chunk) return null;
+        sector.set(chunk, offset);
+      }
+      return bloodyIsValidFlashSector(sector) ? sector : null;
+    } catch (err) {
+      console.warn("[BloodyHidClient] flash sector read failed:", err);
+      return null;
+    }
+  }
+
+  /**
    * Writes the 256-byte profile sector to onboard flash memory (sector 0xe000).
    *
-   * Executes a 7-step hardware flash routine (unlock, write 8 chunks of 32 bytes,
-   * commit signature, reset notification, live DPI sync, lock, and save).
-   * Flash locking and saving are wrapped in a finally block to ensure the controller
-   * never remains unlocked if an error occurs.
+   * Reads the current sector first and patches only the stage count and DPI stage bytes, so
+   * button mappings and other settings survive; only chunks that differ are programmed. If the
+   * sector cannot be read the write is refused. Lock and save always run (every step is
+   * attempted) and never mask the original error.
    *
    * @param stages - Array of DPI values for each stage.
    * @param enabledStageCount - Number of active stages (1..5).
@@ -242,44 +311,96 @@ export class BloodyHidClient {
     pollingHz = 1000,
   ): Promise<void> {
     return this.enqueue(async () => {
-      const sector = bloodyBuildFlashSector(stages, enabledStageCount);
+      const current = await this.readFlashSector();
+      if (!current) {
+        throw new Error("Could not read the Bloody profile sector; refusing to overwrite it");
+      }
+      const sector = bloodyBuildFlashSector(stages, enabledStageCount, current);
+      const dpiPacket = bloodyBuildSetDpi(activeDpi, activeStageIndex, enabledStageCount, pollingHz);
 
-      // 1. Unlock flash programming mode (command 0x20 0x01)
-      await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashUnlock(true)));
-      await new Promise((resolve) => setTimeout(resolve, 30));
-
+      let failure: unknown;
+      let failed = false;
       try {
-        // 2. Write 8 chunks of 32 bytes to sector 0xe000 (command 0x2f 0x01)
-        for (let c = 0; c < 8; c++) {
-          const offset = c * 32;
+        // 1. Unlock flash programming mode (command 0x20 0x01)
+        await this.sendStep(bloodyBuildFlashUnlock(true), 30);
+
+        // 2. Write only the 32-byte chunks that changed (command 0x2f 0x01)
+        for (let offset = 0; offset < sector.length; offset += 32) {
           const chunk = sector.subarray(offset, offset + 32);
-          const chunkPkt = bloodyBuildFlashChunk(offset, chunk, 0xe0);
-          await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(chunkPkt));
-          await new Promise((resolve) => setTimeout(resolve, 20));
+          if (chunk.every((byte, i) => byte === current[offset + i])) continue;
+          await this.sendStep(bloodyBuildFlashChunk(offset, chunk, 0xe0), 20);
         }
 
         // 3. Magic commit packet to finalize sector write (0xa4a4a4a4)
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashMagicCommit(0xe0)));
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await this.sendStep(bloodyBuildFlashMagicCommit(0xe0), 30);
 
         // 4. Reset notification packet (command 0x13)
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashReset()));
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await this.sendStep(bloodyBuildFlashReset(), 30);
 
         // 5. Set live runtime active DPI & stage count (command 0x0d)
-        const dpiPacket = bloodyBuildSetDpi(activeDpi, activeStageIndex, enabledStageCount, pollingHz);
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
-        await new Promise((resolve) => setTimeout(resolve, 30));
-      } finally {
-        // 6. Lock flash programming mode (command 0x20 0x00)
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildFlashUnlock(false)));
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await this.sendStep(dpiPacket, 30);
+      } catch (err) {
+        failed = true;
+        failure = err;
+      }
 
-        // 7. Commit / save settings (command 0x0a)
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
-        await new Promise((resolve) => setTimeout(resolve, 40));
+      // 6/7. Lock flash and save. Each step is attempted regardless of earlier failures.
+      const cleanupErrors: unknown[] = [];
+      for (const [packet, delay] of [[bloodyBuildFlashUnlock(false), 30], [bloodyBuildSaveCommand(), 40]] as const) {
+        try {
+          await this.sendStep(packet, delay);
+        } catch (err) {
+          cleanupErrors.push(err);
+        }
+      }
+
+      if (failed) throw failure;
+      if (cleanupErrors.length > 0) {
+        throw cleanupErrors.length === 1
+          ? cleanupErrors[0]
+          : new AggregateError(cleanupErrors, "Bloody flash lock/save cleanup failed");
       }
     });
+  }
+
+  /**
+   * Writes stage configuration via the legacy 0x02 sensitivity table path.
+   *
+   * @param stages - Stage DPI values to store.
+   * @param activeStageIndex - Active stage index.
+   * @param activeDpi - DPI of the active stage.
+   * @param total - Enabled stage count.
+   * @param pollingHz - Operational polling rate in Hz.
+   */
+  private writeLegacy(
+    stages: readonly number[],
+    activeStageIndex: number,
+    activeDpi: number,
+    total: number,
+    pollingHz: number,
+  ): Promise<void> {
+    const base = this.lastSensRaw!;
+    return this.enqueue(async () => {
+      await this.sendStep(bloodyBuildSensitivitySet(stages.slice(0, total), activeStageIndex, base), 30);
+      await this.sendStep(bloodyBuildSetDpi(activeDpi, activeStageIndex, total, pollingHz), 30);
+      await this.sendStep(bloodyBuildSaveCommand(), 30);
+    });
+  }
+
+  /**
+   * Persists a candidate configuration using the path appropriate for this model.
+   * Does not mutate client state; callers update state only after this resolves.
+   */
+  private persist(
+    stages: readonly number[],
+    activeStageIndex: number,
+    activeDpi: number,
+    total: number,
+  ): Promise<void> {
+    const pollingHz = this.lastStatus?.pollingRateHz ?? 1000;
+    return this.lastSensRaw
+      ? this.writeLegacy(stages, activeStageIndex, activeDpi, total, pollingHz)
+      : this.writeFlashSector(stages, total, activeDpi, activeStageIndex, pollingHz);
   }
 
   /**
@@ -290,33 +411,15 @@ export class BloodyHidClient {
    */
   async setActiveDpiStage(stage: number): Promise<number> {
     await this.open();
+    this.requireStagesKnown();
     const total = this.enabledStageCount;
-    if (stage < 0 || stage >= total) {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= total) {
       throw new RangeError(`Stage ${stage} is outside valid range 0..${total - 1}`);
     }
+    const dpi = this.stagePool[stage]!;
+    await this.persist(this.stagePool, stage, dpi, total);
+
     this.activeStageIndex = stage;
-    const dpi = this.stagePool[stage] ?? 1000;
-    const pollingHz = this.lastStatus?.pollingRateHz ?? 1000;
-
-    if (this.lastSensRaw) {
-      // Legacy Bloody models (supporting 0x02 sensitivity table)
-      await this.enqueue(async () => {
-        const flashPacket = bloodyBuildSensitivitySet(this.currentStages, this.activeStageIndex, this.lastSensRaw!);
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(flashPacket));
-        await new Promise((resolve) => setTimeout(resolve, 30));
-
-        const dpiPacket = bloodyBuildSetDpi(dpi, this.activeStageIndex, total, pollingHz);
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
-        await new Promise((resolve) => setTimeout(resolve, 30));
-
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
-        await new Promise((resolve) => setTimeout(resolve, 30));
-      });
-    } else {
-      // Modern models (W70 / W90 Max with 512KB flash memory sector 0xe000)
-      await this.writeFlashSector(this.currentStages, total, dpi, stage, pollingHz);
-    }
-
     this.activeDpi = dpi;
     if (this.lastStatus) {
       this.lastStatus.activeDpiStage = stage;
@@ -329,53 +432,30 @@ export class BloodyHidClient {
    * Sets the DPI value for a specific stage slot.
    *
    * @param stage - Zero-based stage index (0..4).
-   * @param dpi - Sensitivity in DPI.
+   * @param dpi - Sensitivity in DPI (100..10,000, multiple of 100).
    * @returns Configured DPI value.
    */
   async setDpiStageValue(stage: number, dpi: number): Promise<number> {
     await this.open();
-    if (stage < 0 || stage >= 5) {
-      throw new RangeError(`Stage ${stage} is outside supported 0..4`);
+    bloodyValidateDpi(dpi);
+    this.requireStagesKnown();
+    if (!Number.isInteger(stage) || stage < 0 || stage >= this.stagePool.length) {
+      throw new RangeError(`Stage ${stage} is outside supported 0..${this.stagePool.length - 1}`);
     }
-    while (this.stagePool.length <= stage) {
-      this.stagePool.push(dpi);
-    }
-    this.stagePool[stage] = dpi;
-    this.currentStages = this.stagePool.slice(0, this.enabledStageCount);
+    const nextPool = [...this.stagePool];
+    nextPool[stage] = dpi;
     const total = this.enabledStageCount;
-    const pollingHz = this.lastStatus?.pollingRateHz ?? 1000;
+    const isActive = stage === this.activeStageIndex;
+    const activeDpi = isActive ? dpi : (this.activeDpi ?? nextPool[this.activeStageIndex]!);
 
-    if (this.lastSensRaw) {
-      // Legacy Bloody models (supporting 0x02 sensitivity table)
-      await this.enqueue(async () => {
-        const flashPacket = bloodyBuildSensitivitySet(this.currentStages, this.activeStageIndex, this.lastSensRaw!);
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(flashPacket));
-        await new Promise((resolve) => setTimeout(resolve, 30));
+    await this.persist(nextPool, this.activeStageIndex, activeDpi, total);
 
-        if (stage === this.activeStageIndex) {
-          const dpiPacket = bloodyBuildSetDpi(dpi, this.activeStageIndex, total, pollingHz);
-          await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
-          await new Promise((resolve) => setTimeout(resolve, 30));
-          this.activeDpi = dpi;
-        }
-
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
-        await new Promise((resolve) => setTimeout(resolve, 30));
-      });
-    } else {
-      // Modern models (W70 / W90 Max with 512KB flash memory sector 0xe000)
-      if (stage === this.activeStageIndex) {
-        this.activeDpi = dpi;
-      }
-      const activeDpi = this.activeDpi ?? this.stagePool[this.activeStageIndex] ?? 1000;
-      await this.writeFlashSector(this.currentStages, total, activeDpi, this.activeStageIndex, pollingHz);
-    }
-
+    this.stagePool = nextPool;
+    this.currentStages = nextPool.slice(0, total);
+    if (isActive) this.activeDpi = dpi;
     if (this.lastStatus) {
       this.lastStatus.dpiStages = [...this.currentStages];
-      if (stage === this.activeStageIndex) {
-        this.lastStatus.dpi = dpi;
-      }
+      if (isActive) this.lastStatus.dpi = dpi;
     }
     return dpi;
   }
@@ -388,39 +468,23 @@ export class BloodyHidClient {
    */
   async setDpiStageCount(count: number): Promise<number> {
     await this.open();
+    this.requireStagesKnown();
     const clamped = Math.max(1, Math.min(5, Math.round(count)));
+    if (clamped > this.stagePool.length) {
+      throw new RangeError(`Stage count ${clamped} exceeds the ${this.stagePool.length} stages known from the device`);
+    }
+    const activeStageIndex = Math.min(this.activeStageIndex, clamped - 1);
+    const activeDpi = this.stagePool[activeStageIndex]!;
+
+    await this.persist(this.stagePool, activeStageIndex, activeDpi, clamped);
+
     this.enabledStageCount = clamped;
     this.currentStages = this.stagePool.slice(0, clamped);
-
-    if (this.activeStageIndex >= clamped) {
-      this.activeStageIndex = clamped - 1;
-    }
-    const activeDpi = this.stagePool[this.activeStageIndex] ?? 1000;
-    const pollingHz = this.lastStatus?.pollingRateHz ?? 1000;
-
-    if (this.lastSensRaw) {
-      // Legacy Bloody models (supporting 0x02 sensitivity table)
-      await this.enqueue(async () => {
-        const flashPacket = bloodyBuildSensitivitySet(this.currentStages, this.activeStageIndex, this.lastSensRaw!);
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(flashPacket));
-        await new Promise((resolve) => setTimeout(resolve, 30));
-
-        const dpiPacket = bloodyBuildSetDpi(activeDpi, this.activeStageIndex, clamped, pollingHz);
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(dpiPacket));
-        await new Promise((resolve) => setTimeout(resolve, 30));
-
-        await this.device.sendFeatureReport(BLOODY_REPORT_ID, this.fitBuffer(bloodyBuildSaveCommand()));
-        await new Promise((resolve) => setTimeout(resolve, 30));
-      });
-    } else {
-      // Modern models (W70 / W90 Max with 512KB flash memory sector 0xe000)
-      await this.writeFlashSector(this.currentStages, clamped, activeDpi, this.activeStageIndex, pollingHz);
-    }
-
+    this.activeStageIndex = activeStageIndex;
     this.activeDpi = activeDpi;
     if (this.lastStatus) {
       this.lastStatus.dpiStages = [...this.currentStages];
-      this.lastStatus.activeDpiStage = this.activeStageIndex;
+      this.lastStatus.activeDpiStage = activeStageIndex;
       this.lastStatus.dpi = activeDpi;
     }
     return clamped;

@@ -30,8 +30,10 @@ export const BLOODY_REPORT_SIZE = 63;
 export const BLOODY_POLLING_RATES: readonly number[] = [125, 250, 500, 1000];
 
 export const BLOODY_DPI_MIN = 100;
-export const BLOODY_DPI_MAX = 16000;
-export const BLOODY_DPI_STEP = 50;
+export const BLOODY_DPI_MAX = 10000;
+export const BLOODY_DPI_STEP = 100;
+/** Unit of the legacy 0x02 sensitivity table (DPI / 50 per byte). */
+export const BLOODY_LEGACY_DPI_UNIT = 50;
 
 /**
  * Mapping between polling rates (Hz) and Bloody protocol codes.
@@ -148,13 +150,29 @@ export function bloodyBuildSaveCommand(): Uint8Array {
 }
 
 /**
+ * Validates that a DPI value can be encoded in the single-byte raw step code.
+ *
+ * The raw step encoding is 100-DPI granular and only fits a byte up to
+ * {@link BLOODY_DPI_MAX}; anything else would silently alias or wrap.
+ *
+ * @param dpi - Sensitivity in DPI.
+ * @throws RangeError if the value is not an encodable DPI.
+ */
+export function bloodyValidateDpi(dpi: number): void {
+  if (!Number.isInteger(dpi) || dpi < BLOODY_DPI_MIN || dpi > BLOODY_DPI_MAX || dpi % BLOODY_DPI_STEP !== 0) {
+    throw new RangeError(`DPI ${dpi} must be a multiple of ${BLOODY_DPI_STEP} between ${BLOODY_DPI_MIN} and ${BLOODY_DPI_MAX}`);
+  }
+}
+
+/**
  * Converts a DPI value to the Bloody protocol raw step code byte.
  *
  * @param dpi - Sensitivity in DPI (e.g. 1000).
  * @returns Raw step code byte used in Bloody sensitivity tables and commands.
  */
 export function bloodyDpiToRawStep(dpi: number): number {
-  const input = Math.max(1, Math.min(100, Math.round(dpi / 100)));
+  bloodyValidateDpi(dpi);
+  const input = dpi / 100;
   let x = 0;
   for (let i = 0; i < input; i++) {
     if (i % 3 === 1) x++;
@@ -247,7 +265,7 @@ export function bloodyBuildSensitivitySet(
     const dpi = stages[i] ?? 1000;
     const offset = 19 + i * 6;
     const step = bloodyDpiToRawStep(dpi);
-    const dpiStep = Math.max(1, Math.min(255, Math.round(dpi / BLOODY_DPI_STEP)));
+    const dpiStep = Math.max(1, Math.min(255, Math.round(dpi / BLOODY_LEGACY_DPI_UNIT)));
     buffer[offset] = step;
     buffer[offset + 1] = dpiStep;
     buffer[offset + 2] = step;
@@ -327,63 +345,112 @@ export function bloodyBuildFlashReset(): Uint8Array {
   return buffer;
 }
 
+/** Signature at the start of a valid profile sector (sector 0xe000). */
+export const BLOODY_FLASH_SECTOR_HEADER: readonly number[] = [0xff, 0xff, 0xff, 0xff, 0xd4, 0x92, 0x45, 0x97];
+export const BLOODY_FLASH_SECTOR_SIZE = 256;
+const BLOODY_FLASH_STAGE_BASE = 12;
+const BLOODY_FLASH_STAGE_SIZE = 6;
+const BLOODY_FLASH_STAGE_RAW_OFFSET = 4;
+
 /**
- * Builds the 256-byte flash profile sector for W70/W90 Max (sector 0xe000).
- * If baseSector is provided, preserves existing bytes and modifies only stage count and DPI stages.
+ * Checks that a buffer looks like a real profile sector (size and header signature).
  *
- * @param stages - Array of DPI values for each stage.
+ * @param sector - Candidate sector bytes read from the device.
+ * @returns True if the sector can safely be patched and written back.
+ */
+export function bloodyIsValidFlashSector(sector: Uint8Array | null | undefined): sector is Uint8Array {
+  return !!sector && sector.length === BLOODY_FLASH_SECTOR_SIZE
+    && BLOODY_FLASH_SECTOR_HEADER.every((byte, i) => sector[i] === byte);
+}
+
+/**
+ * Builds the 63-byte command to read a 32-byte chunk of flash memory (command 0x2f 0x00).
+ * Mirrors the layout of {@link bloodyBuildFlashChunk}; the device echoes the data at payload offset 31.
+ *
+ * @param sectorOffset - Byte offset within the sector (0, 32, ..., 224).
+ * @param sectorAddr - Target sector base address code (defaults to 0xe0).
+ * @returns HID feature report payload buffer.
+ */
+export function bloodyBuildFlashReadChunk(sectorOffset: number, sectorAddr = 0xe0): Uint8Array {
+  const buffer = new Uint8Array(BLOODY_REPORT_SIZE);
+  buffer[0] = 0x2f;
+  buffer[1] = 0x00;
+  buffer[23] = 0x08;
+  buffer[27] = sectorOffset & 0xff;
+  buffer[28] = sectorAddr & 0xff;
+  return buffer;
+}
+
+/**
+ * Extracts the 32 data bytes from a flash read response.
+ *
+ * @param reply - Raw HID response buffer for a flash read.
+ * @returns 32-byte chunk, or null if the reply is not a flash read response.
+ */
+export function bloodyParseFlashReadChunk(reply: Uint8Array): Uint8Array | null {
+  const bytes = reply.length > 0 && reply[0] === BLOODY_REPORT_ID ? reply.subarray(1) : reply;
+  if (bytes.length < 63 || bytes[0] !== 0x2f) return null;
+  return new Uint8Array(bytes.subarray(31, 63));
+}
+
+/**
+ * Patches the enabled stage count and DPI stages into an existing 256-byte profile sector.
+ * Only those bytes are modified; button mappings and every other byte are preserved.
+ *
+ * @param baseSector - Sector read from the device (must pass {@link bloodyIsValidFlashSector}).
+ * @param stages - Array of DPI values for each of the 5 stages.
  * @param enabledStageCount - Number of enabled stages (1..5).
- * @param baseSector - Optional existing 256-byte sector data to preserve non-DPI configuration.
- * @returns 256-byte profile sector ready for chunked flash programming.
+ * @returns A new 256-byte sector ready for chunked flash programming.
+ * @throws Error if baseSector is not a valid sector; RangeError for unencodable DPI values.
  */
 export function bloodyBuildFlashSector(
   stages: readonly number[],
-  enabledStageCount = 5,
-  baseSector?: Uint8Array,
+  enabledStageCount: number,
+  baseSector: Uint8Array,
 ): Uint8Array {
-  const sector = new Uint8Array(256);
-  if (baseSector && baseSector.length >= 256) {
-    sector.set(baseSector.subarray(0, 256));
-  } else {
-    // Header: ff ff ff ff d4 92 45 97
-    sector[0] = 0xff;
-    sector[1] = 0xff;
-    sector[2] = 0xff;
-    sector[3] = 0xff;
-    sector[4] = 0xd4;
-    sector[5] = 0x92;
-    sector[6] = 0x45;
-    sector[7] = 0x97;
-
-    // Polling / LOD config indicator
-    sector[0x3c] = 0x02;
-
-    // Standard button mapping table
-    const defaultButtons = [
-      0x07, 0x00, 0x40, 0x00, 0x40, 0x01, 0x40, 0x02, 0x40, 0x04, 0x40, 0x05, 0x40, 0x06, 0x40, 0x07,
-      0x40, 0x08, 0x40, 0x09, 0x40, 0x0a, 0x40, 0x0c, 0x40, 0x0d, 0x40, 0x0e, 0x40, 0x0f, 0x40, 0x10,
-      0x40, 0x11,
-    ];
-    sector.set(defaultButtons, 0x48);
+  if (!bloodyIsValidFlashSector(baseSector)) {
+    throw new Error("Bloody flash sector is missing or invalid; refusing to build a replacement");
   }
+  const sector = new Uint8Array(baseSector);
 
-  // Enabled stage count - 1 (32-bit LE)
-  const count = Math.max(1, Math.min(5, Math.round(enabledStageCount)));
-  sector[8] = count - 1;
+  // Enabled stage count - 1
+  sector[8] = Math.max(1, Math.min(5, Math.round(enabledStageCount))) - 1;
 
-  // 5 DPI stages at offsets 12, 18, 24, 30, 36
   for (let i = 0; i < 5; i++) {
-    const dpi = stages[i] ?? 1000;
-    const offset = 12 + i * 6;
-    sector[offset] = 0x40;
-    sector[offset + 1] = 0x00;
-    sector[offset + 2] = 0x40;
-    sector[offset + 3] = 0x00;
-    sector[offset + 4] = bloodyDpiToRawStep(dpi);
-    sector[offset + 5] = 0x00;
+    const dpi = stages[i];
+    if (dpi === undefined) throw new RangeError(`Missing DPI for stage ${i}`);
+    sector[BLOODY_FLASH_STAGE_BASE + i * BLOODY_FLASH_STAGE_SIZE + BLOODY_FLASH_STAGE_RAW_OFFSET] = bloodyDpiToRawStep(dpi);
   }
 
   return sector;
+}
+
+export interface BloodyFlashProfile {
+  enabledStageCount: number;
+  stages: number[];
+}
+
+/**
+ * Decodes the enabled stage count and the 5 DPI stages from a profile sector.
+ *
+ * @param sector - 256-byte sector read from the device.
+ * @returns Parsed profile, or null if the sector is invalid or a stage code is unrecognized.
+ */
+export function bloodyDecodeFlashSector(sector: Uint8Array): BloodyFlashProfile | null {
+  if (!bloodyIsValidFlashSector(sector)) return null;
+  const count = sector[8]! + 1;
+  if (count < 1 || count > 5) return null;
+  const byRaw = new Map<number, number>();
+  for (let dpi = BLOODY_DPI_MIN; dpi <= BLOODY_DPI_MAX; dpi += BLOODY_DPI_STEP) {
+    byRaw.set(bloodyDpiToRawStep(dpi), dpi);
+  }
+  const stages: number[] = [];
+  for (let i = 0; i < 5; i++) {
+    const dpi = byRaw.get(sector[BLOODY_FLASH_STAGE_BASE + i * BLOODY_FLASH_STAGE_SIZE + BLOODY_FLASH_STAGE_RAW_OFFSET]!);
+    if (dpi === undefined) return null;
+    stages.push(dpi);
+  }
+  return { enabledStageCount: count, stages };
 }
 
 export interface BloodySensitivityInfo {
@@ -418,7 +485,7 @@ export function bloodyDecodeSensitivity(reply: Uint8Array): BloodySensitivityInf
   for (let i = 0; i < totalStages; i++) {
     const offset = 19 + i * 6;
     const step = bytes[offset + 1] ?? 0;
-    const dpi = step > 0 ? step * BLOODY_DPI_STEP : 1000;
+    const dpi = step > 0 ? step * BLOODY_LEGACY_DPI_UNIT : 1000;
     stages.push(dpi);
   }
 
@@ -459,7 +526,7 @@ export function bloodyDecodeBacklight(reply: Uint8Array): number | null {
 }
 
 /**
- * Returns available DPI options in 50-DPI steps up to 16,000.
+ * Returns available DPI options in 100-DPI steps up to 10,000.
  *
  * @returns Array of supported DPI values.
  */

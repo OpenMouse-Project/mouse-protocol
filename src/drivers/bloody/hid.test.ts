@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { BloodyHidClient } from "./hid.ts";
 import {
+  BLOODY_FLASH_SECTOR_HEADER,
+  bloodyDpiToRawStep,
   BLOODY_REPORT_ID,
   BLOODY_VENDOR_ID,
   BLOODY_W70_MAX_PRODUCT_ID,
@@ -10,8 +12,15 @@ import {
 
 function createMockBloodyDevice(
   productId = BLOODY_W70_MAX_PRODUCT_ID,
-  options: { emptySens?: boolean } = {},
+  options: { emptySens?: boolean; noSector?: boolean } = {},
 ) {
+  // Profile sector (0xe000) as stored on the device, with custom button mappings.
+  const sector = new Uint8Array(256);
+  sector.set(BLOODY_FLASH_SECTOR_HEADER, 0);
+  sector[8] = 4;
+  [1000, 1200, 1600, 2000, 4000].forEach((dpi, i) => { sector[12 + i * 6 + 4] = bloodyDpiToRawStep(dpi); });
+  for (let i = 0x48; i < 0x80; i++) sector[i] = (i * 7 + 3) & 0xff; // distinctive button map
+  sector[0x3c] = 0x05;
   let pendingRequest: Uint8Array | null = null;
   const writes: Uint8Array[] = [];
   let mockSensStorage: Uint8Array | null = null;
@@ -41,6 +50,9 @@ function createMockBloodyDevice(
       assert.equal(reportId, BLOODY_REPORT_ID);
       pendingRequest = new Uint8Array(buffer as ArrayBuffer);
       writes.push(pendingRequest);
+      if (pendingRequest[0] === 0x2f && pendingRequest[1] === 0x01 && pendingRequest[23] === 0x08) {
+        sector.set(pendingRequest.subarray(31, 63), pendingRequest[27]);
+      }
       if (pendingRequest[0] === 0x02 && pendingRequest[7] === 0xff) {
         mockSensStorage = new Uint8Array(pendingRequest);
       }
@@ -80,6 +92,11 @@ function createMockBloodyDevice(
           // Stage 4: 5000 DPI (0x64 * 50)
           reply[43] = 0x73; reply[44] = 0x64; reply[45] = 0x73; reply[46] = 0x64;
         }
+      } else if (command === 0x2f && pendingRequest[1] === 0x00) {
+        if (!options.noSector) {
+          reply[0] = 0x2f;
+          reply.set(sector.subarray(pendingRequest[27], pendingRequest[27] + 32), 31);
+        }
       } else if (command === 0x0e) {
         // Polling response: 1000 Hz (code 0x01 at index 14)
         reply[0] = 0x0e;
@@ -90,7 +107,7 @@ function createMockBloodyDevice(
     },
   } as unknown as HIDDevice;
 
-  return { hid, writes };
+  return { hid, writes, sector };
 }
 
 test("BloodyHidClient recognizes supported device by VID, PID and feature report collection", () => {
@@ -213,14 +230,117 @@ test("BloodyHidClient setBacklight sends feature report with brightness level", 
   assert.equal(lastWrite[7], 3);
 });
 
-test("BloodyHidClient reports valuesVerified: false when sensitivity reply is all zeros", async () => {
+test("BloodyHidClient reads stages from the flash sector when the 0x02 reply is all zeros", async () => {
   const { hid } = createMockBloodyDevice(BLOODY_W70_MAX_PRODUCT_ID, { emptySens: true });
   const client = new BloodyHidClient(hid);
 
   const status = await client.readStatus();
-  assert.equal(status.ui?.valuesVerified, false);
+  assert.equal(status.ui?.valuesVerified, true);
   assert.equal(status.dpi, 1000);
   assert.deepEqual(status.dpiStages, [1000, 1200, 1600, 2000, 4000]);
+});
+
+test("BloodyHidClient marks stages unknown and refuses writes when neither 0x02 nor the sector is readable", async () => {
+  const { hid, writes } = createMockBloodyDevice(BLOODY_W70_MAX_PRODUCT_ID, { emptySens: true, noSector: true });
+  const client = new BloodyHidClient(hid);
+
+  const status = await client.readStatus();
+  assert.equal(status.ui?.valuesVerified, false);
+  assert.equal(status.ui?.settingsReady, false);
+  assert.deepEqual(status.dpiStages, []);
+
+  const before = writes.length;
+  await assert.rejects(() => client.setDpiStageValue(0, 800), /unknown/);
+  await assert.rejects(() => client.setDpiStageCount(3), /unknown/);
+  await assert.rejects(() => client.setActiveDpiStage(0), /unknown/);
+  assert.equal(writes.length, before, "no packets may be sent");
+});
+
+test("BloodyHidClient refuses to write when the sector cannot be read", async () => {
+  const { hid, writes, sector } = createMockBloodyDevice(BLOODY_W70_MAX_PRODUCT_ID, { emptySens: true });
+  const client = new BloodyHidClient(hid);
+  await client.readStatus();
+  // Device stops answering sector reads after the initial status read.
+  const originalReceive = hid.receiveFeatureReport.bind(hid);
+  hid.receiveFeatureReport = async (id: number) => {
+    const view = await originalReceive(id);
+    return new DataView(new Uint8Array(view.byteLength).buffer);
+  };
+  const before = writes.length;
+  const snapshot = new Uint8Array(sector);
+  await assert.rejects(() => client.setDpiStageValue(0, 800), /refusing to overwrite/);
+  const sent = writes.slice(before);
+  assert.ok(sent.every((w) => !(w[0] === 0x20 || (w[0] === 0x2f && w[1] === 0x01) || w[0] === 0x0a)), "no unlock/program/save packets");
+  assert.deepEqual(sector, snapshot);
+});
+
+test("BloodyHidClient rejects unencodable DPI values", async () => {
+  const { hid, writes } = createMockBloodyDevice();
+  const client = new BloodyHidClient(hid);
+  await client.readStatus();
+  const before = writes.length;
+  for (const bad of [0, 50, 1250, 10100, 16000, Number.NaN]) {
+    await assert.rejects(() => client.setDpiStageValue(0, bad), RangeError);
+  }
+  assert.equal(writes.length, before);
+});
+
+test("flash write preserves button mappings and every non-DPI byte of the sector", async () => {
+  const { hid, writes, sector } = createMockBloodyDevice(BLOODY_W70_MAX_PRODUCT_ID, { emptySens: true });
+  const client = new BloodyHidClient(hid);
+  await client.readStatus();
+  const original = new Uint8Array(sector);
+
+  await client.setDpiStageValue(2, 2400);
+  await client.setDpiStageCount(3);
+
+  const dpiBytes = new Set<number>([8]);
+  for (let i = 0; i < 5; i++) dpiBytes.add(12 + i * 6 + 4);
+  for (let i = 0; i < sector.length; i++) {
+    if (!dpiBytes.has(i)) assert.equal(sector[i], original[i], `byte 0x${i.toString(16)} must be preserved`);
+  }
+  assert.equal(sector[12 + 2 * 6 + 4], bloodyDpiToRawStep(2400));
+  assert.equal(sector[8], 2);
+  // Unchanged chunks are not reprogrammed: stage edits live in the first chunk only.
+  const programmed = writes.filter((w) => w[0] === 0x2f && w[1] === 0x01 && w[23] === 0x08);
+  assert.ok(programmed.every((w) => w[27] === 0));
+});
+
+test("failed write leaves cached stage state untouched", async () => {
+  const { hid } = createMockBloodyDevice(BLOODY_W70_MAX_PRODUCT_ID, { emptySens: true });
+  const client = new BloodyHidClient(hid);
+  const status = await client.readStatus();
+  const originalSend = hid.sendFeatureReport.bind(hid);
+  hid.sendFeatureReport = async (id: number, buffer: BufferSource) => {
+    const b = new Uint8Array(buffer as ArrayBuffer);
+    if (b[0] === 0x2f && b[1] === 0x01 && b[23] === 0x08) throw new Error("boom");
+    return originalSend(id, buffer);
+  };
+  await assert.rejects(() => client.setDpiStageValue(0, 1200), /boom/);
+  await assert.rejects(() => client.setDpiStageCount(2), /boom/);
+  assert.deepEqual(status.dpiStages, [1000, 1200, 1600, 2000, 4000]);
+  assert.equal(status.dpi, 1000);
+  hid.sendFeatureReport = originalSend;
+  const after = await client.readStatus();
+  assert.deepEqual(after.dpiStages, [1000, 1200, 1600, 2000, 4000]);
+});
+
+test("cleanup failures do not mask the original error and every cleanup step is attempted", async () => {
+  const { hid, writes } = createMockBloodyDevice(BLOODY_W70_MAX_PRODUCT_ID, { emptySens: true });
+  const client = new BloodyHidClient(hid);
+  await client.readStatus();
+  const before = writes.length;
+  const originalSend = hid.sendFeatureReport.bind(hid);
+  hid.sendFeatureReport = async (id: number, buffer: BufferSource) => {
+    const b = new Uint8Array(buffer as ArrayBuffer);
+    if (b[0] === 0x2f && b[1] === 0x01 && b[23] === 0x08) throw new Error("chunk failed");
+    if (b[0] === 0x20 && b[6] === 0x00) { writes.push(b); throw new Error("lock failed"); }
+    return originalSend(id, buffer);
+  };
+  await assert.rejects(() => client.setDpiStageValue(0, 1200), /chunk failed/);
+  const sent = writes.slice(before);
+  assert.ok(sent.some((w) => w[0] === 0x20 && w[6] === 0x00), "lock attempted");
+  assert.ok(sent.some((w) => w[0] === 0x0a), "save still attempted after lock failure");
 });
 
 test("BloodyHidClient executes full W70 Max flash sector write sequence when lastSensRaw is unset", async () => {
@@ -234,53 +354,48 @@ test("BloodyHidClient executes full W70 Max flash sector write sequence when las
   await client.setDpiStageValue(0, 800);
 
   const flashWrites = writes.slice(writeCountBefore);
-  // Total writes: 1 (unlock) + 8 (chunks) + 1 (commit) + 1 (reset) + 1 (runtime 0x0d) + 1 (lock) + 1 (save) = 14
-  assert.equal(flashWrites.length, 14);
+  // Sector reads precede the write; only the changed chunk is programmed.
+  const isRead = (w: Uint8Array) => w[0] === 0x2f && w[1] === 0x00;
+  assert.equal(flashWrites.filter(isRead).length, 8);
+  const seq = flashWrites.filter((w) => !isRead(w));
+  // 1 (unlock) + 1 (changed chunk) + 1 (commit) + 1 (reset) + 1 (runtime 0x0d) + 1 (lock) + 1 (save) = 7
+  assert.equal(seq.length, 7);
 
   // 1. Unlock flash programming mode (0x20 with 0x01 at index 6)
-  assert.equal(flashWrites[0][0], 0x20);
-  assert.equal(flashWrites[0][6], 0x01);
+  assert.equal(seq[0][0], 0x20);
+  assert.equal(seq[0][6], 0x01);
 
-  // 2. 8 flash chunks to sector 0xe000..0xe0e0
-  for (let c = 0; c < 8; c++) {
-    const chunkPkt = flashWrites[1 + c];
-    assert.equal(chunkPkt[0], 0x2f);
-    assert.equal(chunkPkt[1], 0x01);
-    assert.equal(chunkPkt[23], 0x08); // size 8 (32 bytes)
-    assert.equal(chunkPkt[27], c * 32); // offset
-    assert.equal(chunkPkt[28], 0xe0); // address high byte
-  }
-
-  // First chunk holds the updated stage 0: 800 DPI (raw step 18 at byte offset 16 in sector, which is pkt[31 + 16])
-  assert.equal(flashWrites[1][31 + 16], 18);
+  // 2. Changed chunk (offset 0 of sector 0xe000) holding stage 0: 800 DPI (raw step 18 at sector byte 16)
+  const chunkPkt = seq[1];
+  assert.equal(chunkPkt[0], 0x2f);
+  assert.equal(chunkPkt[1], 0x01);
+  assert.equal(chunkPkt[23], 0x08);
+  assert.equal(chunkPkt[27], 0);
+  assert.equal(chunkPkt[28], 0xe0);
+  assert.equal(chunkPkt[31 + 16], 18);
 
   // 3. Magic commit signature (0xa4a4a4a4)
-  const commitPkt = flashWrites[9];
+  const commitPkt = seq[2];
   assert.equal(commitPkt[0], 0x2f);
   assert.equal(commitPkt[1], 0x01);
   assert.equal(commitPkt[23], 0x01);
   assert.equal(commitPkt[28], 0xe0);
-  assert.equal(commitPkt[31], 0xa4);
-  assert.equal(commitPkt[32], 0xa4);
-  assert.equal(commitPkt[33], 0xa4);
-  assert.equal(commitPkt[34], 0xa4);
+  assert.deepEqual([...commitPkt.subarray(31, 35)], [0xa4, 0xa4, 0xa4, 0xa4]);
 
   // 4. Reset notification packet (0x13)
-  const resetPkt = flashWrites[10];
-  assert.equal(resetPkt[0], 0x13);
-  assert.equal(resetPkt[3], 0x80);
+  assert.equal(seq[3][0], 0x13);
+  assert.equal(seq[3][3], 0x80);
 
   // 5. Runtime DPI command (0x0d)
-  const runtimePkt = flashWrites[11];
-  assert.equal(runtimePkt[0], 0x0d);
-  assert.equal(runtimePkt[11], 18); // bloodyDpiToRawStep(800) = 18
+  assert.equal(seq[4][0], 0x0d);
+  assert.equal(seq[4][11], 18); // bloodyDpiToRawStep(800) = 18
 
   // 6. Lock flash programming mode (0x20 with 0x00 at index 6)
-  assert.equal(flashWrites[12][0], 0x20);
-  assert.equal(flashWrites[12][6], 0x00);
+  assert.equal(seq[5][0], 0x20);
+  assert.equal(seq[5][6], 0x00);
 
   // 7. Save settings (0x0a)
-  assert.equal(flashWrites[13][0], 0x0a);
+  assert.equal(seq[6][0], 0x0a);
 });
 
 test("writeFlashSector guarantees flash locking and saving run even if an intermediate write fails", async () => {
@@ -294,9 +409,9 @@ test("writeFlashSector guarantees flash locking and saving run even if an interm
   const originalSend = hid.sendFeatureReport.bind(hid);
   hid.sendFeatureReport = async (reportId: number, buffer: BufferSource) => {
     const bytes = new Uint8Array(buffer as ArrayBuffer);
-    if (bytes[0] === 0x2f && bytes[28] === 0xe0) {
+    if (bytes[0] === 0x2f && bytes[1] === 0x01 && bytes[23] === 0x08) {
       chunkCount++;
-      if (chunkCount === 3) {
+      if (chunkCount === 1) {
         throw new Error("Simulated USB transport failure during chunk write");
       }
     }
@@ -310,8 +425,8 @@ test("writeFlashSector guarantees flash locking and saving run even if an interm
 
   const errorWrites = writes.slice(writeCountBefore);
   // Verify that even after failure, the finally block sent lock (0x20 0x00) and save (0x0a)
-  const lockPkt = errorWrites.find((w) => w[0] === 0x20 && w[1] === 0x00);
+  const lockPkt = errorWrites.find((w) => w[0] === 0x20 && w[6] === 0x00);
   const savePkt = errorWrites.find((w) => w[0] === 0x0a);
-  assert.ok(lockPkt, "Flash lock (0x20 0x00) should be called in finally");
+  assert.ok(lockPkt, "Flash lock (0x20, byte 6 = 0) should be called in finally");
   assert.ok(savePkt, "Save command (0x0a) should be called in finally");
 });
