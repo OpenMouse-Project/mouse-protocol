@@ -1,4 +1,5 @@
 import type { MouseStatus } from "../mouse-types.ts";
+import { isStaleHandleError } from "./stale-handle.ts";
 import {
   WE_CMD_GET_POWER,
   WE_CMD_READ_EEPROM,
@@ -83,6 +84,9 @@ export class EggWeHidClient {
     reject: (reason: Error) => void;
     timer: number;
   } | null = null;
+
+  /** Identity of the in-flight transaction; cleared by close() and replaced by the next one. */
+  private activeRequest: object | null = null;
 
   private readonly onInputReport = (event: HIDInputReportEvent): void => {
     if (event.reportId !== REPORT_NOTIFY) return;
@@ -365,6 +369,7 @@ export class EggWeHidClient {
   }
 
   async close(): Promise<void> {
+    this.activeRequest = null;
     if (this.responseWaiter) {
       window.clearTimeout(this.responseWaiter.timer);
       this.responseWaiter.reject(new Error("The OP1we device was closed."));
@@ -505,33 +510,76 @@ export class EggWeHidClient {
     waiter.reject(error);
   }
 
+  /**
+   * A stale handle (sleep/resume, USB hiccup) rejects every write until the
+   * device is re-enumerated. On a stale-handle error close the command channel,
+   * reopen and retry once. `isCurrent` is checked after the reopen so a request
+   * that timed out or was closed meanwhile is not resent.
+   */
+  private async sendReportRecovering(
+    channels: WeChannels,
+    data: ArrayBuffer,
+    isCurrent: () => boolean = () => true,
+  ): Promise<void> {
+    try {
+      await channels.cmd.sendFeatureReport(WE_REPORT_ID, data);
+    } catch (error) {
+      if (!isStaleHandleError(error)) throw error;
+      await channels.cmd.close().catch(() => undefined);
+      await this.open();
+      if (!isCurrent()) {
+        // close() returned while open() was pending, so open() just re-acquired the
+        // channels. A null activeRequest means shutdown (a newer request would own
+        // its own token), so release them; otherwise leave the newer request alone.
+        if (this.activeRequest === null) await this.close();
+        throw new Error("The OP1we request was cancelled before it could be retried.");
+      }
+      const fresh = this.resolvedChannels() ?? channels;
+      fresh.notify.removeEventListener("inputreport", this.onInputReport);
+      fresh.notify.addEventListener("inputreport", this.onInputReport);
+      await fresh.cmd.sendFeatureReport(WE_REPORT_ID, data);
+    }
+  }
+
   private async transact(
     channels: WeChannels,
     command: number,
     payload: Uint8Array,
   ): Promise<Uint8Array> {
     this.failWaiter(new Error("Superseded by another OP1we request."));
-
-    const responsePromise = new Promise<Uint8Array>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        if (this.responseWaiter?.resolve === resolve) this.responseWaiter = null;
-        reject(new Error(`Timed out waiting for OP1we cmd 0x${command.toString(16)}.`));
-      }, CMD_TIMEOUT_MS);
-      this.responseWaiter = { command, resolve, reject, timer };
-    });
+    if (payload.byteLength !== WE_PAYLOAD_LEN) {
+      throw new Error("WE payload must be 16 bytes.");
+    }
 
     channels.notify.removeEventListener("inputreport", this.onInputReport);
     channels.notify.addEventListener("inputreport", this.onInputReport);
 
-    if (payload.byteLength !== WE_PAYLOAD_LEN) {
-      throw new Error("WE payload must be 16 bytes.");
-    }
     // Ensure ArrayBuffer-backed view for WebHID typings.
     const copy = new Uint8Array(payload);
+    // The response timer starts only once the command is on the wire, so a slow
+    // close+reopen does not eat the reply window. The waiter is registered
+    // before the write resolves so a fast reply is not missed.
+    const token = {};
+    this.activeRequest = token;
+    const responsePromise = new Promise<Uint8Array>((resolve, reject) => {
+      this.responseWaiter = { command, resolve, reject, timer: 0 };
+    });
+    const waiter = this.responseWaiter!;
+    // Swallow rejection noise if we throw before the promise is awaited.
+    responsePromise.catch(() => undefined);
     try {
-      await channels.cmd.sendFeatureReport(WE_REPORT_ID, copy.buffer);
+      await this.sendReportRecovering(channels, copy.buffer, () => this.activeRequest === token);
     } catch (error) {
-      this.failWaiter(error instanceof Error ? error : new Error(String(error)));
+      if (this.responseWaiter === waiter) this.responseWaiter = null;
+      if (this.activeRequest === token) this.activeRequest = null;
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+    // Superseded or closed while sending: that path already rejected the promise.
+    if (this.responseWaiter === waiter) {
+      waiter.timer = window.setTimeout(() => {
+        if (this.responseWaiter === waiter) this.responseWaiter = null;
+        waiter.reject(new Error(`Timed out waiting for OP1we cmd 0x${command.toString(16)}.`));
+      }, CMD_TIMEOUT_MS);
     }
     return responsePromise;
   }
