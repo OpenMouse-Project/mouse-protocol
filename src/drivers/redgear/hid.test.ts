@@ -241,31 +241,91 @@ test("button client reads report 4, edits one record, verifies, and leaves macro
   assert.ok(calls.length > count);
 });
 
-test("button read-back mismatch locks out subsequent settings writes", async () => {
-  const { device, state, calls } = mock();
-  const buttons = new Uint8Array(2048);
-  const records = [
-    "2101000000000000ffff",
-    "2202000000000000ffff",
-    "2304000000000000ffff",
-    "44000000000000000000",
-    "2510000000000000ffff",
-    "2608000000000000ffff",
-    "2702000000000000ffff",
-  ];
-  records.forEach((hex, i) => {
-    buttons[i * 2] = 48 + i * 10;
-    buttons.set(Buffer.from(hex, "hex"), 48 + i * 10);
-  });
-  state.receiveFeatureReport = async () => new DataView(buttons.slice().buffer);
-  device.sendFeatureReport = async () => {
-    calls.push("write:4");
-  };
-  const client = new RedgearX13HidClient(device);
-  await assert.rejects(client.setButtonMapping("Forward", "Back"), /mismatch/);
-  const count = calls.length;
-  await assert.rejects(client.setDpi(2400), /reconnect/);
-  assert.equal(calls.length, count);
+test("invalid button read-back locks out subsequent settings writes", async () => {
+  for (const failure of ["mismatch", "short", "invalid"]) {
+    const { device, state, calls } = mock();
+    const buttons = new Uint8Array(2048);
+    const records = [
+      "2101000000000000ffff",
+      "2202000000000000ffff",
+      "2304000000000000ffff",
+      "44000000000000000000",
+      "2510000000000000ffff",
+      "2608000000000000ffff",
+      "2702000000000000ffff",
+    ];
+    records.forEach((hex, i) => {
+      buttons[i * 2] = 48 + i * 10;
+      buttons.set(Buffer.from(hex, "hex"), 48 + i * 10);
+    });
+    state.collections[0]!.featureReports.push({
+      reportId: 4, items: [{ reportSize: 8, reportCount: 2048 }],
+    });
+    let written = false;
+    state.receiveFeatureReport = async (id) => {
+      calls.push(`read:${id}`);
+      if (id === 3) return new DataView(fixture.slice(1).buffer);
+      if (written && failure === "short") return new DataView(new ArrayBuffer(2));
+      const reply = buttons.slice();
+      if (written && failure === "invalid") reply[0] = 255;
+      return new DataView(reply.buffer);
+    };
+    device.sendFeatureReport = async () => {
+      calls.push("write:4");
+      written = true;
+    };
+    const client = new RedgearX13HidClient(device);
+    assert.ok((await client.readStatus()).buttonMappings);
+    const results = await Promise.allSettled([
+      client.setButtonMapping("Forward", "Back"),
+      client.setDpi(2400),
+    ]);
+    assert.equal(results[0]!.status, "rejected", failure);
+    assert.equal(results[1]!.status, "rejected", failure);
+    assert.equal(calls.filter((c) => c === "write:4").length, 1);
+    assert.equal(client.getRawStatusReport(), null);
+    const count = calls.length;
+    await assert.rejects(client.setDpi(2400), /reconnect/);
+    const status = await client.readStatus();
+    assert.equal(status.ui?.settingsReady, false);
+    assert.equal(status.buttonMappings, undefined);
+    assert.equal(calls.length, count);
+    await client.close();
+  }
+});
+
+test("malformed settings read-back clears cached status and blocks queued writes", async () => {
+  for (const failure of ["short", "dpi", "rate"]) {
+    const { device, state, calls } = mock();
+    const receive = state.receiveFeatureReport;
+    let written = false;
+    state.receiveFeatureReport = async (id) => {
+      if (!written) return receive(id);
+      calls.push(`read:${id}`);
+      const payload = failure === "short" ? new Uint8Array(2) : fixture.slice(1);
+      if (failure === "dpi") payload[0] = 255;
+      if (failure === "rate") payload[1] = 255;
+      return new DataView(payload.buffer);
+    };
+    device.sendFeatureReport = async () => {
+      calls.push("write:3");
+      written = true;
+    };
+    const client = new RedgearX13HidClient(device);
+    assert.equal((await client.readStatus()).ui?.settingsReady, true);
+    const results = await Promise.allSettled([
+      client.setDpi(2400), client.setPollingRate(500),
+    ]);
+    assert.equal(results[0]!.status, "rejected", failure);
+    assert.equal(results[1]!.status, "rejected", failure);
+    assert.deepEqual(calls, ["open", "read:3", "read:3", "write:3", "read:3"]);
+    assert.equal(client.getRawStatusReport(), null);
+    assert.equal((await client.readStatus()).ui?.settingsReady, false);
+    assert.equal(calls.length, 5);
+    await client.close();
+    state.receiveFeatureReport = receive;
+    assert.equal((await client.readStatus()).ui?.settingsReady, true);
+  }
 });
 
 test("write failure and verification mismatch disable further writes until reconnect", async () => {
@@ -350,7 +410,7 @@ test("disconnect prevents an outstanding reply from repopulating cached status",
 });
 
 test("optional button failures preserve settings and allow settings writes", async () => {
-  for (const failure of ["rejected", "malformed", "timeout"]) {
+  for (const failure of ["rejected", "malformed"]) {
     const { device, state, calls, writes } = writableMock();
     state.collections[0]!.featureReports.push({
       reportId: 4,
@@ -360,7 +420,6 @@ test("optional button failures preserve settings and allow settings writes", asy
     state.receiveFeatureReport = async (id) => {
       if (id !== 4) return receive(id);
       if (failure === "rejected") throw new Error("Buttons unavailable");
-      if (failure === "timeout") return new Promise<DataView>(() => {});
       return new DataView(new ArrayBuffer(2));
     };
     const client = new RedgearX13HidClient(device);
@@ -377,6 +436,35 @@ test("optional button failures preserve settings and allow settings writes", asy
     assert.deepEqual(calls, ["open", "read:3", "read:3", "write:3", "read:3"]);
     await client.close();
   }
+});
+
+test("optional button timeout blocks further transfers until reconnect", async () => {
+  const { device, state, calls } = mock();
+  state.collections[0]!.featureReports.push({
+    reportId: 4, items: [{ reportSize: 8, reportCount: 2048 }],
+  });
+  const receive = state.receiveFeatureReport;
+  let resolve!: (value: DataView) => void;
+  state.receiveFeatureReport = async (id) => {
+    if (id !== 4) return receive(id);
+    calls.push("read:4");
+    return new Promise<DataView>((r) => { resolve = r; });
+  };
+  const client = new RedgearX13HidClient(device);
+  const status = await client.readStatus();
+  assert.equal(status.ui?.settingsReady, false);
+  assert.match(status.ui!.statusNote!, /timed out/);
+  assert.equal(client.getRawStatusReport(), null);
+  await assert.rejects(client.setDpi(2400), /reconnect/);
+  await client.readStatus();
+  assert.deepEqual(calls, ["open", "read:3", "read:4"]);
+  await client.close();
+  state.receiveFeatureReport = receive;
+  state.collections[0]!.featureReports.pop();
+  assert.equal((await client.readStatus()).ui?.settingsReady, true);
+  resolve(new DataView(new ArrayBuffer(2048)));
+  await Promise.resolve();
+  assert.deepEqual(client.getRawStatusReport(), fixture);
 });
 
 test("reopening starts a fresh status read before an old read settles", async () => {

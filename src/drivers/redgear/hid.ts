@@ -136,17 +136,20 @@ export class RedgearX13HidClient {
         "X13 Pro transport unavailable; reconnect before changing settings",
       );
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
       const value = await Promise.race([
         action(),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
-            () =>
+            () => {
+              timedOut = true;
               reject(
                 new Error(
                   "X13 Pro transfer timed out; reconnect before retrying",
                 ),
-              ),
+              );
+            },
             2000,
           );
         }),
@@ -155,9 +158,10 @@ export class RedgearX13HidClient {
         throw new Error("X13 Pro disconnected during transfer");
       return value;
     } catch (error) {
-      if (generation === this.generation && !optional) {
+      if (generation === this.generation && (!optional || timedOut)) {
         this.readFailed = true;
         this.rawStatus = null;
+        this.buttons = null;
         this.lastError = error instanceof Error ? error.message : String(error);
       }
       throw error;
@@ -167,14 +171,14 @@ export class RedgearX13HidClient {
   }
 
   private async freshPayload(): Promise<Uint8Array> {
-    const view = await this.transfer(() =>
-      this.device.receiveFeatureReport(REDGEAR_X13_STATUS_REPORT_ID),
-    );
-    const { payload } = redgearDecodeStatusPayload(
-      new Uint8Array(view.buffer, view.byteOffset, view.byteLength),
-    );
-    redgearDecodeSettings(payload);
-    return payload;
+    return this.transfer(async () => {
+      const view = await this.device.receiveFeatureReport(REDGEAR_X13_STATUS_REPORT_ID);
+      const { payload } = redgearDecodeStatusPayload(
+        new Uint8Array(view.buffer, view.byteOffset, view.byteLength),
+      );
+      redgearDecodeSettings(payload);
+      return payload;
+    });
   }
 
   setDpi(dpi: number): Promise<number> {
@@ -213,17 +217,16 @@ export class RedgearX13HidClient {
   }
 
   private async freshButtons(optional = false): Promise<Uint8Array> {
-    const view = await this.transfer(
-      () => this.device.receiveFeatureReport(4),
-      optional,
-    );
-    const payload = new Uint8Array(
-      view.buffer,
-      view.byteOffset,
-      view.byteLength,
-    ).slice();
-    redgearDecodeButtons(payload);
-    return payload;
+    return this.transfer(async () => {
+      const view = await this.device.receiveFeatureReport(4);
+      const payload = new Uint8Array(
+        view.buffer,
+        view.byteOffset,
+        view.byteLength,
+      ).slice();
+      redgearDecodeButtons(payload);
+      return payload;
+    }, optional);
   }
 
   setButtonMapping(button: string, action: string): Promise<void> {
