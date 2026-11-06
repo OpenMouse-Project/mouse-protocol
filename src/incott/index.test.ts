@@ -39,6 +39,10 @@ import {
   incottIsWiredProduct,
   incottKeyboardActionCode,
   incottMacroChunks,
+  incottMacroKeyLabel,
+  incottMacroBindingForButton,
+  incottMacroSlotForButton,
+  incottMacroSlotFromBinding,
   incottLiftOffLabel,
   incottLiftOffTenths,
   incottNormalizeProductName,
@@ -46,6 +50,7 @@ import {
   incottPerformanceModeToWire,
   incottValidateDpi,
   INCOTT_BUTTON_ACTIONS,
+  INCOTT_MACRO_MOUSE_KEYS,
   INCOTT_BUTTON_NAMES,
   INCOTT_BUTTON_WIRE_INDEX,
   INCOTT_PERFORMANCE_MODE_FROM_WIRE,
@@ -848,11 +853,16 @@ test("REGRESSION: the performance-mode mapping is NOT the vendor UI's left-to-ri
 });
 
 test("macro loop modes map to their wire values in order", () => {
+  // Each value captured from the vendor tool saving the same macro in that
+  // mode, with the mouse watched running it (2026-09-14). The vendor's own
+  // export numbers the modes from 1 and the wire from 0, so these are off by
+  // one from `looptype:` in a saved .txt — taking that number as the wire
+  // value would shift every mode one place.
   const at = (loop: IncottMacroLoop): number =>
     incottEncodeMacroBuffer({ bufferId: 0, loop, cycles: 0, uid: 0, steps: [] })[1]!;
-  assert.equal(at("untilKeyRelease"), 0);
-  assert.equal(at("untilAnyKey"), 1);
-  assert.equal(at("cycle"), 2);
+  assert.equal(at("untilKeyRelease"), 0, "looptype:1, captured as 03 00 01 00");
+  assert.equal(at("untilAnyKey"), 1, "looptype:2, captured as 03 01 01 00");
+  assert.equal(at("cycle"), 2, "looptype:3, captured as 03 02 03 00");
 });
 
 test("macro encoders reject an out-of-range buffer, chunk or step count", () => {
@@ -955,6 +965,47 @@ test("the macro buffer reproduces a real capture byte for byte", () => {
   );
 });
 
+test("the macro buffer reproduces a repeat-count capture byte for byte", () => {
+  // A second capture, 2026-09-14, and the only one where the repeat count is
+  // above 1: the vendor tool saving a ten-step macro set to "cycle, 3 times"
+  // — which repeats three times on hardware. It pins bytes 1..3, the loop
+  // mode and the count, which the first capture could only show at their
+  // do-nothing values (loop 1, one cycle).
+  const buffer = incottEncodeMacroBuffer({
+    bufferId: 3,
+    loop: "cycle",
+    cycles: 3,
+    // The vendor uses a millisecond timestamp, truncated to the 32 bits the
+    // field holds: 1789388200304 & 0xffffffff.
+    uid: 0x9fd91970,
+    steps: [
+      { key: 0x19, press: true, delayMs: 53 },   // V down
+      { key: 0x19, press: false, delayMs: 350 }, // V up
+      { key: 0x0f, press: true, delayMs: 84 },   // L down
+      { key: 0x0f, press: false, delayMs: 31 },  // L up
+      { key: 0x04, press: true, delayMs: 70 },   // A down
+      { key: 0x07, press: true, delayMs: 43 },   // D down — overlaps A
+      { key: 0x04, press: false, delayMs: 70 },  // A up
+      { key: 0x07, press: false, delayMs: 1 },   // D up
+      { key: 0x0c, press: true, delayMs: 55 },   // I down
+      { key: 0x0c, press: false, delayMs: 0 },   // I up
+    ],
+  });
+  const hex = (from: number, to: number): string =>
+    [...buffer.slice(from, to)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+
+  // `03 02 03 00`: buffer 3, loop 2 (cycle), three cycles.
+  assert.equal(
+    hex(0, 32),
+    "03 02 03 00 01 19 35 00 81 19 5e 01 01 0f 54 00 81 0f 1f 00 01 04 46 00 01 07 2b 00 81 04 46 00",
+  );
+  assert.equal(hex(32, 44), "81 07 01 00 01 0c 37 00 81 0c 00 00");
+  assert.equal(
+    hex(288, 320),
+    "4d 61 63 72 6f 34 00 00 00 00 00 00 00 00 00 00 ac 00 00 00 10 00 e8 e8 70 19 d9 9f 14 00 0a 00",
+  );
+});
+
 test("macro chunk headers match the captured upload", () => {
   // TX feature  07 0a 00 20 03  ... through  07 0a 09 20 03
   for (let index = 0; index < 10; index += 1) {
@@ -972,8 +1023,9 @@ test("a macro button binding reads back as its slot", () => {
   assert.equal(incottButtonActionLabel(0x00000009), "Macro 1");
   const binding = incottDecodeButtonBinding(frame(0x86, 0x04, 0x09, 0x00, 0x03, 0x00), 4);
   assert.equal(binding?.label, "Macro 4");
-  // Not offered as a writable option: there is no UI to author one.
-  assert.equal(incottButtonActionCode("Macro 4"), null);
+  // "Macro" cannot be resolved from the label alone: which buffer it means
+  // depends on the button being written. See incottMacroBindingForButton.
+  assert.equal(incottButtonActionCode("Macro"), null);
 });
 
 test("the offered DPI ceiling follows the fitted sensor", () => {
@@ -992,4 +1044,62 @@ test("the encoder still accepts the full range regardless of sensor", () => {
   // Same split as the polling rate: readStatus narrows what is OFFERED, the
   // codec keeps accepting anything the protocol can express.
   assert.doesNotThrow(() => incottEncodeSetDpi(0, 45000));
+});
+
+test("a macro step can be a mouse button, not just a keyboard key", () => {
+  // The vendor keeps both in one table, and a click macro is the common case.
+  // These are the same codes the button action words use.
+  assert.equal(INCOTT_MACRO_MOUSE_KEYS.left, 0xf0);
+  assert.equal(INCOTT_MACRO_MOUSE_KEYS.right, 0xf1);
+  assert.equal(INCOTT_MACRO_MOUSE_KEYS.middle, 0xf2);
+
+  const buffer = incottEncodeMacroBuffer({
+    bufferId: 0,
+    loop: "untilKeyRelease",
+    cycles: 0,
+    uid: 0,
+    steps: [
+      { key: INCOTT_MACRO_MOUSE_KEYS.left, press: true, delayMs: 40 },
+      { key: INCOTT_MACRO_MOUSE_KEYS.left, press: false, delayMs: 40 },
+    ],
+  });
+  // Press 0x01 / release 0x81, exactly as a keyboard step encodes.
+  assert.deepEqual([...buffer.slice(4, 12)], [0x01, 0xf0, 40, 0, 0x81, 0xf0, 40, 0]);
+});
+
+test("macro step keys resolve to display names", () => {
+  assert.equal(incottMacroKeyLabel(0xf0), "Left click");
+  assert.equal(incottMacroKeyLabel(0xf1), "Right click");
+  assert.equal(incottMacroKeyLabel(0xf2), "Middle click");
+  assert.equal(incottMacroKeyLabel(0x04), "A");
+  assert.equal(incottMacroKeyLabel(0x3a), "F1");
+  assert.equal(incottMacroKeyLabel(0x2c), "Space");
+  // A code with no name is reported as such rather than guessed at.
+  assert.equal(incottMacroKeyLabel(0x99), null);
+});
+
+test("a button runs the macro buffer carrying its own display index", () => {
+  // HARDWARE-CONFIRMED: uploading to buffer 0 and binding Forward to
+  // 0x00000009 is accepted and never fires. Forward's macro lives in buffer 3
+  // — its display index — and the binding names that same 3.
+  assert.equal(incottMacroSlotForButton("Left"), 0);
+  assert.equal(incottMacroSlotForButton("Forward"), 3);
+  assert.equal(incottMacroSlotForButton("Back"), 4);
+  assert.equal(incottMacroBindingForButton("Forward"), 0x00030009);
+  assert.equal(incottMacroBindingForButton("Left"), 0x00000009);
+});
+
+test("the macro buffer is the DISPLAY index, never the wire index", () => {
+  // Forward is display 3 and wire 4; Back is display 4 and wire 3. Using the
+  // wire index here would point each at the other's buffer.
+  assert.notEqual(incottMacroSlotForButton("Forward"), INCOTT_BUTTON_WIRE_INDEX.Forward);
+  assert.notEqual(incottMacroSlotForButton("Back"), INCOTT_BUTTON_WIRE_INDEX.Back);
+  assert.equal(incottMacroSlotForButton("Forward"), INCOTT_BUTTON_WIRE_INDEX.Back);
+});
+
+test("a macro binding decodes back to the buffer it names", () => {
+  assert.equal(incottMacroSlotFromBinding(0x00030009), 3);
+  assert.equal(incottMacroSlotFromBinding(0x00000009), 0);
+  assert.equal(incottMacroSlotFromBinding(0x00f00001), null, "a left click is not a macro");
+  assert.equal(incottMacroSlotFromBinding(0x000a0009), null, "buffer past the ten that exist");
 });
