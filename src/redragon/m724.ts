@@ -15,7 +15,7 @@ export const REDRAGON_M724_PRODUCT_ID = 0xfc7a;
  * 0xCFF table at `0x49f13c`. Range 1 doubles the step: 6400-12400 DPI reuse
  * the code of half their value (12400 -> code of 6200 = 140, range 1).
  */
-const M724_CODES = [
+export const REDRAGON_M724_DPI_CODES = [
   4, 6, 9, 11, 13, 15, 18, 20, 22, 24, 27, 29, 31, 33, 36, 38, 40, 43, 45, 47,
   49, 52, 54, 56, 58, 61, 63, 65, 67, 70, 72, 74, 77, 79, 81, 83, 86, 88, 90, 92,
   95, 97, 99, 102, 104, 106, 108, 111, 113, 115, 117, 120, 122, 124, 127, 129, 131, 133, 135, 138,
@@ -27,7 +27,7 @@ const M724_CODES = [
  * 200-6200 in steps of 100, then 6400-12400 in steps of 200.
  */
 export const REDRAGON_M724_DPI_LABELS: readonly number[] = [
-  ...M724_CODES.map((_, index) => (index + 2) * 100),
+  ...REDRAGON_M724_DPI_CODES.map((_, index) => (index + 2) * 100),
   ...Array.from({ length: 31 }, (_, index) => 6400 + index * 200),
 ];
 
@@ -35,14 +35,14 @@ export const REDRAGON_M724_DPI_LABELS: readonly number[] = [
 export function redragonM724EncodeDpi(dpi: number): RedragonDpiCode & { dpi: number } {
   const label = REDRAGON_M724_DPI_LABELS[redragonNearestDpiPosition(REDRAGON_M724_DPI_LABELS, dpi, "M724")]!;
   return label <= 6200
-    ? { dpi: label, value: M724_CODES[label / 100 - 2]!, range: 0 }
-    : { dpi: label, value: M724_CODES[label / 200 - 2]!, range: 1 };
+    ? { dpi: label, value: REDRAGON_M724_DPI_CODES[label / 100 - 2]!, range: 0 }
+    : { dpi: label, value: REDRAGON_M724_DPI_CODES[label / 200 - 2]!, range: 1 };
 }
 
 /** DPI for a wire code; codes RDCfg never writes fall back to the sensor's 400/9 DPI per count. */
 export function redragonM724DecodeDpi(value: number, range: number): number {
   const scale = range === 1 ? 2 : 1;
-  const index = M724_CODES.indexOf(value as (typeof M724_CODES)[number]);
+  const index = REDRAGON_M724_DPI_CODES.indexOf(value as (typeof REDRAGON_M724_DPI_CODES)[number]);
   if (index >= 0) return (index + 2) * 100 * scale;
   return Math.round((value * scale * 400) / 9 / 10) * 10;
 }

@@ -118,6 +118,9 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "IPI", supports: (device) => BytechHidClient.isSupported(device), create: (device) => new BytechHidClient(device), score: () => 9 },
   {brand: "ASUS",supports: (device) => AsusHidClient.isSupported(device), create: (device) => new AsusHidClient(device), score: () => 10,},
   { brand: "Dareu", supports: (device) => DareuHidClient.isSupported(device), create: (device) => new DareuHidClient(device), score: () => 9 },
+  // Also serves the Evision USB Gaming Mouse (04d9:fc5e), a Holtek RDCfg OEM
+  // sibling in the same catalog: same collection and transport, a different
+  // read-answer header, and no captured button/lighting layout.
   { brand: "Redragon", supports: (device) => RedragonHidClient.isSupported(device), create: (device) => new RedragonHidClient(device), score: () => 9 },
   // Shares SinoWealth's 0x258a with the Glorious classic line; disjoint by
   // product id, and the client refuses a settings block that is not the
@@ -283,6 +286,7 @@ export function clientSupportScore(device: HIDDevice): number {
 export function deviceBrand(client: SupportedClient): string {
   if (client instanceof EggOp1HidClient || client instanceof EggOtHidClient || isEggWeClient(client)) return "Endgame Gear";
   if (client instanceof LamzuHidClient) return client.deviceBrand();
+  if (client instanceof RedragonHidClient) return client.brand;
   if (client instanceof AtkHidClient) return client.deviceBrand();
   if (client instanceof DeluxHidClient) return client.deviceBrand();
   if (client instanceof AttackSharkHidClient) return client.deviceBrand();

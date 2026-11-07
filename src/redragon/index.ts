@@ -1,5 +1,6 @@
 import { REDRAGON_M612_MODEL } from "./m612.js";
 import { REDRAGON_M724_MODEL } from "./m724.js";
+import { EVISION_MODEL } from "./evision.js";
 import type { RedragonModel } from "./holtek.js";
 
 export interface RedragonProduct {
@@ -31,6 +32,16 @@ export const REDRAGON_PRODUCTS: ReadonlyMap<number, RedragonProduct> = new Map([
     stages: 5,
     maxDpi: 8000,
   }],
+  // Evision sells the same RDCfg OEM firmware under its own brand; the
+  // display name comes from EVISION_MODEL.brand, not this name.
+  [EVISION_MODEL.productId, {
+    model: "Evision",
+    name: "USB Gaming Mouse",
+    transport: "wired",
+    verified: true,
+    stages: 5,
+    maxDpi: 12400,
+  }],
 ]);
 
 export const REDRAGON_PRODUCT_IDS: readonly number[] = [...REDRAGON_PRODUCTS.keys()];
@@ -39,11 +50,13 @@ export const REDRAGON_PRODUCT_IDS: readonly number[] = [...REDRAGON_PRODUCTS.key
 export const REDRAGON_MODELS: ReadonlyMap<number, RedragonModel> = new Map([
   [REDRAGON_M724_MODEL.productId, REDRAGON_M724_MODEL],
   [REDRAGON_M612_MODEL.productId, REDRAGON_M612_MODEL],
+  [EVISION_MODEL.productId, EVISION_MODEL],
 ]);
 
 export * from "./holtek.js";
 export * from "./m612.js";
 export * from "./m724.js";
+export * from "./evision.js";
 export * from "./deprecated.js";
 export * from "./m690-pro.js";
 export * from "./m719-pro.js";

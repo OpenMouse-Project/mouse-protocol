@@ -78,14 +78,17 @@ const hex = (bytes: ArrayLike<number>) => Array.from(bytes).map((byte) => byte.t
 
 /**
  * Redragon Holtek mice (K1NG 1K M724 `04d9:fc7a`, Predator M612 `04d9:fc61`)
+ * and the Evision USB Gaming Mouse (`04d9:fc5e`), a Holtek RDCfg OEM sibling,
  * over WebHID.
  *
- * Both keep their settings in one flat memory on the `0xFFA0:0x01`
+ * They keep their settings in one flat memory on the `0xFFA0:0x01`
  * collection (see `@openmouse/protocol/redragon`): every value shown is
  * read from the mouse with `F2`, and every write runs inside the vendor
  * bracket, is followed by the commit block, and is read back before it is
  * reported as done. DPI stages, polling, buttons, and (on the M724)
  * lighting live per onboard profile, so they follow the active profile.
+ * The Evision model leaves buttons and lighting unset because its blocks do
+ * not match the M724's; the shared client then omits them from the status.
  */
 export class RedragonHidClient {
   readonly device: HIDDevice;
@@ -114,6 +117,11 @@ export class RedragonHidClient {
     return [...REDRAGON_POLLING_RATES];
   }
 
+  /** The model's brand; the Evision OEM sibling shares this client. */
+  get brand(): MouseStatus["brand"] {
+    return this.model.brand ?? "Redragon";
+  }
+
   getDpiOptions(): number[] {
     return [...this.model.dpi.labels];
   }
@@ -134,8 +142,8 @@ export class RedragonHidClient {
       const labels = this.model.dpi.labels;
       const liftOff = await this.readLiftOff();
       return {
-        brand: "Redragon",
-        name: `Redragon ${product.name}`,
+        brand: this.brand,
+        name: `${this.brand} ${product.name}`,
         ui: {
           family: "redragon",
           settingsReady: true,
@@ -149,7 +157,7 @@ export class RedragonHidClient {
             maxDpi: labels[labels.length - 1]!,
             stepDpi: this.model.dpi.step,
           },
-          defaultDisplayName: `Redragon ${product.name}`,
+          defaultDisplayName: `${this.brand} ${product.name}`,
           showAdvancedSection: true,
         },
         batteryPercent: null,
@@ -161,9 +169,13 @@ export class RedragonHidClient {
         supportedPollingRates: this.supportedPollingRates,
         activeProfile: settings.profile + 1,
         profileCount: REDRAGON_PROFILE_COUNT,
-        buttonMappings: await this.readButtonMappings(settings.profile),
-        buttonOptions: [...this.model.buttons.options],
-        lighting: this.model.lighting === "profile" ? await this.readProfileLighting(settings.profile) : await this.readEffectLighting(),
+        ...(this.model.buttons === undefined ? {} : {
+          buttonMappings: await this.readButtonMappings(settings.profile),
+          buttonOptions: [...this.model.buttons.options],
+        }),
+        ...(this.model.lighting === "profile" ? { lighting: await this.readProfileLighting(settings.profile) }
+          : this.model.lighting === "effect" ? { lighting: await this.readEffectLighting() }
+          : {}),
         connectionType: "Wired",
         liftOffDistance: liftOff,
         ...(this.model.liftOffAddress === undefined ? {} : { supportedLiftOffDistances: [...LIFT_OFF_LEVELS] }),
@@ -193,7 +205,7 @@ export class RedragonHidClient {
   /** Selects the active DPI stage of the active profile, as the DPI button does. */
   async setActiveDpiStage(stage: number): Promise<number> {
     if (!Number.isInteger(stage) || stage < 0 || stage >= REDRAGON_STAGE_COUNT) {
-      throw new Error(`Redragon DPI stage ${stage} is outside 0-${REDRAGON_STAGE_COUNT - 1}.`);
+      throw new Error(`${this.brand} DPI stage ${stage} is outside 0-${REDRAGON_STAGE_COUNT - 1}.`);
     }
     return await this.run(async () => {
       await this.open();
@@ -206,7 +218,7 @@ export class RedragonHidClient {
   async setPollingRate(hz: number): Promise<number> {
     const code = REDRAGON_POLLING_CODES[hz];
     if (code === undefined) {
-      throw new Error(`Redragon polling rate ${hz} Hz is not offered; supported: ${REDRAGON_POLLING_RATES.join(", ")}.`);
+      throw new Error(`${this.brand} polling rate ${hz} Hz is not offered; supported: ${REDRAGON_POLLING_RATES.join(", ")}.`);
     }
     return await this.run(async () => {
       await this.open();
@@ -224,7 +236,7 @@ export class RedragonHidClient {
    */
   async setProfile(profile: number): Promise<void> {
     if (!Number.isInteger(profile) || profile < 1 || profile > REDRAGON_PROFILE_COUNT) {
-      throw new Error(`Redragon profile ${profile} is outside 1-${REDRAGON_PROFILE_COUNT}.`);
+      throw new Error(`${this.brand} profile ${profile} is outside 1-${REDRAGON_PROFILE_COUNT}.`);
     }
     await this.run(async () => {
       await this.open();
@@ -243,9 +255,11 @@ export class RedragonHidClient {
    * leave the mouse unable to click.
    */
   async setButtonMapping(button: string, action: string): Promise<void> {
-    const slot = this.model.buttons.names.indexOf(button);
-    if (slot < 0) throw new Error(`The Redragon ${this.model.model} has no button named "${button}".`);
-    const value = this.model.buttons.encode(action);
+    const buttons = this.model.buttons;
+    if (buttons === undefined) throw new Error(`The ${this.brand} ${this.model.model} has no captured button layout.`);
+    const slot = buttons.names.indexOf(button);
+    if (slot < 0) throw new Error(`The ${this.brand} ${this.model.model} has no button named "${button}".`);
+    const value = buttons.encode(action);
     await this.run(async () => {
       await this.open();
       const profile = await this.readActiveProfile();
@@ -256,16 +270,16 @@ export class RedragonHidClient {
           throw new Error("Keep Left click on at least one button, or the mouse cannot click.");
         }
       }
-      await this.writeAndConfirm(REDRAGON_BUTTON_BASES[profile]! + this.model.buttons.offsets[slot]!, value);
+      await this.writeAndConfirm(REDRAGON_BUTTON_BASES[profile]! + buttons.offsets[slot]!, value);
     });
   }
 
   /** Sets the lift-off height (M724 only): Low, Medium, or High. */
   async setLiftOffDistance(value: LiftOff): Promise<LiftOff> {
     const address = this.model.liftOffAddress;
-    if (address === undefined) throw new Error(`The Redragon ${this.model.model} has no lift-off setting.`);
+    if (address === undefined) throw new Error(`The ${this.brand} ${this.model.model} has no lift-off setting.`);
     const level = LIFT_OFF_LEVELS.indexOf(value);
-    if (level < 0) throw new Error(`Redragon lift-off "${value}" is not Low, Medium, or High.`);
+    if (level < 0) throw new Error(`${this.brand} lift-off "${value}" is not Low, Medium, or High.`);
     await this.run(async () => {
       await this.open();
       const [, next] = await this.readBytes(address, 2);
@@ -283,16 +297,19 @@ export class RedragonHidClient {
    */
   async setLighting(lighting: MouseLighting): Promise<void> {
     const model = this.model.model;
+    if (this.model.lighting === undefined) {
+      throw new Error(`The ${this.brand} ${model} has no captured lighting layout.`);
+    }
     if (lighting.speed != null && !SPEEDS.includes(lighting.speed)) {
-      throw new Error(`Redragon ${model} lighting speed ${lighting.speed} is outside 1-${SPEEDS.length}.`);
+      throw new Error(`${this.brand} ${model} lighting speed ${lighting.speed} is outside 1-${SPEEDS.length}.`);
     }
     if (lighting.brightness != null && !BRIGHTNESS.includes(lighting.brightness as 33)) {
-      throw new Error(`Redragon ${model} brightness ${lighting.brightness}% is not one of ${BRIGHTNESS.join(", ")}.`);
+      throw new Error(`${this.brand} ${model} brightness ${lighting.brightness}% is not one of ${BRIGHTNESS.join(", ")}.`);
     }
-    const rgb = lighting.color == null ? null : parseColor(lighting.color, model);
+    const rgb = lighting.color == null ? null : parseColor(lighting.color, `${this.brand} ${model}`);
     if (this.model.lighting === "profile") {
       const info = REDRAGON_M724_EFFECTS.find((candidate) => candidate.name === lighting.mode);
-      if (!info) throw new Error(`The Redragon ${model} has no "${lighting.mode}" lighting effect.`);
+      if (!info) throw new Error(`The ${this.brand} ${model} has no "${lighting.mode}" lighting effect.`);
       await this.run(async () => {
         await this.open();
         const address = redragonM724LightingAddress(await this.readActiveProfile());
@@ -307,7 +324,7 @@ export class RedragonHidClient {
       return;
     }
     const effect = M612_MODES.find(([, mode]) => mode === lighting.mode)?.[0];
-    if (!effect) throw new Error(`The Redragon ${model} has no "${lighting.mode}" lighting effect.`);
+    if (!effect) throw new Error(`The ${this.brand} ${model} has no "${lighting.mode}" lighting effect.`);
     const info = REDRAGON_M612_EFFECTS.find((candidate) => candidate.effect === effect)!;
     await this.run(async () => {
       await this.open();
@@ -336,7 +353,8 @@ export class RedragonHidClient {
 
   /** Names every button of `profile` with its decoded action, from one ranged read. */
   private async readButtonMappings(profile: number): Promise<Record<string, string>> {
-    const { names, offsets, decode } = this.model.buttons;
+    // Callers only reach this with a model that defines the layout.
+    const { names, offsets, decode } = this.model.buttons!;
     const bytes = await this.readRange(REDRAGON_BUTTON_BASES[profile]!, offsets.at(-1)! + REDRAGON_BUTTON_LENGTH);
     return Object.fromEntries(names.map((name, slot) =>
       [name, decode(bytes.subarray(offsets[slot]!, offsets[slot]! + REDRAGON_BUTTON_LENGTH))]));
@@ -409,7 +427,7 @@ export class RedragonHidClient {
     const profile = await this.readActiveProfile();
     const [activeStage] = await this.readBytes(REDRAGON_PROFILE_BASES[profile]!, 1);
     if (activeStage === undefined || activeStage >= REDRAGON_STAGE_COUNT) {
-      throw new Error(`The Redragon ${this.model.model} reported DPI stage ${activeStage}; expected 0-4.`);
+      throw new Error(`The ${this.brand} ${this.model.model} reported DPI stage ${activeStage}; expected 0-4.`);
     }
     const stages: number[] = [];
     for (let stage = 0; stage < REDRAGON_STAGE_COUNT; stage++) {
@@ -419,7 +437,7 @@ export class RedragonHidClient {
     const [pollCode] = await this.readBytes(redragonPollAddress(profile), 1);
     const pollingHz = REDRAGON_POLLING_RATES.find((hz) => REDRAGON_POLLING_CODES[hz] === pollCode);
     if (pollingHz === undefined) {
-      throw new Error(`The Redragon ${this.model.model} reported polling code ${pollCode}; expected 1, 2, 4, or 8.`);
+      throw new Error(`The ${this.brand} ${this.model.model} reported polling code ${pollCode}; expected 1, 2, 4, or 8.`);
     }
     return { profile, activeStage, stages, pollingHz };
   }
@@ -428,7 +446,7 @@ export class RedragonHidClient {
   private async readActiveProfile(): Promise<number> {
     const [profile] = await this.readBytes(REDRAGON_ACTIVE_PROFILE_ADDRESS, 1);
     if (profile === undefined || profile >= REDRAGON_PROFILE_COUNT) {
-      throw new Error(`The Redragon ${this.model.model} reported profile ${profile}; expected 0-4.`);
+      throw new Error(`The ${this.brand} ${this.model.model} reported profile ${profile}; expected 0-4.`);
     }
     return profile;
   }
@@ -437,7 +455,7 @@ export class RedragonHidClient {
     await this.sendFrame(redragonEncodeRead(address, length));
     const view = await this.device.receiveFeatureReport(REDRAGON_REPORT_ID);
     const answer = new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
-    return redragonDecodeRead(answer, address, length);
+    return redragonDecodeRead(answer, address, length, this.model.replyAddressBase);
   }
 
   /** One write inside the vendor bracket + commit block, then a read-back. */
@@ -453,7 +471,7 @@ export class RedragonHidClient {
   private async confirm(address: number, data: readonly number[]): Promise<void> {
     const confirmed = await this.readBytes(address, data.length);
     if (confirmed.some((byte, index) => byte !== data[index])) {
-      throw new Error(`The Redragon ${this.model.model} kept ${hex(confirmed)} at 0x${address.toString(16)} instead of ${hex(data)}.`);
+      throw new Error(`The ${this.brand} ${this.model.model} kept ${hex(confirmed)} at 0x${address.toString(16)} instead of ${hex(data)}.`);
     }
   }
 
@@ -485,6 +503,6 @@ export class RedragonM612HidClient extends RedragonHidClient {}
 /** `#rrggbb` to RGB bytes; anything else throws. */
 function parseColor(color: string, model: string): [number, number, number] {
   const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
-  if (!match) throw new Error(`Redragon ${model} colour "${color}" is not #rrggbb.`);
+  if (!match) throw new Error(`${model} colour "${color}" is not #rrggbb.`);
   return [parseInt(match[1]!, 16), parseInt(match[2]!, 16), parseInt(match[3]!, 16)];
 }
