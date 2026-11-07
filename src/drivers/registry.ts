@@ -118,6 +118,9 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "IPI", supports: (device) => BytechHidClient.isSupported(device), create: (device) => new BytechHidClient(device), score: () => 9 },
   {brand: "ASUS",supports: (device) => AsusHidClient.isSupported(device), create: (device) => new AsusHidClient(device), score: () => 10,},
   { brand: "Dareu", supports: (device) => DareuHidClient.isSupported(device), create: (device) => new DareuHidClient(device), score: () => 9 },
+  // Also serves the Redragon M901 Perdition (04d9:fc5e), a Holtek sibling in
+  // the same catalog: same collection and transport, a different read-answer
+  // header, and no verified button/lighting layout yet.
   { brand: "Redragon", supports: (device) => RedragonHidClient.isSupported(device), create: (device) => new RedragonHidClient(device), score: () => 9 },
   // Shares SinoWealth's 0x258a with the Glorious classic line; disjoint by
   // product id, and the client refuses a settings block that is not the

@@ -77,15 +77,18 @@ function hasConfigCollection(collections: readonly HIDCollectionInfo[]): boolean
 const hex = (bytes: ArrayLike<number>) => Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join(" ");
 
 /**
- * Redragon Holtek mice (K1NG 1K M724 `04d9:fc7a`, Predator M612 `04d9:fc61`)
- * over WebHID.
+ * Redragon Holtek mice (K1NG 1K M724 `04d9:fc7a`, Predator M612 `04d9:fc61`,
+ * M901 Perdition `04d9:fc5e`) over WebHID.
  *
- * Both keep their settings in one flat memory on the `0xFFA0:0x01`
+ * They keep their settings in one flat memory on the `0xFFA0:0x01`
  * collection (see `@openmouse/protocol/redragon`): every value shown is
  * read from the mouse with `F2`, and every write runs inside the vendor
  * bracket, is followed by the commit block, and is read back before it is
  * reported as done. DPI stages, polling, buttons, and (on the M724)
  * lighting live per onboard profile, so they follow the active profile.
+ * The M901 model leaves buttons and lighting unset because its physical
+ * button order and effect names are not verified yet; the shared client
+ * then omits them from the status.
  */
 export class RedragonHidClient {
   readonly device: HIDDevice;
@@ -161,9 +164,13 @@ export class RedragonHidClient {
         supportedPollingRates: this.supportedPollingRates,
         activeProfile: settings.profile + 1,
         profileCount: REDRAGON_PROFILE_COUNT,
-        buttonMappings: await this.readButtonMappings(settings.profile),
-        buttonOptions: [...this.model.buttons.options],
-        lighting: this.model.lighting === "profile" ? await this.readProfileLighting(settings.profile) : await this.readEffectLighting(),
+        ...(this.model.buttons === undefined ? {} : {
+          buttonMappings: await this.readButtonMappings(settings.profile),
+          buttonOptions: [...this.model.buttons.options],
+        }),
+        ...(this.model.lighting === "profile" ? { lighting: await this.readProfileLighting(settings.profile) }
+          : this.model.lighting === "effect" ? { lighting: await this.readEffectLighting() }
+          : {}),
         connectionType: "Wired",
         liftOffDistance: liftOff,
         ...(this.model.liftOffAddress === undefined ? {} : { supportedLiftOffDistances: [...LIFT_OFF_LEVELS] }),
@@ -243,9 +250,11 @@ export class RedragonHidClient {
    * leave the mouse unable to click.
    */
   async setButtonMapping(button: string, action: string): Promise<void> {
-    const slot = this.model.buttons.names.indexOf(button);
+    const buttons = this.model.buttons;
+    if (buttons === undefined) throw new Error(`The Redragon ${this.model.model} has no captured button layout.`);
+    const slot = buttons.names.indexOf(button);
     if (slot < 0) throw new Error(`The Redragon ${this.model.model} has no button named "${button}".`);
-    const value = this.model.buttons.encode(action);
+    const value = buttons.encode(action);
     await this.run(async () => {
       await this.open();
       const profile = await this.readActiveProfile();
@@ -256,7 +265,7 @@ export class RedragonHidClient {
           throw new Error("Keep Left click on at least one button, or the mouse cannot click.");
         }
       }
-      await this.writeAndConfirm(REDRAGON_BUTTON_BASES[profile]! + this.model.buttons.offsets[slot]!, value);
+      await this.writeAndConfirm(REDRAGON_BUTTON_BASES[profile]! + buttons.offsets[slot]!, value);
     });
   }
 
@@ -283,6 +292,9 @@ export class RedragonHidClient {
    */
   async setLighting(lighting: MouseLighting): Promise<void> {
     const model = this.model.model;
+    if (this.model.lighting === undefined) {
+      throw new Error(`The Redragon ${model} has no captured lighting layout.`);
+    }
     if (lighting.speed != null && !SPEEDS.includes(lighting.speed)) {
       throw new Error(`Redragon ${model} lighting speed ${lighting.speed} is outside 1-${SPEEDS.length}.`);
     }
@@ -336,7 +348,8 @@ export class RedragonHidClient {
 
   /** Names every button of `profile` with its decoded action, from one ranged read. */
   private async readButtonMappings(profile: number): Promise<Record<string, string>> {
-    const { names, offsets, decode } = this.model.buttons;
+    // Callers only reach this with a model that defines the layout.
+    const { names, offsets, decode } = this.model.buttons!;
     const bytes = await this.readRange(REDRAGON_BUTTON_BASES[profile]!, offsets.at(-1)! + REDRAGON_BUTTON_LENGTH);
     return Object.fromEntries(names.map((name, slot) =>
       [name, decode(bytes.subarray(offsets[slot]!, offsets[slot]! + REDRAGON_BUTTON_LENGTH))]));
@@ -437,7 +450,7 @@ export class RedragonHidClient {
     await this.sendFrame(redragonEncodeRead(address, length));
     const view = await this.device.receiveFeatureReport(REDRAGON_REPORT_ID);
     const answer = new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
-    return redragonDecodeRead(answer, address, length);
+    return redragonDecodeRead(answer, address, length, this.model.replyAddressBase);
   }
 
   /** One write inside the vendor bracket + commit block, then a read-back. */
