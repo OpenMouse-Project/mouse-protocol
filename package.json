@@ -130,6 +130,10 @@
       "types": "./dist/valkyrie/index.d.ts",
       "import": "./dist/valkyrie/index.js"
     },
+    "./kmart": {
+      "types": "./dist/kmart/index.d.ts",
+      "import": "./dist/kmart/index.js"
+    },
     "./vaxee": {
       "types": "./dist/vaxee/index.d.ts",
       "import": "./dist/vaxee/index.js"
