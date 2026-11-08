@@ -26,8 +26,10 @@ export const KMART_COMMAND = {
   status: 0x20,
   /** Six DPI stages, the enabled-stage mask and the active stage (18 bytes). */
   dpiStages: 0x05,
-  /** Eight button assignments, three bytes each (24 bytes). Not driven yet. */
-  buttons: 0x06,
+  /** One button assignment: key index 0–5, then three action bytes (4 bytes). Not driven yet. */
+  buttons: 0x04,
+  /** Eight RGB colours, probably the DPI-stage indicator (24 bytes). Not driven yet. */
+  dpiColors: 0x06,
   /** USB report interval in milliseconds (1 byte). */
   pollingInterval: 0x07,
   /** Lighting effect block (25 bytes). Not driven yet. */
