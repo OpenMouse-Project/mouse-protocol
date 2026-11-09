@@ -24,6 +24,7 @@ import {
   ROCCAT_VENDOR_ID,
 } from "../roccat/index.ts";
 import { GLORIOUS_CORE2_PRODUCTS, GLORIOUS_CORE2_USAGE_PAGE, GLORIOUS_CORE2_VENDOR_ID } from "../glorious-core2/index.ts";
+import { SC380_PRO_RECEIVER_ID, SC380_PRO_USAGE, SC380_PRO_USAGE_PAGE, SC380_PRO_VENDOR_ID } from "../aula/index.js";
 import { GLORIOUS_SINOWEALTH_PRODUCTS } from "../glorious-sinowealth/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { HITSCAN_PRODUCTS, HITSCAN_VENDOR_ID, HITSCAN_XVI_PRODUCTS } from "@openmouse/protocol/hitscan";
@@ -977,6 +978,12 @@ export const VAXEE_HID_FILTERS: HIDDeviceFilter[] = VAXEE_PRODUCT_IDS.map((produ
 }));
 
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
+  {
+    vendorId: SC380_PRO_VENDOR_ID,
+    productId: SC380_PRO_RECEIVER_ID,
+    usagePage: SC380_PRO_USAGE_PAGE,
+    usage: SC380_PRO_USAGE,
+  },
   ...[...AJ200P_PRODUCTS.keys()].map((productId) => ({ vendorId: AJ200P_VENDOR_ID, productId, usagePage: AJ200P_USAGE_PAGE, usage: AJ200P_USAGE })),
   { vendorId: VENDOR_ID.redgear, productId: REDGEAR_X13_PRODUCT_ID, usagePage: REDGEAR_X13_USAGE_PAGE, usage: REDGEAR_X13_USAGE },
   ...VAXEE_HID_FILTERS,
