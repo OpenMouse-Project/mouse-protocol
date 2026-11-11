@@ -154,9 +154,17 @@ export class PulsarHidClient {
       const currentDpi = Math.min(flash[FLASH.currentDpi] ?? 0, 7);
       const dpi = this.decodeDpi(flash.slice(FLASH.dpiValues + currentDpi * 4, FLASH.dpiValues + currentDpi * 4 + 4)) ?? 800;
       const lodValue = flash[FLASH.liftOffDistance];
+      
+      let modelName = this.device.productName || "Pulsar Mouse";
+      if (this.device.vendorId === PULSAR_VENDOR_ID && this.device.productId === 0x5406) {
+        modelName = "Pulsar X3 CrazyLight Mini";
+      } else if (info.cid === 0x57 && info.mid === 0x04) {
+        modelName = "Pulsar X2 CrazyLight";
+      }
+      
       return {
         brand: "Pulsar",
-        name: info.cid === 0x57 && info.mid === 0x04 ? "Pulsar X2 CrazyLight" : (this.device.productName || "Pulsar Mouse"),
+        name: modelName,
         ui: { family: "pulsar", hideUnsupportedPollingRates: true },
         batteryPercent: battery[5] <= 100 ? battery[5] : null,
         batteryState: battery[6] === 1 ? "Charging" : "Discharging",

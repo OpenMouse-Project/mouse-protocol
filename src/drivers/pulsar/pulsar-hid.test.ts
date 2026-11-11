@@ -45,11 +45,14 @@ test("rejects devices without the report-8 control collection", () => {
 });
 
 /** Answers report 8 from a flash image, enough for a write and its read-back. */
-function flashDevice(): HIDDevice & { flash: Uint8Array } {
+function flashDevice({
+  vendorId = 0x3710, productId = 0x0001, productName = "Pulsar 8K Dongle", cid = 0, mid = 0,
+} = {}): HIDDevice & { flash: Uint8Array } {
   const flash = new Uint8Array(256);
   let listener: ((event: HIDInputReportEvent) => void) | null = null;
   const fake = {
-    ...device(0x3710, 0x0001),
+    ...device(vendorId, productId),
+    productName,
     flash,
     opened: true,
     addEventListener: (_: string, fn: (event: HIDInputReportEvent) => void) => { listener = fn; },
@@ -58,6 +61,11 @@ function flashDevice(): HIDDevice & { flash: Uint8Array } {
       const packet = new Uint8Array(data as Uint8Array);
       const reply = new Uint8Array(16);
       reply.set(packet.subarray(0, 5));
+      reply[1] = 0;
+      if (packet[0] === PULSAR_COMMAND.encryptionData) {
+        reply[9] = cid;
+        reply[10] = mid;
+      }
       const address = (packet[2]! << 8) | packet[3]!;
       if (packet[0] === PULSAR_COMMAND.deviceOnline) reply[5] = 1;
       if (packet[0] === PULSAR_COMMAND.readFlashData) reply.set(flash.subarray(address, address + packet[4]!), 5);
@@ -67,6 +75,22 @@ function flashDevice(): HIDDevice & { flash: Uint8Array } {
   };
   return fake as unknown as HIDDevice & { flash: Uint8Array };
 }
+
+test("resolves model names and preserves product-name and generic fallbacks", async () => {
+  for (const { options, expected } of [
+    { options: { productId: 0x5406, cid: 0x57, mid: 0x14 }, expected: "Pulsar X3 CrazyLight Mini" },
+    { options: { productId: 0x5403, cid: 0x57, mid: 0x04 }, expected: "Pulsar X2 CrazyLight" },
+    { options: { productId: 0x5403 }, expected: "Pulsar 8K Dongle" },
+    { options: { vendorId: 0x3554, productId: 0x5406 }, expected: "Pulsar 8K Dongle" },
+    { options: { cid: 0x57, mid: 0x05 }, expected: "Pulsar 8K Dongle" },
+    { options: { cid: 0x58, mid: 0x04 }, expected: "Pulsar 8K Dongle" },
+    { options: { productName: "Pulsar X2 Wireless" }, expected: "Pulsar X2 Wireless" },
+    { options: { productName: "" }, expected: "Pulsar Mouse" },
+  ]) {
+    const status = await new PulsarHidClient(flashDevice(options)).readStatus();
+    assert.equal(status.name, expected, JSON.stringify(options));
+  }
+});
 
 test("setButtonMapping writes one key record at 96 + 4 * slot", async () => {
   const fake = flashDevice();

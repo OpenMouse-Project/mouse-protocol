@@ -133,7 +133,7 @@ export function readUint16LE(data: Uint8Array, offset: number): number {
 // XS-1 protocol used by the X3 family: unnumbered 64-byte feature reports
 // (report ID 0, which WebHID does not prefix) carrying a 16-bit
 // little-endian checksum of bytes 0..61 in bytes 62..63.
-export const PULSAR_XS1_PRODUCT_IDS: ReadonlySet<number> = new Set([0x3404, 0x3409, 0x3410, 0x5402, 0x5403]);
+export const PULSAR_XS1_PRODUCT_IDS: ReadonlySet<number> = new Set([0x3404, 0x3409, 0x3410, 0x5402, 0x5403, 0x5406]);
 export const PULSAR_XS1_WIRELESS_PRODUCT_IDS: ReadonlySet<number> = new Set([0x5402, 0x5403]);
 export const PULSAR_XS1_FEATURE_REPORT_ID = 0;
 export const PULSAR_XS1_PACKET_LENGTH = 64;
