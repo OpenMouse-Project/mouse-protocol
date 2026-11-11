@@ -151,22 +151,63 @@ export class PulsarProHidClient {
 
   async setDpi(value: number): Promise<number> {
     if (!this.getDpiOptions().includes(value)) throw new Error("Unsupported Pulsar Pro DPI value.");
+    const current = await this.readDpiConfiguration();
+    return await this.writeDpiStageValue(current, current[3], value);
+  }
+
+  /** Edits both axes of an enabled stage (0-based), preserving the active stage. */
+  async setDpiStageValue(stage: number, value: number): Promise<number> {
+    this.validateDpiStage(stage);
+    if (!this.getDpiOptions().includes(value)) throw new Error("Unsupported Pulsar Pro DPI value.");
+    const current = await this.readDpiConfiguration();
+    if (stage >= current[2]) throw new RangeError(`DPI stage ${stage} is outside this mouse's ${current[2]}-stage cycle.`);
+    return await this.writeDpiStageValue(current, stage, value);
+  }
+
+  /** Selects an enabled stage (0-based) without changing its stored DPI values. */
+  async setActiveDpiStage(stage: number): Promise<number> {
+    this.validateDpiStage(stage);
+    const current = await this.readDpiConfiguration();
+    const stageCount = current[2];
+    if (stage >= stageCount) throw new RangeError(`DPI stage ${stage} is outside this mouse's ${stageCount}-stage cycle.`);
+    await this.command(COMMAND.dpi, new Uint8Array([1, stageCount, stage, ...current.slice(4, 4 + stageCount * 4)]));
+    await this.applySettings();
+    const confirmed = await this.readDpiConfiguration();
+    if (confirmed[3] !== stage) throw new Error(`The mouse kept DPI stage ${confirmed[3]} instead of ${stage}.`);
+    return stage;
+  }
+
+  private validateDpiStage(stage: number): void {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= 6) throw new RangeError("DPI stage must be an index from 0 to 5.");
+  }
+
+  private async readDpiConfiguration(): Promise<Uint8Array> {
     const current = await this.query(COMMAND.dpi);
-    const stageCount = Math.min(current[2] ?? 0, 6);
-    const activeStage = Math.min(current[3] ?? 0, Math.max(stageCount - 1, 0));
-    if (stageCount < 1) throw new Error("The Pulsar Pro mouse reported no DPI stages.");
+    const stageCount = current[2] ?? 0;
+    if (stageCount < 1 || stageCount > 6 || current.length < 4 + stageCount * 4 || current[3] >= stageCount) {
+      throw new Error("The Pulsar Pro mouse reported an invalid DPI stage configuration.");
+    }
+    return current;
+  }
+
+  private async writeDpiStageValue(current: Uint8Array, stage: number, value: number): Promise<number> {
+    const stageCount = current[2];
+    const activeStage = current[3];
     const stages = current.slice(4, 4 + stageCount * 4);
-    const offset = activeStage * 4;
+    const offset = stage * 4;
     stages[offset] = value & 0xff;
     stages[offset + 1] = value >> 8;
     stages[offset + 2] = value & 0xff;
     stages[offset + 3] = value >> 8;
     await this.command(COMMAND.dpi, new Uint8Array([1, stageCount, activeStage, ...stages]));
     await this.applySettings();
-    const confirmed = await this.query(COMMAND.dpi);
-    const confirmedOffset = 4 + activeStage * 4;
+    const confirmed = await this.readDpiConfiguration();
+    if (confirmed[3] !== activeStage) throw new Error("The mouse changed the active DPI stage while editing its value.");
+    const confirmedOffset = 4 + stage * 4;
     const confirmedValue = readUint16LE(confirmed, confirmedOffset);
-    if (confirmedValue !== value) throw new Error(`The mouse kept ${confirmedValue} DPI instead of ${value} DPI.`);
+    if (confirmedValue !== value || readUint16LE(confirmed, confirmedOffset + 2) !== value) {
+      throw new Error(`The mouse did not keep ${value} DPI on both axes of stage ${stage}.`);
+    }
     return confirmedValue;
   }
 
