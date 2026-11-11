@@ -321,6 +321,7 @@ export class LamzuAtlantisHidClient {
     return await this.transaction(async () => {
       if (live && this.lastStatus) return await this.readLiveStatus(this.lastStatus);
 
+      await this.identify();
       const battery = lamzuAtlantisDecodeBattery(await this.request(COMMAND.batteryLevel));
       const profileCount = this.onboardProfileCount();
       const activeProfile = profileCount > 0 ? (await this.request(COMMAND.getCurrentConfig))[0] ?? 0 : null;
@@ -891,8 +892,15 @@ export class LamzuAtlantisHidClient {
     return await run;
   }
 
+  /**
+   * Runs at the start of every full status read, inside the transaction and
+   * before the name is computed, so a subclass can tell models apart that share
+   * a product id. The default has nothing to ask.
+   */
+  protected async identify(): Promise<void> {}
+
   /** Unqueued: the caller already holds the transaction lock. */
-  private async request(command: number, address = 0, payload: readonly number[] = []): Promise<Uint8Array> {
+  protected async request(command: number, address = 0, payload: readonly number[] = []): Promise<Uint8Array> {
     return await this.exchange(command, address, payload);
   }
 

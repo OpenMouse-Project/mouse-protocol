@@ -28,6 +28,35 @@ UI strings), including a screenshot of it connected to the same mouse.
   (byte 6: `01` awake, `00` asleep). While it reads `00`, every other command
   goes unanswered.
 
+## Wired V8 (0xf5f6)
+
+- Device: "SCYROX V8", VID/PID `0x3554:0xf5f6`, release `0x0220`, mouse
+  firmware v2.20. Same collection layout as the dongle: `0xff02:2` with
+  report 8 on interface 1, plus `0xff05`, `0xff03`, `0x000c:1`, `0x0001:0x80`
+  and `0xff04:2`; interface 0 a keyboard, interface 2 the mouse.
+- `ScyroxHidClient.readStatus` through node-hid on Windows: "Scyrox V8",
+  one stage at 1,600 DPI, 1,000 Hz, battery 45% / 3,829 mV charging,
+  profile 1, debounce 0 ms, sleep 300 s, motion sync and angle snapping on,
+  ripple off, performance off, 20K on, firmware "Mouse v2.20".
+- Polling rate round trip: 1,000 → 2,000 Hz (read back 2,000), then
+  2,000 → 1,000 Hz (read back 1,000).
+- Handshake (command `0x01`): a bare request fails with status 1; the
+  configurator's payload (four random bytes, four zeros) is answered with
+  payload `84 bf 7a f2 3e 01 02`: CID `0x3e`, MID `0x01` (V8), type `0x02`
+  (wired 1K).
+
+## V6 identification
+
+The configurator (S-center 3.1.0, `cfg.json`) lists only five Scyrox
+product ids: wired `0xF5F6` and `0xF515`, wireless `0xF5F4`, `0xF5F7` and
+`0xF517`. It tells models apart by the handshake's MID, not by product id,
+and gives the V8 (MID 1, 10, 11) and the V6 (MID 2, 12, 13) the same 3950
+sensor, 30,000 DPI ceiling and controls. `ScyroxHidClient` therefore sends
+the handshake once per connection on the V8 entries and names the mouse
+"Scyrox V6" for a V6 MID; a refused or unanswered handshake keeps the
+catalog's "Scyrox V8". No V6 has been connected yet, and `0xF5F4` (sensor
+unknown) is not claimed.
+
 ## Protocol family
 
 The V8 speaks the same CompX report-8 flash protocol as the V8S, and every
@@ -115,8 +144,8 @@ differences, which the catalog follows:
   was, as a round trip ending on the rate read first.
 - The sleep reading: the flash held 180 (30 minutes), while the configurator
   screenshot showed "1min", likely its default before the device read.
-- Whether the V6 enumerates with the same dongle id. It would read the same
-  fields (same sensor, same ceiling) but be named "Scyrox V8".
+- A V6 on hardware: its product ids, and the MID-based name.
+- What `0xF5F4` is. The configurator lists it as a wireless mouse id.
 - The 4,000 and 8,000 Hz bytes on the V8: the configurator offers them, but
   neither has been read from this mouse.
 

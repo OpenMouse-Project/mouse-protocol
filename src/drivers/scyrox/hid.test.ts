@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  SCYROX_CID,
   SCYROX_PRODUCT_IDS,
   SCYROX_V8S_LIFT_OFF_MILLIMETRES,
   SCYROX_VENDOR_ID,
+  scyroxDecodeHandshake,
+  scyroxEncodeHandshake,
+  scyroxModelForMid,
   scyroxProduct,
 } from "@openmouse/protocol/scyrox";
 import {
@@ -15,9 +19,11 @@ import {
 import { ScyroxHidClient } from "./hid.ts";
 import { createSupportedClient, deviceBrand } from "../registry.ts";
 
-/** The V8S on its cable and its Turbo 8k dongle; the V8's dongle is 0xf5f7. */
+/** The V8S on its cable and its Turbo 8k dongle; the V8 on its cable and its dongle. */
 const V8S_PRODUCT_IDS = [0xf515, 0xf517];
+const V8_WIRED = 0xf5f6;
 const V8_DONGLE = 0xf5f7;
+const V8_PRODUCT_IDS = [V8_WIRED, V8_DONGLE];
 
 function collection(
   usagePage: number,
@@ -53,7 +59,7 @@ const device = (
   collections: HIDCollectionInfo[] = SCYROX_COLLECTIONS,
 ): HIDDevice => ({ vendorId, productId, productName: "Scyrox V8S", collections } as unknown as HIDDevice);
 
-test("the V8S on both transports and the V8's dongle are claimed", () => {
+test("the V8S and the V8 are claimed on both transports", () => {
   for (const productId of SCYROX_PRODUCT_IDS) {
     assert.ok(ScyroxHidClient.isSupported(device(SCYROX_VENDOR_ID, productId)));
   }
@@ -86,13 +92,14 @@ test("the registry creates the Scyrox client under the Scyrox brand", () => {
     const client = createSupportedClient(device(SCYROX_VENDOR_ID, productId));
     assert.ok(client instanceof ScyroxHidClient);
     assert.equal(deviceBrand(client), "Scyrox");
-    assert.equal(client.displayName(), productId === V8_DONGLE ? "Scyrox V8" : "Scyrox V8S");
+    assert.equal(client.displayName(), V8_PRODUCT_IDS.includes(productId) ? "Scyrox V8" : "Scyrox V8S");
   }
 });
 
 test("only the dongles report themselves as wireless", () => {
   assert.equal(new ScyroxHidClient(device(SCYROX_VENDOR_ID, 0xf515)).isWireless(), false);
   assert.equal(new ScyroxHidClient(device(SCYROX_VENDOR_ID, 0xf517)).isWireless(), true);
+  assert.equal(new ScyroxHidClient(device(SCYROX_VENDOR_ID, V8_WIRED)).isWireless(), false);
   assert.equal(new ScyroxHidClient(device(SCYROX_VENDOR_ID, V8_DONGLE)).isWireless(), true);
 });
 
@@ -155,28 +162,32 @@ test("both V8S transports read their DPI stages from the 3955 region", () => {
 });
 
 test("the V8 keeps its 3950 stages in the legacy fields, up to 30,000 DPI", () => {
-  const product = scyroxProduct(SCYROX_VENDOR_ID, V8_DONGLE)!;
-  // The mouse read five legacy stages matching the configurator; the
-  // ceiling is the configurator's own for this mouse's 3950 sensor.
-  assert.equal(product.dpiLayout ?? "legacy", "legacy");
-  assert.equal(product.maxDpi, 30000);
-  assert.equal(product.dpiStep, 50);
-  assert.equal(product.maxDpiStages, 5);
-  assert.equal(new ScyroxHidClient(device(SCYROX_VENDOR_ID, V8_DONGLE)).maxDpi(), 30000);
+  for (const productId of V8_PRODUCT_IDS) {
+    const product = scyroxProduct(SCYROX_VENDOR_ID, productId)!;
+    // The mouse read five legacy stages matching the configurator; the
+    // ceiling is the configurator's own for this mouse's 3950 sensor.
+    assert.equal(product.dpiLayout ?? "legacy", "legacy");
+    assert.equal(product.maxDpi, 30000);
+    assert.equal(product.dpiStep, 50);
+    assert.equal(product.maxDpiStages, 5);
+    assert.equal(new ScyroxHidClient(device(SCYROX_VENDOR_ID, productId)).maxDpi(), 30000);
+  }
 });
 
 test("the V8 leaves out what was not verified on it", async () => {
-  const product = scyroxProduct(SCYROX_VENDOR_ID, V8_DONGLE)!;
-  // Its 3950 lift-off codes (3, 1, 2 for 0.7, 1 and 2 mm) fit neither the
-  // two-stop write nor the 3955 scale; its angle fields read unsealed; the
-  // restore command was never sent to it.
-  assert.equal(product.liftOffMillimetres, undefined);
-  assert.notEqual(product.supportsAngleTuning, true);
-  assert.notEqual(product.supportsFactoryReset, true);
-  // Flash 173 and 183 held the same timer on hardware.
-  assert.equal(product.mirrorSleepToPerformanceTime, true);
-  const client = new ScyroxHidClient(device(SCYROX_VENDOR_ID, V8_DONGLE));
-  await assert.rejects(() => client.setLiftOffDistance("Low"));
+  for (const productId of V8_PRODUCT_IDS) {
+    const product = scyroxProduct(SCYROX_VENDOR_ID, productId)!;
+    // Its 3950 lift-off codes (3, 1, 2 for 0.7, 1 and 2 mm) fit neither the
+    // two-stop write nor the 3955 scale; its angle fields read unsealed; the
+    // restore command was never sent to it.
+    assert.equal(product.liftOffMillimetres, undefined);
+    assert.notEqual(product.supportsAngleTuning, true);
+    assert.notEqual(product.supportsFactoryReset, true);
+    // Flash 173 and 183 held the same timer on hardware.
+    assert.equal(product.mirrorSleepToPerformanceTime, true);
+    const client = new ScyroxHidClient(device(SCYROX_VENDOR_ID, productId));
+    await assert.rejects(() => client.setLiftOffDistance("Low"));
+  }
 });
 
 test("the sensor-mode register is not offered as a performance toggle", async () => {
@@ -184,4 +195,17 @@ test("the sensor-mode register is not offered as a performance toggle", async ()
     const client = new ScyroxHidClient(device(SCYROX_VENDOR_ID, productId));
     await assert.rejects(() => client.setHyperMode(true));
   }
+});
+
+test("the handshake decodes the wired V8's reply and maps MIDs to models", () => {
+  // Payload of the wired V8's reply on hardware: 84 bf 7a f2 3e 01 02.
+  assert.deepEqual(
+    scyroxDecodeHandshake(Uint8Array.of(0x84, 0xbf, 0x7a, 0xf2, 0x3e, 0x01, 0x02, 0, 0, 0)),
+    { cid: SCYROX_CID, mid: 1, type: 2 },
+  );
+  assert.equal(scyroxDecodeHandshake(Uint8Array.of(1, 2, 3)), null);
+  assert.deepEqual(scyroxEncodeHandshake([0x112, 0x34, 0x56, 0x78]), [0x12, 0x34, 0x56, 0x78, 0, 0, 0, 0]);
+  for (const mid of [1, 10, 11]) assert.equal(scyroxModelForMid(mid), "V8");
+  for (const mid of [2, 12, 13]) assert.equal(scyroxModelForMid(mid), "V6");
+  assert.equal(scyroxModelForMid(5), undefined);
 });

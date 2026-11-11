@@ -51,6 +51,8 @@ class FakeAtlantis extends EventTarget {
   opens = 0;
   /** Set to drop replies, so a caller's timeout path can be exercised. */
   mute = false;
+  /** A Scyrox MID to answer the 0x01 handshake with; null refuses it. */
+  handshakeMid: number | null = null;
   /** Adds a leading byte to the input DataView, as a real event can. */
   offsetReplies = false;
   /** Replies queued while held, released by releaseReplies(). */
@@ -135,6 +137,10 @@ class FakeAtlantis extends EventTarget {
       reply.set([1, 0x24], 5);
     } else if (command === CLEAR_SETTINGS) {
       this.resets += 1;
+    } else if (command === 0x01 && this.handshakeMid !== null) {
+      // The wired V8's reply: four echoed key bytes, CID 0x3e, MID, type 2.
+      reply[4] = 8;
+      reply.set([0x84, 0xbf, 0x7a, 0xf2, 0x3e, this.handshakeMid, 0x02], 5);
     } else {
       reply[1] = 1;
     }
@@ -279,6 +285,30 @@ test("a 3955 sensor's stages are read and written at 6912, not the legacy fields
     [...pulsarVgnEncodeDpi(400)],
     "the legacy factory default is left alone",
   );
+  await client.close();
+});
+
+test("a Scyrox on the V8's product ids is named by the handshake's MID", async () => {
+  for (const [productId, mid, name] of [
+    [0xf5f6, 0x01, "Scyrox V8"],
+    [0xf5f6, 0x02, "Scyrox V6"],
+    [0xf5f7, 0x0c, "Scyrox V6"],
+    [0xf5f7, 0x0a, "Scyrox V8"],
+  ] as const) {
+    const device = new FakeAtlantis(productId);
+    device.handshakeMid = mid;
+    const client = new ScyroxHidClient(device as unknown as HIDDevice);
+    assert.equal((await client.readStatus()).name, name);
+    const handshake = device.sent.find((packet) => packet[0] === 0x01)!;
+    assert.deepEqual([...handshake.subarray(9, 13)], [0, 0, 0, 0], "four random bytes, then four zeros");
+    await client.close();
+  }
+});
+
+test("a refused handshake keeps the catalog's name", async () => {
+  const device = new FakeAtlantis(0xf5f6);
+  const client = new ScyroxHidClient(device as unknown as HIDDevice);
+  assert.equal((await client.readStatus()).name, "Scyrox V8");
   await client.close();
 });
 

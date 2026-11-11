@@ -28,8 +28,51 @@ export const SCYROX_VENDOR_ID = 0x3554;
 export const SCYROX_V8S_CID = 0x3e;
 export const SCYROX_V8S_MID = 0x05;
 
+/**
+ * Every Scyrox reports CID 62 (0x3e); the model is the MID, not the product
+ * id. The vendor configurator (S-center 3.1.0, cfg.json) groups the MIDs by
+ * model and gives the V8 and the V6 the same 3950 sensor, 30,000 DPI ceiling
+ * and controls, so a V6 enumerates on the V8's product ids and only its name
+ * differs. Hardware: a wired V8 (0xf5f6, firmware v2.20) answered CID 0x3e,
+ * MID 0x01, type 0x02 (wired).
+ */
+export const SCYROX_CID = 0x3e;
+export const SCYROX_V8_MIDS: readonly number[] = [1, 10, 11];
+export const SCYROX_V6_MIDS: readonly number[] = [2, 12, 13];
+
+/**
+ * The command 0x01 handshake payload as the configurator sends it: four
+ * random bytes, then four zero bytes. A bare 0x01 is refused with status 1.
+ */
+export function scyroxEncodeHandshake(random: readonly number[] = [0, 0, 0, 0]): number[] {
+  return [...random.slice(0, 4).map((value) => value & 0xff), 0, 0, 0, 0];
+}
+
+export interface ScyroxIdentity {
+  cid: number;
+  mid: number;
+  /** Connection type: 0/1/4/5 wireless at 1K/4K/2K/8K, 2/3 wired at 1K/8K. */
+  type: number;
+}
+
+/**
+ * Reads CID, MID and type from the handshake reply's payload (bytes 9-11 of
+ * the raw report, which is payload offsets 4-6).
+ */
+export function scyroxDecodeHandshake(payload: Uint8Array): ScyroxIdentity | null {
+  if (payload.length < 7) return null;
+  return { cid: payload[4]!, mid: payload[5]!, type: payload[6]! };
+}
+
+/** The model a MID names, for the 3950 generation that shares product ids. */
+export function scyroxModelForMid(mid: number): "V8" | "V6" | undefined {
+  if (SCYROX_V8_MIDS.includes(mid)) return "V8";
+  if (SCYROX_V6_MIDS.includes(mid)) return "V6";
+  return undefined;
+}
+
 /** Product ids this brand owns on CompX's shared vendor id. */
-export const SCYROX_PRODUCT_IDS: readonly number[] = [0xf515, 0xf517, 0xf5f7];
+export const SCYROX_PRODUCT_IDS: readonly number[] = [0xf515, 0xf517, 0xf5f6, 0xf5f7];
 
 /**
  * The "20K" switch: 20,000 FPS sensor scanning, which the vendor configurator
@@ -116,6 +159,24 @@ export const SCYROX_PRODUCTS: ReadonlyMap<number, ScyroxProduct> = new Map([
     supportsHyperMode: false,
     supportsAngleTuning: true,
     supportsFactoryReset: true,
+    mirrorSleepToPerformanceTime: true,
+  }],
+  // The V8 on its cable: "SCYROX V8", 0x3554:0xf5f6, release 0x0220. Same
+  // mouse and sensor as behind the 8K dongle below, so the same fields.
+  [0xf5f6, {
+    brand: "Scyrox",
+    model: "V8",
+    wireless: false,
+    pollingRates: RATES_V8S,
+    rateFamily: "pulsar",
+    dpiLayout: "legacy",
+    verified: true,
+    minDpi: 50,
+    maxDpi: 30000,
+    dpiStep: 50,
+    maxDpiStages: 5,
+    supportsLiftOffDistance: false,
+    supportsHyperMode: false,
     mirrorSleepToPerformanceTime: true,
   }],
   // The V8's "SCYROX 8K Dongle". The vendor configurator offers the V8S's
