@@ -2,7 +2,8 @@ import type { MouseStatus } from "../mouse-types.ts";
 import type { PulsarDeviceInfo } from "./pulsar-hid.ts";
 import {
   PULSAR_PRO_COMMAND as COMMAND,
-  PULSAR_PRO_PRODUCT_ID as PRO_DONGLE_PRODUCT_ID,
+  PULSAR_PRO_PRODUCT_IDS,
+  PULSAR_PRO_WIRED_PRODUCT_IDS,
   PULSAR_PRO_REPORT_ID as REPORT_ID,
   PULSAR_PRO_REPORT_LENGTH as REPORT_LENGTH,
   PULSAR_VENDOR_ID as VENDOR_ID,
@@ -43,12 +44,18 @@ export class PulsarProHidClient {
 
   static isSupported(device: HIDDevice): boolean {
     return device.vendorId === VENDOR_ID
-      && device.productId === PRO_DONGLE_PRODUCT_ID
+      && PULSAR_PRO_PRODUCT_IDS.has(device.productId)
       && device.collections.some((collection) =>
-        collection.usagePage === 1
-        && collection.usage === 0
+        // The wired capture lacks the HID report descriptor, so do not
+        // assume the receiver's usage. The known PID and report pair select
+        // the control interface and exclude the pointer/keyboard interfaces.
+        (PULSAR_PRO_WIRED_PRODUCT_IDS.has(device.productId) || (collection.usagePage === 1 && collection.usage === 0))
         && collection.inputReports.some((report) => report.reportId === REPORT_ID)
         && collection.outputReports.some((report) => report.reportId === REPORT_ID));
+  }
+
+  private get wired(): boolean {
+    return PULSAR_PRO_WIRED_PRODUCT_IDS.has(this.device.productId);
   }
 
   async open(): Promise<void> {
@@ -67,9 +74,9 @@ export class PulsarProHidClient {
     return {
       cid: 0,
       mid: 0,
-      type: 3,
-      dongleType: 5,
-      connection: "Wireless",
+      type: this.wired ? 2 : 3,
+      dongleType: this.wired ? 0xff : 5,
+      connection: this.wired ? "Wired" : "Wireless",
       maximumPollingRateHz: 8000,
     };
   }
@@ -94,8 +101,8 @@ export class PulsarProHidClient {
     const sleep = await this.queryOptional(COMMAND.powerSaving, 1500);
     const profile = await this.queryOptional(COMMAND.profile, 1500);
     const mouseVersion = await this.queryOptional(COMMAND.mouseVersion);
-    const dongleVersion = await this.queryOptional(COMMAND.dongleVersion);
-    const rssi = await this.queryOptional(COMMAND.rssi);
+    const dongleVersion = this.wired ? null : await this.queryOptional(COMMAND.dongleVersion);
+    const rssi = this.wired ? null : await this.queryOptional(COMMAND.rssi);
     const dpiIndex = Math.min(dpi[3] ?? 0, 7);
     const dpiOffset = 4 + dpiIndex * 4;
     const sleepMs = sleep ? readUint32LE(sleep, 2) : 0;
@@ -107,7 +114,12 @@ export class PulsarProHidClient {
       dpi: readUint16LE(dpi, dpiOffset),
       pollingRateHz: readUint16LE(polling, 2),
       activeProfile: profile ? (profile[2] ?? 0) + 1 : null,
-      connectionDetail: "PID 0x5405 · Pulsar Pro protocol · Wireless",
+      connectionType: this.wired ? "Wired" : "Wireless",
+      connectionDetail: `PID 0x${this.device.productId.toString(16)} · Pulsar Pro protocol · ${this.wired ? "Wired" : "Wireless"}`,
+      ...(this.wired ? {
+        supportedPollingRates: [125, 250, 500, 1000, 2000, 4000, 8000],
+        ui: { family: "pulsar", hideUnsupportedPollingRates: true, hideSignalCard: true },
+      } : {}),
       signalStrength: this.signalLevel(rssi?.[1]),
       debounceMs: debounce?.[2] ?? null,
       motionSync: motion ? motion[2] === 1 : null,
@@ -278,7 +290,8 @@ export class PulsarProHidClient {
   }
 
   private async applySettings(): Promise<void> {
-    await this.command(COMMAND.saveAllow, new Uint8Array([1]));
+    // zywoo chosen-x: wired B1/B2/B5/B6/B7/C4 writes take effect directly, without the receiver's C3 save-allow command.
+    if (!this.wired) await this.command(COMMAND.saveAllow, new Uint8Array([1]));
   }
 
   private async command(command: number, parameters: Uint8Array, timeoutMs = 1500): Promise<Uint8Array> {

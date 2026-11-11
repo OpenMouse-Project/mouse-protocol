@@ -16,9 +16,14 @@ export const PULSAR_FLASH = {
   performanceTime: 183,
 } as const;
 
-export const PULSAR_PRO_PRODUCT_ID = 0x5405;
+export const PULSAR_PRO_WIRED_PRODUCT_IDS: ReadonlySet<number> = new Set([
+  0x7401, // Pulsar ZYWOO The Chosen X
+]);
+export const PULSAR_PRO_PRODUCT_IDS: ReadonlySet<number> = new Set([
+  0x5405, // Pulsar Pro wireless adapter
+]);
 export const PULSAR_PRO_REPORT_ID = 0;
-export const PULSAR_PRO_REPORT_LENGTH = 63;
+export const PULSAR_PRO_REPORT_LENGTH = 64;
 export const PULSAR_PRO_COMMAND = {
   dongleVersion: 0xa0, rssi: 0xa4, dpi: 0xb1, polling: 0xb2, lod: 0xb3,
   battery: 0xb4, motionSync: 0xb5, ripple: 0xb6, angleSnap: 0xb7,
@@ -134,7 +139,7 @@ export function readUint16LE(data: Uint8Array, offset: number): number {
 // (report ID 0, which WebHID does not prefix) carrying a 16-bit
 // little-endian checksum of bytes 0..61 in bytes 62..63.
 export const PULSAR_XS1_PRODUCT_IDS: ReadonlySet<number> = new Set([0x3404, 0x3409, 0x3410, 0x5402, 0x5403, 0x5406]);
-export const PULSAR_XS1_WIRELESS_PRODUCT_IDS: ReadonlySet<number> = new Set([0x5402, 0x5403]);
+export const PULSAR_XS1_WIRELESS_PRODUCT_IDS: ReadonlySet<number> = new Set([0x5402, 0x5403, 0x5406]);
 export const PULSAR_XS1_FEATURE_REPORT_ID = 0;
 export const PULSAR_XS1_PACKET_LENGTH = 64;
 export const PULSAR_XS1_DPI_MIN = 50;
