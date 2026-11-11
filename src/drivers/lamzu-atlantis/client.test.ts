@@ -305,6 +305,32 @@ test("a Scyrox on the V8's product ids is named by the handshake's MID", async (
   }
 });
 
+test("a Scyrox V8 maps the 3950's lift-off codes onto the three stops", async () => {
+  for (const productId of [0xf5f6, 0xf5f7]) {
+    const device = new FakeAtlantis(productId);
+    device.writeField(FLASH.liftOffDistance, [3]); // 0.7 mm, as the V8 read
+    const client = new ScyroxHidClient(device as unknown as HIDDevice);
+    const status = await client.readStatus();
+    assert.equal(status.liftOffDistance, "Low");
+    assert.deepEqual(status.supportedLiftOffDistances, ["Low", "Medium", "High"]);
+    assert.equal(status.liftOffScale, undefined);
+
+    for (const [stop, code] of [["High", 2], ["Medium", 1], ["Low", 3]] as const) {
+      assert.equal(await client.setLiftOffDistance(stop), stop);
+      assert.equal(device.flash[FLASH.liftOffDistance], code, `${stop} writes code ${code}`);
+    }
+    await client.close();
+  }
+});
+
+test("a code outside the 3950 table reads as no stop", async () => {
+  const device = new FakeAtlantis(0xf5f7);
+  device.writeField(FLASH.liftOffDistance, [5]);
+  const client = new ScyroxHidClient(device as unknown as HIDDevice);
+  assert.equal((await client.readStatus()).liftOffDistance, null);
+  await client.close();
+});
+
 test("a refused handshake keeps the catalog's name", async () => {
   const device = new FakeAtlantis(0xf5f6);
   const client = new ScyroxHidClient(device as unknown as HIDDevice);

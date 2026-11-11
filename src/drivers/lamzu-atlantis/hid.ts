@@ -293,7 +293,7 @@ export class LamzuAtlantisHidClient {
   }
 
   getDebounceMaxMs(): number {
-    return DEBOUNCE_MAX_MS;
+    return this.debounceMaxMs();
   }
 
   getSleepOptions(): readonly number[] {
@@ -352,16 +352,20 @@ export class LamzuAtlantisHidClient {
       }
 
       const liftOffMillimetres = this.product()?.liftOffMillimetres;
-      const liftOffRaw = this.supports("supportsLiftOffDistance") || liftOffMillimetres
+      const liftOffStopCodes = this.product()?.liftOffStopCodes;
+      const liftOffRaw = this.supports("supportsLiftOffDistance") || liftOffMillimetres || liftOffStopCodes
         ? (await this.readField(FLASH.liftOffDistance, 1))[0] ?? 0
         : null;
       const liftOffScale = liftOffMillimetres && liftOffRaw !== null
         ? lamzuAtlantisLiftOffScale(liftOffRaw, liftOffMillimetres)
         : undefined;
-      // A scale product's byte is a height code, not one of Lamzu's two stops.
-      const liftOffDistance = liftOffScale
-        ? lamzuAtlantisNearestLiftOffStop(liftOffScale.millimetres)
-        : liftOffRaw === null || liftOffMillimetres ? null : lamzuAtlantisDecodeLiftOffDistance(liftOffRaw);
+      // A scale product's byte is a height code, not one of Lamzu's two stops,
+      // and a stop-code product's byte is whatever its own table says.
+      const liftOffDistance = liftOffStopCodes
+        ? this.liftOffStopForCode(liftOffRaw)
+        : liftOffScale
+          ? lamzuAtlantisNearestLiftOffStop(liftOffScale.millimetres)
+          : liftOffRaw === null || liftOffMillimetres ? null : lamzuAtlantisDecodeLiftOffDistance(liftOffRaw);
       const debounceMs = (await this.readField(FLASH.debounceTime, 1))[0] ?? 0;
       const sleepRaw = this.supports("supportsSleepTimeout")
         ? (await this.readField(FLASH.sleepTime, 1))[0] ?? 0
@@ -429,6 +433,9 @@ export class LamzuAtlantisHidClient {
         ...(sleepRaw !== null ? { sleepTimeout: sleepRaw > 0 ? sleepRaw * TIMER_STEP_SECONDS : null } : {}),
         liftOffDistance,
         ...(liftOffScale !== undefined ? { liftOffScale } : {}),
+        ...(liftOffStopCodes
+          ? { supportedLiftOffDistances: (["Low", "Medium", "High"] as const).filter((stop) => liftOffStopCodes[stop] !== undefined) }
+          : {}),
         ...(motionSync !== undefined ? { motionSync } : {}),
         ...(angleSnapping !== undefined ? { angleSnapping } : {}),
         ...(rippleControl !== undefined ? { rippleControl } : {}),
@@ -485,8 +492,31 @@ export class LamzuAtlantisHidClient {
     });
   }
 
+  private debounceMaxMs(): number {
+    return this.product()?.maxDebounceMs ?? DEBOUNCE_MAX_MS;
+  }
+
+  private liftOffStopForCode(code: number | null): LiftOffDistance | null {
+    const table = this.product()?.liftOffStopCodes;
+    if (!table || code === null) return null;
+    return (["Low", "Medium", "High"] as const).find((stop) => table[stop] === code) ?? null;
+  }
+
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
     return await this.transaction(async () => {
+      const stopCodes = this.product()?.liftOffStopCodes;
+      if (stopCodes) {
+        const code = stopCodes[value as "Low" | "Medium" | "High"];
+        if (code === undefined) {
+          throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
+        }
+        const confirmed = this.liftOffStopForCode(await this.writeByte(FLASH.liftOffDistance, code));
+        if (confirmed !== value) {
+          throw new Error(`The mouse kept a ${String(confirmed).toLowerCase()} lift-off distance instead of ${value.toLowerCase()}.`);
+        }
+        this.patch({ liftOffDistance: confirmed });
+        return confirmed;
+      }
       if (!this.supports("supportsLiftOffDistance")) {
         throw new Error("This mouse does not expose a configurable lift-off distance.");
       }
@@ -561,8 +591,9 @@ export class LamzuAtlantisHidClient {
 
   async setDebounceTime(milliseconds: number): Promise<number> {
     return await this.transaction(async () => {
-      if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > DEBOUNCE_MAX_MS) {
-        throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${DEBOUNCE_MAX_MS}.`);
+      const max = this.debounceMaxMs();
+      if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > max) {
+        throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${max}.`);
       }
       const confirmed = await this.writeByte(FLASH.debounceTime, milliseconds);
       if (confirmed !== milliseconds) {

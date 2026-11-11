@@ -101,6 +101,21 @@ export type ScyroxProduct = LamzuAtlantisProduct;
 const RATES_V8S = [125, 250, 500, 1000, 2000, 4000, 8000] as const;
 
 /**
+ * The V8 and V6 on their cable report handshake type 2, which the vendor
+ * configurator treats as a 1,000 Hz ceiling (type 3 would be wired 8K), and
+ * it offers nothing above 1,000 Hz there. The higher rates are dongle-only.
+ */
+const RATES_V8_WIRED = [125, 250, 500, 1000] as const;
+
+/**
+ * The 3950's three lift-off heights. The configurator's English strings list
+ * them as code 3 = 0.7 mm, 1 = 1 mm and 2 = 2 mm (mouse.sensor.LODOptions,
+ * "3950"), so they map onto the shared stops low to high in that order. A
+ * V8 read code 3 and a V6 read code 1.
+ */
+export const SCYROX_3950_LIFT_OFF_STOP_CODES = { Low: 3, Medium: 1, High: 2 } as const;
+
+/**
  * Both transports speak CompX's own rate bytes (`rateFamily: "pulsar"`): the
  * vendor configurator writes 0x10, 0x20 and 0x40 for 2,000, 4,000 and 8,000 Hz,
  * and the mouse held 0x20 while reporting 4,000 Hz. Neither Lamzu family fits —
@@ -167,7 +182,7 @@ export const SCYROX_PRODUCTS: ReadonlyMap<number, ScyroxProduct> = new Map([
     brand: "Scyrox",
     model: "V8",
     wireless: false,
-    pollingRates: RATES_V8S,
+    pollingRates: RATES_V8_WIRED,
     rateFamily: "pulsar",
     dpiLayout: "legacy",
     verified: true,
@@ -176,6 +191,14 @@ export const SCYROX_PRODUCTS: ReadonlyMap<number, ScyroxProduct> = new Map([
     dpiStep: 50,
     maxDpiStages: 5,
     supportsLiftOffDistance: false,
+    liftOffStopCodes: SCYROX_3950_LIFT_OFF_STOP_CODES,
+    // Mouse Angle Mode: flash 189 and 191 read sealed on a V8 (angle 0, on)
+    // and a V6 (angle 0, off), and the configurator shows the slider.
+    supportsAngleTuning: true,
+    // The configurator's Restore button, command 0x09, as on the V8S.
+    supportsFactoryReset: true,
+    // The configurator's Key Response Time goes to 30 ms on the 3950 entries.
+    maxDebounceMs: 30,
     supportsHyperMode: false,
     mirrorSleepToPerformanceTime: true,
   }],
@@ -202,9 +225,17 @@ export const SCYROX_PRODUCTS: ReadonlyMap<number, ScyroxProduct> = new Map([
     dpiStep: 50,
     maxDpiStages: 5,
     // The 3950 codes its three heights 3, 1 and 2 (0.7, 1 and 2 mm), which
-    // neither Lamzu's two stops nor a 1-to-n scale describes, so lift-off
-    // stays out until the byte has its own decoder.
+    // neither Lamzu's two stops nor a 1-to-n scale describes, so they get an
+    // explicit stop table.
     supportsLiftOffDistance: false,
+    liftOffStopCodes: SCYROX_3950_LIFT_OFF_STOP_CODES,
+    // Mouse Angle Mode: flash 189 and 191 read sealed on a V8 (angle 0, on)
+    // and a V6 (angle 0, off), and the configurator shows the slider.
+    supportsAngleTuning: true,
+    // The configurator's Restore button, command 0x09, as on the V8S.
+    supportsFactoryReset: true,
+    // The configurator's Key Response Time goes to 30 ms on the 3950 entries.
+    maxDebounceMs: 30,
     supportsHyperMode: false,
     // Flash 173 and 183 both held 180 (30 minutes in the configurator's
     // table), as its sleep setter writes them.

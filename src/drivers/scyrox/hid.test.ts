@@ -104,12 +104,23 @@ test("only the dongles report themselves as wireless", () => {
 });
 
 test("the vendor's polling-rate list is offered on both transports", () => {
-  for (const productId of SCYROX_PRODUCT_IDS) {
+  for (const productId of SCYROX_PRODUCT_IDS.filter((id) => id !== V8_WIRED)) {
     assert.deepEqual(
       new ScyroxHidClient(device(SCYROX_VENDOR_ID, productId)).getSupportedPollingRates(),
       [125, 250, 500, 1000, 2000, 4000, 8000],
     );
   }
+});
+
+test("the V8 and V6 on their cable stop at 1,000 Hz; the rest is dongle-only", () => {
+  assert.deepEqual(
+    new ScyroxHidClient(device(SCYROX_VENDOR_ID, V8_WIRED)).getSupportedPollingRates(),
+    [125, 250, 500, 1000],
+  );
+  assert.deepEqual(
+    new ScyroxHidClient(device(SCYROX_VENDOR_ID, V8_DONGLE)).getSupportedPollingRates(),
+    [125, 250, 500, 1000, 2000, 4000, 8000],
+  );
 });
 
 test("lift-off is the 3955's five-height scale, not the two-stop write", async () => {
@@ -174,19 +185,19 @@ test("the V8 keeps its 3950 stages in the legacy fields, up to 30,000 DPI", () =
   }
 });
 
-test("the V8 leaves out what was not verified on it", async () => {
+test("the V8 offers the configurator's 3950 controls", async () => {
   for (const productId of V8_PRODUCT_IDS) {
     const product = scyroxProduct(SCYROX_VENDOR_ID, productId)!;
     // Its 3950 lift-off codes (3, 1, 2 for 0.7, 1 and 2 mm) fit neither the
-    // two-stop write nor the 3955 scale; its angle fields read unsealed; the
-    // restore command was never sent to it.
+    // two-stop write nor the 3955 scale, so they get a stop table. The angle
+    // fields read sealed on a V8 and a V6, and Key Response Time goes to 30 ms.
     assert.equal(product.liftOffMillimetres, undefined);
-    assert.notEqual(product.supportsAngleTuning, true);
-    assert.notEqual(product.supportsFactoryReset, true);
+    assert.deepEqual(product.liftOffStopCodes, { Low: 3, Medium: 1, High: 2 });
+    assert.equal(product.supportsAngleTuning, true);
+    assert.equal(product.supportsFactoryReset, true);
+    assert.equal(new ScyroxHidClient(device(SCYROX_VENDOR_ID, productId)).getDebounceMaxMs(), 30);
     // Flash 173 and 183 held the same timer on hardware.
     assert.equal(product.mirrorSleepToPerformanceTime, true);
-    const client = new ScyroxHidClient(device(SCYROX_VENDOR_ID, productId));
-    await assert.rejects(() => client.setLiftOffDistance("Low"));
   }
 });
 
