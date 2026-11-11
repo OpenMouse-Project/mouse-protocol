@@ -54,8 +54,29 @@ and gives the V8 (MID 1, 10, 11) and the V6 (MID 2, 12, 13) the same 3950
 sensor, 30,000 DPI ceiling and controls. `ScyroxHidClient` therefore sends
 the handshake once per connection on the V8 entries and names the mouse
 "Scyrox V6" for a V6 MID; a refused or unanswered handshake keeps the
-catalog's "Scyrox V8". No V6 has been connected yet, and `0xF5F4` (sensor
-unknown) is not claimed.
+catalog's "Scyrox V8". `0xF5F4` (sensor unknown) is not claimed.
+
+### V6 on hardware
+
+A Scyrox V6 on the "SCYROX 8K Dongle" (`0x3554:0xf5f7`, release `0x0216`,
+dongle version `02 16`), read through node-hid on Windows with a read-only
+build of `ScyroxHidClient` that refuses every command but 0x01, 0x03, 0x04,
+0x08, 0x0e, 0x12 and 0x1d:
+
+- Same product id and collection layout as the V8's dongle.
+- Handshake payload `e0 ec fc 6b 3e 02 05`: CID `0x3e`, MID 2 (V6), type 5
+  (wireless 8K). The client named it "Scyrox V6".
+- Firmware `02 24`, v2.24, the version the configurator's V6 upgrade tool
+  ships.
+- `readStatus`: three stages 500/800/1,600 with stage 2 active, 1,000 Hz,
+  battery 75% / 4,013 mV discharging, profile 1, debounce 0 ms, sleep 300 s,
+  motion sync, angle snapping, ripple control and performance on, 20K off,
+  firmware "Mouse v2.24". Every field carried its seal.
+- The raw flash agrees field by field: rate `01 54`, three stages `03 52`,
+  active stage `02 53`, 20K `00 55`, legacy stages `09 09 00 43`,
+  `0f 0f 00 37` and `1f 1f 00 17` (500, 800, 1,600 DPI), sleep `1e 37` at 173
+  and 183, performance `01 54` at 181. The 3955 region at 6912 reads `ff`, as
+  on the V8, confirming the legacy layout.
 
 ## Protocol family
 
@@ -144,7 +165,7 @@ differences, which the catalog follows:
   was, as a round trip ending on the rate read first.
 - The sleep reading: the flash held 180 (30 minutes), while the configurator
   screenshot showed "1min", likely its default before the device read.
-- A V6 on hardware: its product ids, and the MID-based name.
+- The V6 on its cable (expected `0xf5f6`) and any write to a V6.
 - What `0xF5F4` is. The configurator lists it as a wireless mouse id.
 - The 4,000 and 8,000 Hz bytes on the V8: the configurator offers them, but
   neither has been read from this mouse.
