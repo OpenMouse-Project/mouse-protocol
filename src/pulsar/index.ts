@@ -21,6 +21,7 @@ export const PULSAR_PRO_WIRED_PRODUCT_IDS: ReadonlySet<number> = new Set([
 ]);
 export const PULSAR_PRO_PRODUCT_IDS: ReadonlySet<number> = new Set([
   0x5405, // Pulsar Pro wireless adapter
+  ...PULSAR_PRO_WIRED_PRODUCT_IDS,
 ]);
 export const PULSAR_PRO_REPORT_ID = 0;
 export const PULSAR_PRO_REPORT_LENGTH = 64;
