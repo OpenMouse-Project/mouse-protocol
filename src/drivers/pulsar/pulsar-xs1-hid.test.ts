@@ -177,6 +177,11 @@ test("reports the wired X3 as wired", async () => {
   assert.equal(status.connectionType, "Wired");
 });
 
+test("the CrazyLight receiver PID does not name a paired mouse on the feature interface", async () => {
+  const status = await new PulsarXs1HidClient(fakeDevice(0x5406, "Pulsar X3 CrazyLight Mini").device).readStatus();
+  assert.equal(status.name, "Pulsar CrazyLight 8K Dongle");
+});
+
 test("the X2A v3 cable ID is named and stays on the wired 1K capability path", async () => {
   const client = new PulsarXs1HidClient(fakeDevice(0x3404).device);
   const status = await client.readStatus();

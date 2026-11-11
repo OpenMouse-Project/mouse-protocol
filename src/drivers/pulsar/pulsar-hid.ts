@@ -42,6 +42,32 @@ const CLAIMED_VGN_PRODUCT_IDS: ReadonlySet<number> = new Set([
 ]);
 const PULSAR_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
 
+// CID/MID pairs for the CrazyLight 8K dongle (3710:5406)
+const PULSAR_MODEL_NAMES: ReadonlyMap<number, string> = new Map([
+  [0x5701, "Pulsar X2 CrazyLight Mini"],
+  [0x5702, "Pulsar X2 CrazyLight Mini"],
+  [0x5703, "Pulsar X2 CrazyLight Mini"],
+  [0x5704, "Pulsar X2 CrazyLight Mini"],
+  [0x5705, "Pulsar X2 CrazyLight Mini"],
+  [0x5706, "Pulsar X2 CrazyLight Mini"],
+  [0x5709, "Pulsar X2 CrazyLight Mini"],
+  [0x570a, "Pulsar X2 CrazyLight Mini"],
+  [0x5711, "Pulsar Xlite CrazyLight Mini"],
+  [0x5712, "Pulsar Xlite CrazyLight Mini"],
+  [0x5713, "Pulsar X3 CrazyLight Mini"],
+  [0x5714, "Pulsar X3 CrazyLight Mini"],
+  [0x5715, "Pulsar X3 LHD CrazyLight Mini"],
+  [0x5716, "Pulsar X3 LHD CrazyLight Mini"],
+  [0x571b, "Pulsar X2 CrazyLight Medium"],
+  [0x5722, "Pulsar Xlite CrazyLight Medium"],
+  [0x5746, "Pulsar X2 CrazyLight Medium"],
+  [0x5747, "Pulsar Xlite CrazyLight Medium"],
+  [0x5748, "Pulsar X3 CrazyLight Medium"],
+  [0x5749, "Pulsar X3 CrazyLight Medium"],
+  [0x574a, "Pulsar X3 LHD CrazyLight Medium"],
+  [0x574b, "Pulsar X3 LHD CrazyLight Medium"],
+]);
+
 export interface PulsarReport {
   timestamp: number;
   reportId: number;
@@ -154,17 +180,14 @@ export class PulsarHidClient {
       const currentDpi = Math.min(flash[FLASH.currentDpi] ?? 0, 7);
       const dpi = this.decodeDpi(flash.slice(FLASH.dpiValues + currentDpi * 4, FLASH.dpiValues + currentDpi * 4 + 4)) ?? 800;
       const lodValue = flash[FLASH.liftOffDistance];
-      
-      let modelName = this.device.productName || "Pulsar Mouse";
-      if (this.device.vendorId === PULSAR_VENDOR_ID && this.device.productId === 0x5406) {
-        modelName = "Pulsar X3 CrazyLight Mini";
-      } else if (info.cid === 0x57 && info.mid === 0x04) {
-        modelName = "Pulsar X2 CrazyLight";
-      }
-      
+      const modelName = this.device.vendorId === PULSAR_VENDOR_ID
+        ? PULSAR_MODEL_NAMES.get((info.cid << 8) | info.mid)
+          ?? (this.device.productId === 0x5406 ? "Pulsar CrazyLight 8K Dongle" : null)
+        : null;
+
       return {
         brand: "Pulsar",
-        name: modelName,
+        name: modelName ?? (this.device.productName || "Pulsar Mouse"),
         ui: { family: "pulsar", hideUnsupportedPollingRates: true },
         batteryPercent: battery[5] <= 100 ? battery[5] : null,
         batteryState: battery[6] === 1 ? "Charging" : "Discharging",
