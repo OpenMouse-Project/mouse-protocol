@@ -103,6 +103,36 @@ test("resolves model names and preserves product-name and generic fallbacks", as
   }
 });
 
+test("names other Pulsar families and editions from the handshake on wired and receiver PIDs", async () => {
+  for (const productId of [0x3506, 0x5406]) {
+    for (const [mid, name] of [
+      [0x07, "Pulsar TenZ Signature Edition"],
+      [0x17, "Pulsar X2H CrazyLight Mini"],
+      [0x19, "Pulsar X2N CrazyLight Mini"],
+      [0x1f, "Pulsar X2A Medium Pulsar By You XS-1"],
+      [0x24, "Pulsar Lab. X2F"],
+      [0x26, "Pulsar JV-X Pro Series"],
+      [0x2d, "Pulsar X VSPO! Asumi Sena"],
+      [0x44, "Pulsar ZywOo The Chosen Mouse Gen.2"],
+      [0x65, "Pulsar Feinmann F01 Noctua Edition"],
+      [0x6b, "Pulsar TenZ 2.0 Mini Misty Blue"],
+      [0x6d, "Pulsar X2 CrazyLight Medium Forest"],
+      [0x93, "Pulsar X2 CrazyLight 2 Medium 2026 PRX Edition"],
+    ] satisfies [number, string][]) {
+      const fake = flashDevice({ productId, cid: 0x57, mid });
+      assert.equal(PulsarHidClient.isSupported(fake), true);
+      assert.equal((await new PulsarHidClient(fake).readStatus()).name, name);
+    }
+  }
+});
+
+test("unnamed vendor placeholders and out-of-range MIDs retain the fallback", async () => {
+  for (const mid of [0x00, 0x6c, 0x6f, 0x89, 0x95, 0x96, 0xff]) {
+    const fake = flashDevice({ productId: 0x5406, cid: 0x57, mid });
+    assert.equal((await new PulsarHidClient(fake).readStatus()).name, "Pulsar CrazyLight 8K Dongle");
+  }
+});
+
 test("setButtonMapping writes one key record at 96 + 4 * slot", async () => {
   const fake = flashDevice();
   [[KEY.mouse, 0x0100], [KEY.mouse, 0x0200], [KEY.mouse, 0x0400], [KEY.mouse, 0x0800], [KEY.mouse, 0x1000], [KEY.dpi, 0x0100]]

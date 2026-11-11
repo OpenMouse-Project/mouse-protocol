@@ -1,4 +1,5 @@
 import type { MouseStatus } from "../mouse-types.ts";
+import { PULSAR_MODEL_NAMES } from "./model-names.ts";
 import {
   PULSAR_COMMAND as COMMAND,
   PULSAR_CONFIG_PACKET_LENGTH as CONFIG_PACKET_LENGTH,
@@ -41,32 +42,6 @@ const CLAIMED_VGN_PRODUCT_IDS: ReadonlySet<number> = new Set([
   ...SCYROX_PRODUCT_IDS, // Scyrox V8S, its Turbo 8K dongle and the V8's 8K dongle
 ]);
 const PULSAR_POLLING_RATES = [125, 250, 500, 1000, 2000, 4000, 8000];
-
-// CID/MID pairs for the CrazyLight 8K dongle (3710:5406)
-const PULSAR_MODEL_NAMES: ReadonlyMap<number, string> = new Map([
-  [0x5701, "Pulsar X2 CrazyLight Mini"],
-  [0x5702, "Pulsar X2 CrazyLight Mini"],
-  [0x5703, "Pulsar X2 CrazyLight Mini"],
-  [0x5704, "Pulsar X2 CrazyLight Mini"],
-  [0x5705, "Pulsar X2 CrazyLight Mini"],
-  [0x5706, "Pulsar X2 CrazyLight Mini"],
-  [0x5709, "Pulsar X2 CrazyLight Mini"],
-  [0x570a, "Pulsar X2 CrazyLight Mini"],
-  [0x5711, "Pulsar Xlite CrazyLight Mini"],
-  [0x5712, "Pulsar Xlite CrazyLight Mini"],
-  [0x5713, "Pulsar X3 CrazyLight Mini"],
-  [0x5714, "Pulsar X3 CrazyLight Mini"],
-  [0x5715, "Pulsar X3 LHD CrazyLight Mini"],
-  [0x5716, "Pulsar X3 LHD CrazyLight Mini"],
-  [0x571b, "Pulsar X2 CrazyLight Medium"],
-  [0x5722, "Pulsar Xlite CrazyLight Medium"],
-  [0x5746, "Pulsar X2 CrazyLight Medium"],
-  [0x5747, "Pulsar Xlite CrazyLight Medium"],
-  [0x5748, "Pulsar X3 CrazyLight Medium"],
-  [0x5749, "Pulsar X3 CrazyLight Medium"],
-  [0x574a, "Pulsar X3 LHD CrazyLight Medium"],
-  [0x574b, "Pulsar X3 LHD CrazyLight Medium"],
-]);
 
 export interface PulsarReport {
   timestamp: number;
