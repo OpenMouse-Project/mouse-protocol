@@ -26,6 +26,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./aula": {
+      "types": "./dist/aula/index.d.ts",
+      "import": "./dist/aula/index.js"
+    },
     "./bytech": {
       "types": "./dist/bytech/index.d.ts",
       "import": "./dist/bytech/index.js"

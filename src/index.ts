@@ -1,4 +1,5 @@
 export * as atk from "./atk/index.js";
+export * as aula from "./aula/index.js";
 export * as hitscan from "./hitscan/index.js";
 export * as bitmouse from "./bitmouse/index.js";
 export * as endgameGearWe from "./endgame-gear/wireless.js";
