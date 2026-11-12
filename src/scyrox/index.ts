@@ -41,8 +41,15 @@ export const SCYROX_V8_MIDS: readonly number[] = [1, 10, 11];
 export const SCYROX_V6_MIDS: readonly number[] = [2, 12, 13];
 
 /**
- * The command 0x01 handshake payload as the configurator sends it: four
- * random bytes, then four zero bytes. A bare 0x01 is refused with status 1.
+ * The four key bytes this package sends in the handshake. The configurator
+ * sends random ones, but the mouse treats them as an opaque key, so fixed
+ * bytes keep captured traces reproducible.
+ */
+export const SCYROX_HANDSHAKE_KEY: readonly number[] = [0x4f, 0x4d, 0x53, 0x01];
+
+/**
+ * The command 0x01 handshake payload as the configurator sends it: four key
+ * bytes, then four zero bytes. A bare 0x01 is refused with status 1.
  */
 export function scyroxEncodeHandshake(random: readonly number[] = [0, 0, 0, 0]): number[] {
   return [...random.slice(0, 4).map((value) => value & 0xff), 0, 0, 0, 0];
@@ -54,6 +61,9 @@ export interface ScyroxIdentity {
   /** Connection type: 0/1/4/5 wireless at 1K/4K/2K/8K, 2/3 wired at 1K/8K. */
   type: number;
 }
+
+/** Handshake type 3: a wired mouse with an 8K ceiling, per the configurator. */
+export const SCYROX_TYPE_WIRED_8K = 3;
 
 /**
  * Reads CID, MID and type from the handshake reply's payload (bytes 9-11 of
@@ -100,10 +110,14 @@ export type ScyroxProduct = LamzuAtlantisProduct;
  */
 const RATES_V8S = [125, 250, 500, 1000, 2000, 4000, 8000] as const;
 
+/** Every rate the CompX table encodes, up to 8,000 Hz. */
+export const SCYROX_POLLING_RATES_8K: readonly number[] = RATES_V8S;
+
 /**
  * The V8 and V6 on their cable report handshake type 2, which the vendor
- * configurator treats as a 1,000 Hz ceiling (type 3 would be wired 8K), and
- * it offers nothing above 1,000 Hz there. The higher rates are dongle-only.
+ * configurator treats as a 1,000 Hz ceiling, and it offers nothing above
+ * 1,000 Hz there. This is the default until the handshake answers; a wired
+ * mouse that reports type 3 (wired 8K) gets SCYROX_POLLING_RATES_8K instead.
  */
 const RATES_V8_WIRED = [125, 250, 500, 1000] as const;
 

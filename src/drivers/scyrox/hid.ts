@@ -1,14 +1,22 @@
 import { LamzuAtlantisHidClient } from "../lamzu-atlantis/hid.ts";
+import type { LamzuAtlantisProduct } from "@openmouse/protocol/lamzu";
 import {
   SCYROX_CID,
+  SCYROX_HANDSHAKE_KEY,
+  SCYROX_POLLING_RATES_8K,
+  SCYROX_TYPE_WIRED_8K,
   SCYROX_V8S_20K_ADDRESS,
   scyroxDecodeHandshake,
   scyroxEncodeHandshake,
   scyroxModelForMid,
   scyroxProduct,
+  type ScyroxIdentity,
 } from "@openmouse/protocol/scyrox";
 
 const HANDSHAKE_COMMAND = 0x01;
+
+/** How long a failed handshake waits before a later full read asks again. */
+const IDENTIFY_RETRY_MS = 30_000;
 
 /**
  * Scyrox's CompX generation: the V8S mouse (wired 0x3554:0xf515) and its
@@ -31,9 +39,14 @@ const HANDSHAKE_COMMAND = 0x01;
  * verified (see docs/scyrox-v8-testing.md).
  */
 export class ScyroxHidClient extends LamzuAtlantisHidClient {
-  /** The model the handshake's MID named; null until read, or if it failed. */
-  private identifiedModel: string | null = null;
-  private identityRead = false;
+  /** What the handshake answered; null until a Scyrox reply was read. */
+  private identity: ScyroxIdentity | null = null;
+  /** Set once the handshake got a reply, or has nothing to ask. */
+  private identitySettled = false;
+  /** No new handshake before this time, after one went unanswered. */
+  private nextIdentifyAt = 0;
+  /** Exposed so a test can retry without waiting. */
+  protected identifyRetryMs = IDENTIFY_RETRY_MS;
 
   constructor(device: HIDDevice) {
     super(device, scyroxProduct(device.vendorId, device.productId) ?? null);
@@ -41,25 +54,57 @@ export class ScyroxHidClient extends LamzuAtlantisHidClient {
 
   /**
    * The V8 and the V6 share product ids (the vendor tool tells them apart by
-   * MID alone), so the 3950 entries ask once per connection. A refusal or a
-   * silent mouse behind the dongle keeps the catalog's name.
+   * MID alone), so the 3950 entries ask until the mouse answers. A mouse
+   * asleep behind the dongle does not answer; the next full read after
+   * IDENTIFY_RETRY_MS asks again, so a silent mouse costs one timeout per
+   * interval rather than one per read, and a mouse that wakes is still named.
    */
   protected override async identify(): Promise<void> {
-    if (this.identityRead) return;
-    this.identityRead = true;
-    const product = scyroxProduct(this.device.vendorId, this.device.productId);
-    if (product?.model !== "V8") return;
+    if (this.identitySettled || Date.now() < this.nextIdentifyAt) return;
+    if (this.catalogEntry()?.model !== "V8") {
+      this.identitySettled = true;
+      return;
+    }
     try {
-      const random = Array.from({ length: 4 }, () => Math.floor(Math.random() * 256));
-      const identity = scyroxDecodeHandshake(await this.request(HANDSHAKE_COMMAND, 0, scyroxEncodeHandshake(random)));
-      if (identity?.cid === SCYROX_CID) this.identifiedModel = scyroxModelForMid(identity.mid) ?? null;
+      const reply = await this.request(HANDSHAKE_COMMAND, 0, scyroxEncodeHandshake(SCYROX_HANDSHAKE_KEY));
+      // Any reply settles it: asking again would get the same answer.
+      this.identitySettled = true;
+      const identity = scyroxDecodeHandshake(reply);
+      if (identity?.cid === SCYROX_CID) this.identity = identity;
     } catch {
-      // Keep the catalog name.
+      this.nextIdentifyAt = Date.now() + this.identifyRetryMs;
     }
   }
 
+  private catalogEntry(): LamzuAtlantisProduct | undefined {
+    return scyroxProduct(this.device.vendorId, this.device.productId);
+  }
+
+  private identifiedModel(): "V8" | "V6" | null {
+    return this.identity ? scyroxModelForMid(this.identity.mid) ?? null : null;
+  }
+
+  /**
+   * The 3950 entries' extra writes (the lift-off stop table, angle tuning,
+   * the 30 ms debounce ceiling and Restore) were verified on a V8 only, and a
+   * V6 reads different values in the angle fields, so they are offered only
+   * once the handshake has named the mouse a V8. A wired mouse that reports
+   * the wired 8K type gets the 8K rate list instead of the 1K default.
+   */
+  protected override product(): LamzuAtlantisProduct | undefined {
+    const catalog = super.product();
+    if (!catalog || catalog.model !== "V8") return catalog;
+    const rates = !catalog.wireless && this.identity?.type === SCYROX_TYPE_WIRED_8K
+      ? { pollingRates: SCYROX_POLLING_RATES_8K }
+      : {};
+    if (this.identifiedModel() === "V8") return { ...catalog, ...rates };
+    const { liftOffStopCodes: _stops, maxDebounceMs: _debounce, ...shared } = catalog;
+    return { ...shared, ...rates, supportsAngleTuning: false, supportsFactoryReset: false };
+  }
+
   override displayName(): string {
-    return this.identifiedModel ? `Scyrox ${this.identifiedModel}` : super.displayName();
+    const model = this.identifiedModel();
+    return model ? `Scyrox ${model}` : super.displayName();
   }
 
   static override isSupported(device: HIDDevice): boolean {
@@ -70,5 +115,13 @@ export class ScyroxHidClient extends LamzuAtlantisHidClient {
   /** The "20K" switch is a Scyrox-only byte, so the catalog cannot carry it. */
   protected override turboModeAddress(): number | null {
     return SCYROX_V8S_20K_ADDRESS;
+  }
+
+  /**
+   * The configurator greys out 20K until Competitive Mode (performance mode
+   * here) is on, and 20K only runs under it, so the two move together.
+   */
+  protected override linksTurboToPerformanceMode(): boolean {
+    return true;
   }
 }

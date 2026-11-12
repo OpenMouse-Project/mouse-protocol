@@ -58,6 +58,13 @@ const ANGLE_TUNING_MAX_DEGREES = 30;
 
 type LiftOffDistance = NonNullable<MouseStatus["liftOffDistance"]>;
 
+/** One side of a linked pair of one-byte flags (turbo and performance mode). */
+interface LinkedFlag {
+  address: number;
+  field: "turboMode" | "performanceMode";
+  label: string;
+}
+
 /**
  * Lamzu's Atlantis generation (0x3554), which speaks CompX's report-8
  * interrupt protocol rather than the feature-report page/command protocol the
@@ -112,7 +119,7 @@ export class LamzuAtlantisHidClient {
       && LamzuAtlantisHidClient.hasConfigCollection(device);
   }
 
-  private product(): LamzuAtlantisProduct | undefined {
+  protected product(): LamzuAtlantisProduct | undefined {
     return this.productOverride ?? lamzuAtlantisProduct(this.device.vendorId, this.device.productId);
   }
 
@@ -165,6 +172,17 @@ export class LamzuAtlantisHidClient {
    */
   protected turboModeAddress(): number | null {
     return null;
+  }
+
+  /**
+   * Whether turbo and performance mode move together: turbo on turns
+   * performance mode on first, and performance mode off turns turbo off
+   * first. Off by default, where turbo on without performance mode is refused
+   * and performance mode is written on its own; a subclass opts in only where
+   * the vendor's own tool links the two.
+   */
+  protected linksTurboToPerformanceMode(): boolean {
+    return false;
   }
 
   protected minimumDpi(): number {
@@ -649,21 +667,18 @@ export class LamzuAtlantisHidClient {
   async setPerformanceMode(enabled: boolean): Promise<boolean> {
     if (!this.supports("supportsPerformanceMode")) throw new Error("This mouse does not expose performance mode.");
     const turboAddress = this.turboModeAddress();
-    if (enabled || turboAddress === null) {
+    if (enabled || turboAddress === null || !this.linksTurboToPerformanceMode()) {
       return await this.setFlag(FLASH.performanceState, enabled, "performanceMode", "competition mode");
     }
-    // 20K scanning only runs under Competitive Mode, so switching that off
-    // takes the 20K switch with it, as the vendor configurator does, rather
-    // than leaving a stored 20K byte the mouse would act on later.
+    // Linked: turbo only runs under performance mode, so switching that off
+    // takes turbo with it rather than leaving a stored turbo byte the mouse
+    // would act on later.
     return await this.transaction(async () => {
-      if ((await this.readRaw(turboAddress, 1))[0] !== 0) {
-        const turbo = (await this.writeByte(turboAddress, 0)) !== 0;
-        if (turbo) throw new Error("The mouse left turbo mode on.");
-        this.patch({ turboMode: false });
-      }
-      const confirmed = (await this.writeByte(FLASH.performanceState, 0)) === 1;
-      if (confirmed) throw new Error("The mouse left competition mode on.");
-      this.patch({ performanceMode: false });
+      await this.writeLinkedFlags(
+        { address: turboAddress, field: "turboMode", label: "turbo mode" },
+        { address: FLASH.performanceState, field: "performanceMode", label: "competition mode" },
+        false,
+      );
       return false;
     });
   }
@@ -675,18 +690,24 @@ export class LamzuAtlantisHidClient {
 
   /**
    * 20,000 FPS sensor scanning, shown as the shared "turbo mode" switch. It
-   * only runs under Competitive Mode (performance mode here), so turning it on
-   * turns that on first. Refusing instead failed the whole flash whenever both
-   * switches were staged together and turbo happened to be written first.
+   * only runs under performance mode. Where the two are linked, turning turbo
+   * on turns performance mode on first; otherwise it is refused until
+   * performance mode is on.
    */
   async setTurboMode(enabled: boolean): Promise<boolean> {
     return await this.transaction(async () => {
       const address = this.turboModeAddress();
       if (address === null) throw new Error("This mouse does not expose a turbo frame-rate mode.");
       if (enabled && (await this.readField(FLASH.performanceState, 1))[0] !== 1) {
-        const performance = (await this.writeByte(FLASH.performanceState, 1)) === 1;
-        if (!performance) throw new Error("The mouse left competition mode off, which 20,000 FPS mode needs.");
-        this.patch({ performanceMode: true });
+        if (!this.linksTurboToPerformanceMode()) {
+          throw new Error("20,000 FPS mode requires performance mode to be turned on first.");
+        }
+        await this.writeLinkedFlags(
+          { address: FLASH.performanceState, field: "performanceMode", label: "competition mode" },
+          { address, field: "turboMode", label: "turbo mode" },
+          true,
+        );
+        return true;
       }
       const confirmed = (await this.writeByte(address, enabled ? 1 : 0)) === 1;
       if (confirmed !== enabled) throw new Error(`The mouse left turbo mode ${confirmed ? "on" : "off"}.`);
@@ -864,6 +885,41 @@ export class LamzuAtlantisHidClient {
       this.patch({ [field]: confirmed });
       return confirmed;
     });
+  }
+
+  /**
+   * Sets two linked one-byte flags to `value`, `first` then `second`, as one
+   * change. Each write is read back. If `second` does not take, `first` is put
+   * back to the byte it held before, so a failure never leaves one switch
+   * changed without the other. The caller holds the transaction.
+   */
+  private async writeLinkedFlags(first: LinkedFlag, second: LinkedFlag, value: boolean): Promise<void> {
+    const target = value ? 1 : 0;
+    const state = value ? "off" : "on";
+    const before = (await this.readRaw(first.address, 1))[0] ?? 0;
+    if ((await this.writeByte(first.address, target)) !== target) {
+      throw new Error(`The mouse left ${first.label} ${state}.`);
+    }
+    let secondTook = false;
+    let failure: unknown = null;
+    try {
+      secondTook = (await this.writeByte(second.address, target)) === target;
+    } catch (error) {
+      failure = error;
+    }
+    if (!secondTook) {
+      let restored = true;
+      try {
+        restored = (await this.writeByte(first.address, before)) === before;
+      } catch {
+        restored = false;
+      }
+      const cause = failure instanceof Error ? ` (${failure.message})` : "";
+      throw new Error(restored
+        ? `The mouse left ${second.label} ${state}${cause}, so ${first.label} was put back.`
+        : `The mouse left ${second.label} ${state}${cause}, and ${first.label} could not be put back.`);
+    }
+    this.patch({ [first.field]: value, [second.field]: value });
   }
 
   /**

@@ -185,17 +185,19 @@ test("the V8 keeps its 3950 stages in the legacy fields, up to 30,000 DPI", () =
   }
 });
 
-test("the V8 offers the configurator's 3950 controls", async () => {
+test("the V8 catalog carries the configurator's 3950 controls", async () => {
   for (const productId of V8_PRODUCT_IDS) {
     const product = scyroxProduct(SCYROX_VENDOR_ID, productId)!;
     // Its 3950 lift-off codes (3, 1, 2 for 0.7, 1 and 2 mm) fit neither the
-    // two-stop write nor the 3955 scale, so they get a stop table. The angle
-    // fields read sealed on a V8 and a V6, and Key Response Time goes to 30 ms.
+    // two-stop write nor the 3955 scale, so they get a stop table. Key
+    // Response Time goes to 30 ms. The client offers these only once the
+    // handshake names a V8 (see the Atlantis client tests).
     assert.equal(product.liftOffMillimetres, undefined);
     assert.deepEqual(product.liftOffStopCodes, { Low: 3, Medium: 1, High: 2 });
     assert.equal(product.supportsAngleTuning, true);
     assert.equal(product.supportsFactoryReset, true);
-    assert.equal(new ScyroxHidClient(device(SCYROX_VENDOR_ID, productId)).getDebounceMaxMs(), 30);
+    assert.equal(product.maxDebounceMs, 30);
+    assert.equal(new ScyroxHidClient(device(SCYROX_VENDOR_ID, productId)).getDebounceMaxMs(), 15, "not before the handshake");
     // Flash 173 and 183 held the same timer on hardware.
     assert.equal(product.mirrorSleepToPerformanceTime, true);
   }
