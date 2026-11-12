@@ -67,8 +67,67 @@ test("decodeX11DpiReport round-trips a table across every stage category", () =>
     angleSnap: true,
     rippleControl: false,
   };
-  const decoded = decodeX11DpiReport(buildX11DpiReport(config));
-  assert.deepEqual(decoded, config);
+  const report = buildX11DpiReport(config);
+  const decoded = decodeX11DpiReport(report);
+  assert.deepEqual(decoded, { ...config, enabledMask: 0x3f, base: report });
+});
+
+// Report 0x04 read through the 0xa0 handshake from a genuine X11 receiver
+// (1d57:fa60, firmware 0x0107): three stages enabled (550/600/650, stage 2
+// active), the factory colours, and the vendor app's 01 01 in the unused
+// stage 7/8 slots.
+const X11_READ_BACK = Uint8Array.from(
+  ("04 38 01 00 01 07 20 20 0c 0e 0f 12 75 81 01 01 00 00 00 00 00 01 00 00 02 ff 00 00 00 ff 00 00 "
+    + "00 ff ff ff 00 00 ff ff ff 00 ff ff 40 00 ff ff ff 02 0e b3 00 00 00 00")
+    .split(" ").map((byte) => parseInt(byte, 16)),
+);
+
+test("decodeX11DpiReport reads a real X11 table with disabled stages", () => {
+  const decoded = decodeX11DpiReport(X11_READ_BACK);
+  assert.deepEqual(decoded?.stages, [550, 600, 650, 800, 5000, 22000]);
+  assert.equal(decoded?.enabledMask, 0x07);
+  assert.equal(decoded?.activeStage, 2);
+  assert.equal(decoded?.angleSnap, false);
+  assert.equal(decoded?.rippleControl, true);
+  assert.deepEqual(decoded?.base, X11_READ_BACK);
+});
+
+test("buildX11DpiReport on a read-back changes only the edited fields", () => {
+  const decoded = decodeX11DpiReport(X11_READ_BACK)!;
+  const stages = [...decoded.stages];
+  stages[0] = 1600;
+  const report = buildX11DpiReport({ ...decoded, stages });
+  const changed = [...report.subarray(0, 50)].flatMap((byte, i) => (byte === X11_READ_BACK[i] ? [] : [i]));
+  // Only stage 1's byte (plus the checksum); the enable mask, colours and
+  // unused slots stay as the mouse had them.
+  assert.deepEqual(changed, [8]);
+  assert.equal(report[8], 0x25);
+  const sum = report.subarray(3, 50).reduce((acc, byte) => (acc + byte) & 0xffff, 0);
+  assert.equal((report[50] << 8) | report[51], sum);
+  assert.deepEqual(decodeX11DpiReport(report)?.stages, stages);
+});
+
+test("buildX11DpiReport keeps a disabled stage's stored bytes when its value is 0", () => {
+  const base = new Uint8Array(X11_READ_BACK);
+  base[13] = 0x00; // an empty slot behind disabled stage 6
+  base[21] = 0x00;
+  base[6] = base[7] = 0x00;
+  const sum = base.subarray(3, 50).reduce((acc, byte) => (acc + byte) & 0xffff, 0);
+  base[50] = sum >> 8;
+  base[51] = sum & 0xff;
+  const decoded = decodeX11DpiReport(base)!;
+  assert.equal(decoded.stages[5], 0);
+  const report = buildX11DpiReport(decoded);
+  assert.deepEqual(report, base);
+});
+
+test("decodeX11DpiReport still rejects an enabled stage it cannot decode", () => {
+  const report = new Uint8Array(X11_READ_BACK);
+  report[8] = 0x00;
+  const sum = report.subarray(3, 50).reduce((acc, byte) => (acc + byte) & 0xffff, 0);
+  report[50] = sum >> 8;
+  report[51] = sum & 0xff;
+  assert.equal(decodeX11DpiReport(report), null);
 });
 
 test("decodeX11DpiReport accepts a report-id-stripped read-back", () => {
