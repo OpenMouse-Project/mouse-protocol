@@ -40,7 +40,10 @@ export function decodeSc380ProReply(reply: Uint8Array, command: number, argument
         && reply[offset + 5] === (length & 0xff) && reply[offset + 6] === (length >> 8)) {
       if (command === SC380_PRO_READ_SETTINGS) {
         const checksum = reply.subarray(offset + 1, start + length).reduce((sum, byte) => sum + byte, 0) & 0xff;
-        if (reply[offset] !== checksum) throw new Error("Invalid AULA SC380 Pro settings checksum.");
+        if (reply[offset] !== checksum) {
+          if (offset === 1) continue;
+          throw new Error("Invalid AULA SC380 Pro settings checksum.");
+        }
       }
       return reply.slice(start, start + length);
     }
@@ -49,10 +52,11 @@ export function decodeSc380ProReply(reply: Uint8Array, command: number, argument
 }
 
 export function decodeSc380ProSettings(block: Uint8Array) {
+  if (block.length !== SC380_PRO_SETTINGS_LENGTH) throw new Error("Unexpected AULA SC380 Pro settings block.");
   const count = block[3]! & 0x0f;
   const active = (block[3]! >> 4) - 1;
   const polling = SC380_PRO_POLLING_RATES[(block[2]! & 0x0f) - 1];
-  if (block.length !== SC380_PRO_SETTINGS_LENGTH || block[0] !== SETTINGS_MARKER
+  if (block[0] !== SETTINGS_MARKER
       || (block[1]! & 0x1f) !== PAW3311_CODE || count < 1 || count > 6
       || active < 0 || active >= count || polling === undefined) {
     throw new Error("Unexpected AULA SC380 Pro settings block.");

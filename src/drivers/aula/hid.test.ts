@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decodeSc380ProSettings } from "../../aula/index.js";
-import { createSupportedClient, DEVICE_DRIVERS } from "../registry.js";
-import { AulaSc380ProHidClient } from "./hid.js";
+import { decodeSc380ProSettings } from "../../aula/index.ts";
+import { createSupportedClient, DEVICE_DRIVERS } from "../registry.ts";
+import { AulaSc380ProHidClient } from "./hid.ts";
 
 const signature = [4, 0, 0, 0, 0, 0x2e];
 

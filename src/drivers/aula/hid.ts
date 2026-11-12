@@ -13,8 +13,8 @@ import {
   decodeSc380ProSettings,
   encodeSc380ProReport,
   setSc380ProStageDpi,
-} from "../../aula/index.js";
-import type { MouseStatus } from "../mouse-types.js";
+} from "../../aula/index.ts";
+import type { MouseStatus } from "../mouse-types.ts";
 
 const NAME = "AULA SC380 Pro";
 const MODEL_SIGNATURE = [0x04, 0, 0, 0, 0, 0x2e];
@@ -56,7 +56,9 @@ export class AulaSc380ProHidClient {
   }
 
   async close(): Promise<void> {
-    if (this.device.opened) await this.device.close();
+    await this.run(async () => {
+      if (this.device.opened) await this.device.close();
+    });
   }
 
   async readStatus(): Promise<MouseStatus> {
@@ -106,7 +108,7 @@ export class AulaSc380ProHidClient {
     });
   }
 
-  setPollingRate(hz: number): Promise<void> {
+  async setPollingRate(hz: number): Promise<void> {
     const code = this.supportedPollingRates.indexOf(hz) + 1;
     if (code === 0) throw new Error("Unsupported AULA SC380 Pro polling rate.");
     return this.update((block) => { block[2] = (block[2]! & 0xf0) | code; },
