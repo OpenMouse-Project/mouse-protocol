@@ -18,6 +18,7 @@ import {
   DELUX_OEM_VENDOR_ID,
 } from "@openmouse/protocol/delux";
 import { COOLERMASTER_PRODUCT_IDS } from "@openmouse/protocol/coolermaster";
+import { KMART_PRODUCT_IDS, KMART_USAGE, KMART_USAGE_PAGE, KMART_VENDOR_ID } from "@openmouse/protocol/kmart";
 import {
   REDGEAR_X13_VENDOR_ID,
   REDGEAR_X13_PRODUCT_ID,
@@ -31,6 +32,16 @@ test("Redgear picker filter uses the protocol identity constants", () => {
     SUPPORTED_HID_FILTERS.filter((filter) => filter.vendorId === REDGEAR_X13_VENDOR_ID),
     [{ vendorId: REDGEAR_X13_VENDOR_ID, productId: REDGEAR_X13_PRODUCT_ID,
       usagePage: REDGEAR_X13_USAGE_PAGE, usage: REDGEAR_X13_USAGE }],
+  );
+});
+
+test("Kmart picker filters use the protocol identity constants", () => {
+  assert.equal(VENDOR_ID.kmart, KMART_VENDOR_ID);
+  assert.deepEqual(
+    SUPPORTED_HID_FILTERS.filter((filter) => filter.vendorId === KMART_VENDOR_ID),
+    KMART_PRODUCT_IDS.map((productId) => ({
+      vendorId: KMART_VENDOR_ID, productId, usagePage: KMART_USAGE_PAGE, usage: KMART_USAGE,
+    })),
   );
 });
 
