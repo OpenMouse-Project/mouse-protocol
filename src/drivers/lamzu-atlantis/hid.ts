@@ -648,7 +648,24 @@ export class LamzuAtlantisHidClient {
 
   async setPerformanceMode(enabled: boolean): Promise<boolean> {
     if (!this.supports("supportsPerformanceMode")) throw new Error("This mouse does not expose performance mode.");
-    return await this.setFlag(FLASH.performanceState, enabled, "performanceMode", "competition mode");
+    const turboAddress = this.turboModeAddress();
+    if (enabled || turboAddress === null) {
+      return await this.setFlag(FLASH.performanceState, enabled, "performanceMode", "competition mode");
+    }
+    // 20K scanning only runs under Competitive Mode, so switching that off
+    // takes the 20K switch with it, as the vendor configurator does, rather
+    // than leaving a stored 20K byte the mouse would act on later.
+    return await this.transaction(async () => {
+      if ((await this.readRaw(turboAddress, 1))[0] !== 0) {
+        const turbo = (await this.writeByte(turboAddress, 0)) !== 0;
+        if (turbo) throw new Error("The mouse left turbo mode on.");
+        this.patch({ turboMode: false });
+      }
+      const confirmed = (await this.writeByte(FLASH.performanceState, 0)) === 1;
+      if (confirmed) throw new Error("The mouse left competition mode on.");
+      this.patch({ performanceMode: false });
+      return false;
+    });
   }
 
   async setHyperMode(enabled: boolean): Promise<boolean> {
@@ -657,16 +674,19 @@ export class LamzuAtlantisHidClient {
   }
 
   /**
-   * 20,000 FPS sensor scanning, shown as the shared "turbo mode" switch. The
-   * vendor configurator refuses to enable it until Competitive Mode is on, and
-   * so does this, rather than flipping a second switch on the user's behalf.
+   * 20,000 FPS sensor scanning, shown as the shared "turbo mode" switch. It
+   * only runs under Competitive Mode (performance mode here), so turning it on
+   * turns that on first. Refusing instead failed the whole flash whenever both
+   * switches were staged together and turbo happened to be written first.
    */
   async setTurboMode(enabled: boolean): Promise<boolean> {
     return await this.transaction(async () => {
       const address = this.turboModeAddress();
       if (address === null) throw new Error("This mouse does not expose a turbo frame-rate mode.");
       if (enabled && (await this.readField(FLASH.performanceState, 1))[0] !== 1) {
-        throw new Error("20,000 FPS mode requires performance mode to be turned on first.");
+        const performance = (await this.writeByte(FLASH.performanceState, 1)) === 1;
+        if (!performance) throw new Error("The mouse left competition mode off, which 20,000 FPS mode needs.");
+        this.patch({ performanceMode: true });
       }
       const confirmed = (await this.writeByte(address, enabled ? 1 : 0)) === 1;
       if (confirmed !== enabled) throw new Error(`The mouse left turbo mode ${confirmed ? "on" : "off"}.`);

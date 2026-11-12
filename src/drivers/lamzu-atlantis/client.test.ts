@@ -355,23 +355,41 @@ test("a Scyrox V8 reads and writes its stages in the legacy fields, up to 30,000
   await client.close();
 });
 
-test("the 20K switch reads and writes flash 8, gated on performance mode", async () => {
+test("the 20K switch reads and writes flash 8, linked to performance mode", async () => {
   const device = new FakeAtlantis(0xf515, FLASH.sensor3955DpiValues + 6);
   device.writeField(FLASH.dpiStageCount, [1]);
   device.flash.set(lamzuAtlantisEncodeDpiStage3955(1600), FLASH.sensor3955DpiValues);
   const client = new ScyroxHidClient(device as unknown as HIDDevice);
   assert.equal((await client.readStatus()).turboMode, false, "off while the byte is zero");
 
-  // The vendor configurator disables the switch until Competitive Mode is on;
-  // the driver refuses the write rather than flipping both switches.
+  // 20K only runs under Competitive Mode, so turning it on turns that on too.
   device.writeField(FLASH.performanceState, [0]);
-  await assert.rejects(() => client.setTurboMode(true), /requires performance mode/);
-  assert.equal(device.flash[SCYROX_V8S_20K_ADDRESS], 0, "the refused write never reached the device");
-
-  device.writeField(FLASH.performanceState, [1]);
   assert.equal(await client.setTurboMode(true), true);
   assert.equal(device.flash[SCYROX_V8S_20K_ADDRESS], 1);
-  assert.equal((await client.readStatus(true)).turboMode, true);
+  let status = await client.readStatus(true);
+  assert.equal(status.turboMode, true);
+  assert.equal(status.performanceMode, true, "performance mode came on with 20K");
+
+  // Turning 20K off leaves performance mode alone.
+  assert.equal(await client.setTurboMode(false), false);
+  status = await client.readStatus(true);
+  assert.equal(status.turboMode, false);
+  assert.equal(status.performanceMode, true);
+
+  // Turning performance mode off takes 20K with it.
+  assert.equal(await client.setTurboMode(true), true);
+  assert.equal(await client.setPerformanceMode(false), false);
+  assert.equal(device.flash[SCYROX_V8S_20K_ADDRESS], 0);
+  status = await client.readStatus(true);
+  assert.equal(status.turboMode, false, "20K went off with performance mode");
+  assert.equal(status.performanceMode, false);
+
+  // Both on in either order, as a staged flash might write them.
+  assert.equal(await client.setPerformanceMode(true), true);
+  assert.equal(await client.setTurboMode(true), true);
+  status = await client.readStatus(true);
+  assert.equal(status.turboMode, true);
+  assert.equal(status.performanceMode, true);
   await client.close();
 });
 
