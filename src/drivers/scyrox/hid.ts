@@ -86,10 +86,11 @@ export class ScyroxHidClient extends LamzuAtlantisHidClient {
 
   /**
    * The 3950 entries' extra writes (the lift-off stop table, angle tuning,
-   * the 30 ms debounce ceiling and Restore) were verified on a V8 only, and a
-   * V6 reads different values in the angle fields, so they are offered only
-   * once the handshake has named the mouse a V8. A wired mouse that reports
-   * the wired 8K type gets the 8K rate list instead of the 1K default.
+   * the 30 ms debounce ceiling and Restore) were tested on a V8 and a V6, so
+   * they are offered once the handshake has named the mouse either model. A
+   * mouse that has not answered yet gets the shared controls only. A wired
+   * mouse that reports the wired 8K type gets the 8K rate list instead of the
+   * 1K default.
    */
   protected override product(): LamzuAtlantisProduct | undefined {
     const catalog = super.product();
@@ -97,7 +98,7 @@ export class ScyroxHidClient extends LamzuAtlantisHidClient {
     const rates = !catalog.wireless && this.identity?.type === SCYROX_TYPE_WIRED_8K
       ? { pollingRates: SCYROX_POLLING_RATES_8K }
       : {};
-    if (this.identifiedModel() === "V8") return { ...catalog, ...rates };
+    if (this.identifiedModel() !== null) return { ...catalog, ...rates };
     const { liftOffStopCodes: _stops, maxDebounceMs: _debounce, ...shared } = catalog;
     return { ...shared, ...rates, supportsAngleTuning: false, supportsFactoryReset: false };
   }

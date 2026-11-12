@@ -333,12 +333,12 @@ test("a V6 asleep on the first read is still named once it wakes", async () => {
   const client = new EagerScyroxClient(device as unknown as HIDDevice);
   let status = await client.readStatus();
   assert.equal(status.name, "Scyrox V8", "the catalog name while the mouse is silent");
-  assert.equal(status.angleTuning, undefined, "no V8-only control before the mouse is named");
+  assert.equal(status.supportedLiftOffDistances, undefined, "no 3950 extras before the mouse is named");
 
   device.handshakeSilent = false;
   status = await client.readStatus();
   assert.equal(status.name, "Scyrox V6", "asked again after waking");
-  assert.equal(status.angleTuning, undefined, "a V6 gets no V8-only control either");
+  assert.deepEqual(status.supportedLiftOffDistances, ["Low", "Medium", "High"], "the 3950 extras once named");
   const asked = handshakes(device);
   await client.readStatus();
   assert.equal(handshakes(device), asked, "a reply settles it for the connection");
@@ -368,27 +368,28 @@ test("a refused handshake is asked again on a later read", async () => {
   await client.close();
 });
 
-test("the V8-only writes wait for the handshake to name a V8", async () => {
-  for (const mid of [null, 0x02] as const) {
+test("the 3950 extras wait for the handshake to name a V8 or a V6", async () => {
+  const unnamed = new FakeAtlantis(0xf5f7);
+  const client = new ScyroxHidClient(unnamed as unknown as HIDDevice);
+  const status = await client.readStatus();
+  assert.equal(status.supportedLiftOffDistances, undefined);
+  assert.equal(client.getDebounceMaxMs(), 15);
+  await assert.rejects(() => client.setLiftOffDistance("Low"));
+  await assert.rejects(() => client.setAngleTuning(5), /angle tuning/);
+  await assert.rejects(() => client.setDebounceTime(30), /between 0 and 15/);
+  await assert.rejects(() => client.factoryReset());
+  await client.close();
+
+  for (const mid of [0x01, 0x02]) {
     const device = new FakeAtlantis(0xf5f7);
     device.handshakeMid = mid;
-    const client = new ScyroxHidClient(device as unknown as HIDDevice);
-    const status = await client.readStatus();
-    assert.equal(status.supportedLiftOffDistances, undefined);
-    assert.equal(client.getDebounceMaxMs(), 15);
-    await assert.rejects(() => client.setLiftOffDistance("Low"));
-    await assert.rejects(() => client.setAngleTuning(5), /angle tuning/);
-    await assert.rejects(() => client.setDebounceTime(30), /between 0 and 15/);
-    await assert.rejects(() => client.factoryReset());
-    await client.close();
+    const named = new ScyroxHidClient(device as unknown as HIDDevice);
+    assert.deepEqual((await named.readStatus()).supportedLiftOffDistances, ["Low", "Medium", "High"]);
+    assert.equal(named.getDebounceMaxMs(), 30);
+    assert.equal(await named.setDebounceTime(30), 30);
+    assert.equal(await named.setLiftOffDistance("High"), "High");
+    await named.close();
   }
-  const device = new FakeAtlantis(0xf5f7);
-  device.handshakeMid = 0x01;
-  const client = new ScyroxHidClient(device as unknown as HIDDevice);
-  await client.readStatus();
-  assert.equal(client.getDebounceMaxMs(), 30);
-  assert.equal(await client.setDebounceTime(30), 30);
-  await client.close();
 });
 
 test("a wired Scyrox reporting the wired 8K type offers the 8K rates", async () => {

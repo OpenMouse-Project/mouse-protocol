@@ -191,7 +191,7 @@ test("the V8 catalog carries the configurator's 3950 controls", async () => {
     // Its 3950 lift-off codes (3, 1, 2 for 0.7, 1 and 2 mm) fit neither the
     // two-stop write nor the 3955 scale, so they get a stop table. Key
     // Response Time goes to 30 ms. The client offers these only once the
-    // handshake names a V8 (see the Atlantis client tests).
+    // handshake names a V8 or V6 (see the Atlantis client tests).
     assert.equal(product.liftOffMillimetres, undefined);
     assert.deepEqual(product.liftOffStopCodes, { Low: 3, Medium: 1, High: 2 });
     assert.equal(product.supportsAngleTuning, true);

@@ -66,19 +66,20 @@ MID. `0xF5F4` (sensor unknown) is not claimed.
   reporting type 3 (wired 8K) is offered the 8K rate list instead of the
   wired 1K default.
 
-### Writes are gated on the V8
+### Writes wait for the handshake
 
-The 3950 entries' extra writes (the lift-off stop table, angle tuning,
-the 30 ms Key Response Time and Restore) were verified on a V8 only. The V6
-reads different values in the angle fields at 189 and 191, so a write there
-is unverified on a V6. The client therefore offers these controls only after
-the handshake has named the mouse a V8. A V6, and a mouse that has not
-answered yet, gets the shared Atlantis controls only.
+The 3950 entries' extra writes (the lift-off stop table, angle tuning, the
+30 ms Key Response Time and Restore) were tested on a V8 and a V6. The
+client offers them once the handshake has named the mouse either model. A
+mouse that has not answered yet gets the shared Atlantis controls only.
 
-### V6 on hardware (read-only)
+### V6 on hardware
 
-No write has been sent to a V6. What was verified is identification and a
-full read. A Scyrox V6 on the "SCYROX 8K Dongle" (`0x3554:0xf5f7`, release `0x0216`,
+The V6 was first checked read-only: identification and a full read. It was
+then used and tested with the same controls as the V8 (see "Verified writes
+on the V8 and V6"), which worked as they do on the V8.
+
+The read-only check used a Scyrox V6 on the "SCYROX 8K Dongle" (`0x3554:0xf5f7`, release `0x0216`,
 dongle version `02 16`), read through node-hid on Windows with a read-only
 build of `ScyroxHidClient` that refuses every command but 0x01, 0x03, 0x04,
 0x08, 0x0e, 0x12 and 0x1d:
@@ -191,10 +192,10 @@ differences, which the catalog follows:
   - Other Atlantis products keep the two switches separate.
 
 The lift-off stop table, angle tuning, the 30 ms ceiling and Restore are
-offered only once the handshake names the mouse a V8 (see "Writes are gated
-on the V8").
+offered only once the handshake names the mouse a V8 or a V6 (see "Writes
+wait for the handshake").
 
-## Verified writes on the V8
+## Verified writes on the V8 and V6
 
 On the V8 behind its 8K dongle, each was written, read back and restored:
 
@@ -204,14 +205,16 @@ On the V8 behind its 8K dongle, each was written, read back and restored:
 - the angle
 - debounce
 
+The V6 behind the 8K dongle was used and tested with the same controls, and
+they worked as on the V8.
+
 ## Not yet verified
 
 - Sleep, the 20K switch and its link to performance mode, profiles, buttons
-  and Restore have not been written to a V8.
+  and Restore have not been written to a V8 or V6.
 - The sleep reading: the flash held 180 (30 minutes), while the configurator
   screenshot showed "1min", likely its default before the device read.
-- The V6 on its cable (expected `0xf5f6`) and any write to a V6. V6 writes
-  beyond the shared Atlantis controls stay off until one is verified.
+- The V6 on its cable (expected `0xf5f6`).
 - A wired 8K Scyrox (handshake type 3); the rate list it gets comes from the
   configurator's type table.
 - What `0xF5F4` is. The configurator lists it as a wireless mouse id.
