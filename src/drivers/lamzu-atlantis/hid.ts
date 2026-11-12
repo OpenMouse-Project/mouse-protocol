@@ -58,6 +58,13 @@ const ANGLE_TUNING_MAX_DEGREES = 30;
 
 type LiftOffDistance = NonNullable<MouseStatus["liftOffDistance"]>;
 
+/** One side of a linked pair of one-byte flags (turbo and performance mode). */
+interface LinkedFlag {
+  address: number;
+  field: "turboMode" | "performanceMode";
+  label: string;
+}
+
 /**
  * Lamzu's Atlantis generation (0x3554), which speaks CompX's report-8
  * interrupt protocol rather than the feature-report page/command protocol the
@@ -112,7 +119,7 @@ export class LamzuAtlantisHidClient {
       && LamzuAtlantisHidClient.hasConfigCollection(device);
   }
 
-  private product(): LamzuAtlantisProduct | undefined {
+  protected product(): LamzuAtlantisProduct | undefined {
     return this.productOverride ?? lamzuAtlantisProduct(this.device.vendorId, this.device.productId);
   }
 
@@ -165,6 +172,17 @@ export class LamzuAtlantisHidClient {
    */
   protected turboModeAddress(): number | null {
     return null;
+  }
+
+  /**
+   * Whether turbo and performance mode move together: turbo on turns
+   * performance mode on first, and performance mode off turns turbo off
+   * first. Off by default, where turbo on without performance mode is refused
+   * and performance mode is written on its own; a subclass opts in only where
+   * the vendor's own tool links the two.
+   */
+  protected linksTurboToPerformanceMode(): boolean {
+    return false;
   }
 
   protected minimumDpi(): number {
@@ -293,7 +311,7 @@ export class LamzuAtlantisHidClient {
   }
 
   getDebounceMaxMs(): number {
-    return DEBOUNCE_MAX_MS;
+    return this.debounceMaxMs();
   }
 
   getSleepOptions(): readonly number[] {
@@ -321,6 +339,7 @@ export class LamzuAtlantisHidClient {
     return await this.transaction(async () => {
       if (live && this.lastStatus) return await this.readLiveStatus(this.lastStatus);
 
+      await this.identify();
       const battery = lamzuAtlantisDecodeBattery(await this.request(COMMAND.batteryLevel));
       const profileCount = this.onboardProfileCount();
       const activeProfile = profileCount > 0 ? (await this.request(COMMAND.getCurrentConfig))[0] ?? 0 : null;
@@ -351,16 +370,20 @@ export class LamzuAtlantisHidClient {
       }
 
       const liftOffMillimetres = this.product()?.liftOffMillimetres;
-      const liftOffRaw = this.supports("supportsLiftOffDistance") || liftOffMillimetres
+      const liftOffStopCodes = this.product()?.liftOffStopCodes;
+      const liftOffRaw = this.supports("supportsLiftOffDistance") || liftOffMillimetres || liftOffStopCodes
         ? (await this.readField(FLASH.liftOffDistance, 1))[0] ?? 0
         : null;
       const liftOffScale = liftOffMillimetres && liftOffRaw !== null
         ? lamzuAtlantisLiftOffScale(liftOffRaw, liftOffMillimetres)
         : undefined;
-      // A scale product's byte is a height code, not one of Lamzu's two stops.
-      const liftOffDistance = liftOffScale
-        ? lamzuAtlantisNearestLiftOffStop(liftOffScale.millimetres)
-        : liftOffRaw === null || liftOffMillimetres ? null : lamzuAtlantisDecodeLiftOffDistance(liftOffRaw);
+      // A scale product's byte is a height code, not one of Lamzu's two stops,
+      // and a stop-code product's byte is whatever its own table says.
+      const liftOffDistance = liftOffStopCodes
+        ? this.liftOffStopForCode(liftOffRaw)
+        : liftOffScale
+          ? lamzuAtlantisNearestLiftOffStop(liftOffScale.millimetres)
+          : liftOffRaw === null || liftOffMillimetres ? null : lamzuAtlantisDecodeLiftOffDistance(liftOffRaw);
       const debounceMs = (await this.readField(FLASH.debounceTime, 1))[0] ?? 0;
       const sleepRaw = this.supports("supportsSleepTimeout")
         ? (await this.readField(FLASH.sleepTime, 1))[0] ?? 0
@@ -428,6 +451,9 @@ export class LamzuAtlantisHidClient {
         ...(sleepRaw !== null ? { sleepTimeout: sleepRaw > 0 ? sleepRaw * TIMER_STEP_SECONDS : null } : {}),
         liftOffDistance,
         ...(liftOffScale !== undefined ? { liftOffScale } : {}),
+        ...(liftOffStopCodes
+          ? { supportedLiftOffDistances: (["Low", "Medium", "High"] as const).filter((stop) => liftOffStopCodes[stop] !== undefined) }
+          : {}),
         ...(motionSync !== undefined ? { motionSync } : {}),
         ...(angleSnapping !== undefined ? { angleSnapping } : {}),
         ...(rippleControl !== undefined ? { rippleControl } : {}),
@@ -484,8 +510,31 @@ export class LamzuAtlantisHidClient {
     });
   }
 
+  private debounceMaxMs(): number {
+    return this.product()?.maxDebounceMs ?? DEBOUNCE_MAX_MS;
+  }
+
+  private liftOffStopForCode(code: number | null): LiftOffDistance | null {
+    const table = this.product()?.liftOffStopCodes;
+    if (!table || code === null) return null;
+    return (["Low", "Medium", "High"] as const).find((stop) => table[stop] === code) ?? null;
+  }
+
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
     return await this.transaction(async () => {
+      const stopCodes = this.product()?.liftOffStopCodes;
+      if (stopCodes) {
+        const code = stopCodes[value as "Low" | "Medium" | "High"];
+        if (code === undefined) {
+          throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
+        }
+        const confirmed = this.liftOffStopForCode(await this.writeByte(FLASH.liftOffDistance, code));
+        if (confirmed !== value) {
+          throw new Error(`The mouse kept a ${String(confirmed).toLowerCase()} lift-off distance instead of ${value.toLowerCase()}.`);
+        }
+        this.patch({ liftOffDistance: confirmed });
+        return confirmed;
+      }
       if (!this.supports("supportsLiftOffDistance")) {
         throw new Error("This mouse does not expose a configurable lift-off distance.");
       }
@@ -560,8 +609,9 @@ export class LamzuAtlantisHidClient {
 
   async setDebounceTime(milliseconds: number): Promise<number> {
     return await this.transaction(async () => {
-      if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > DEBOUNCE_MAX_MS) {
-        throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${DEBOUNCE_MAX_MS}.`);
+      const max = this.debounceMaxMs();
+      if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > max) {
+        throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${max}.`);
       }
       const confirmed = await this.writeByte(FLASH.debounceTime, milliseconds);
       if (confirmed !== milliseconds) {
@@ -616,7 +666,21 @@ export class LamzuAtlantisHidClient {
 
   async setPerformanceMode(enabled: boolean): Promise<boolean> {
     if (!this.supports("supportsPerformanceMode")) throw new Error("This mouse does not expose performance mode.");
-    return await this.setFlag(FLASH.performanceState, enabled, "performanceMode", "competition mode");
+    const turboAddress = this.turboModeAddress();
+    if (enabled || turboAddress === null || !this.linksTurboToPerformanceMode()) {
+      return await this.setFlag(FLASH.performanceState, enabled, "performanceMode", "competition mode");
+    }
+    // Linked: turbo only runs under performance mode, so switching that off
+    // takes turbo with it rather than leaving a stored turbo byte the mouse
+    // would act on later.
+    return await this.transaction(async () => {
+      await this.writeLinkedFlags(
+        { address: turboAddress, field: "turboMode", label: "turbo mode" },
+        { address: FLASH.performanceState, field: "performanceMode", label: "competition mode" },
+        false,
+      );
+      return false;
+    });
   }
 
   async setHyperMode(enabled: boolean): Promise<boolean> {
@@ -625,16 +689,25 @@ export class LamzuAtlantisHidClient {
   }
 
   /**
-   * 20,000 FPS sensor scanning, shown as the shared "turbo mode" switch. The
-   * vendor configurator refuses to enable it until Competitive Mode is on, and
-   * so does this, rather than flipping a second switch on the user's behalf.
+   * 20,000 FPS sensor scanning, shown as the shared "turbo mode" switch. It
+   * only runs under performance mode. Where the two are linked, turning turbo
+   * on turns performance mode on first; otherwise it is refused until
+   * performance mode is on.
    */
   async setTurboMode(enabled: boolean): Promise<boolean> {
     return await this.transaction(async () => {
       const address = this.turboModeAddress();
       if (address === null) throw new Error("This mouse does not expose a turbo frame-rate mode.");
       if (enabled && (await this.readField(FLASH.performanceState, 1))[0] !== 1) {
-        throw new Error("20,000 FPS mode requires performance mode to be turned on first.");
+        if (!this.linksTurboToPerformanceMode()) {
+          throw new Error("20,000 FPS mode requires performance mode to be turned on first.");
+        }
+        await this.writeLinkedFlags(
+          { address: FLASH.performanceState, field: "performanceMode", label: "competition mode" },
+          { address, field: "turboMode", label: "turbo mode" },
+          true,
+        );
+        return true;
       }
       const confirmed = (await this.writeByte(address, enabled ? 1 : 0)) === 1;
       if (confirmed !== enabled) throw new Error(`The mouse left turbo mode ${confirmed ? "on" : "off"}.`);
@@ -815,6 +888,41 @@ export class LamzuAtlantisHidClient {
   }
 
   /**
+   * Sets two linked one-byte flags to `value`, `first` then `second`, as one
+   * change. Each write is read back. If `second` does not take, `first` is put
+   * back to the byte it held before, so a failure never leaves one switch
+   * changed without the other. The caller holds the transaction.
+   */
+  private async writeLinkedFlags(first: LinkedFlag, second: LinkedFlag, value: boolean): Promise<void> {
+    const target = value ? 1 : 0;
+    const state = value ? "off" : "on";
+    const before = (await this.readRaw(first.address, 1))[0] ?? 0;
+    if ((await this.writeByte(first.address, target)) !== target) {
+      throw new Error(`The mouse left ${first.label} ${state}.`);
+    }
+    let secondTook = false;
+    let failure: unknown = null;
+    try {
+      secondTook = (await this.writeByte(second.address, target)) === target;
+    } catch (error) {
+      failure = error;
+    }
+    if (!secondTook) {
+      let restored = true;
+      try {
+        restored = (await this.writeByte(first.address, before)) === before;
+      } catch {
+        restored = false;
+      }
+      const cause = failure instanceof Error ? ` (${failure.message})` : "";
+      throw new Error(restored
+        ? `The mouse left ${second.label} ${state}${cause}, so ${first.label} was put back.`
+        : `The mouse left ${second.label} ${state}${cause}, and ${first.label} could not be put back.`);
+    }
+    this.patch({ [first.field]: value, [second.field]: value });
+  }
+
+  /**
    * Both angle fields must carry their seal, which is what the vendor
    * configurator checks before it shows the slider at all, so a firmware
    * without them reads as unsupported rather than as a 0 degree angle. The
@@ -891,8 +999,15 @@ export class LamzuAtlantisHidClient {
     return await run;
   }
 
+  /**
+   * Runs at the start of every full status read, inside the transaction and
+   * before the name is computed, so a subclass can tell models apart that share
+   * a product id. The default has nothing to ask.
+   */
+  protected async identify(): Promise<void> {}
+
   /** Unqueued: the caller already holds the transaction lock. */
-  private async request(command: number, address = 0, payload: readonly number[] = []): Promise<Uint8Array> {
+  protected async request(command: number, address = 0, payload: readonly number[] = []): Promise<Uint8Array> {
     return await this.exchange(command, address, payload);
   }
 

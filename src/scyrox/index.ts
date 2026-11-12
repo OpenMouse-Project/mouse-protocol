@@ -28,8 +28,61 @@ export const SCYROX_VENDOR_ID = 0x3554;
 export const SCYROX_V8S_CID = 0x3e;
 export const SCYROX_V8S_MID = 0x05;
 
+/**
+ * Every Scyrox reports CID 62 (0x3e); the model is the MID, not the product
+ * id. The vendor configurator (S-center 3.1.0, cfg.json) groups the MIDs by
+ * model and gives the V8 and the V6 the same 3950 sensor, 30,000 DPI ceiling
+ * and controls, so a V6 enumerates on the V8's product ids and only its name
+ * differs. Hardware: a wired V8 (0xf5f6, firmware v2.20) answered CID 0x3e,
+ * MID 0x01, type 0x02 (wired).
+ */
+export const SCYROX_CID = 0x3e;
+export const SCYROX_V8_MIDS: readonly number[] = [1, 10, 11];
+export const SCYROX_V6_MIDS: readonly number[] = [2, 12, 13];
+
+/**
+ * The four key bytes this package sends in the handshake. The configurator
+ * sends random ones, but the mouse treats them as an opaque key, so fixed
+ * bytes keep captured traces reproducible.
+ */
+export const SCYROX_HANDSHAKE_KEY: readonly number[] = [0x4f, 0x4d, 0x53, 0x01];
+
+/**
+ * The command 0x01 handshake payload as the configurator sends it: four key
+ * bytes, then four zero bytes. A bare 0x01 is refused with status 1.
+ */
+export function scyroxEncodeHandshake(random: readonly number[] = [0, 0, 0, 0]): number[] {
+  return [...random.slice(0, 4).map((value) => value & 0xff), 0, 0, 0, 0];
+}
+
+export interface ScyroxIdentity {
+  cid: number;
+  mid: number;
+  /** Connection type: 0/1/4/5 wireless at 1K/4K/2K/8K, 2/3 wired at 1K/8K. */
+  type: number;
+}
+
+/** Handshake type 3: a wired mouse with an 8K ceiling, per the configurator. */
+export const SCYROX_TYPE_WIRED_8K = 3;
+
+/**
+ * Reads CID, MID and type from the handshake reply's payload (bytes 9-11 of
+ * the raw report, which is payload offsets 4-6).
+ */
+export function scyroxDecodeHandshake(payload: Uint8Array): ScyroxIdentity | null {
+  if (payload.length < 7) return null;
+  return { cid: payload[4]!, mid: payload[5]!, type: payload[6]! };
+}
+
+/** The model a MID names, for the 3950 generation that shares product ids. */
+export function scyroxModelForMid(mid: number): "V8" | "V6" | undefined {
+  if (SCYROX_V8_MIDS.includes(mid)) return "V8";
+  if (SCYROX_V6_MIDS.includes(mid)) return "V6";
+  return undefined;
+}
+
 /** Product ids this brand owns on CompX's shared vendor id. */
-export const SCYROX_PRODUCT_IDS: readonly number[] = [0xf515, 0xf517, 0xf5f7];
+export const SCYROX_PRODUCT_IDS: readonly number[] = [0xf515, 0xf517, 0xf5f6, 0xf5f7];
 
 /**
  * The "20K" switch: 20,000 FPS sensor scanning, which the vendor configurator
@@ -56,6 +109,25 @@ export type ScyroxProduct = LamzuAtlantisProduct;
  * byte table is the configurator's own encoder.
  */
 const RATES_V8S = [125, 250, 500, 1000, 2000, 4000, 8000] as const;
+
+/** Every rate the CompX table encodes, up to 8,000 Hz. */
+export const SCYROX_POLLING_RATES_8K: readonly number[] = RATES_V8S;
+
+/**
+ * The V8 and V6 on their cable report handshake type 2, which the vendor
+ * configurator treats as a 1,000 Hz ceiling, and it offers nothing above
+ * 1,000 Hz there. This is the default until the handshake answers; a wired
+ * mouse that reports type 3 (wired 8K) gets SCYROX_POLLING_RATES_8K instead.
+ */
+const RATES_V8_WIRED = [125, 250, 500, 1000] as const;
+
+/**
+ * The 3950's three lift-off heights. The configurator's English strings list
+ * them as code 3 = 0.7 mm, 1 = 1 mm and 2 = 2 mm (mouse.sensor.LODOptions,
+ * "3950"), so they map onto the shared stops low to high in that order. A
+ * V8 read code 3 and a V6 read code 1.
+ */
+export const SCYROX_3950_LIFT_OFF_STOP_CODES = { Low: 3, Medium: 1, High: 2 } as const;
 
 /**
  * Both transports speak CompX's own rate bytes (`rateFamily: "pulsar"`): the
@@ -118,6 +190,32 @@ export const SCYROX_PRODUCTS: ReadonlyMap<number, ScyroxProduct> = new Map([
     supportsFactoryReset: true,
     mirrorSleepToPerformanceTime: true,
   }],
+  // The V8 on its cable: "SCYROX V8", 0x3554:0xf5f6, release 0x0220. Same
+  // mouse and sensor as behind the 8K dongle below, so the same fields.
+  [0xf5f6, {
+    brand: "Scyrox",
+    model: "V8",
+    wireless: false,
+    pollingRates: RATES_V8_WIRED,
+    rateFamily: "pulsar",
+    dpiLayout: "legacy",
+    verified: true,
+    minDpi: 50,
+    maxDpi: 30000,
+    dpiStep: 50,
+    maxDpiStages: 5,
+    supportsLiftOffDistance: false,
+    liftOffStopCodes: SCYROX_3950_LIFT_OFF_STOP_CODES,
+    // Mouse Angle Mode: flash 189 and 191 read sealed on a V8 (angle 0, on)
+    // and a V6 (angle 0, off), and the configurator shows the slider.
+    supportsAngleTuning: true,
+    // The configurator's Restore button, command 0x09, as on the V8S.
+    supportsFactoryReset: true,
+    // The configurator's Key Response Time goes to 30 ms on the 3950 entries.
+    maxDebounceMs: 30,
+    supportsHyperMode: false,
+    mirrorSleepToPerformanceTime: true,
+  }],
   // The V8's "SCYROX 8K Dongle". The vendor configurator offers the V8S's
   // seven rates for it, and the mouse held 0x10 while the configurator showed
   // 2,000 Hz, so it shares the CompX rate bytes.
@@ -141,9 +239,17 @@ export const SCYROX_PRODUCTS: ReadonlyMap<number, ScyroxProduct> = new Map([
     dpiStep: 50,
     maxDpiStages: 5,
     // The 3950 codes its three heights 3, 1 and 2 (0.7, 1 and 2 mm), which
-    // neither Lamzu's two stops nor a 1-to-n scale describes, so lift-off
-    // stays out until the byte has its own decoder.
+    // neither Lamzu's two stops nor a 1-to-n scale describes, so they get an
+    // explicit stop table.
     supportsLiftOffDistance: false,
+    liftOffStopCodes: SCYROX_3950_LIFT_OFF_STOP_CODES,
+    // Mouse Angle Mode: flash 189 and 191 read sealed on a V8 (angle 0, on)
+    // and a V6 (angle 0, off), and the configurator shows the slider.
+    supportsAngleTuning: true,
+    // The configurator's Restore button, command 0x09, as on the V8S.
+    supportsFactoryReset: true,
+    // The configurator's Key Response Time goes to 30 ms on the 3950 entries.
+    maxDebounceMs: 30,
     supportsHyperMode: false,
     // Flash 173 and 183 both held 180 (30 minutes in the configurator's
     // table), as its sleep setter writes them.
