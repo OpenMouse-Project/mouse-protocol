@@ -68,7 +68,7 @@ export interface KmartStatus {
 }
 
 /** Builds one request payload (report ID excluded). */
-export function kmartRequest(command: number, sequence: number, data: readonly number[] = [], write = false): Uint8Array {
+export function kmartRequest(command: number, sequence: number, data: readonly number[] = [], write = false): Uint8Array<ArrayBuffer> {
   if (!Number.isInteger(command) || command < 1 || command > 255) throw new RangeError("Invalid Kmart command.");
   if (data.length > KMART_MAX_DATA) throw new RangeError("Kmart payload too long.");
   const bytes = new Uint8Array(KMART_REPORT_SIZE);
@@ -109,7 +109,8 @@ export function kmartDecodeStatus(source: DataView | Uint8Array): KmartStatus {
   const bytes = kmartPayload(source);
   if (bytes.length < 21 || bytes[1] !== KMART_COMMAND.status) throw new Error("Invalid Kmart status reply.");
   const tag = String.fromCharCode(bytes[7]!, bytes[8]!, bytes[9]!, bytes[10]!);
-  if (tag !== "M361") throw new Error("Kmart status reply has an unknown signature.");
+  // Only the "M" prefix is checked so other firmware revisions still decode.
+  if (tag[0] !== "M") throw new Error("Kmart status reply has an unknown signature.");
   const stageByte = bytes[15]!;
   return {
     linked: bytes[2] === 0x00 && bytes[20] === 0x01,
@@ -134,14 +135,19 @@ export function kmartPmw3325DpiCode(dpi: number): number {
  * Data bytes for command 0x05: (active+1)<<4 | enabled count, enabled-stage
  * mask, then six little-endian stage codes and four zero bytes.
  */
-export function kmartDpiStagesData(stagesDpi: readonly number[], activeStage: number): number[] {
+export function kmartDpiStagesData(
+  stagesDpi: readonly number[], activeStage: number, enabledCount = stagesDpi.length,
+): number[] {
   if (stagesDpi.length < 1 || stagesDpi.length > KMART_DPI_STAGE_COUNT) throw new RangeError("Kmart supports 1–6 DPI stages.");
-  if (!Number.isInteger(activeStage) || activeStage < 0 || activeStage >= stagesDpi.length) {
+  if (!Number.isInteger(enabledCount) || enabledCount < 1 || enabledCount > stagesDpi.length) {
+    throw new RangeError("Enabled DPI stage count is out of range.");
+  }
+  if (!Number.isInteger(activeStage) || activeStage < 0 || activeStage >= enabledCount) {
     throw new RangeError("Active DPI stage is out of range.");
   }
   const data = new Array<number>(18).fill(0);
-  data[0] = ((activeStage + 1) << 4) | stagesDpi.length;
-  data[1] = (1 << stagesDpi.length) - 1;
+  data[0] = ((activeStage + 1) << 4) | enabledCount;
+  data[1] = (1 << enabledCount) - 1;
   stagesDpi.forEach((dpi, index) => {
     const code = kmartPmw3325DpiCode(dpi);
     data[2 + index * 2] = code & 0xff;

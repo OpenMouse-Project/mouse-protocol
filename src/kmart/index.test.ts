@@ -42,6 +42,9 @@ test("Kmart decodes a captured status reply with or without the report ID", () =
   const corrupt = CAPTURED_STATUS.slice();
   corrupt[8] = 0;
   assert.throws(() => kmartDecodeStatus(corrupt));
+  const newer = CAPTURED_STATUS.slice();
+  newer[11] = 0x32;
+  assert.equal(kmartDecodeStatus(newer).firmwareTag, "M3622");
 });
 
 test("Kmart DPI stages encode the bytes verified on hardware", () => {
@@ -54,6 +57,8 @@ test("Kmart DPI stages encode the bytes verified on hardware", () => {
   );
   assert.throws(() => kmartPmw3325DpiCode(450), RangeError);
   assert.throws(() => kmartDpiStagesData([400], 1), RangeError);
+  assert.deepEqual(kmartDpiStagesData([400, 800, 1600, 2400, 3200, 6400], 1, 4).slice(0, 2), [0x24, 0x0f]);
+  assert.throws(() => kmartDpiStagesData([400, 800], 1, 1), RangeError);
 });
 
 test("Kmart polling uses report intervals in milliseconds", () => {

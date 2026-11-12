@@ -10,6 +10,7 @@ const PRODUCT_IDS = new Set<number>(KMART_PRODUCT_IDS);
 /** The configurator waits 10 ms before reading a reply and 60 ms after a write. */
 const READ_PAUSE_MS = 10;
 const WRITE_PAUSE_MS = 60;
+const STATUS_ATTEMPTS = 3;
 /** The mouse keeps no readable copy of its DPI ladder, so the driver remembers the last one it wrote. */
 const DEFAULT_STAGES = [400, 800, 1600, 2400, 3200, 6400];
 
@@ -49,12 +50,16 @@ export class KmartHidClient {
     if (!this.device.opened) await this.device.open();
   }
 
-  async close(): Promise<void> { if (this.device.opened) await this.device.close(); }
+  async close(): Promise<void> {
+    await this.run(async () => { if (this.device.opened) await this.device.close(); });
+  }
   async startNotifications(_onChange?: () => void): Promise<boolean> { return false; }
 
   async readStatus(): Promise<MouseStatus> {
     return this.run(async () => {
       const status = await this.queryStatus();
+      // MouseStatus has no unknown polling rate, so fail rather than invent 125 Hz.
+      if (status.pollingRateHz === null) throw new Error("Kmart reported an unrecognised polling interval.");
       const receiver = this.device.productId === KMART_RECEIVER_PRODUCT_ID;
       const stage = Math.min(status.activeStage, this.stages.length - 1);
       return {
@@ -63,7 +68,7 @@ export class KmartHidClient {
         batteryPercent: status.batteryPercent,
         batteryState: status.chargeState === 1 ? "Charging" : status.chargeState === 2 ? "Full" : "Discharging",
         dpi: this.stages[stage]!,
-        pollingRateHz: status.pollingRateHz ?? 125,
+        pollingRateHz: status.pollingRateHz,
         supportedPollingRates: this.getSupportedPollingRates(),
         activeProfile: null,
         connectionType: receiver ? "Wireless" : "Wired",
@@ -90,10 +95,13 @@ export class KmartHidClient {
       if (status.sensor !== KMART_SENSOR_PMW3325) {
         throw new Error(`Kmart sensor 0x${status.sensor.toString(16)} has no verified DPI table.`);
       }
-      const stage = Math.min(status.activeStage, KMART_DPI_STAGE_COUNT - 1);
+      // Keep the device's own enabled-stage count instead of forcing all six on.
+      const enabled = status.enabledStageCount >= 1 && status.enabledStageCount <= KMART_DPI_STAGE_COUNT
+        ? status.enabledStageCount : KMART_DPI_STAGE_COUNT;
+      const stage = Math.min(status.activeStage, enabled - 1);
       const stages = [...this.stages];
       stages[stage] = dpi;
-      await this.write(KMART_COMMAND.dpiStages, kmartDpiStagesData(stages, stage));
+      await this.write(KMART_COMMAND.dpiStages, kmartDpiStagesData(stages, stage, enabled));
       this.stages = stages;
       return dpi;
     });
@@ -112,20 +120,27 @@ export class KmartHidClient {
 
   private async requireLinked(): Promise<KmartStatus> {
     const status = await this.queryStatus();
-    if (!status.linked) throw new Error("The mouse is asleep. Move it, then try again.");
+    // The wired PID's link byte is unverified, so only the receiver is gated on it.
+    if (this.device.productId === KMART_RECEIVER_PRODUCT_ID && !status.linked) throw new Error("The mouse is asleep. Move it, then try again.");
     return status;
   }
 
   private async queryStatus(): Promise<KmartStatus> {
     await this.open();
-    await this.device.sendFeatureReport(KMART_REPORT_ID, new Uint8Array(kmartRequest(KMART_COMMAND.status, this.nextSequence())).buffer);
-    await sleep(READ_PAUSE_MS);
-    return kmartDecodeStatus(kmartPayload(await this.device.receiveFeatureReport(KMART_REPORT_ID)));
+    for (let attempt = 0; attempt < STATUS_ATTEMPTS; attempt += 1) {
+      const sequence = this.nextSequence();
+      await this.device.sendFeatureReport(KMART_REPORT_ID, kmartRequest(KMART_COMMAND.status, sequence));
+      await sleep(READ_PAUSE_MS);
+      const payload = kmartPayload(await this.device.receiveFeatureReport(KMART_REPORT_ID));
+      // A reply that does not echo our sequence byte belongs to an earlier request.
+      if (payload[3] === sequence) return kmartDecodeStatus(payload);
+    }
+    throw new Error("Kmart status reply did not match the request.");
   }
 
   private async write(command: number, data: number[]): Promise<void> {
     await this.open();
-    await this.device.sendFeatureReport(KMART_REPORT_ID, new Uint8Array(kmartRequest(command, this.nextSequence(), data, true)).buffer);
+    await this.device.sendFeatureReport(KMART_REPORT_ID, kmartRequest(command, this.nextSequence(), data, true));
     await sleep(WRITE_PAUSE_MS);
   }
 
