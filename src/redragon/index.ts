@@ -1,5 +1,6 @@
 import { REDRAGON_M612_MODEL } from "./m612.js";
 import { REDRAGON_M724_MODEL } from "./m724.js";
+import { REDRAGON_M901_MODEL } from "./m901.js";
 import type { RedragonModel } from "./holtek.js";
 
 export interface RedragonProduct {
@@ -31,6 +32,17 @@ export const REDRAGON_PRODUCTS: ReadonlyMap<number, RedragonProduct> = new Map([
     stages: 5,
     maxDpi: 8000,
   }],
+  // M901-K-2 "Perdition4". The generic Holtek codec table tops out at 12400
+  // DPI; the product page's higher presets come from the vendor app, which
+  // this protocol's captured range does not cover yet.
+  [REDRAGON_M901_MODEL.productId, {
+    model: "M901",
+    name: "M901 Perdition",
+    transport: "wired",
+    verified: true,
+    stages: 5,
+    maxDpi: 12400,
+  }],
 ]);
 
 export const REDRAGON_PRODUCT_IDS: readonly number[] = [...REDRAGON_PRODUCTS.keys()];
@@ -39,11 +51,13 @@ export const REDRAGON_PRODUCT_IDS: readonly number[] = [...REDRAGON_PRODUCTS.key
 export const REDRAGON_MODELS: ReadonlyMap<number, RedragonModel> = new Map([
   [REDRAGON_M724_MODEL.productId, REDRAGON_M724_MODEL],
   [REDRAGON_M612_MODEL.productId, REDRAGON_M612_MODEL],
+  [REDRAGON_M901_MODEL.productId, REDRAGON_M901_MODEL],
 ]);
 
 export * from "./holtek.js";
 export * from "./m612.js";
 export * from "./m724.js";
+export * from "./m901.js";
 export * from "./deprecated.js";
 export * from "./m690-pro.js";
 export * from "./m719-pro.js";

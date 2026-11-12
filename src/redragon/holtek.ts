@@ -34,6 +34,12 @@ export const REDRAGON_CMD_COMMIT = 0xf1;
 export const REDRAGON_REPLY_TAG = 0x08;
 /** Length of the answer header before the data bytes (report id excluded). */
 export const REDRAGON_REPLY_HEADER = 7;
+/**
+ * Byte 3 of a read answer is this plus the address high byte on the
+ * M612/M724. RDCfg's Holtek OEM firmware family is otherwise identical; the
+ * M901 answers with 0x60 instead (see `m901.ts`).
+ */
+export const REDRAGON_REPLY_ADDRESS_BASE = 0x32;
 /** Most data bytes one read or write frame carries. */
 export const REDRAGON_MAX_TRANSFER = 8;
 
@@ -98,9 +104,16 @@ export function redragonEncodeRead(address: number, length: number): Uint8Array 
 /**
  * Validates the GET_FEATURE answer to `redragonEncodeRead(address, length)`
  * and returns its data bytes. Accepts the answer with or without the leading
- * report id, since WebHID and hidraw differ there.
+ * report id, since WebHID and hidraw differ there. `addressBase` is byte 3's
+ * constant for this firmware: `REDRAGON_REPLY_ADDRESS_BASE` unless a model
+ * documents another (see `RedragonModel.replyAddressBase`).
  */
-export function redragonDecodeRead(answer: Uint8Array, address: number, length: number): Uint8Array {
+export function redragonDecodeRead(
+  answer: Uint8Array,
+  address: number,
+  length: number,
+  addressBase = REDRAGON_REPLY_ADDRESS_BASE,
+): Uint8Array {
   checkTransfer(address, length);
   const body = answer[0] === REDRAGON_REPORT_ID && answer[1] === REDRAGON_REPLY_TAG ? answer.subarray(1) : answer;
   const hex = [...answer].map((byte) => byte.toString(16).padStart(2, "0")).join(" ");
@@ -108,7 +121,7 @@ export function redragonDecodeRead(answer: Uint8Array, address: number, length: 
     body.length < REDRAGON_REPLY_HEADER + length ||
     body[0] !== REDRAGON_REPLY_TAG ||
     body[1] !== (address & 0xff) ||
-    body[2] !== 0x32 + (address >> 8) ||
+    body[2] !== addressBase + (address >> 8) ||
     body[3] !== length ||
     body[5] !== 0xfa ||
     body[6] !== 0xfa
@@ -270,6 +283,11 @@ export interface RedragonModel {
   /** Catalog model, e.g. "M724". */
   model: string;
   productId: number;
+  /**
+   * Byte 3's constant in a read answer: `addressBase + addressHigh`. Defaults
+   * to `REDRAGON_REPLY_ADDRESS_BASE`; the M901 firmware answers 0x60.
+   */
+  replyAddressBase?: number;
   dpi: {
     /** RDCfg slider labels, ascending. */
     labels: readonly number[];
@@ -279,14 +297,19 @@ export interface RedragonModel {
     encode(dpi: number): RedragonDpiCode & { dpi: number };
     decode(value: number, range: number): number;
   };
-  /** Button names and slot offsets from the profile's button base, in slot order. */
-  buttons: { names: readonly string[]; offsets: readonly number[] } & RedragonButtonCodec;
+  /**
+   * Button names and slot offsets from the profile's button base, in slot
+   * order. Omitted where the layout has not been captured, which hides the
+   * button editor instead of guessing at someone's side buttons.
+   */
+  buttons?: { names: readonly string[]; offsets: readonly number[] } & RedragonButtonCodec;
   /**
    * `effect`: one global effect selector plus a parameter block per effect
    * (M612, RDCfg's `PRODUCT/Light=4` path). `profile`: one block per
-   * profile at `0x448 + 8p` (M724, `PRODUCT/Light=0`).
+   * profile at `0x448 + 8p` (M724, `PRODUCT/Light=0`). Omitted where the
+   * effect table is unknown.
    */
-  lighting: "effect" | "profile";
+  lighting?: "effect" | "profile";
   /** Lift-off `[level, 00]` (0 low, 1 medium, 2 high), where the mouse honours it. */
   liftOffAddress?: number;
 }
