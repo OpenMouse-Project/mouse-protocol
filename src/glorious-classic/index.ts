@@ -328,7 +328,9 @@ export function parseGloriousClassicFirmwareResponse(body: Uint8Array): Glorious
  * FirmwareUpdate.exe 1.0.8229.18185 sets bfr[3] = deviceID (0, from Config.ini
  * [Debug] DeviceID), bfr[4] = 0x01, bfr[7] = 0xb0 and leaves every other byte 0.
  * Hardware-verified on a Series One Pro (v1.0.0.0, wired): it re-enumerates as
- * 258a:2103. The receiver (258a:2031 -> 258a:2113) path has not been exercised.
+ * 258a:2103. Do not send it to the receiver (258a:2031): with bfr[3] = 0 it is not
+ * relayed, and by the receiver's disassembly it reboots the receiver itself into
+ * its bootloader (258a:2113). That path has not been exercised.
  */
 export function buildGloriousClassicEnterBootloaderPayload(): Uint8Array<ArrayBuffer> {
   const body = packet();
