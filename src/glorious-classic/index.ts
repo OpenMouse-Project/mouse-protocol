@@ -268,6 +268,90 @@ export function parseGloriousClassicBatteryResponse(body: Uint8Array): GloriousC
 }
 
 // ---------------------------------------------------------------------------
+// Firmware version read and Compx nRF52840 USB HID bootloader entry/exit (Series One Pro).
+// The entry and exit packets are C52840Dongle::SetBLDeviceMode / Exit from
+// FirmwareUpdate.exe 1.0.8229.18185; the firmware read uses length 0x06 (the updater's
+// GetFW sends 0x03). All are hardware-verified on a wired Series One Pro (258a:2018,
+// v1.0.0.0); the receiver (258a:2031 / 258a:2113) paths are not.
+// ---------------------------------------------------------------------------
+
+export const GLORIOUS_CLASSIC_MOUSE_BOOTLOADER_PID = 0x2103;
+
+export interface GloriousClassicFirmware {
+  version: string;
+  major: number;
+  minor: number;
+  patch: number;
+  build: number;
+  productId: number | null;
+}
+
+/**
+ * Firmware version request (verified on a wired Series One Pro):
+ *   bfr[3]=0x00 (target), bfr[4]=0x06 (length), bfr[5]=0x00, bfr[6]=0x81.
+ */
+export function buildGloriousClassicFirmwareRequestPayload(): Uint8Array<ArrayBuffer> {
+  const body = packet();
+  bfr(body, 4, 0x06);
+  bfr(body, 6, 0x81);
+  return body;
+}
+
+/**
+ * Parses the 64-byte feature-report reply to `buildGloriousClassicFirmwareRequestPayload()`.
+ * Reply layout (body[n] = bfr[n + 1]):
+ *   body[0] = 0xa1 (status OK), body[4] = 0x00, body[5] = 0x81 (echo),
+ *   body[6..9] = major, minor, patch, build,
+ *   body[10..11] = big-endian uint16 USB productId (e.g. 0x2018).
+ */
+export function parseGloriousClassicFirmwareResponse(body: Uint8Array): GloriousClassicFirmware | null {
+  if (body.length < 12 || body[0] !== 0xa1 || body[5] !== 0x81) return null;
+  const major = body[6]!;
+  const minor = body[7]!;
+  const patch = body[8]!;
+  const build = body[9]!;
+  const productId = ((body[10]! << 8) | body[11]!) || null;
+  return {
+    version: `${major}.${minor}.${patch}.${build}`,
+    major,
+    minor,
+    patch,
+    build,
+    productId,
+  };
+}
+
+/**
+ * Builds the 64-byte feature-report body (`C52840Dongle::SetBLDeviceMode`) that
+ * reboots a Glorious nRF52840 mouse (`258a:2018`) into its resident Compx USB HID
+ * bootloader (`258a:2103`): "set device mode" (bfr[6] = 0x00, length 1) to 0xb0.
+ * FirmwareUpdate.exe 1.0.8229.18185 sets bfr[3] = deviceID (0, from Config.ini
+ * [Debug] DeviceID), bfr[4] = 0x01, bfr[7] = 0xb0 and leaves every other byte 0.
+ * Hardware-verified on a Series One Pro (v1.0.0.0, wired): it re-enumerates as
+ * 258a:2103. The receiver (258a:2031 -> 258a:2113) path has not been exercised.
+ */
+export function buildGloriousClassicEnterBootloaderPayload(): Uint8Array<ArrayBuffer> {
+  const body = packet();
+  bfr(body, 4, 0x01);
+  bfr(body, 7, 0xb0);
+  return body;
+}
+
+/**
+ * Bootloader `Exit` (sent to 258a:2103, C52840Dongle::Exit): bfr[4]=0x01 (length),
+ * bfr[5]=0xb0, bfr[6]=0x04, bfr[7]=0x01 (boot the application). Verified on a wired
+ * Series One Pro: it resets into the application (the SET fails as the device resets).
+ */
+export function buildGloriousClassicBootloaderExitPayload(): Uint8Array<ArrayBuffer> {
+  const body = packet();
+  bfr(body, 4, 0x01);
+  bfr(body, 5, 0xb0);
+  bfr(body, 6, 0x04);
+  bfr(body, 7, 0x01);
+  return body;
+}
+
+// ---------------------------------------------------------------------------
 // DPI, polling rate, lift-off distance (korkje/mxw). None of these three has
 // a read command in mxw either — every write below is fire-and-forget, same
 // as the RGB/debounce commands above.
