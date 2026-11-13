@@ -77,6 +77,8 @@ function wiredDevice({
   const values = new Map<number, Uint8Array>([
     [0xb1, dpiConfiguration],
     [0xb2, new Uint8Array([0xe8, 0x03])],
+    [0xb3, new Uint8Array([1])],
+    [0xb4, new Uint8Array([80])],
     [0xb5, new Uint8Array([1])],
     [0xb6, new Uint8Array([1])],
     [0xb7, new Uint8Array([1])],
@@ -102,7 +104,10 @@ function wiredDevice({
       assert.equal(data.length, 64);
       sent.push(data.slice());
       const command = data[0];
-      assert.ok(values.has(command), `unexpected command 0x${command.toString(16)}`);
+      if (!values.has(command)) {
+        queueMicrotask(() => listener?.({ reportId: 0, data: new DataView(new Uint8Array([0xa6]).buffer) } as HIDInputReportEvent));
+        return;
+      }
       if (data[1] === 1 && !(command === 0xb1 && ignoreDpiWrites)) {
         values.set(command, data.slice(2, command === 0xb1 ? 4 + data[2] * 4 : command === 0xb2 ? 4 : 3));
       }
@@ -160,6 +165,33 @@ test("replays captured wired polling and toggle writes without receiver save-all
 });
 
 for (const productId of [0x7401, 0x5405]) {
+  test(`exposes enabled DPI stages and a fixed-count editor, PID ${productId.toString(16)}`, async () => {
+    for (const dpiConfiguration of [
+      new Uint8Array(Buffer.from("0602900190012003200340064006800c800c0019001900320032", "hex")),
+      new Uint8Array([2, 1, 0x90, 1, 0x90, 1, 0x20, 3, 0x40, 6]),
+    ]) {
+      const { device } = wiredDevice({ productId, dpiConfiguration });
+      const client = new PulsarProHidClient(device);
+      const status = await client.readStatus();
+      assert.deepEqual(status.dpiStages, dpiConfiguration[0] === 6 ? [400, 800, 1600, 3200, 6400, 12800] : [400, 800]);
+      assert.equal(status.activeDpiStage, dpiConfiguration[1]);
+      assert.equal(status.dpi, dpiConfiguration[0] === 6 ? 1600 : 800);
+      assert.deepEqual(status.firmware, productId === 0x7401
+        ? ["Mouse firmware unavailable"]
+        : ["Mouse firmware unavailable", "Dongle firmware unavailable"]);
+      assert.deepEqual(status.ui?.dpiStageEditor, {
+        maxStages: 6, countEditable: false, minDpi: 50, maxDpi: 32000, stepDpi: 50,
+      });
+      if (productId === 0x7401) {
+        assert.equal(status.ui?.family, "pulsar");
+        assert.equal(status.ui?.hideUnsupportedPollingRates, true);
+        assert.equal(status.ui?.hideSignalCard, true);
+        assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000, 2000, 4000, 8000]);
+      }
+      await client.close();
+    }
+  });
+
   test(`selects stages using captured B1 packets without changing the table, PID ${productId.toString(16)}`, async () => {
     const { device, sent } = wiredDevice({ productId });
     const client = new PulsarProHidClient(device);

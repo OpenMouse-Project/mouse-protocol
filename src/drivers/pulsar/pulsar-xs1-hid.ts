@@ -119,7 +119,7 @@ export class PulsarXs1HidClient {
     await this.open();
     this.deviceInfo = {
       connection: PULSAR_XS1_WIRELESS_PRODUCT_IDS.has(this.device.productId) ? "Wireless" : "Wired",
-      maximumPollingRateHz: this.device.productId === EIGHT_K_RECEIVER_PRODUCT_ID ? 8000 : 1000,
+      maximumPollingRateHz: this.device.productId === EIGHT_K_RECEIVER_PRODUCT_ID || this.device.productId === 0x5406 ? 8000 : 1000,
     };
     return this.deviceInfo;
   }

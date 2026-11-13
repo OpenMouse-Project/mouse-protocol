@@ -191,18 +191,20 @@ test("the X2A v3 cable ID is named and stays on the wired 1K capability path", a
   assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000]);
 });
 
-test("the shared 8K dongle advertises high rates without inventing the paired mouse model", async () => {
-  for (const [code, rate] of [[15, 2000], [8, 4000], [4, 8000]]) {
-    const client = new PulsarXs1HidClient(fakeDevice(0x5403, "1K Dongle", { pollingCode: code }).device);
-    const status = await client.readStatus();
-    assert.equal(status.name, "Pulsar 8K Dongle");
-    assert.equal(status.connectionType, "Wireless");
-    assert.equal((await client.readDeviceInfo()).maximumPollingRateHz, 8000);
-    assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000, 2000, 4000, 8000]);
-    assert.equal(status.pollingRateHz, rate);
-    assert.equal(status.ui?.pollingReadOnly, true);
-  }
-});
+for (const [productId, name] of [[0x5403, "Pulsar 8K Dongle"], [0x5406, "Pulsar CrazyLight 8K Dongle"]] as const) {
+  test(`the 8K dongle ${productId.toString(16)} advertises high rates without inventing the paired mouse model`, async () => {
+    for (const [code, rate] of [[15, 2000], [8, 4000], [4, 8000]]) {
+      const client = new PulsarXs1HidClient(fakeDevice(productId, "1K Dongle", { pollingCode: code }).device);
+      const status = await client.readStatus();
+      assert.equal(status.name, name);
+      assert.equal(status.connectionType, "Wireless");
+      assert.equal((await client.readDeviceInfo()).maximumPollingRateHz, 8000);
+      assert.deepEqual(status.supportedPollingRates, [125, 250, 500, 1000, 2000, 4000, 8000]);
+      assert.equal(status.pollingRateHz, rate);
+      assert.equal(status.ui?.pollingReadOnly, true);
+    }
+  });
+}
 
 test("unknown and failed polling reads never turn into a fabricated 1000 Hz", async () => {
   for (const options of [{ pollingCode: 0 }, { pollingCode: 255 }, { failPolling: true }]) {

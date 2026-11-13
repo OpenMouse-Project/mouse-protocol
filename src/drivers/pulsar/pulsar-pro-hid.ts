@@ -84,7 +84,7 @@ export class PulsarProHidClient {
   async readStatus(): Promise<MouseStatus> {
     await this.open();
     const battery = await this.query(COMMAND.battery);
-    const dpi = await this.query(COMMAND.dpi);
+    const dpi = await this.readDpiConfiguration();
     const polling = await this.query(COMMAND.polling);
     const lod = await this.query(COMMAND.lod);
     const motion = await this.queryOptional(COMMAND.motionSync);
@@ -103,7 +103,7 @@ export class PulsarProHidClient {
     const mouseVersion = await this.queryOptional(COMMAND.mouseVersion);
     const dongleVersion = this.wired ? null : await this.queryOptional(COMMAND.dongleVersion);
     const rssi = this.wired ? null : await this.queryOptional(COMMAND.rssi);
-    const dpiIndex = Math.min(dpi[3] ?? 0, 7);
+    const dpiIndex = dpi[3];
     const dpiOffset = 4 + dpiIndex * 4;
     const sleepMs = sleep ? readUint32LE(sleep, 2) : 0;
     return {
@@ -112,14 +112,19 @@ export class PulsarProHidClient {
       batteryPercent: battery[0] === COMMAND.battery ? Math.min(battery[1] ?? 0, 100) : null,
       batteryState: battery[6] === 1 ? "Charging" : "Discharging",
       dpi: readUint16LE(dpi, dpiOffset),
+      dpiStages: Array.from({ length: dpi[2] }, (_, stage) => readUint16LE(dpi, 4 + stage * 4)),
+      activeDpiStage: dpiIndex,
       pollingRateHz: readUint16LE(polling, 2),
       activeProfile: profile ? (profile[2] ?? 0) + 1 : null,
       connectionType: this.wired ? "Wired" : "Wireless",
       connectionDetail: `PID 0x${this.device.productId.toString(16)} · Pulsar Pro protocol · ${this.wired ? "Wired" : "Wireless"}`,
       ...(this.wired ? {
         supportedPollingRates: [125, 250, 500, 1000, 2000, 4000, 8000],
-        ui: { family: "pulsar", hideUnsupportedPollingRates: true, hideSignalCard: true },
       } : {}),
+      ui: {
+        ...(this.wired ? { family: "pulsar", hideUnsupportedPollingRates: true, hideSignalCard: true } : {}),
+        dpiStageEditor: { maxStages: 6, countEditable: false, minDpi: 50, maxDpi: 32000, stepDpi: 50 },
+      },
       signalStrength: this.signalLevel(rssi?.[1]),
       debounceMs: debounce?.[2] ?? null,
       motionSync: motion ? motion[2] === 1 : null,
@@ -138,7 +143,7 @@ export class PulsarProHidClient {
       liftOffDistance: lod[2] === 1 ? "Low" : lod[2] === 2 ? "Medium" : lod[2] === 3 ? "High" : null,
       firmware: [
         mouseVersion ? this.formatVersion("Mouse", mouseVersion) : "Mouse firmware unavailable",
-        dongleVersion ? this.formatVersion("Dongle", dongleVersion) : "Dongle firmware unavailable",
+        ...(this.wired ? [] : [dongleVersion ? this.formatVersion("Dongle", dongleVersion) : "Dongle firmware unavailable"]),
       ],
     };
   }
