@@ -165,6 +165,40 @@ test("replays captured wired polling and toggle writes without receiver save-all
 });
 
 for (const productId of [0x7401, 0x5405]) {
+  test(`serializes concurrent DPI updates through readback, PID ${productId.toString(16)}`, async () => {
+    const { device, sent } = wiredDevice({ productId });
+    const client = new PulsarProHidClient(device);
+    await client.open();
+    assert.deepEqual(await Promise.all([
+      client.setDpiStageValue(0, 1000),
+      client.setDpiStageValue(1, 1200),
+      client.setActiveDpiStage(1),
+      client.setDpi(1400),
+    ]), [1000, 1200, 1, 1400]);
+    const transaction = productId === 0x7401
+      ? [[0xb1, 0], [0xb1, 1], [0xb1, 0]]
+      : [[0xb1, 0], [0xb1, 1], [0xc3, 1], [0xb1, 0]];
+    assert.deepEqual(sent.map((packet) => [...packet.slice(0, 2)]),
+      Array.from({ length: 4 }, () => transaction).flat());
+    const status = await client.readStatus();
+    assert.deepEqual(status.dpiStages, [1000, 1400, 1600, 3200, 6400, 12800]);
+    assert.equal(status.activeDpiStage, 1);
+    assert.equal(status.dpi, 1400);
+    await client.close();
+  });
+
+  test(`releases the DPI update lock after a failed readback, PID ${productId.toString(16)}`, async () => {
+    const { device, sent } = wiredDevice({ productId, ignoreDpiWrites: true });
+    const client = new PulsarProHidClient(device);
+    await client.open();
+    const failedUpdate = assert.rejects(client.setDpiStageValue(0, 1200), /did not keep 1200 DPI/);
+    const nextUpdate = client.setActiveDpiStage(2);
+    await failedUpdate;
+    assert.equal(await nextUpdate, 2);
+    assert.equal(sent.filter((packet) => packet[0] === 0xb1 && packet[1] === 1).length, 2);
+    await client.close();
+  });
+
   test(`exposes enabled DPI stages and a fixed-count editor, PID ${productId.toString(16)}`, async () => {
     for (const dpiConfiguration of [
       new Uint8Array(Buffer.from("0602900190012003200340064006800c800c0019001900320032", "hex")),

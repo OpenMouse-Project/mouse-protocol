@@ -14,6 +14,7 @@ import {
 
 export class PulsarProHidClient {
   private commandQueue: Promise<void> = Promise.resolve();
+  private dpiUpdateQueue: Promise<void> = Promise.resolve();
   private readonly unsupportedQueries = new Set<string>();
   private explicitlyClosed = false;
   private waiter: {
@@ -156,30 +157,43 @@ export class PulsarProHidClient {
 
   async setDpi(value: number): Promise<number> {
     if (!this.getDpiOptions().includes(value)) throw new Error("Unsupported Pulsar Pro DPI value.");
-    const current = await this.readDpiConfiguration();
-    return await this.writeDpiStageValue(current, current[3], value);
+    return await this.withDpiUpdate(async () => {
+      const current = await this.readDpiConfiguration();
+      return await this.writeDpiStageValue(current, current[3], value);
+    });
   }
 
   /** Edits both axes of an enabled stage (0-based), preserving the active stage. */
   async setDpiStageValue(stage: number, value: number): Promise<number> {
     this.validateDpiStage(stage);
     if (!this.getDpiOptions().includes(value)) throw new Error("Unsupported Pulsar Pro DPI value.");
-    const current = await this.readDpiConfiguration();
-    if (stage >= current[2]) throw new RangeError(`DPI stage ${stage} is outside this mouse's ${current[2]}-stage cycle.`);
-    return await this.writeDpiStageValue(current, stage, value);
+    return await this.withDpiUpdate(async () => {
+      const current = await this.readDpiConfiguration();
+      if (stage >= current[2]) throw new RangeError(`DPI stage ${stage} is outside this mouse's ${current[2]}-stage cycle.`);
+      return await this.writeDpiStageValue(current, stage, value);
+    });
   }
 
   /** Selects an enabled stage (0-based) without changing its stored DPI values. */
   async setActiveDpiStage(stage: number): Promise<number> {
     this.validateDpiStage(stage);
-    const current = await this.readDpiConfiguration();
-    const stageCount = current[2];
-    if (stage >= stageCount) throw new RangeError(`DPI stage ${stage} is outside this mouse's ${stageCount}-stage cycle.`);
-    await this.command(COMMAND.dpi, new Uint8Array([1, stageCount, stage, ...current.slice(4, 4 + stageCount * 4)]));
-    await this.applySettings();
-    const confirmed = await this.readDpiConfiguration();
-    if (confirmed[3] !== stage) throw new Error(`The mouse kept DPI stage ${confirmed[3]} instead of ${stage}.`);
-    return stage;
+    return await this.withDpiUpdate(async () => {
+      const current = await this.readDpiConfiguration();
+      const stageCount = current[2];
+      if (stage >= stageCount) throw new RangeError(`DPI stage ${stage} is outside this mouse's ${stageCount}-stage cycle.`);
+      await this.command(COMMAND.dpi, new Uint8Array([1, stageCount, stage, ...current.slice(4, 4 + stageCount * 4)]));
+      await this.applySettings();
+      const confirmed = await this.readDpiConfiguration();
+      if (confirmed[3] !== stage) throw new Error(`The mouse kept DPI stage ${confirmed[3]} instead of ${stage}.`);
+      return stage;
+    });
+  }
+
+  private withDpiUpdate(update: () => Promise<number>): Promise<number> {
+    // Hold a separate queue through readback; command() acquires commandQueue itself.
+    const result = this.dpiUpdateQueue.then(update);
+    this.dpiUpdateQueue = result.then(() => undefined, () => undefined);
+    return result;
   }
 
   private validateDpiStage(stage: number): void {
