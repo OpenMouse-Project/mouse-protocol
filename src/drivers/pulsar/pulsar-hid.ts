@@ -1,4 +1,5 @@
 import type { MouseStatus } from "../mouse-types.ts";
+import { PULSAR_MODEL_NAMES } from "./model-names.ts";
 import {
   PULSAR_COMMAND as COMMAND,
   PULSAR_CONFIG_PACKET_LENGTH as CONFIG_PACKET_LENGTH,
@@ -154,9 +155,14 @@ export class PulsarHidClient {
       const currentDpi = Math.min(flash[FLASH.currentDpi] ?? 0, 7);
       const dpi = this.decodeDpi(flash.slice(FLASH.dpiValues + currentDpi * 4, FLASH.dpiValues + currentDpi * 4 + 4)) ?? 800;
       const lodValue = flash[FLASH.liftOffDistance];
+      const modelName = this.device.vendorId === PULSAR_VENDOR_ID
+        ? PULSAR_MODEL_NAMES.get((info.cid << 8) | info.mid)
+          ?? (this.device.productId === 0x5406 ? "Pulsar CrazyLight 8K Dongle" : null)
+        : null;
+
       return {
         brand: "Pulsar",
-        name: info.cid === 0x57 && info.mid === 0x04 ? "Pulsar X2 CrazyLight" : (this.device.productName || "Pulsar Mouse"),
+        name: modelName ?? (this.device.productName || "Pulsar Mouse"),
         ui: { family: "pulsar", hideUnsupportedPollingRates: true },
         batteryPercent: battery[5] <= 100 ? battery[5] : null,
         batteryState: battery[6] === 1 ? "Charging" : "Discharging",
