@@ -788,3 +788,157 @@ test("R1 Pro Max accepts firmware-normalized Breathing state after reconnect", (
     dpiLedSpeed: 0,
   });
 });
+test("R1 Pro over the Compx 1K dongle decodes PAW3395 stages instead of borrowing the ATK-vendor R1 NK codec", async () => {
+  // Replies captured from a VXE R1 Pro (firmware 1.20) behind 0x3554:0xf58a
+  // "VXE NordicMouse 1K Dongle". It reports CID/MID 2,8, which under ATK's
+  // 0x373b vendor id is the PAW3395SE-based VXE R1 NK; that codec has no code
+  // 0x07, so the 400-DPI stage used to abort the whole status read.
+  const fake = device(0xf58a, "VXE NordicMouse 1K Dongle");
+  (fake as unknown as FakeR1ProMaxDevice).replies = [
+    reply(0x10, 0, [0x02, 0x08, 0x4b]),
+    reply(0x04, 0, [0x14, 0x00]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x04, 0x51, 0x03, 0x52]),
+    reply(0x08, 0x000c, [0x07, 0x07, 0x00, 0x47]),
+    reply(0x08, 0x0010, [0x0f, 0x0f, 0x00, 0x37]),
+    reply(0x08, 0x0014, [0x3f, 0x3f, 0x00, 0xd7]),
+    reply(0x08, 0x0018, [0x17, 0x17, 0x00, 0x27]),
+    reply(0x12, 0, [0x01, 0x20]),
+    reply(0x08, 0x000a, [0x01, 0x54]),
+    reply(0x08, 0x00a9, [0x04, 0x51, 0x00, 0x55, 0x06, 0x4f, 0x00, 0x55, 0x00, 0x55]),
+    reply(0x08, 0x00bd, [0xff, 0xff, 0xff, 0xff]),
+    reply(0x08, 0x00b5, [0x00, 0x55, 0x06, 0x4f, 0x01, 0x54]),
+    reply(0x08, 0x004c, [0x02, 0x53, 0x80, 0xd5, 0x05, 0x50, 0x00, 0x55]),
+    reply(0x08, 0x002c, [0xff, 0x00, 0x00, 0x56, 0x00, 0xff, 0x00, 0x56]),
+    reply(0x08, 0x0034, [0xff, 0x00, 0xff, 0x57, 0xff, 0xc3, 0x5c, 0x37]),
+    reply(0x17, 0, [0x00]),
+    reply(0x0e, 0, [0x00]),
+    reply(0x08, 0x0060, [0x01, 0x01, 0x00, 0x53, 0x01, 0x02, 0x00, 0x52]),
+    reply(0x08, 0x0068, [0x01, 0x04, 0x00, 0x50, 0x01, 0x08, 0x00, 0x4c]),
+    reply(0x08, 0x0070, [0x01, 0x10, 0x00, 0x44, 0x02, 0x01, 0x00, 0x52]),
+  ];
+
+  const client = new AtkHidClient(fake);
+  const status = await client.readStatus();
+
+  assert.deepEqual(status.dpiStageColors, ["#ff0000", "#00ff00", "#ff00ff", "#ffc35c"]);
+  assert.equal(status.dpiLedMode, 0, "enabled flag 0 is Off even with a Breathing effect pair stored");
+  assert.deepEqual(status.ui?.dpiLighting?.brightnessModes, [1], "no brightness control while breathing");
+  assert.equal(status.longRangeMode, false);
+  assert.equal(status.performanceMode, undefined);
+  assert.equal(status.activeProfile, 1);
+  assert.equal(status.atkProfileCount, 4);
+  assert.deepEqual(
+    status.atkButtonMappings?.map((mapping) => mapping.action),
+    ["Left click", "Right click", "Middle click", "Back", "Forward", "DPI cycle"],
+  );
+  assert.equal(status.name, "VXE R1 Pro");
+  assert.deepEqual(status.dpiStages, [400, 800, 3200, 1200]);
+  assert.equal(status.activeDpiStage, 3);
+  assert.equal(status.dpi, 1200);
+  assert.equal(status.pollingRateHz, 1000);
+  assert.equal(status.connectionDetail, "2.4 GHz receiver");
+  assert.equal(status.atkCatalogFeatures, undefined, "no ATK-vendor catalog flags leak onto a Compx device");
+  assert.equal(client.maxDpi(), 30000);
+});
+
+test("a DPI row with a valid checksum but an impossible sensor code is not reported as a checksum failure", async () => {
+  // CID/MID 2,29 on 0xf58f is the catalog's PAW3395SE-based R1 SE; 0x07 is
+  // one of the codes that sensor never uses.
+  const fake = device(0xf58f, "VXE R1 SE");
+  (fake as unknown as FakeR1ProMaxDevice).replies = [
+    reply(0x10, 0, [0x02, 0x1d]),
+    reply(0x04, 0, [0x14, 0x00]),
+    reply(0x08, 0x0000, [0x01, 0x54, 0x01, 0x54, 0x00, 0x55]),
+    reply(0x08, 0x000c, [0x07, 0x07, 0x00, 0x47]),
+  ];
+
+  await assert.rejects(
+    new AtkHidClient(fake).readStatus(),
+    /cannot produce; the model may be misidentified/,
+  );
+});
+
+// Frames below were captured from ATK HUB (v3-hub.atk.store) driving a VXE R1
+// Pro, firmware 1.20, through the 0x3554:0xf58a 1K dongle.
+const R1_PRO_IDENTITY = reply(0x10, 0, [0x02, 0x08, 0x4b]);
+const R1_PRO_SYSTEM = [0x01, 0x54, 0x04, 0x51, 0x03, 0x52, 0x00, 0x55, 0x00, 0x55];
+
+function r1ProReceiver(): FakeR1ProMaxDevice {
+  return device(0xf58a, "VXE NordicMouse 1K Dongle") as unknown as FakeR1ProMaxDevice;
+}
+
+test("R1 Pro receiver writes a DPI stage as the vendor's two-stage group and waits for the echo", async () => {
+  const fake = r1ProReceiver();
+  const group = [0x3f, 0x3f, 0x00, 0xd7, 0x1d, 0x1d, 0x00, 0x1b];
+  fake.replies = [
+    R1_PRO_IDENTITY,
+    reply(0x08, 0x0000, R1_PRO_SYSTEM.slice(0, 6)),
+    reply(0x08, 0x0014, [0x3f, 0x3f, 0x00, 0xd7, 0x17, 0x17, 0x00, 0x27]),
+    reply(0x08, 0x0018, [0x1d, 0x1d, 0x00, 0x1b]),
+  ];
+  fake.writeReplies = [reply(0x07, 0x0014, group)];
+
+  const client = new AtkHidClient(fake as unknown as HIDDevice);
+  assert.equal(await client.setDpiStageValue(3, 1500), 1500);
+
+  const sent = writes(fake as unknown as HIDDevice);
+  assert.equal(sent.length, 1);
+  assert.deepEqual([...sent[0]!.subarray(0, 13)], [0x07, 0x00, 0x00, 0x14, 0x08, ...group]);
+  assert.equal(sent[0]![15], 0x80, "frame checksum matches the captured vendor write");
+});
+
+test("R1 Pro receiver changes polling through the complete system row", async () => {
+  const fake = r1ProReceiver();
+  const row = [0x02, 0x53, ...R1_PRO_SYSTEM.slice(2)];
+  fake.replies = [
+    R1_PRO_IDENTITY,
+    reply(0x08, 0x0000, R1_PRO_SYSTEM),
+    reply(0x08, 0x0000, row.slice(0, 6)),
+  ];
+  fake.writeReplies = [reply(0x07, 0x0000, row)];
+
+  const client = new AtkHidClient(fake as unknown as HIDDevice);
+  assert.equal(await client.setPollingRate(500), 500);
+  assert.deepEqual([...writes(fake as unknown as HIDDevice)[0]!.subarray(0, 15)], [0x07, 0x00, 0x00, 0x00, 0x0a, ...row]);
+});
+
+test("R1 Pro receiver turns DPI lighting off through the enabled flag and keeps the stored brightness", async () => {
+  const fake = r1ProReceiver();
+  const sentRow = [0x00, 0x00, 0x10, 0x45, 0x01, 0x54, 0x00, 0x55];
+  fake.replies = [
+    R1_PRO_IDENTITY,
+    reply(0x08, 0x004c, [0x01, 0x54, 0x10, 0x45, 0x01, 0x54, 0x01, 0x54]),
+    // The mouse keeps a Breathing effect pair rather than the 00 00 it was sent.
+    reply(0x08, 0x004c, [0x02, 0x53, 0x10, 0x45, 0x01, 0x54, 0x00, 0x55]),
+  ];
+  fake.writeReplies = [reply(0x07, 0x004c, sentRow)];
+
+  const client = new AtkHidClient(fake as unknown as HIDDevice);
+  await client.setDpiLighting(0, 0, 0);
+
+  const sent = writes(fake as unknown as HIDDevice);
+  assert.deepEqual([...sent[0]!.subarray(0, 13)], [0x07, 0x00, 0x00, 0x4c, 0x08, ...sentRow]);
+  assert.equal(sent[0]![15], 0xf3, "frame checksum matches the captured vendor write");
+});
+
+test("R1 Pro receiver switches configuration banks with the captured select/echo/readback exchange", async () => {
+  const fake = r1ProReceiver();
+  const select = reply(0x0f, 0, [0x01]);
+  fake.replies = [R1_PRO_IDENTITY, select, reply(0x0e, 0, [0x01])];
+
+  const client = new AtkHidClient(fake as unknown as HIDDevice);
+  assert.equal(await client.setR1ActiveProfile(2), 2);
+
+  const sent = fake.sent.map(({ data }) => [...data]).find((frame) => frame[0] === 0x0f);
+  assert.deepEqual(sent, select);
+  assert.equal(select[15], 0x3c, "frame checksum matches the captured vendor write");
+});
+
+test("R1 Pro receiver refuses Performance Mode, which ATK HUB does not offer for it", async () => {
+  const fake = r1ProReceiver();
+  fake.replies = [R1_PRO_IDENTITY];
+
+  const client = new AtkHidClient(fake as unknown as HIDDevice);
+  await assert.rejects(client.setPerformanceMode(true), /Performance mode is not available/);
+  assert.equal(writes(fake as unknown as HIDDevice).length, 0);
+});

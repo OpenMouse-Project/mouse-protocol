@@ -45,7 +45,7 @@ import {
   atkUnpackDpiStage,
   atkUnpackDpiStageForSensor,
 } from "@openmouse/protocol/atk";
-import { type AtkProduct, ATK_COMPX_PRODUCT_IDS, ATK_PRODUCTS, atkCatalogDevice, atkCatalogSensorForCidMid, atkCatalogSensorToSensor } from "./products.ts";
+import { type AtkProduct, ATK_COMPX_PRODUCT_IDS, ATK_COMPX_PRODUCTS, ATK_PRODUCTS, atkCatalogDevice, atkCatalogSensorForCidMid, atkCatalogSensorToSensor, atkProductFor } from "./products.ts";
 import type { AtkDeviceDescriptor, AtkDeviceFeatures } from "./device-catalog.generated.ts";
 import type { AtkSensor } from "@openmouse/protocol/atk";
 
@@ -399,6 +399,9 @@ export class AtkHidClient {
         dpiLighting: r1Extras && this.features().noDpiRGB !== true ? {
           modes: [0, 1, 2],
           brightness: [0, 1, 2],
+          // ATK HUB offers no brightness while breathing on these two, and
+          // setDpiLighting leaves the stored pair alone in that mode.
+          brightnessModes: this.isR1ProMax() || this.isR1Pro() ? [1] : undefined,
           speed: [0, 1, 2],
         } : undefined,
       },
@@ -424,7 +427,8 @@ export class AtkHidClient {
       motionSync: advanced[2] === 1,
       sleepTimeout: advanced[4] * SLEEP_STEP_SECONDS || null,
       rippleControl: advanced[8] === 1,
-      performanceMode: r1Extras?.performanceMode ?? a9PerformanceMode,
+      // ATK HUB offers no performance-mode switch for the R1 Pro.
+      performanceMode: this.isR1Pro() ? undefined : r1Extras?.performanceMode ?? a9PerformanceMode,
       longRangeMode: r1Extras?.longRangeMode,
       atkSensorMode: f1Extras?.sensorMode ?? null,
       atkAntiMistouchMs: f1Extras?.antiMistouchMs ?? null,
@@ -800,6 +804,7 @@ export class AtkHidClient {
 
   async setPerformanceMode(enabled: boolean): Promise<boolean> {
     await this.identify();
+    if (this.isR1Pro()) throw new Error("Performance mode is not available on this connection.");
 
     const change = (block: number[]): void => {
       block.splice(4, 2, ...wePackScalarPair(enabled ? 1 : 0));
@@ -961,14 +966,19 @@ export class AtkHidClient {
     // Off       = 00 00 | 00 00 | speed | 00 55
     // Always On = 01 54 | brightness | speed | 01 54
     // Breathing = 02 53 | preserve brightness | speed | 01 54
+    // The R1 Pro shares that encoding, except that ATK HUB leaves its
+    // brightness pair untouched when switching the light off, and the mouse
+    // keeps its previous effect pair instead of storing 00 00: there, Off is
+    // carried by the trailing enabled flag alone.
     const block = Array.from(await this.read(REGISTER.dpiLighting, R1_DPI_LIGHTING_LENGTH));
-    const proMax = this.isR1ProMax();
+    const r1Pro = this.isR1Pro();
+    const proMax = this.isR1ProMax() || r1Pro;
 
     const expectedEffect = proMax && mode === 0
       ? [0, 0]
       : wePackScalarPair(mode === 2 ? 2 : 1);
 
-    const expectedBrightness = proMax && mode === 2
+    const expectedBrightness = (proMax && mode === 2) || (r1Pro && mode === 0)
       ? [block[2]!, block[3]!]
       : mode === 0
         ? [0, 0]
@@ -988,7 +998,8 @@ export class AtkHidClient {
     const expectedSpeed = wePackScalarPair(R1_DPI_SPEED[speed]!);
     const expectedEnabled = wePackScalarPair(mode === 0 ? 0 : 1);
     const expected = [...expectedEffect, ...expectedBrightness, ...expectedSpeed, ...expectedEnabled];
-    if (!expected.every((byte, index) => raw[index] === byte)) {
+    const firstChecked = r1Pro && mode === 0 ? expectedEffect.length : 0;
+    if (!expected.every((byte, index) => index < firstChecked || raw[index] === byte)) {
       throw new Error("The mouse did not retain its DPI lighting settings.");
     }
 
@@ -1324,6 +1335,11 @@ export class AtkHidClient {
 
     if (brightnessIndex < 0 || speedIndex < 0 || (enabled !== 0 && enabled !== 1)) return null;
 
+    // The R1 Pro stores Off as enabled=0 and leaves the last effect in place.
+    if (this.isR1Pro() && enabled === 0) {
+      return { dpiLedMode: 0, dpiLedBrightness: brightnessIndex, dpiLedSpeed: speedIndex };
+    }
+
     // R1 Pro Max may report the trailing flag as 0 after reconnect even when
     // the stored effect is Breathing. Treat the effect field as authoritative.
     // Keep effect=1 + enabled=0 as the legacy Off encoding used by other R1s.
@@ -1422,7 +1438,14 @@ export class AtkHidClient {
     const stage = sensor
       ? atkUnpackDpiStageForSensor(sensor, data)
       : atkUnpackDpiStage(data);
-    if (!stage) throw new Error("The mouse reported a DPI stage that failed its checksum.");
+    if (!stage) {
+      // A row can sum correctly and still hold a value this sensor's codec
+      // rejects, which points at a misidentified model rather than bad data.
+      const checksumValid = data.reduce((total, byte) => total + byte, 0) % 0x100 === 0x55;
+      throw new Error(checksumValid
+        ? "The mouse reported a DPI stage this sensor cannot produce; the model may be misidentified."
+        : "The mouse reported a DPI stage that failed its checksum.");
+    }
     return stage;
   }
 
@@ -1583,7 +1606,7 @@ export class AtkHidClient {
     }
     this.identified = true;
     this.cidMid = `${reply[DATA_OFFSET]},${reply[DATA_OFFSET + 1]}`;
-    this.product = ATK_PRODUCTS[this.cidMid] ?? null;
+    this.product = atkProductFor(this.device.vendorId, this.cidMid);
   }
 
   /**
@@ -1615,7 +1638,7 @@ export class AtkHidClient {
    */
   private sensorKey(): AtkSensor | null {
     if (this.product) return this.product.sensor;
-    return atkCatalogSensorToSensor(this.catalogEntry()?.sensor ?? null) ?? atkCatalogSensorForCidMid(this.cidMid);
+    return atkCatalogSensorToSensor(this.catalogEntry()?.sensor ?? null) ?? atkCatalogSensorForCidMid(this.cidMid, this.device.vendorId);
   }
 
   private usesSharedR1Transport(): boolean {
@@ -1635,10 +1658,21 @@ export class AtkHidClient {
     return this.product === ATK_PRODUCTS["2,27"];
   }
 
+  /** VXE R1 Pro (Compx CID 2, MID 8), captured behind the F58A 1K dongle. */
+  private isR1Pro(): boolean {
+    return this.device.vendorId === VENDOR_ID.vgn && this.product === ATK_COMPX_PRODUCTS["2,8"];
+  }
+
+  /**
+   * The F58A dongle's captured write/echo protocol. The R1 Pro Max and the R1
+   * Pro both pair with this dongle and ATK HUB sends them the same rows, so
+   * the R1 Pro reuses the Pro Max receiver helpers for the settings that were
+   * captured on it; see docs/vxe-r1-pro-testing.md for what was not.
+   */
   private usesVerifiedR1ProMaxReceiverTransport(): boolean {
     return this.device.vendorId === VENDOR_ID.vgn
       && this.device.productId === VXE_R1_PRO_MAX_RECEIVER_PID
-      && this.isR1ProMax();
+      && (this.isR1ProMax() || this.isR1Pro());
   }
 
   /**
