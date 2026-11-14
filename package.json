@@ -170,6 +170,10 @@
       "types": "./dist/redragon/index.d.ts",
       "import": "./dist/redragon/index.js"
     },
+    "./utechsmart": {
+      "types": "./dist/utechsmart/index.d.ts",
+      "import": "./dist/utechsmart/index.js"
+    },
     "./drivers": {
       "types": "./dist/drivers/index.d.ts",
       "import": "./dist/drivers/index.js"

@@ -4,7 +4,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DEVICE_DRIVERS } from "./registry.ts";
+import { DEVICE_DRIVERS, createSupportedClient, deviceBrand } from "./registry.ts";
+import { UtechsmartVenusHidClient } from "./utechsmart/hid.ts";
+import { RedragonHidClient } from "./redragon/hid.ts";
 import { SUPPORTED_HID_FILTERS, VENDOR_ID } from "./vendors.ts";
 import { LAMZU_ATLANTIS_PRODUCTS, LAMZU_PRODUCTS } from "@openmouse/protocol/lamzu";
 import { SCYROX_PRODUCTS } from "@openmouse/protocol/scyrox";
@@ -32,6 +34,20 @@ test("Redgear picker filter uses the protocol identity constants", () => {
     [{ vendorId: REDGEAR_X13_VENDOR_ID, productId: REDGEAR_X13_PRODUCT_ID,
       usagePage: REDGEAR_X13_USAGE_PAGE, usage: REDGEAR_X13_USAGE }],
   );
+});
+
+test("Holtek Venus discovery is disjoint from Redragon and picker targets config only", () => {
+  assert.equal(VENDOR_ID.utechsmart, 0x04d9);
+  assert.deepEqual(SUPPORTED_HID_FILTERS.filter((filter) => filter.productId === 0xfc55), [
+    { vendorId: 0x04d9, productId: 0xfc55, usagePage: 0xffa0, usage: 1 },
+  ]);
+  for (const productId of [0xfc55, 0xfc7a, 0xfc61]) {
+    const device = { vendorId: 0x04d9, productId, collections: [collection(0xffa0, 1, { feature: [2, 3] })] } as HIDDevice;
+    const client = createSupportedClient(device)!;
+    assert.ok(client instanceof (productId === 0xfc55 ? UtechsmartVenusHidClient : RedragonHidClient));
+    assert.equal(deviceBrand(client), productId === 0xfc55 ? "UtechSmart" : "Redragon");
+    assert.equal(DEVICE_DRIVERS.filter((driver) => driver.supports(device)).length, 1);
+  }
 });
 
 const DEVICES_DIR = dirname(fileURLToPath(import.meta.url));
