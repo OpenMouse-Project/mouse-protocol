@@ -8,6 +8,7 @@ import {
   UTECHSMART_VENUS_CONFIG_USAGE,
   UTECHSMART_VENUS_CONFIG_USAGE_PAGE,
   UTECHSMART_VENUS_DPI_LABELS,
+  UTECHSMART_VENUS_LONG_REPORT_ID,
   UTECHSMART_VENUS_MAX_READ,
   UTECHSMART_VENUS_MAX_STAGES,
   UTECHSMART_VENUS_POLLING_RATES,
@@ -65,14 +66,17 @@ function hasConfigCollection(collections: readonly HIDCollectionInfo[]): boolean
   return collections.some((collection) =>
     (collection.usagePage === UTECHSMART_VENUS_CONFIG_USAGE_PAGE &&
       collection.usage === UTECHSMART_VENUS_CONFIG_USAGE &&
-      (collection.featureReports ?? []).some((report) => report.reportId === UTECHSMART_VENUS_REPORT_ID)) ||
+      [UTECHSMART_VENUS_REPORT_ID, UTECHSMART_VENUS_LONG_REPORT_ID].every((reportId) =>
+        (collection.featureReports ?? []).some((report) => report.reportId === reportId))) ||
     hasConfigCollection(collection.children ?? []));
 }
 
 /** Wired Venus MMO 04d9:fc55, on interface 2's vendor config collection only.
- * Transport/read memory and bare F3 writes are owner-verified; this client has
- * not been tested on hardware. Readback confirms memory, not durable storage
- * or effective sensor/polling behavior. No LEDs, macros or profile switching.
+ * Owner-tested on Windows/Edge WebHID: status, button remaps (including Ctrl),
+ * DPI stage values and polling 1000/500/125 Hz were exercised and read back.
+ * Button/DPI F3 writes persisted across replug. Polling uses
+ * F5(0)/F3/F1 02 08/F5(1); its replug persistence was not tested and effective
+ * report rate was not measured. No LEDs, macros or profile switching.
  */
 export class UtechsmartVenusHidClient {
   readonly device: HIDDevice;
@@ -113,7 +117,7 @@ export class UtechsmartVenusHidClient {
         ui: {
           family: "utechsmart-venus",
           settingsReady: true,
-          valuesVerified: true,
+          valuesVerified: profile.pollingHz !== null && profile.stages.every((stage) => stage.exact),
           hideUnsupportedPollingRates: true,
           hideProcessingCard: true,
           defaultDisplayName: "UtechSmart Venus MMO",
@@ -125,7 +129,7 @@ export class UtechsmartVenusHidClient {
             maxDpi: UTECHSMART_VENUS_DPI_LABELS.at(-1)!,
             stepDpi: 100,
           },
-          statusNote: "Writes are read back; persistence is unverified and effective polling Hz has not been measured.",
+          statusNote: "Writes are read back from device memory. Effective polling rate has not been measured.",
         },
         batteryPercent: null,
         batteryState: "Unknown",

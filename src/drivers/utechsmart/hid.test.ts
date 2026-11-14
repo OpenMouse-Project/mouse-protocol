@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { UtechsmartVenusHidClient } from "./hid.ts";
+import { UtechsmartVenusHidClient } from "./hid.js";
 
 const hex = (text: string) => Uint8Array.from(text.trim().split(/\s+/).map((byte) => parseInt(byte, 16)));
 // Sanitized real dump excerpts copied from src/utechsmart/venus.test.ts.
@@ -83,7 +83,7 @@ const device = (fake: FakeVenus) => fake as unknown as HIDDevice;
 const client = (fake = new FakeVenus()) => new UtechsmartVenusHidClient(device(fake));
 const frame = (body: string) => [...hex(body), ...new Array(15 - hex(body).length).fill(0)];
 
-test("isSupported claims only Venus config collection with feature report 2", () => {
+test("isSupported claims only Venus config collection with feature reports 2 and 3", () => {
   assert.equal(UtechsmartVenusHidClient.isSupported(device(new FakeVenus())), true);
   for (const [vendorId, productId, usagePage, usage] of [
     [0x04d9, 0xfc55, 1, 2], [0x04d9, 0xfc55, 1, 6], [0x04d9, 0xfc55, 0x0c, 1],
@@ -94,8 +94,21 @@ test("isSupported claims only Venus config collection with feature report 2", ()
     Object.assign(fake.collections[0]!, { usagePage, usage });
     assert.equal(UtechsmartVenusHidClient.isSupported(device(fake)), false);
   }
+  for (const reportIds of [[], [2], [3]]) {
+    const fake = new FakeVenus();
+    fake.collections[0]!.featureReports = reportIds.map((reportId) => ({ reportId, items: [] }));
+    assert.equal(UtechsmartVenusHidClient.isSupported(device(fake)), false, `reports ${reportIds}`);
+  }
+});
+
+test("isSupported finds both reports on a nested vendor collection, not separate collections", () => {
   const fake = new FakeVenus();
-  fake.collections[0]!.featureReports = [];
+  const child = fake.collections[0]!;
+  fake.collections = [{ ...child, usagePage: 1, usage: 2, featureReports: [], children: [child] }];
+  assert.equal(UtechsmartVenusHidClient.isSupported(device(fake)), true);
+  child.featureReports = [{ reportId: 2, items: [] }];
+  assert.equal(UtechsmartVenusHidClient.isSupported(device(fake)), false);
+  fake.collections.push({ ...child, featureReports: [{ reportId: 3, items: [] }] });
   assert.equal(UtechsmartVenusHidClient.isSupported(device(fake)), false);
 });
 
@@ -132,6 +145,27 @@ test("readStatus decodes active profile 2 and Ctrl side buttons from real dump",
   assert.ok(fake.received.includes(3), "long reads use report 3");
   await c.close();
   assert.equal(fake.opened, false);
+});
+
+test("readStatus marks fallback DPI values unverified even on a noncurrent enabled stage", async () => {
+  for (const [value, range, dpi] of [[5, 0, 220], [9, 0xfe, 400], [5, 0xfe, 220]]) {
+    const fake = new FakeVenus();
+    fake.memory.set([value!, range!], 0x11d); // Active profile, enabled stage 4; current stage is 3.
+    const status = await client(fake).readStatus();
+    assert.equal(status.dpiStages![4], dpi);
+    assert.equal(status.dpi, 1000);
+    assert.equal(status.ui?.valuesVerified, false, `DPI pair ${value}/${range}`);
+  }
+});
+
+test("readStatus verifies known ranges and ignores fallback in inactive profiles or disabled stages", async () => {
+  const fake = new FakeVenus();
+  fake.memory[0x2c] = 0; // Factory profile includes ranges 0, 1 and the special range-4 cap.
+  fake.memory.set([5, 0xfe], 0x105); // Inactive profile.
+  fake.memory.set([5, 0xfe], 0x63); // Disabled stage 5 in the active profile.
+  const status = await client(fake).readStatus();
+  assert.deepEqual(status.dpiStages, [1000, 2000, 4000, 8200, 16400]);
+  assert.equal(status.ui?.valuesVerified, true);
 });
 
 test("DPI setter plans minimal F3 from fresh bytes, preserves unknown bytes and verifies", async () => {

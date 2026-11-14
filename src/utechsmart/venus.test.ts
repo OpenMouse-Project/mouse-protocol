@@ -138,6 +138,25 @@ test("all vendor DPI labels round-trip, with lower ties and cap exception", () =
   assert.equal(v.utechsmartVenusDecodeDpi(9, 0xfe), 400);
 });
 
+test("decoded stages distinguish exact vendor labels from fallback code/range pairs", () => {
+  const memory = fixture();
+  for (const dpi of v.UTECHSMART_VENUS_DPI_LABELS) {
+    const encoded = v.utechsmartVenusEncodeDpi(dpi);
+    memory.data.set([encoded.value, encoded.range], 0x105);
+    const stage = v.utechsmartVenusDecodeStatus(memory).profiles[1]!.stages[0]!;
+    assert.equal(stage.dpi, dpi);
+    assert.equal(stage.exact, true, `vendor DPI ${dpi}`);
+  }
+  for (const [value, range, dpi] of [[5, 0, 220], [5, 1, 440], [5, 4, 670], [9, 0xfe, 400], [5, 0xfe, 220]]) {
+    memory.data.set([value!, range!], 0x105);
+    const stage = v.utechsmartVenusDecodeStatus(memory).profiles[1]!.stages[0]!;
+    assert.equal(stage.dpi, dpi);
+    assert.equal(stage.exact, false, `fallback pair ${value}/${range}`);
+    assert.equal(stage.value, value);
+    assert.equal(stage.range, range);
+  }
+});
+
 test("button codec reuses Holtek names, supports single/keypad keys and standard 8-bit modifiers", () => {
   for (const [name, code] of [["Left click", 0x81], ["Right click", 0x82], ["Middle click", 0x83], ["Back", 0x84], ["Forward", 0x85], ["DPI down", 0x89], ["DPI up", 0x8a], ["Profile cycle", 0x8d], ["Disabled", 0]] as const) {
     const action = { kind: "action", name } as const;

@@ -6,8 +6,9 @@
  * apply, matching the official software. Effective Hz was NOT measured; apply's
  * broader meaning and the legacy F1 control names remain partly unverified.
  * No reset or LED memory writer.
- * This module has not itself been exercised against hardware. Callers must read
- * back after writing; persistence across power cycles is not established here.
+ * The WebHID client was owner-tested on Windows/Edge; button/DPI F3 writes
+ * persisted across replug. Polling replug persistence was not tested.
+ * Callers must read back after writing.
  */
 import {
   redragonEncodeRead, redragonEncodeWrite, redragonButtonCodec,
@@ -275,6 +276,8 @@ function buttonCount(memory: UtechsmartVenusMemory, profile: number): void {
 }
 export interface UtechsmartVenusStage {
   dpi: number; value: number; range: number; raw: Uint8Array;
+  /** Known code and range; false when DPI uses a fallback. */
+  exact: boolean;
 }
 export interface UtechsmartVenusProfile {
   index: number; pollingHz: number | null; pollingCode: number;
@@ -291,7 +294,11 @@ export function utechsmartVenusDecodeStatus(memory: UtechsmartVenusMemory): Utec
     buttonCount(memory, index);
     const stages = Array.from({ length: header[0]! }, (_, stage): UtechsmartVenusStage => {
       const raw = readMemory(memory, utechsmartVenusStageAddress(index, stage), 6);
-      return { dpi: utechsmartVenusDecodeDpi(raw[1]!, raw[2]!), value: raw[1]!, range: raw[2]!, raw };
+      return {
+        dpi: utechsmartVenusDecodeDpi(raw[1]!, raw[2]!), value: raw[1]!, range: raw[2]!, raw,
+        exact: [0, 1, 4].includes(raw[2]!) &&
+          (BASE_CODES.includes(raw[1]!) || (raw[1] === 124 && raw[2] === 4)),
+      };
     });
     return {
       index, pollingHz: [1, 2, 4, 8].includes(polling) ? 1000 / polling : null, pollingCode: polling,
@@ -316,7 +323,7 @@ export type UtechsmartVenusChange =
  * the six-byte stage record; button edits require count+slot; polling needs two
  * bytes. Refresh readback before planning and verify again after applying.
  * Bare button/DPI writes were confirmed. Polling requires the caller to bracket
- * F3 with F5 0/1 and send settings apply; durability remains unverified.
+ * F3 with F5 0/1 and send settings apply; polling replug persistence is untested.
  */
 export function utechsmartVenusPlanWrite(memory: UtechsmartVenusMemory, change: UtechsmartVenusChange): Uint8Array[] {
   let address: number;
