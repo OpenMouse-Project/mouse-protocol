@@ -49,7 +49,7 @@ test("hardware read/write frames include id, zero reserved bytes and no checksum
   assert.throws(() => v.utechsmartVenusEncodeWrite(0xffff, [1, 2]));
 });
 
-test("F1 controls are explicit and cannot build reset; F5 is polling, never a bracket", () => {
+test("legacy F1 controls remain explicit and cannot build reset", () => {
   const controls = { enter: 1, buttons: 2, dpi: 4, led: 8, exit: 16 } as const;
   for (const [name, code] of Object.entries(controls)) {
     const frame = v.utechsmartVenusEncodeControl(name as keyof typeof controls);
@@ -58,10 +58,19 @@ test("F1 controls are explicit and cannot build reset; F5 is polling, never a br
     assert.ok(frame.slice(4).every((b) => b === 0));
   }
   assert.throws(() => v.utechsmartVenusEncodeControl("reset" as "enter"));
-  for (const [hz, code] of [[125, 8], [250, 4], [500, 2], [1000, 1]]) {
-    assert.deepEqual(v.utechsmartVenusEncodePolling(hz!), Uint8Array.from([2, 0xf5, code!, ...new Array(13).fill(0)]));
+});
+
+test("F5 brackets settings writes with 0/1, never a polling divisor", () => {
+  for (const state of [0, 1] as const) {
+    assert.deepEqual(v.utechsmartVenusEncodeSession(state), Uint8Array.from([2, 0xf5, state, ...new Array(13).fill(0)]));
   }
-  assert.throws(() => v.utechsmartVenusEncodePolling(2000));
+  for (const state of [-1, 2, 4, 8, 0.5, NaN]) {
+    assert.throws(() => v.utechsmartVenusEncodeSession(state as 0));
+  }
+});
+
+test("settings apply is F1 02 08 without relying on the legacy LED interpretation", () => {
+  assert.deepEqual(v.utechsmartVenusEncodeApply(), hex("02 f1 02 08 00 00 00 00 00 00 00 00 00 00 00 00"));
 });
 
 function reply(address: number, length: number): Uint8Array {
@@ -204,7 +213,7 @@ test("status exposes unknown DPI range and polling code, rejects incomplete or i
   assert.throws(() => v.utechsmartVenusDecodeStatus(memory));
 });
 
-test("write plans emit only minimal F3 byte spans and preserve unknown/reserved/tail bytes", () => {
+test("write plans emit minimal F3 spans except full polling words and preserve unknown/reserved/tail bytes", () => {
   const memory = fixture();
   memory.data.set([0xa5, 0x16, 0, 0xc1, 0xc2, 0xc3], 0x44);
   memory.data[0x33] = 0x7e;
@@ -213,7 +222,7 @@ test("write plans emit only minimal F3 byte spans and preserve unknown/reserved/
     [{ kind: "dpi", profile: 0, stage: 0, dpi: 8200 }, 0x45, [0x5c, 1]],
     [{ kind: "dpi", profile: 0, stage: 0, dpi: 2000 }, 0x45, [0x2d]],
     [{ kind: "currentStage", profile: 0, stage: 4 }, 0x42, [4]],
-    [{ kind: "polling", profile: 0, hz: 1000 }, 0x32, [1]],
+    [{ kind: "polling", profile: 0, hz: 1000 }, 0x32, [1, 0x7e]],
     [{ kind: "button", profile: 1, slot: 6, action: { kind: "combo", modifiers: 3, usage: 0x1e } }, 0x15b, [3]],
     [{ kind: "button", profile: 0, slot: 19, action: { kind: "raw", bytes: hex("ff ab cd ef") } }, 0xce, [0xff, 0xab, 0xcd, 0xef]],
   ];
@@ -230,6 +239,23 @@ test("write plans emit only minimal F3 byte spans and preserve unknown/reserved/
   assert.deepEqual(v.utechsmartVenusPlanWrite(memory, { kind: "polling", profile: 0, hz: 500 }), []);
   assert.deepEqual(v.utechsmartVenusPlanWrite(memory, { kind: "button", profile: 0, slot: 0, action: { kind: "action", name: "Left click" } }), []);
 });
+test("polling plans use vendor codes and full preserved words in every profile", () => {
+  const memory = fixture();
+  for (let profile = 0; profile < 5; profile++) {
+    const address = 0x32 + 2 * profile;
+    const second = 0xa0 + profile;
+    for (const [hz, code] of [[1000, 1], [500, 2], [250, 4], [125, 8]] as const) {
+      memory.data.set([code === 1 ? 2 : 1, second], address);
+      const before = memory.data.slice();
+      const change = { kind: "polling", profile, hz } as const;
+      assert.deepEqual(v.utechsmartVenusPlanWrite(memory, change), [v.utechsmartVenusEncodeWrite(address, [code, second])]);
+      assert.deepEqual(memory.data, before, "planning must not mutate readback");
+      memory.data[address] = code;
+      assert.deepEqual(v.utechsmartVenusPlanWrite(memory, change), []);
+    }
+  }
+});
+
 test("write plans accept address-based excerpts but reject missing bytes, inactive stages and tail slots", () => {
   const excerpt = { address: 0x40, data: factoryDpi.slice() };
   assert.deepEqual(v.utechsmartVenusPlanWrite(excerpt, { kind: "dpi", profile: 0, stage: 0, dpi: 2000 }), [v.utechsmartVenusEncodeWrite(0x45, [0x2d])]);

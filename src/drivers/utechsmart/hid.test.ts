@@ -34,6 +34,7 @@ class FakeVenus {
   received: number[] = [];
   ignoreWrites = false;
   failCommand: number | null = null;
+  failSend?: (bytes: number[]) => Error | undefined;
   malformed = false;
   stripReportId = false;
   private pending: { address: number; length: number } | null = null;
@@ -45,6 +46,8 @@ class FakeVenus {
     assert.equal(bytes.length, 15, "WebHID send excludes report id");
     this.sent.push(bytes);
     const [cmd, lo = 0, hi = 0, length = 0] = bytes;
+    const failure = this.failSend?.(bytes);
+    if (failure) throw failure;
     if (cmd === this.failCommand) { this.failCommand = null; throw new Error("simulated STALL"); }
     const address = lo | (hi << 8);
     if (cmd === 0xf2) {
@@ -53,7 +56,12 @@ class FakeVenus {
       this.pending = { address, length };
     } else if (cmd === 0xf3) {
       if (!this.ignoreWrites) this.memory.set(bytes.slice(7, 7 + length), address);
-    } else assert.equal(cmd, 0xf5, "no F1 or session brackets");
+    } else if (cmd === 0xf5) {
+      assert.ok(lo === 0 || lo === 1, "F5 is a session bracket, never a polling divisor");
+      assert.ok(bytes.slice(2).every((byte) => byte === 0));
+    } else {
+      assert.deepEqual(bytes, frame("f1 02 08"), "only the settings apply F1 is allowed");
+    }
   }
   async receiveFeatureReport(reportId: number) {
     const { address, length } = this.pending!;
@@ -137,14 +145,78 @@ test("DPI setter plans minimal F3 from fresh bytes, preserves unknown bytes and 
   assert.equal((await c.readStatus()).dpiStages![0], 8200);
 });
 
-test("polling writes active profile byte then F5, no commits, then readback", async () => {
+test("polling brackets the full active-profile word, applies, closes, then verifies with exact delays", async (t) => {
   const fake = new FakeVenus();
-  fake.memory[0x35] = 0x7e;
-  assert.equal(await client(fake).setPollingRate(125), 125);
-  assert.deepEqual(fake.writes(), [frame("f3 34 00 01 00 00 00 08"), frame("f5 08")]);
-  assert.equal(fake.memory[0x35], 0x7e);
-  assert.equal(fake.memory[0x32], 2, "other profile unchanged");
-  assert.deepEqual(fake.sent.at(-1), frame("f2 34 00 01"));
+  const delays: { frame: number[] | undefined; ms: number | undefined }[] = [];
+  const originalTimeout = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", (callback: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+    delays.push({ frame: fake.sent.at(-1), ms });
+    return originalTimeout(callback, ms, ...args);
+  });
+  const c = client(fake);
+  for (const [hz, code, second] of [[125, "08", 0x7e], [500, "02", 0]]) {
+    fake.memory[0x35] = second!;
+    fake.sent = [];
+    delays.length = 0;
+    const word = `f3 34 00 02 00 00 00 ${code} ${second!.toString(16)}`;
+    assert.equal(await c.setPollingRate(hz!), hz);
+    assert.deepEqual(fake.writes(), [frame("f5 00"), frame(word), frame("f1 02 08"), frame("f5 01")]);
+    assert.deepEqual(delays.slice(-5), [
+      { frame: frame("f5 00"), ms: 100 },
+      { frame: frame(word), ms: 8 },
+      { frame: frame("f1 02 08"), ms: 100 },
+      { frame: frame("f5 01"), ms: 100 },
+      { frame: frame("f2 34 00 02"), ms: 5 },
+    ]);
+    assert.equal(fake.memory[0x35], second);
+    assert.equal(fake.memory[0x32], 2, "other profile unchanged");
+    assert.deepEqual(fake.sent.at(-1), frame("f2 34 00 02"));
+  }
+});
+
+test("unchanged polling sends no F3, F1 or session brackets", async () => {
+  const fake = new FakeVenus();
+  assert.equal(await client(fake).setPollingRate(1000), 1000);
+  assert.deepEqual(fake.writes(), []);
+});
+
+test("polling failures attempt one best-effort close and preserve the original error", async () => {
+  for (const failedCommand of [0xf3, 0xf1, 0xf5]) {
+    const fake = new FakeVenus();
+    const original = new Error("original failure");
+    let failed = false;
+    fake.failSend = (bytes) => {
+      if (bytes[0] === 0xf5 && bytes[1] === 0) return;
+      if (!failed && bytes[0] === failedCommand) {
+        failed = true;
+        return original;
+      }
+      if (failed && bytes[0] === 0xf5) return new Error("cleanup failure");
+    };
+    await assert.rejects(() => client(fake).setPollingRate(125), (error) => error === original);
+    const commands = failedCommand === 0xf3 ? [frame("f5 00"), frame("f3 34 00 02 00 00 00 08 00")]
+      : [frame("f5 00"), frame("f3 34 00 02 00 00 00 08 00"), frame("f1 02 08")];
+    if (failedCommand === 0xf5) commands.push(frame("f5 01"));
+    assert.deepEqual(fake.writes(), [...commands, frame("f5 01")]);
+  }
+});
+
+test("polling readback mismatch also attempts a best-effort close", async () => {
+  const fake = new FakeVenus();
+  fake.ignoreWrites = true;
+  await assert.rejects(() => client(fake).setPollingRate(125), /readback mismatch/);
+  assert.deepEqual(fake.writes(), [frame("f5 00"), frame("f3 34 00 02 00 00 00 08 00"),
+    frame("f1 02 08"), frame("f5 01"), frame("f5 01")]);
+});
+
+test("invalid polling rates reject before opening or sending any I/O", async () => {
+  const fake = new FakeVenus();
+  const c = client(fake);
+  for (const hz of [2000, 0, NaN, Infinity, 125.5]) {
+    await assert.rejects(() => c.setPollingRate(hz), /polling/);
+  }
+  assert.equal(fake.opened, false);
+  assert.deepEqual(fake.sent, []);
 });
 
 test("buttons support singles, modifier combinations and native actions with minimal writes", async () => {

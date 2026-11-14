@@ -19,9 +19,10 @@ import {
   utechsmartVenusButtonActionName,
   utechsmartVenusDecodeStatus,
   utechsmartVenusDecodeRead,
+  utechsmartVenusEncodeApply,
   utechsmartVenusEncodeControl,
   utechsmartVenusEncodeDpi,
-  utechsmartVenusEncodePolling,
+  utechsmartVenusEncodeSession,
   utechsmartVenusEncodeRead,
   utechsmartVenusPlanWrite,
   utechsmartVenusReadReportId,
@@ -31,16 +32,15 @@ import {
   type UtechsmartVenusControl,
   type UtechsmartVenusMemory,
   type UtechsmartVenusProfile,
-} from "@openmouse/protocol/utechsmart";
+} from "../../utechsmart/index.js";
 
 const READ_DELAY_MS = 5;
 const WRITE_DELAY_MS = 8;
-// F1 commit semantics/persistence are UNVERIFIED. Hardware testing will decide
-// this list in one place; v1 sends no F1 (and never the F1 00 00 reset).
+// Button/DPI writes stay bare: no F1 or F5 (and never the F1 00 00 reset).
 const COMMIT_AFTER_WRITE: readonly UtechsmartVenusControl[] = [];
-// UNVERIFIED: the reverse-engineered tool claims F5 applies polling immediately.
-// This is NOT Redragon's F5 session bracket.
-const APPLY_POLLING_IMMEDIATELY = true;
+// Hardware-verified polling sequence: F5(0), full F3 word, F1 02 08, F5(1).
+// F5 brackets a settings session; readback does not measure effective Hz.
+const POLLING_SETTLE_DELAY_MS = 100;
 
 // The table has 20 slots; slot 18 is unused and deliberately not remappable.
 const BUTTON_NAMES = ["Left", "Right", "Middle", "Fire", "DPI+", "DPI-",
@@ -125,7 +125,7 @@ export class UtechsmartVenusHidClient {
             maxDpi: UTECHSMART_VENUS_DPI_LABELS.at(-1)!,
             stepDpi: 100,
           },
-          statusNote: "Writes are read back; persistence and immediate polling application are not yet hardware-verified.",
+          statusNote: "Writes are read back; persistence is unverified and effective polling Hz has not been measured.",
         },
         batteryPercent: null,
         batteryState: "Unknown",
@@ -160,13 +160,15 @@ export class UtechsmartVenusHidClient {
   }
 
   async setPollingRate(hz: number): Promise<number> {
-    const polling = utechsmartVenusEncodePolling(hz); // Validate before I/O.
+    // Validate before opening the device or reading memory.
+    if (!UTECHSMART_VENUS_POLLING_RATES.some((rate) => rate === hz)) {
+      throw new Error(`UtechSmart Venus unsupported polling rate ${hz}.`);
+    }
     return await this.run(async () => {
       await this.open();
       const memory = await this.readMemory();
       const profile = this.activeProfile(memory).index;
-      await this.writeAndConfirm(memory, { kind: "polling", profile, hz },
-        APPLY_POLLING_IMMEDIATELY ? polling : undefined);
+      await this.writeAndConfirm(memory, { kind: "polling", profile, hz });
       return hz;
     });
   }
@@ -227,13 +229,30 @@ export class UtechsmartVenusHidClient {
     return utechsmartVenusDecodeRead(answer, address, length);
   }
 
-  private async writeAndConfirm(memory: UtechsmartVenusMemory, change: UtechsmartVenusChange, polling?: Uint8Array): Promise<void> {
+  private async writeAndConfirm(memory: UtechsmartVenusMemory, change: UtechsmartVenusChange): Promise<void> {
     const frames = utechsmartVenusPlanWrite(memory, change);
-    for (const frame of frames) await this.sendFrame(frame);
-    if (frames.length > 0) {
-      for (const control of COMMIT_AFTER_WRITE) await this.sendFrame(utechsmartVenusEncodeControl(control));
+    if (frames.length === 0) return;
+    if (change.kind === "polling") {
+      try {
+        await this.sendFrame(utechsmartVenusEncodeSession(0), POLLING_SETTLE_DELAY_MS);
+        for (const frame of frames) await this.sendFrame(frame);
+        await this.sendFrame(utechsmartVenusEncodeApply(), POLLING_SETTLE_DELAY_MS);
+        await this.sendFrame(utechsmartVenusEncodeSession(1), POLLING_SETTLE_DELAY_MS);
+        await this.confirmWrites(frames);
+      } catch (error) {
+        // Even a rejected send may have reached the device. Try closing once,
+        // including after a readback failure; never mask the original error.
+        try { await this.sendFrame(utechsmartVenusEncodeSession(1), POLLING_SETTLE_DELAY_MS); } catch { /* best effort */ }
+        throw error;
+      }
+      return;
     }
-    if (polling) await this.sendFrame(polling);
+    for (const frame of frames) await this.sendFrame(frame);
+    for (const control of COMMIT_AFTER_WRITE) await this.sendFrame(utechsmartVenusEncodeControl(control));
+    await this.confirmWrites(frames);
+  }
+
+  private async confirmWrites(frames: Uint8Array[]): Promise<void> {
     for (const frame of frames) {
       const address = frame[2]! | (frame[3]! << 8);
       const expected = frame.slice(8, 8 + frame[4]!);
@@ -244,9 +263,9 @@ export class UtechsmartVenusHidClient {
     }
   }
 
-  private async sendFrame(frame: Uint8Array): Promise<void> {
+  private async sendFrame(frame: Uint8Array, delayMs = frame[1] === 0xf2 ? READ_DELAY_MS : WRITE_DELAY_MS): Promise<void> {
     await this.device.sendFeatureReport(UTECHSMART_VENUS_REPORT_ID, frame.slice(1).buffer as ArrayBuffer);
-    await new Promise((resolve) => setTimeout(resolve, frame[1] === 0xf2 ? READ_DELAY_MS : WRITE_DELAY_MS));
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
   private async run<T>(operation: () => Promise<T>): Promise<T> {

@@ -2,8 +2,10 @@
  * UtechSmart Venus MMO wired, Holtek 04d9:fc55.
  * Memory layout, F2 replies, bare F3 writes, keyboard combos and the cited DPI
  * pairs were verified on the user's hardware by read probes/vendor UI/readback.
- * F1 meanings and F5 polling are inferred from a reverse-engineered Linux tool,
- * NOT hardware-verified. No Redragon session bracket, reset or LED memory writer.
+ * Polling writes were hardware-verified with F5 0/1 session brackets and F1 02 08
+ * apply, matching the official software. Effective Hz was NOT measured; apply's
+ * broader meaning and the legacy F1 control names remain partly unverified.
+ * No reset or LED memory writer.
  * This module has not itself been exercised against hardware. Callers must read
  * back after writing; persistence across power cycles is not established here.
  */
@@ -106,10 +108,22 @@ function pollingCode(hz: number): number {
   if (!UTECHSMART_VENUS_POLLING_RATES.some((rate) => rate === hz)) throw new Error(`UtechSmart Venus unsupported polling rate ${hz}.`);
   return 1000 / hz;
 }
-/** UNVERIFIED F5 polling command. Unlike Redragon, F5 is NOT a session bracket. */
-export function utechsmartVenusEncodePolling(hz: number): Uint8Array {
+/** Hardware-verified F5 session bracket: 0 before settings writes, 1 after apply.
+ * F5 is NOT a polling divisor. Readback confirms stored codes, not effective Hz.
+ */
+export function utechsmartVenusEncodeSession(state: 0 | 1): Uint8Array {
+  integer(state, 0, 1, "session state");
   const frame = new Uint8Array(16);
-  frame.set([2, 0xf5, pollingCode(hz)]);
+  frame.set([2, 0xf5, state]);
+  return frame;
+}
+/** Official software's settings apply, also verified in the polling sequence.
+ * Its broader commit/persistence semantics remain unverified. The legacy F1
+ * control encoder calls this code "led" based on an unreliable Linux tool.
+ */
+export function utechsmartVenusEncodeApply(): Uint8Array {
+  const frame = new Uint8Array(16);
+  frame.set([2, 0xf1, 2, 8]);
   return frame;
 }
 
@@ -118,7 +132,9 @@ export function utechsmartVenusProfileAddress(profile: number): number {
   integer(profile, 0, 4, "profile");
   return UTECHSMART_VENUS_PROFILE_BASES[profile]!;
 }
-/** Hardware-observed polling record is [1000 / Hz, unknown] at 0x32 + 2p. */
+/** Polling word is [vendor code (1000 / labeled Hz), unknown] at 0x32 + 2p.
+ * Stored codes are verified; effective Hz has not been measured.
+ */
 export function utechsmartVenusPollAddress(profile: number): number {
   utechsmartVenusProfileAddress(profile);
   return 0x32 + 2 * profile;
@@ -293,12 +309,14 @@ export type UtechsmartVenusChange =
   | { kind: "button"; profile: number; slot: number; action: UtechsmartVenusButtonAction };
 /**
  * Plan ONE change using current readback. Returns no frames for a no-op, otherwise
- * one minimal contiguous F3 span (<=4 bytes). Never mutates the excerpt, rewrites
+ * one minimal contiguous F3 span (<=4 bytes), except polling always writes its
+ * full two-byte word with byte 1 preserved. Never mutates the excerpt, changes
  * unknown bytes, enables extra stages, touches trailing wheel records, or emits
  * F1/F5 automatically. A stage change requires its four-byte profile header plus
  * the six-byte stage record; button edits require count+slot; polling needs two
  * bytes. Refresh readback before planning and verify again after applying.
- * Writes applying bare was confirmed; durability/commit requirements remain open.
+ * Bare button/DPI writes were confirmed. Polling requires the caller to bracket
+ * F3 with F5 0/1 and send settings apply; durability remains unverified.
  */
 export function utechsmartVenusPlanWrite(memory: UtechsmartVenusMemory, change: UtechsmartVenusChange): Uint8Array[] {
   let address: number;
@@ -342,6 +360,7 @@ export function utechsmartVenusPlanWrite(memory: UtechsmartVenusMemory, change: 
   let first = 0;
   while (first < before.length && before[first] === after[first]) first++;
   if (first === before.length) return [];
+  if (change.kind === "polling") return [utechsmartVenusEncodeWrite(address, after)];
   let end = before.length;
   while (before[end - 1] === after[end - 1]) end--;
   return [utechsmartVenusEncodeWrite(address + first, after.slice(first, end))];
