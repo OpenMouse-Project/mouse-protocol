@@ -156,6 +156,8 @@ export class AtkHidClient {
   readonly device: HIDDevice;
 
   private queue: Promise<unknown> = Promise.resolve();
+  /** Serializes whole read/patch/write transactions on shared EEPROM rows. */
+  private rowQueue: Promise<unknown> = Promise.resolve();
   private lastStatus: MouseStatus | null = null;
   private product: AtkProduct | null = null;
   private identified = false;
@@ -1184,10 +1186,12 @@ export class AtkHidClient {
 
   /** The advanced block is written whole, so read it back, patch one pair, write. */
   private async writeAdvanced(offset: number, value: number): Promise<number> {
-    const group = Array.from(await this.read(REGISTER.advanced, ADVANCED_LENGTH));
-    group.splice(offset, 2, ...wePackScalarPair(value));
-    await this.write(REGISTER.advanced, group);
-    return (await this.read(REGISTER.advanced, ADVANCED_LENGTH))[offset];
+    return await this.inRowTransaction(async () => {
+      const group = Array.from(await this.read(REGISTER.advanced, ADVANCED_LENGTH));
+      group.splice(offset, 2, ...wePackScalarPair(value));
+      await this.write(REGISTER.advanced, group);
+      return (await this.read(REGISTER.advanced, ADVANCED_LENGTH))[offset];
+    });
   }
 
   /**
@@ -1769,32 +1773,34 @@ export class AtkHidClient {
     }
 
     const address = REGISTER.advanced;
-    const block = Array.from(await this.read(address, ADVANCED_LENGTH));
-    block.splice(offset, 2, ...wePackScalarPair(value));
+    return await this.inRowTransaction(async () => {
+      const block = Array.from(await this.read(address, ADVANCED_LENGTH));
+      block.splice(offset, 2, ...wePackScalarPair(value));
 
-    const payload = weBuildCmdPayload(
-      WE_CMD_WRITE_EEPROM,
-      [
-        0,
-        (address >> 8) & 0xff,
-        address & 0xff,
-        block.length,
-        ...block,
-      ],
-    );
+      const payload = weBuildCmdPayload(
+        WE_CMD_WRITE_EEPROM,
+        [
+          0,
+          (address >> 8) & 0xff,
+          address & 0xff,
+          block.length,
+          ...block,
+        ],
+      );
 
-    await this.exchange(
-      payload,
-      (frame) => frame[0] === WE_CMD_WRITE_EEPROM
-        && frame[1] === 0
-        && frame[2] === ((address >> 8) & 0xff)
-        && frame[3] === (address & 0xff)
-        && frame[4] === block.length
-        && this.hasValidChecksum(frame)
-        && block.every((byte, index) => frame[DATA_OFFSET + index] === byte),
-    );
+      await this.exchange(
+        payload,
+        (frame) => frame[0] === WE_CMD_WRITE_EEPROM
+          && frame[1] === 0
+          && frame[2] === ((address >> 8) & 0xff)
+          && frame[3] === (address & 0xff)
+          && frame[4] === block.length
+          && this.hasValidChecksum(frame)
+          && block.every((byte, index) => frame[DATA_OFFSET + index] === byte),
+      );
 
-    return (await this.read(address, ADVANCED_LENGTH))[offset]!;
+      return (await this.read(address, ADVANCED_LENGTH))[offset]!;
+    });
   }
 
   /**
@@ -1955,6 +1961,18 @@ export class AtkHidClient {
   private async run<T>(task: () => Promise<T>): Promise<T> {
     const started = this.queue.then(task, task);
     this.queue = started.catch(() => undefined);
+    return await started;
+  }
+
+  /**
+   * Holds a whole read/patch/write of a shared row, so two setters patching
+   * different fields cannot both read the old row and overwrite each other.
+   * The task's own reads and writes still go through run(); this is a
+   * separate chain, so nesting cannot deadlock.
+   */
+  private async inRowTransaction<T>(task: () => Promise<T>): Promise<T> {
+    const started = this.rowQueue.then(task, task);
+    this.rowQueue = started.catch(() => undefined);
     return await started;
   }
 }

@@ -942,3 +942,31 @@ test("R1 Pro receiver refuses Performance Mode, which ATK HUB does not offer for
   await assert.rejects(client.setPerformanceMode(true), /Performance mode is not available/);
   assert.equal(writes(fake as unknown as HIDDevice).length, 0);
 });
+
+test("R1 Pro Max receiver keeps concurrent advanced-row writes from overwriting each other", async () => {
+  const fake = device(0xf58a, "VXE R1 Pro Max Receiver");
+  const hardware = fake as unknown as FakeR1ProMaxDevice;
+  // Stateful advanced row: reads return what the last write stored.
+  let row = [0x04, 0x51, 0x01, 0x54, 0x06, 0x4f, 0x01, 0x54, 0x01, 0x54];
+  const send = hardware.sendReport.bind(hardware);
+  hardware.sendReport = async (reportId: number, data: ArrayBuffer) => {
+    const frame = new Uint8Array(data);
+    if (frame[0] === 0x10) hardware.replies = [reply(0x10, 0, [0x02, 0x1b])];
+    if (frame[0] === 0x08 && frame[3] === 0xa9) hardware.replies = [reply(0x08, 0x00a9, row)];
+    if (frame[0] === 0x07 && frame[3] === 0xa9) {
+      row = [...frame.subarray(5, 15)];
+      hardware.writeReplies = [reply(0x07, 0x00a9, row)];
+    }
+    await send(reportId, data);
+  };
+
+  const client = new AtkHidClient(fake);
+  const [motionSync, ripple] = await Promise.all([
+    client.setMotionSync(false),
+    client.setRippleControl(false),
+  ]);
+
+  assert.equal(motionSync, false);
+  assert.equal(ripple, false);
+  assert.deepEqual(row, [0x04, 0x51, 0x00, 0x55, 0x06, 0x4f, 0x01, 0x54, 0x00, 0x55]);
+});
