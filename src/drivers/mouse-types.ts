@@ -208,7 +208,7 @@ export interface MagneticCalibrationProgress {
 }
 
 export interface MouseStatus {
-  brand: "RAWM" | "Motospeed" | "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "Vancer" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "VAXEE" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Noir Gear" | "Lingbao" | "GearHub" | "AJAZZ" | "Corsair" | "Microsoft" | "Dareu" | "Redragon" | "Incott" | "HyperX" | "ASUS" | "Ryunix" | "Amkette" | "Delux" | "GravaStar" | "IPI" | "Rapoo" | "Fater" | "Cooler Master" | "AJAZZ" | "Scyrox" | "Hitscan" | "ROCCAT" | "Thermaltake" | "Redgear" | "AULA";
+  brand: "RAWM" | "Motospeed" | "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "Vancer" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "VAXEE" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Noir Gear" | "Lingbao" | "GearHub" | "AJAZZ" | "Corsair" | "Microsoft" | "Dareu" | "Redragon" | "UtechSmart" | "Incott" | "HyperX" | "ASUS" | "Ryunix" | "Amkette" | "Delux" | "GravaStar" | "IPI" | "Rapoo" | "Fater" | "Cooler Master" | "AJAZZ" | "Scyrox" | "Hitscan" | "ROCCAT" | "Thermaltake" | "Redgear" | "AULA";
   name: string;
   /** Optional LunaFury controls, populated only after successful device reads. */
   lunafury?: import("../lamzu/lunafury.js").LunaFurySettings;
