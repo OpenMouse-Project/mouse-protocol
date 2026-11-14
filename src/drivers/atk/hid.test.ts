@@ -1300,11 +1300,17 @@ test("a mouse behind the generic 8K dongle-L is decoded with the sensor its CID/
 });
 
 test("a CID/MID shared by models with different sensors stays on the generic codec behind a receiver", () => {
-  assert.equal(atkCatalogSensorForCidMid("2,77"), "PAW3395SE");
-  assert.equal(atkCatalogSensorForCidMid("1,2"), "PAW3950Ultra");
-  assert.equal(atkCatalogSensorForCidMid("2,5"), null);
-  assert.equal(atkCatalogSensorForCidMid("250,250"), null);
-  assert.equal(atkCatalogSensorForCidMid(null), null);
+  assert.equal(atkCatalogSensorForCidMid("2,77", 0x373b), "PAW3395SE");
+  assert.equal(atkCatalogSensorForCidMid("1,2", 0x373b), "PAW3950Ultra");
+  assert.equal(atkCatalogSensorForCidMid("2,5", 0x373b), null);
+  assert.equal(atkCatalogSensorForCidMid("250,250", 0x373b), null);
+  assert.equal(atkCatalogSensorForCidMid(null, 0x373b), null);
+  // CID/MID 2,8 is the VXE R1 NK under ATK's vendor id only; a Compx (0x3554)
+  // device reporting it is a different mouse and must not borrow that entry.
+  assert.equal(atkCatalogSensorForCidMid("2,8", 0x373b), "PAW3395SE");
+  assert.equal(atkCatalogSensorForCidMid("2,8", 0x3554), null);
+  assert.equal(atkCatalogDevice(0x3554, 0xf58a, "2,8"), undefined);
+  assert.equal(atkCatalogDevice(0x373b, 0x10c9, "2,8")?.model, "VXE R1 NK");
   assert.equal(atkCatalogDevice(0x373b, 0x1278, "2,77")?.model, "ATK X1 SE NK");
   assert.equal(atkCatalogDevice(0x373b, 0x1278, "2,5"), undefined);
 });

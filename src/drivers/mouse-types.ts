@@ -77,6 +77,11 @@ export interface MouseUiHints {
   dpiLighting?: {
     modes: readonly (0 | 1 | 2)[];
     brightness: readonly number[];
+    /**
+     * Modes in which brightness can be changed. Omitted when every lit mode
+     * accepts it; a mouse whose breathing effect has no brightness lists [1].
+     */
+    brightnessModes?: readonly (1 | 2)[];
     speed: readonly number[];
     /** Optional DPI-indicator-only sleep values in seconds. */
     sleepTimeouts?: readonly number[];
