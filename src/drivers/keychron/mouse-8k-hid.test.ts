@@ -17,6 +17,15 @@ class FakeKeychronMouse {
   opened = false;
   readonly sent: Array<{ reportId: number; packet: Uint8Array }> = [];
   private listeners = new Map<string, (event: unknown) => void>();
+  heRecords = [0, 2].map(index => {
+    const r = new Uint8Array(22); r[0] = index; r.set([2, 3, 25, 30], 1);
+    r[5] = 25; r[7] = 15; r[10] = 40; r[12] = 0x12; r[13] = 5; r[15] = 5;
+    return r;
+  });
+  failHeWrite = false;
+  pairMask = 9;
+  receiverButtons = new Map<number, number[]>();
+  dynamic = { profile: 1, enabled: true, mode: 0, points: [{ speed: 0, gain: 16 }, { speed: 200, gain: 56 }] };
   workMode = 0;
   /** Protocol version in the 0x02 answer; from 6 the feature flags move there. */
   version = 5;
@@ -74,6 +83,29 @@ class FakeKeychronMouse {
   async sendReport(reportId: number, data: ArrayBuffer): Promise<void> {
     const packet = new Uint8Array(data);
     this.sent.push({ reportId, packet });
+    if (reportId === 0xb3 && packet[0] === 0x31) {
+      const reply = new Uint8Array(63); reply.set([0x31, packet[1]!, 0]); reply.set(this.receiverButtons.get(packet[1]!) ?? [0], 3); this.emit(0xb4, reply); return;
+    }
+    if (reportId === 0xb3 && packet[0] === 0x30) {
+      this.receiverButtons.set(packet[1]!, Array.from(packet.slice(3))); this.emit(0xb4, new Uint8Array([ACK, 0, 0x30])); return;
+    }
+    if (reportId === 0xb3 && packet[0] === 0x4f) {
+      const r = new Uint8Array(63); r.set([0x4f, packet[1]!, +this.dynamic.enabled, this.dynamic.mode, 0, this.dynamic.points.length]);
+      this.dynamic.points.forEach((p, i) => { r[6 + i * 4] = p.speed & 255; r[7 + i * 4] = p.speed >> 8; r[8 + i * 4] = p.gain; });
+      this.emit(0xb4, r); return;
+    }
+    if (reportId === 0xb3 && packet[0] === 0x4e) {
+      this.dynamic = { profile: packet[1]!, enabled: !!packet[2], mode: packet[3]!, points: Array.from({ length: packet[5]! }, (_, i) => ({ speed: packet[6 + 4 * i]! | packet[7 + 4 * i]! << 8, gain: packet[8 + 4 * i]! })) }; return;
+    }
+    if (reportId === 0xb3 && packet[0] === 0x65) {
+      const reply = new Uint8Array(63); reply.set([0x65, 2]);
+      this.heRecords.forEach((r, i) => reply.set(r, 2 + i * 22));
+      this.emit(0xb4, reply); return;
+    }
+    if (reportId === 0xb3 && packet[0] === 0x55) {
+      if (!this.failHeWrite) this.heRecords = [packet.slice(2, 24), packet.slice(24, 46)];
+      this.emit(0xb4, new Uint8Array([ACK, 0, 0x55])); return;
+    }
     if (reportId === 0xb3) return this.command(packet);
     if (reportId !== 0xb5) return;
     if (this.rejectNext) {
@@ -82,6 +114,11 @@ class FakeKeychronMouse {
       return;
     }
     switch (packet[0]) {
+      case 0x0b: {
+        if (packet[1] === 1) this.pairMask = packet[2]!;
+        this.emit(0xb6, packet[1] === 1 ? new Uint8Array([ACK, 0, 0x0b]) : new Uint8Array([0x0b, 2, this.pairMask, 4])); return;
+      }
+      case 0x0f: this.emit(0xb6, new Uint8Array([ACK, 0, 0x0f])); return;
       case 0x02: {
         const reply = new Uint8Array(20);
         reply.set([0x02, this.version, 0, 0x34, 0x34, this.reportedProductId & 0xff, this.reportedProductId >> 8, 0x03, 0x01, this.workMode]);
@@ -100,6 +137,7 @@ class FakeKeychronMouse {
         this.emit(0xb6, reply);
         return;
       }
+      case 0x20: this.emit(0xb6, new Uint8Array([0x20, 0, 0, 0, this.light.mode, this.light.brightness, this.light.speed, ...this.light.rgb])); return;
       case 0x23:
         this.emit(0xb6, new Uint8Array([0x21, this.light.mode, this.light.brightness, this.light.speed, ...this.light.rgb]));
         return;
@@ -716,4 +754,80 @@ test("shortcut presets remap like Launcher and polling keys follow feature1 bit 
   assert.ok(status.buttonOptions?.includes("Polling Loop"));
   assert.equal(status.buttonMappings?.["Tilt Left"], "Copy (Ctrl+C)");
   assert.equal(status.buttonMappings?.["Tilt Right"], "Polling +");
+});
+
+test("HE capability flags expose actual button records only on supported firmware", async () => {
+  const fake = new FakeKeychronMouse(), hid = client(fake);
+  assert.equal((await hid.readStatus()).magneticButtons, undefined);
+  fake.version = 6; fake.features[1] = 8;
+  await hid.close();
+  const status = await client(fake).readStatus();
+  assert.equal(status.magneticButtons?.buttons[0]?.triggerPoint, 4);
+  assert.equal(status.magneticButtons?.buttons[1]?.switchType, "magnetic");
+  assert.equal(status.magneticButtons?.canChooseSwitchType, true); await hid.close();
+});
+test("HE writes preserve the other button and reserved settings and verify readback", async () => {
+  const fake = new FakeKeychronMouse(), hid = client(fake); await hid.open();
+  const other = fake.heRecords[1]!.slice(0, 17);
+  await hid.setMagneticTriggerPoint(0, 6);
+  assert.equal(fake.heRecords[0]![5], 35); assert.equal(fake.heRecords[0]![7], 25);
+  assert.deepEqual(fake.heRecords[1]!.slice(0, 17), other);
+  assert.deepEqual(Array.from(fake.heRecords[0]!.slice(1, 5)), [2,3,25,30]);
+  await hid.setMagneticRapidTrigger(1, true, 3);
+  assert.equal(fake.heRecords[1]![13], 15); assert.equal(fake.heRecords[1]![15], 15);
+  await hid.setMagneticSwitchTypes(["optical", "magnetic"]);
+  assert.equal(fake.heRecords[0]![12], 0x11);
+  await hid.setMagneticTriggerPoint(0, 12); assert.equal(fake.heRecords[0]![12], 1);
+  await assert.rejects(() => hid.setMagneticRapidTrigger(0, true, 1), /remaining/);
+  fake.failHeWrite = true; await assert.rejects(() => hid.setMagneticTriggerPoint(1, 2), /did not keep/);
+  await hid.close();
+});
+test("scroll reversal preserves sensor flags and lift off", async () => {
+  const fake = new FakeKeychronMouse(), hid = client(fake); await hid.open();
+  await hid.setScrollDirection("Reverse");
+  assert.equal(fake.scrollReversed, true); assert.equal(fake.motion, true); assert.equal(fake.lod, 1);
+  assert.equal((await hid.readStatus()).scrollDirection, "Reverse"); await hid.close();
+});
+
+test("pairing shortcut and dynamic DPI are capability-gated and round-trip", async () => {
+  const fake = new FakeKeychronMouse(); fake.version = 6; fake.features[1] = 2; fake.features[3] = 32;
+  const hid = client(fake); const status = await hid.readStatus();
+  assert.deepEqual(status.keychronMouse?.pairing, { mask: 9, holdTime: 4 });
+  assert.deepEqual(status.keychronMouse?.dynamicDpi, fake.dynamic);
+  await hid.setKeychronPairingShortcut({ mask: 3, holdTime: 99 });
+  assert.equal(fake.pairMask, 3); assert.equal(lastSent(fake, 0x0b)![1], 2);
+  await assert.rejects(() => hid.setKeychronPairingShortcut({ mask: 31, holdTime: 4 }), /three/);
+  const next = { ...fake.dynamic, points: [{ speed: 0, gain: 8 }, { speed: 100, gain: 32 }] };
+  await hid.setKeychronDynamicDpi(next); assert.deepEqual(fake.dynamic, next);
+  await assert.rejects(() => hid.setKeychronDynamicDpi({ ...next, profile: 0 }), /profile changed/);
+  await assert.rejects(() => hid.setKeychronDynamicDpi({ ...next, points: [{ speed: 10, gain: 8 }, { speed: 5, gain: 20 }] }), /Invalid/);
+  await hid.close();
+});
+test("live travel uses device samples, serializes writes and stops after unsubscribe", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const fake = new FakeKeychronMouse(), hid = client(fake); await hid.open();
+  const samples: Array<[number, number]> = [];
+  const stop = hid.onButtonDepth((left, right) => samples.push([left, right]));
+  t.mock.timers.tick(50);
+  await Promise.all([hid.setMagneticTriggerPoint(0, 4), hid.setScrollDirection("Reverse")]);
+  assert.deepEqual(samples, [[40 / 65 * 100, 40 / 65 * 100]]);
+  stop();
+  const before = fake.sent.length;
+  t.mock.timers.tick(200);
+  assert.equal(fake.sent.length, before);
+  await hid.close();
+  assert.equal(fake.opened, false);
+});
+
+test("TurboLink controls stay nested in the G6 mouse status and use their own button commands", async () => {
+  const fake = new FakeKeychronMouse(); fake.productId = 0xd05a; fake.reportedProductId = 0xd086; fake.workMode = 1;
+  const hid = client(fake), status = await hid.readStatus();
+  assert.equal(status.name, "Keychron G6 HE 8K");
+  assert.equal(status.keychronReceiver?.name, "Keychron TurboLink 8K");
+  assert.equal(status.keychronReceiver?.buttonMappings.Polling, "Polling Loop");
+  assert.equal(status.keychronReceiver?.lighting.zone, "Receiver");
+  await hid.setKeychronReceiverButton({ button: "Switch type", action: "Magnetic (both)" });
+  assert.deepEqual(fake.receiverButtons.get(2)?.slice(0, 4), [15, 3, 204, 2]);
+  assert.equal(fake.buttons.size, 0);
+  await hid.close();
 });

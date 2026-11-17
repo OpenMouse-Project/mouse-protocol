@@ -1,4 +1,5 @@
-import type { MouseLighting, MouseStatus } from "../mouse-types.ts";
+import type { KeychronDynamicDpi, MagneticButtonsStatus, MouseLighting, MouseStatus } from "../mouse-types.ts";
+import { isKeychronConfigurableReceiver, KeychronReceiverControls } from "./receiver-hid.ts";
 import {
   KEYCHRON_8K_NORDIC_PRODUCT_IDS,
   KEYCHRON_M6_COMMAND_REPORT_ID as COMMAND_REPORT_ID,
@@ -90,6 +91,10 @@ type Features = {
   /** The 20K FPS switch. */
   fps20k: boolean;
   angle: boolean;
+  triggerSense: boolean;
+  switchChoice: boolean;
+  pairing: boolean;
+  dynamicDpi: boolean;
   /** Separate X/Y DPI through 0x48/0x49. */
   separateDpi: boolean;
   /** USB and 2.4 GHz polling tables through 0x4a/0x4b. */
@@ -196,6 +201,19 @@ export class Keychron8kHidClient {
     this.device = device;
   }
 
+  private receiverControls(): KeychronReceiverControls {
+    if (!isKeychronConfigurableReceiver(this.device)) throw new Error("No configurable Keychron receiver is connected.");
+    return new KeychronReceiverControls(this.query.bind(this), this.sendWithoutReply.bind(this));
+  }
+
+  async setKeychronReceiverButton(value: { button: string; action: string }): Promise<void> {
+    await this.receiverControls().setButtonMapping(value.button, value.action);
+  }
+
+  async setKeychronReceiverLighting(value: MouseLighting): Promise<MouseLighting> {
+    return await this.receiverControls().setLighting(value);
+  }
+
   /** Launcher treats any Keychron device with this collection as an "8k" mouse, so this does too. */
   static isSupported(device: HIDDevice): boolean {
     // The G3 Air and its Ultra-Link receivers speak the 8K Nordic protocol
@@ -220,6 +238,9 @@ export class Keychron8kHidClient {
   }
 
   async close(): Promise<void> {
+    if (this.depthTimer) clearInterval(this.depthTimer);
+    this.depthTimer = null;
+    this.depthListeners.clear();
     if (this.openedListener) {
       this.device.removeEventListener("inputreport", this.onInputReport);
       this.openedListener = false;
@@ -260,6 +281,11 @@ export class Keychron8kHidClient {
       return this.unreachableStatus(identity);
     }
     const buttons = await this.readButtons().catch(() => null);
+    const receiver = isKeychronConfigurableReceiver(this.device)
+      ? await this.receiverControls().readStatus().catch(() => null) : null;
+    const pairing = status.features.pairing ? await this.readPairingShortcut().catch(() => null) : null;
+    const dynamicDpi = status.features.dynamicDpi ? await this.readDynamicDpi(status.profile).catch(() => null) : null;
+    const magnetic = status.features.triggerSense ? await this.readMagneticStatus(status.features.switchChoice).catch(() => null) : null;
     const light = model?.light ? await this.readLight().catch(() => null) : null;
     const pollingRateHz = POLLING_RATES[polling.table[polling.level] ?? 2] ?? 1000;
     const liftOff = this.liftOffChoices(status);
@@ -271,8 +297,13 @@ export class Keychron8kHidClient {
     return {
       brand: "Keychron",
       name,
+      ...(receiver ? { keychronReceiver: receiver } : {}),
+      keychronMouse: { pairing, dynamicDpi, factoryReset: true },
+      scrollDirection: status.scrollReversed ? "Reverse" : "Forward",
+      ...(magnetic ? { magneticButtons: magnetic } : {}),
       ui: {
         family: "keychron-8k",
+        receiverControls: isKeychronConfigurableReceiver(this.device),
         defaultDisplayName: name,
         hideUnsupportedPollingRates: true,
         forceShowBattery: true,
@@ -316,6 +347,148 @@ export class Keychron8kHidClient {
       ...(light && model?.light ? { lighting: keychronLighting(light, model.light) } : {}),
       firmware: [identity.firmware ?? "Firmware unavailable"],
     };
+  }
+
+  private depthTimer: ReturnType<typeof setInterval> | null = null;
+  private depthListeners = new Set<(left: number, right: number) => void>();
+  private magneticWrite = false;
+
+  /** Launcher polls 0x65 every 50 ms only while its travel view is visible. */
+  onButtonDepth(listener: (left: number, right: number) => void): () => void {
+    this.depthListeners.add(listener);
+    if (!this.depthTimer) this.depthTimer = setInterval(() => {
+      if (this.queryPending || this.magneticWrite || (typeof document !== "undefined" && document.hidden)) return;
+      void this.readHeRecords().then((records) => {
+        for (const notify of this.depthListeners) notify(readU16(records[0]!, 10) / 65 * 100, readU16(records[1]!, 10) / 65 * 100);
+      }).catch(() => { for (const notify of this.depthListeners) notify(NaN, NaN); });
+    }, 50);
+    return () => {
+      this.depthListeners.delete(listener);
+      if (!this.depthListeners.size && this.depthTimer) { clearInterval(this.depthTimer); this.depthTimer = null; }
+    };
+  }
+
+  private async readHeRecords(): Promise<Uint8Array[]> {
+    const reply = await this.query(COMMAND_REPORT_ID, PACKET_LENGTH, [0x65], bytes => bytes[0] === 0x65);
+    if (reply[1] !== 2 || reply.length < 46) throw new Error("Invalid magnetic button report.");
+    const records = [reply.slice(2, 24), reply.slice(24, 46)];
+    const ordered = [records.find(r => r[0] === 0), records.find(r => r[0] === 2)];
+    if (!ordered[0] || !ordered[1]) throw new Error("Missing magnetic button record.");
+    return ordered as Uint8Array[];
+  }
+
+  private async readMagneticStatus(choice: boolean): Promise<MagneticButtonsStatus> {
+    const records = await this.readHeRecords();
+    return {
+      buttons: records.map(r => ({
+        switchType: (r[12]! & 15) === 1 ? "optical" : (r[12]! & 15) === 2 ? "magnetic" : null,
+        triggerPoint: heTravelLevel(readU16(r, 5)),
+        rapidTriggerEnabled: (r[12]! >> 4) <= 1 ? (r[12]! >> 4) === 1 : null,
+        rapidTrigger: readU16(r, 13) >= 5 && readU16(r, 13) <= 55 && readU16(r, 13) % 5 === 0 ? readU16(r, 13) / 5 : null,
+      })),
+      triggerPointRange: { min: 1, max: 12 }, rapidTriggerRange: { min: 1, max: 11 },
+      rapidTriggerUnit: "level", rapidTriggerSwitch: true, canChooseSwitchType: choice,
+      calibration: null, liveDepth: true,
+    };
+  }
+
+  private async editHe(edit: (records: Uint8Array[]) => void): Promise<Uint8Array[]> {
+    this.magneticWrite = true;
+    try {
+      const records = await this.readHeRecords();
+      edit(records);
+      const packet = new Uint8Array(PACKET_LENGTH);
+      packet.set([0x55, 2]);
+      records.forEach((r, i) => {
+        // Launcher writes configuration only; ADC and optical input bytes are read-only.
+        packet.set(r.slice(0, 17), 2 + 22 * i);
+      });
+      const reply = await this.query(COMMAND_REPORT_ID, PACKET_LENGTH, Array.from(packet), bytes => bytes[0] === ACK && bytes[2] === 0x55);
+      if (reply[1] !== 0) throw new Error("The mouse rejected magnetic button settings.");
+      const confirmed = await this.readHeRecords();
+      if (confirmed.some((r, i) => r.slice(0, 9).some((v, j) => v !== records[i]![j]) || r.slice(12, 17).some((v, j) => v !== records[i]![12 + j]))) {
+        throw new Error("The mouse did not keep the magnetic button settings.");
+      }
+      return confirmed;
+    } finally { this.magneticWrite = false; }
+  }
+
+  async setMagneticTriggerPoint(button: 0 | 1, point: number): Promise<number> {
+    if (!Number.isInteger(point) || point < 1 || point > 12) throw new Error("Actuation must be level 1 to 12.");
+    await this.editHe(records => {
+      const r = records[button]!; const travel = 10 + (point - 1) * 5;
+      writeU16(r, 5, travel); writeU16(r, 7, Math.max(5, travel - 10));
+      const rapid = Math.min(readU16(r, 13), 65 - travel);
+      r[12] = (r[12]! & 15) | (rapid > 0 && (r[12]! >> 4) === 1 ? 16 : 0);
+      writeU16(r, 13, rapid || 1); writeU16(r, 15, rapid || 1);
+    });
+    return point;
+  }
+
+  async setMagneticRapidTrigger(button: 0 | 1, enabled: boolean, level: number): Promise<{ enabled: boolean; level: number }> {
+    if (!Number.isInteger(level) || level < 1 || level > 11) throw new Error("Rapid trigger must be level 1 to 11.");
+    await this.editHe(records => {
+      const r = records[button]!;
+      if (enabled && level * 5 > 65 - readU16(r, 5)) throw new Error("Rapid trigger exceeds the remaining button travel.");
+      r[12] = (r[12]! & 15) | (enabled ? 16 : 0);
+      writeU16(r, 13, level * 5); writeU16(r, 15, level * 5);
+    });
+    return { enabled, level };
+  }
+
+  async setMagneticSwitchTypes(types: readonly ["magnetic" | "optical", "magnetic" | "optical"]): Promise<void> {
+    await this.editHe(records => records.forEach((r, i) => { r[12] = (r[12]! & 240) | (types[i] === "optical" ? 1 : 2); }));
+  }
+
+  async setScrollDirection(direction: NonNullable<MouseStatus["scrollDirection"]>): Promise<string> {
+    if (direction !== "Forward" && direction !== "Reverse") throw new Error("Invalid scroll direction.");
+    const confirmed = await this.writeSensor({ ...(await this.readSettings()), scrollReversed: direction === "Reverse" });
+    if (confirmed.scrollReversed !== (direction === "Reverse")) throw new Error("The mouse did not keep the scroll direction.");
+    return direction;
+  }
+
+  private async readPairingShortcut(): Promise<{ mask: number; holdTime: number }> {
+    const r = await this.querySettings(0x0b, [2]);
+    if (r.length < 4 || (r[2]! & 0xe0)) throw new Error("Invalid pairing shortcut.");
+    return { mask: r[2] || 9, holdTime: r[3]! };
+  }
+
+  async setKeychronPairingShortcut(value: { mask: number; holdTime: number }): Promise<void> {
+    const count = value.mask.toString(2).replaceAll("0", "").length;
+    if (!Number.isInteger(value.mask) || value.mask < 1 || value.mask > 31 || count > 3
+      || !Number.isInteger(value.holdTime) || value.holdTime < 0 || value.holdTime > 255) throw new Error("Choose one to three pairing buttons.");
+    const current = await this.readPairingShortcut();
+    const p = new Uint8Array(20); p.set([0x0b, 1, value.mask, current.holdTime]);
+    await this.writeSettings(p);
+    if ((await this.readPairingShortcut()).mask !== value.mask) throw new Error("The mouse did not keep the pairing shortcut.");
+  }
+
+  private async readDynamicDpi(profile: number): Promise<KeychronDynamicDpi> {
+    const r = await this.query(COMMAND_REPORT_ID, PACKET_LENGTH, [0x4f, profile], b => b[0] === 0x4f && b[1] === profile);
+    const count = r[5]!;
+    if (!count || count > 14 || r.length < 6 + count * 4 || r[3]! > 3) throw new Error("Invalid dynamic DPI report.");
+    return { profile, enabled: !!(r[2]! & 1), mode: r[3]!, points: Array.from({ length: count }, (_, i) => ({ speed: readU16(r, 6 + 4 * i), gain: r[8 + 4 * i]! })) };
+  }
+
+  async setKeychronDynamicDpi(value: KeychronDynamicDpi): Promise<void> {
+    const status = await this.readSettings();
+    if (!status.features.dynamicDpi || value.profile !== status.profile) throw new Error("The active dynamic DPI profile changed. Refresh first.");
+    if (!Number.isInteger(value.mode) || value.mode < 0 || value.mode > 3 || !value.points.length || value.points.length > 14
+      || value.points.some((p, i) => !Number.isInteger(p.speed) || p.speed < 0 || p.speed > 200
+        || !Number.isInteger(p.gain) || p.gain < 0 || p.gain > 56 || (i > 0 && p.speed <= value.points[i - 1]!.speed))) throw new Error("Invalid dynamic DPI curve.");
+    const packet = new Uint8Array(PACKET_LENGTH); packet.set([0x4e, value.profile, +value.enabled, value.mode, 0, value.points.length]);
+    value.points.forEach((p, i) => { writeU16(packet, 6 + 4 * i, p.speed); packet[8 + 4 * i] = p.gain; });
+    // Launcher does not wait for an ACK for 0x4e. Serialize the send, then verify with 0x4f.
+    await this.sendWithoutReply(COMMAND_REPORT_ID, packet);
+    const confirmed = await this.readDynamicDpi(value.profile);
+    if (JSON.stringify(confirmed) !== JSON.stringify(value)) throw new Error("The mouse did not keep the dynamic DPI settings.");
+  }
+
+  async resetKeychronMouse(): Promise<void> {
+    await this.setDebounceTime(8);
+    const packet = new Uint8Array(20); packet.set([0x0f, 0xff]);
+    await this.writeSettings(packet);
+    await new Promise(resolve => setTimeout(resolve, 3000));
   }
 
   async setDpi(dpi: number): Promise<number> {
@@ -840,12 +1013,37 @@ export class Keychron8kHidClient {
     }
   }
 
-  private async query(
+  private queryTail: Promise<void> = Promise.resolve();
+  private queryPending = 0;
+
+  protected async sendWithoutReply(reportId: number, packet: Uint8Array): Promise<void> {
+    const previous = this.queryTail;
+    let release!: () => void;
+    this.queryPending++;
+    this.queryTail = new Promise<void>(resolve => { release = resolve; });
+    try {
+      await previous;
+      if (!this.device.opened) throw new Error("The mouse was disconnected.");
+      await this.device.sendReport(reportId, packet.buffer as ArrayBuffer);
+    } finally { this.queryPending--; release(); }
+  }
+
+  protected async query(reportId: number, length: number, payload: number[], match: (bytes: Uint8Array) => boolean): Promise<Uint8Array> {
+    this.queryPending++;
+    const previous = this.queryTail;
+    let release!: () => void;
+    this.queryTail = new Promise<void>(resolve => { release = resolve; });
+    try { await previous; return await this.executeQuery(reportId, length, payload, match); }
+    finally { this.queryPending--; release(); }
+  }
+
+  private async executeQuery(
     reportId: number,
     length: number,
     payload: number[],
     match: (bytes: Uint8Array) => boolean,
   ): Promise<Uint8Array> {
+    if (!this.device.opened) throw new Error("The mouse was disconnected.");
     if (this.responseWaiter) throw new Error(`Another ${this.label} request is already in progress.`);
     const packet = new Uint8Array(length);
     packet.set(payload.slice(0, length));
@@ -890,6 +1088,10 @@ function decodeFeatures(feature1: number, feature2: number, feature3: number, fe
     pollingGears: (feature1 & 0x10) !== 0,
     fps20k: (feature1 & 0x80) !== 0,
     angle: (feature2 & 0x04) !== 0,
+    triggerSense: (feature2 & 0x68) !== 0,
+    switchChoice: (feature2 & 0x08) !== 0,
+    pairing: (feature2 & 0x02) !== 0,
+    dynamicDpi: (feature4 & 0x20) !== 0,
     separateDpi: (feature3 & 0x01) !== 0,
     separatePolling: (feature3 & 0x02) !== 0,
     lodLevel: (feature4 & 0x10) !== 0,
@@ -900,4 +1102,8 @@ function decodeFeatures(feature1: number, feature2: number, feature3: number, fe
 function decodeFirmwareNibbles(bytes: Uint8Array): string | null {
   if (bytes.length < 9) return null;
   return `v${bytes[8]}.${(bytes[7] ?? 0) >> 4}.${(bytes[7] ?? 0) & 0x0f}`;
+}
+
+function heTravelLevel(raw: number): number | null {
+  return raw >= 10 && raw <= 65 && (raw - 10) % 5 === 0 ? 1 + (raw - 10) / 5 : null;
 }
