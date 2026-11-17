@@ -65,9 +65,24 @@ test("receiver key combinations use keyboard records and retain modifiers on rea
   await client.setButtonMapping("Polling", "Keyboard: Ctrl+Shift+A");
   assert.deepEqual(buttons.get(0)?.slice(0, 4), [2, 3, 4, 0]);
   assert.equal((await client.readStatus()).buttonMappings.Polling, "Keyboard: Ctrl+Shift+A");
+  await client.setButtonMapping("Polling", "Keyboard: Shift+Ctrl+A");
+  assert.equal((await client.readStatus()).buttonMappings.Polling, "Keyboard: Ctrl+Shift+A");
   await client.setButtonMapping("Lighting", "Keyboard: Win+F12");
   assert.deepEqual(buttons.get(1)?.slice(0, 3), [2, 8, 69]);
   await assert.rejects(() => client.setButtonMapping("Polling", "Keyboard: Ctrl+Unknown"), /Unknown/);
   rejectReadback();
   await assert.rejects(() => client.setButtonMapping("Polling", "Keyboard: Alt+Tab"), /did not keep/);
+});
+
+test("receiver lighting verifies the encoded defaults and still rejects a retained old value", async () => {
+  const { client, rejectReadback } = receiver();
+  const lighting = (await client.readStatus()).lighting;
+  const confirmed = await client.setLighting({ ...lighting, brightness: undefined, speed: null, color: null });
+  assert.equal(confirmed.brightness, 100);
+  assert.equal(confirmed.speed, 5);
+  assert.equal(confirmed.color, "#ffffff");
+  const uppercase = await client.setLighting({ ...confirmed, color: "#ABCDEF" });
+  assert.equal(uppercase.color, "#abcdef");
+  rejectReadback();
+  await assert.rejects(client.setLighting({ ...uppercase, brightness: 25 }), /did not keep/);
 });

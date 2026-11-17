@@ -23,6 +23,7 @@ class FakeKeychronMouse {
     return r;
   });
   failHeWrite = false;
+  failDynamicWrite = false;
   pairMask = 9;
   receiverButtons = new Map<number, number[]>();
   dynamic = { profile: 1, enabled: true, mode: 0, points: [{ speed: 0, gain: 16 }, { speed: 200, gain: 56 }] };
@@ -95,6 +96,7 @@ class FakeKeychronMouse {
       this.emit(0xb4, r); return;
     }
     if (reportId === 0xb3 && packet[0] === 0x4e) {
+      if (this.failDynamicWrite) return;
       this.dynamic = { profile: packet[1]!, enabled: !!packet[2], mode: packet[3]!, points: Array.from({ length: packet[5]! }, (_, i) => ({ speed: packet[6 + 4 * i]! | packet[7 + 4 * i]! << 8, gain: packet[8 + 4 * i]! })) }; return;
     }
     if (reportId === 0xb3 && packet[0] === 0x65) {
@@ -787,6 +789,41 @@ test("scroll reversal preserves sensor flags and lift off", async () => {
   await hid.setScrollDirection("Reverse");
   assert.equal(fake.scrollReversed, true); assert.equal(fake.motion, true); assert.equal(fake.lod, 1);
   assert.equal((await hid.readStatus()).scrollDirection, "Reverse"); await hid.close();
+});
+
+test("concurrent HE edits retain both buttons and the edit queue recovers after failure", async () => {
+  const fake = new FakeKeychronMouse(), hid = client(fake); await hid.open();
+  await Promise.all([hid.setMagneticTriggerPoint(0, 6), hid.setMagneticTriggerPoint(1, 8)]);
+  assert.equal(fake.heRecords[0]![5], 35);
+  assert.equal(fake.heRecords[1]![5], 45);
+  const results = await Promise.allSettled([
+    hid.setMagneticRapidTrigger(0, true, 11), hid.setMagneticTriggerPoint(1, 5),
+  ]);
+  assert.equal(results[0]!.status, "rejected");
+  assert.equal(results[1]!.status, "fulfilled");
+  assert.equal(fake.heRecords[1]![5], 30);
+  fake.failHeWrite = true;
+  await assert.rejects(hid.setMagneticTriggerPoint(0, 7), /did not keep/);
+  fake.failHeWrite = false;
+  await hid.setMagneticTriggerPoint(0, 8);
+  assert.equal(fake.heRecords[0]![5], 45);
+  await hid.close();
+});
+
+test("Dynamic DPI accepts reordered properties but rejects changed scalars and point values", async () => {
+  const fake = new FakeKeychronMouse(); fake.version = 6; fake.features[3] = 32;
+  const hid = client(fake); await hid.open();
+  const next = { enabled: true, points: [{ gain: 8, speed: 0 }, { gain: 32, speed: 100 }], mode: 0, profile: 1 };
+  await hid.setKeychronDynamicDpi(next);
+  assert.deepEqual(fake.dynamic, next);
+  fake.failDynamicWrite = true;
+  for (const value of [
+    { ...next, enabled: false }, { ...next, mode: 1 },
+    { ...next, points: [{ speed: 0, gain: 9 }, { speed: 100, gain: 32 }] },
+    { ...next, points: [{ speed: 0, gain: 8 }, { speed: 101, gain: 32 }] },
+    { ...next, points: [{ speed: 0, gain: 8 }] },
+  ]) await assert.rejects(hid.setKeychronDynamicDpi(value), /did not keep/);
+  await hid.close();
 });
 
 test("pairing shortcut and dynamic DPI are capability-gated and round-trip", async () => {

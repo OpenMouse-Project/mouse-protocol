@@ -58,7 +58,8 @@ export class KeychronReceiverControls {
     const packet = new Uint8Array(63); packet.set([0x30, target.index, 0]); packet.set(bytes, 3);
     const ack = await this.query(0xb3, 63, Array.from(packet), b => b[0] === 0xe4 && b[2] === 0x30);
     if (ack[1] !== 0) throw new Error("The receiver rejected the button assignment.");
-    const expected = action === "Default" ? target.action : action;
+    const expected = action === "Default" ? target.action
+      : bytes[0] === 2 ? decodeReceiverKeys(Uint8Array.from([0, 0, 0, ...bytes])) : action;
     if (await this.readReceiverButton(target.index, target.action) !== expected) throw new Error("The receiver did not keep the button assignment.");
   }
 
@@ -73,8 +74,9 @@ export class KeychronReceiverControls {
     const packet = new Uint8Array(20); packet.set([0x24, 0, next.mode, next.brightness, next.speed, ...next.rgb]);
     await this.sendWithoutReply(0xb5, packet);
     const confirmed = await this.readReceiverLighting();
-    if (confirmed.mode !== lighting.mode || confirmed.brightness !== lighting.brightness || confirmed.speed !== lighting.speed
-      || confirmed.color?.toLowerCase() !== lighting.color?.toLowerCase()) throw new Error("The receiver did not keep the lighting settings.");
+    const expected = keychronLighting(next, [1, 2, 3]);
+    if (confirmed.mode !== expected.mode || confirmed.brightness !== expected.brightness || confirmed.speed !== expected.speed
+      || confirmed.color !== expected.color) throw new Error("The receiver did not keep the lighting settings.");
     return confirmed;
   }
 }

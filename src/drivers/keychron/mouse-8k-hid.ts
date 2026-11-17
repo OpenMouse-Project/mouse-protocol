@@ -352,6 +352,7 @@ export class Keychron8kHidClient {
   private depthTimer: ReturnType<typeof setInterval> | null = null;
   private depthListeners = new Set<(left: number, right: number) => void>();
   private magneticWrite = false;
+  private heEditTail: Promise<unknown> = Promise.resolve();
 
   /** Launcher polls 0x65 every 50 ms only while its travel view is visible. */
   onButtonDepth(listener: (left: number, right: number) => void): () => void {
@@ -392,7 +393,13 @@ export class Keychron8kHidClient {
     };
   }
 
-  private async editHe(edit: (records: Uint8Array[]) => void): Promise<Uint8Array[]> {
+  private editHe(edit: (records: Uint8Array[]) => void): Promise<Uint8Array[]> {
+    const result = this.heEditTail.then(() => this.performHeEdit(edit));
+    this.heEditTail = result.catch(() => {});
+    return result;
+  }
+
+  private async performHeEdit(edit: (records: Uint8Array[]) => void): Promise<Uint8Array[]> {
     this.magneticWrite = true;
     try {
       const records = await this.readHeRecords();
@@ -481,7 +488,11 @@ export class Keychron8kHidClient {
     // Launcher does not wait for an ACK for 0x4e. Serialize the send, then verify with 0x4f.
     await this.sendWithoutReply(COMMAND_REPORT_ID, packet);
     const confirmed = await this.readDynamicDpi(value.profile);
-    if (JSON.stringify(confirmed) !== JSON.stringify(value)) throw new Error("The mouse did not keep the dynamic DPI settings.");
+    if (confirmed.profile !== value.profile || confirmed.enabled !== value.enabled || confirmed.mode !== value.mode
+      || confirmed.points.length !== value.points.length || confirmed.points.some((point, i) =>
+        point.speed !== value.points[i]!.speed || point.gain !== value.points[i]!.gain)) {
+      throw new Error("The mouse did not keep the dynamic DPI settings.");
+    }
   }
 
   async resetKeychronMouse(): Promise<void> {
