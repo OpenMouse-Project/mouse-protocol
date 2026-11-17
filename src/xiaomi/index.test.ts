@@ -10,6 +10,11 @@ import {
   XIAOMI_EFFECTS_BY_DEVICE,
   XIAOMI_HEADER,
   XIAOMI_KEY_COMBOS,
+  XIAOMI_MACRO_EVENT_SIZE,
+  XIAOMI_MACRO_HEADER_LENGTH,
+  XIAOMI_MACRO_MAX_EVENTS_PER_PACKET,
+  XIAOMI_MACRO_PACKET_SIZE,
+  XIAOMI_MACRO_REPORT_ID,
   XIAOMI_PACKET_SIZE,
   XIAOMI_POLLING_RATES,
   XIAOMI_PRODUCT_IDS,
@@ -18,28 +23,38 @@ import {
   xiaomiDecodeBinding,
   xiaomiDecodeDpi,
   xiaomiDecodeLighting,
+  xiaomiDecodeMacroChunk,
   xiaomiDecodePolling,
   xiaomiDpiFromWire,
   xiaomiDpiToWire,
   xiaomiEffectFromWire,
   xiaomiEffectToWire,
   xiaomiHexColorToRgb,
+  xiaomiMacroPackets,
   xiaomiPollingRateFromWire,
   xiaomiPollingRateToWire,
   xiaomiReadBatteryRequest,
   xiaomiReadBindingRequest,
   xiaomiReadDpiRequest,
   xiaomiReadLightingRequest,
+  xiaomiReadMacroRequest,
   xiaomiReadPollingRequest,
   xiaomiRgbToHexColor,
   xiaomiWriteBindingRequest,
   xiaomiWriteDpiRequest,
   xiaomiWriteLightingRequest,
+  xiaomiWriteMacroRequest,
   xiaomiWritePollingRequest,
 } from "./index.js";
 
 function reply(...bytes: number[]): Uint8Array {
   const data = new Uint8Array(XIAOMI_PACKET_SIZE);
+  data.set(bytes);
+  return data;
+}
+
+function macroReply(...bytes: number[]): Uint8Array {
+  const data = new Uint8Array(XIAOMI_MACRO_PACKET_SIZE);
   data.set(bytes);
   return data;
 }
@@ -170,25 +185,98 @@ test("DPI decode reads five levels and clamps the active level", () => {
 });
 
 test("binding decode handles direct combos, custom combos and macros", () => {
-  const direct = reply(XIAOMI_HEADER, 0xb0, 3, 0, 0x01, 0x03, 0, 0);
-  assert.deepEqual(xiaomiDecodeBinding(direct, 3), { mode: XIAOMI_KEY_COMBOS.CTRL_TAB });
+  // The real device does not echo the button index in byte 2 (always 0x00).
+  const direct = reply(XIAOMI_HEADER, 0xb0, 0, 0, 0x01, 0x03, 0, 0);
+  assert.deepEqual(xiaomiDecodeBinding(direct), { mode: XIAOMI_KEY_COMBOS.CTRL_TAB });
 
-  const custom = reply(XIAOMI_HEADER, 0xb0, 3, 0, 0x01, 0x00, 0x01, 0x04);
-  assert.deepEqual(xiaomiDecodeBinding(custom, 3), {
+  const custom = reply(XIAOMI_HEADER, 0xb0, 0, 0, 0x01, 0x00, 0x01, 0x04);
+  assert.deepEqual(xiaomiDecodeBinding(custom), {
     mode: XIAOMI_KEY_COMBOS.CUSTOM_KEY_COMBO,
     modifiers: 0x01,
     key: 0x04,
   });
 
-  const macro = reply(XIAOMI_HEADER, 0xb0, 3, 0, 0x02, 0x01, 0x00, 0x10);
-  assert.deepEqual(xiaomiDecodeBinding(macro, 3), {
+  const macro = reply(XIAOMI_HEADER, 0xb0, 0, 0, 0x02, 0x01, 0x00, 0x10);
+  assert.deepEqual(xiaomiDecodeBinding(macro), {
     mode: XIAOMI_KEY_COMBOS.MACROS_WITH_DELAY,
     macroSize: 0x10,
   });
-
-  assert.throws(() => xiaomiDecodeBinding(direct, 4), Error);
 });
 
 test("speeds are 1 through 8", () => {
   assert.deepEqual(XIAOMI_SPEEDS, [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
+test("macro channel constants match the 64-byte hidraw layout", () => {
+  assert.equal(XIAOMI_MACRO_REPORT_ID, 0x57);
+  assert.equal(XIAOMI_MACRO_PACKET_SIZE, 64);
+  assert.equal(XIAOMI_MACRO_HEADER_LENGTH, 8);
+  assert.equal(XIAOMI_MACRO_EVENT_SIZE, 4);
+  assert.equal(XIAOMI_MACRO_MAX_EVENTS_PER_PACKET, 14);
+});
+
+test("macro read request is a 64-byte 0x57 0xf0 0x0d report with offset and chunk", () => {
+  const frame = xiaomiReadMacroRequest(0x0102, 56);
+  assert.equal(frame.length, XIAOMI_MACRO_PACKET_SIZE);
+  assert.deepEqual([...frame.slice(0, 8)], [0x57, 0xf0, 0x0d, 56, 0x00, 0x00, 0x01, 0x02]);
+  assert.deepEqual([...frame.slice(8, 12)], [0, 0, 0, 0]);
+
+  const first = xiaomiReadMacroRequest(0, 4);
+  assert.deepEqual([...first.slice(0, 8)], [0x57, 0xf0, 0x0d, 4, 0x00, 0x00, 0x00, 0x00]);
+
+  assert.throws(() => xiaomiReadMacroRequest(-1, 4), RangeError);
+  assert.throws(() => xiaomiReadMacroRequest(0x10000, 4), RangeError);
+  assert.throws(() => xiaomiReadMacroRequest(0, 57), RangeError);
+  assert.throws(() => xiaomiReadMacroRequest(0, -1), RangeError);
+});
+
+test("macro write request packs events as [key, state, delay_hi, delay_lo]", () => {
+  const events = [
+    { key: 0x04, state: 0 as const, delayMs: 0 },
+    { key: 0x04, state: 1 as const, delayMs: 0x0102 },
+  ];
+  const frame = xiaomiWriteMacroRequest(0x0008, events);
+  assert.equal(frame.length, XIAOMI_MACRO_PACKET_SIZE);
+  assert.deepEqual([...frame.slice(0, 8)], [0x57, 0xf1, 0x0d, 8, 0x00, 0x00, 0x00, 0x08]);
+  assert.deepEqual([...frame.slice(8, 16)], [0x04, 0x00, 0x00, 0x00, 0x04, 0x01, 0x01, 0x02]);
+  assert.deepEqual([...frame.slice(16, 20)], [0, 0, 0, 0]);
+
+  assert.throws(() => xiaomiWriteMacroRequest(0, [{ key: 0x100, state: 0, delayMs: 0 }]), RangeError);
+  assert.throws(() => xiaomiWriteMacroRequest(0, [{ key: 0x04, state: 2, delayMs: 0 }]), RangeError);
+  assert.throws(() => xiaomiWriteMacroRequest(0, [{ key: 0x04, state: 0, delayMs: 0x10000 }]), RangeError);
+  assert.throws(() => xiaomiWriteMacroRequest(0x10000, []), RangeError);
+  assert.throws(
+    () => xiaomiWriteMacroRequest(0, Array.from({ length: 15 }, () => ({ key: 0x04, state: 0 as const, delayMs: 0 }))),
+    RangeError,
+  );
+});
+
+test("macro chunk decode reads the event bytes and stops at the header length", () => {
+  const data = macroReply(0x57, 0xf0, 0x0d, 8, 0, 0, 0, 0, 0x04, 0x00, 0x00, 0x00, 0x04, 0x01, 0x01, 0x02);
+  assert.deepEqual(xiaomiDecodeMacroChunk(data), {
+    packetSize: 8,
+    events: [
+      { key: 0x04, state: 0, delayMs: 0 },
+      { key: 0x04, state: 1, delayMs: 0x0102 },
+    ],
+  });
+
+  const end = macroReply(0x57, 0xf0, 0x0d, 0, 0, 0, 0, 0);
+  assert.deepEqual(xiaomiDecodeMacroChunk(end), { packetSize: 0, events: [] });
+
+  assert.throws(() => xiaomiDecodeMacroChunk(macroReply(0x57, 0xf1, 0x0d, 8)), Error);
+  assert.throws(() => xiaomiDecodeMacroChunk(new Uint8Array([0x57, 0xf0, 0x0d, 8])), Error);
+});
+
+test("macro packets chunk events into groups of 14", () => {
+  const events = Array.from({ length: 30 }, (_, i) => ({ key: 0x04, state: (i % 2) as 0 | 1, delayMs: 0 }));
+  const packets = xiaomiMacroPackets(events);
+  assert.equal(packets.length, 3);
+  assert.equal(packets[0].length, 14);
+  assert.equal(packets[1].length, 14);
+  assert.equal(packets[2].length, 2);
+  assert.deepEqual(packets[2][0], { key: 0x04, state: 0, delayMs: 0 });
+
+  assert.deepEqual(xiaomiMacroPackets([]), []);
+  assert.equal(xiaomiMacroPackets([{ key: 1, state: 0, delayMs: 0 }])[0].length, 1);
 });
