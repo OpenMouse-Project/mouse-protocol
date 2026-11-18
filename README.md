@@ -57,6 +57,7 @@ checklist.
 | Hitscan (Hyperlight web control / native Utility) | `@openmouse/protocol/hitscan` |
 | HyperX | `@openmouse/protocol/hyperx` |
 | Incott | `@openmouse/protocol/incott` |
+| Instant A825 | `@openmouse/protocol/instant` |
 | K-snake | `@openmouse/protocol/ksnake` |
 | Keychron | `@openmouse/protocol/keychron` |
 | Lamzu / CRDRAKO / Attack Shark / LunaFury | `@openmouse/protocol/lamzu` |
