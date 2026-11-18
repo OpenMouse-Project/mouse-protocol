@@ -177,11 +177,18 @@ import {
   COOLERMASTER_VENDOR_ID,
 } from "@openmouse/protocol/coolermaster";
 import { AJAZZ_AK820_WIRED_PID } from "../ajazz/ak820.ts";
+import {
+  INSTANT_PRODUCT_IDS,
+  INSTANT_USAGE,
+  INSTANT_USAGE_PAGE,
+  INSTANT_VENDOR_ID,
+} from "@openmouse/protocol/instant";
 import { AJ200P_PRODUCTS, AJ200P_USAGE, AJ200P_USAGE_PAGE, AJ200P_VENDOR_ID } from "../ajazz/aj200p.ts";
 
 export const VENDOR_ID = {
   ajazzAj200p: AJ200P_VENDOR_ID,
   redgear: REDGEAR_X13_VENDOR_ID,
+  sades: INSTANT_VENDOR_ID,
   coolermaster: COOLERMASTER_VENDOR_ID,
   ajazz: 0x1a2c,
   vaxee: VAXEE_VENDOR_ID,
@@ -986,6 +993,12 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   },
   ...[...AJ200P_PRODUCTS.keys()].map((productId) => ({ vendorId: AJ200P_VENDOR_ID, productId, usagePage: AJ200P_USAGE_PAGE, usage: AJ200P_USAGE })),
   { vendorId: VENDOR_ID.redgear, productId: REDGEAR_X13_PRODUCT_ID, usagePage: REDGEAR_X13_USAGE_PAGE, usage: REDGEAR_X13_USAGE },
+  ...[...INSTANT_PRODUCT_IDS].map((productId) => ({
+    vendorId: INSTANT_VENDOR_ID,
+    productId,
+    usagePage: INSTANT_USAGE_PAGE,
+    usage: INSTANT_USAGE,
+  })),
   ...VAXEE_HID_FILTERS,
   ...ASUS_HID_FILTERS,
   ...DAREU_HID_FILTERS,
