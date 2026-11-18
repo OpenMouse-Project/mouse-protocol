@@ -11,7 +11,7 @@ The analysis database used the names below; the addresses are the evidence.
 | `0x455A40` | `A825_BlockWrite` | Write a config block: one `18 03` frame per byte, `18 09` finish, `18 00` commit. |
 | `0x455BA0` | `A825_BlockMode` | Enter (`18 10`) and leave (`18 00`) block mode. |
 | `0x480B00` | `A825_WriteLightingConfig` | Write lighting/configuration blocks at `0x1C`, `0x20`, `0x28`, `0x30`, `0x3A`, `0x3E`. |
-| `0x481400` | `A825_BuildConfigImage` | Build the full image as id/value records; record `0x14` packs `byte[0x8104] & 3` above three flags; writing it did not change the measured report cadence. |
+| `0x481400` | `A825_BuildConfigImage` | Build the full image as id/value records; record `0x14` puts `byte[0x8104] & 3` in bits 4-3 above three flags; writing it did not change the measured report cadence. |
 | `0x4862F0` | `A825_ReadInfo` | Read bytes through `18 03` / `18 00` / `18 05`. |
 | `0x486440` | `A825_ButtonMap` | Send `09` button-map frames for the active profile. |
 | `0x486630` | `A825_LiveDpiAndButtons` | Send `12` DPI, `11` commit, then four `09` frames. |
@@ -89,9 +89,9 @@ flags are `byte[0x79C..0x79F]`.
 | 1 | `(-(flag) & 3) + (byte[0x74C] & 3) * 32` |
 | 2 | `0xA5` |
 | 3 | `byte[0x8068]` |
-| 4 | `byte[0x8068] >> 8` |
+| 4 | `byte 1 of the 32-bit value at 0x8068` |
 | 5 | `byte[0x8064]` |
-| 6 | `byte[0x8064] >> 8` |
+| 6 | `byte 1 of the 32-bit value at 0x8064` |
 | 7 | `byte[0x802C]` (key map byte 0) |
 | 8+ | lighting and stage fields |
 

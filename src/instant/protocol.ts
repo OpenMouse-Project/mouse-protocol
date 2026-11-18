@@ -205,7 +205,7 @@ export function instantBlockReadFrames(
   if (!Number.isInteger(address) || address < 0 || address > 0xffff) {
     throw new RangeError(`Invalid Instant block address: ${address}`);
   }
-  if (length < 1 || length > 0x100) {
+  if (!Number.isInteger(length) || length < 1 || length > 0x100) {
     throw new RangeError(`Invalid Instant block length: ${length}`);
   }
   const low = address & 0xff;
@@ -243,6 +243,15 @@ export function instantBlockReadByteFrame(
   index: number,
   length: number,
 ): Uint8Array {
+  if (!Number.isInteger(address) || address < 0 || address > 0xffff) {
+    throw new RangeError(`Invalid Instant block address: ${address}`);
+  }
+  if (!Number.isInteger(length) || length < 1 || length > 0x100) {
+    throw new RangeError(`Invalid Instant block length: ${length}`);
+  }
+  if (!Number.isInteger(index) || index < 0 || index >= length) {
+    throw new RangeError(`Instant block index ${index} is outside a ${length}-byte block`);
+  }
   return instantFrame(INSTANT_COMMAND.block, [
     INSTANT_BLOCK.read,
     index,
@@ -265,8 +274,14 @@ export function instantDpiFrames(dpi: number, mode = 0): Uint8Array[] {
     throw new RangeError(`Unsupported A825 DPI: ${dpi}`);
   }
   if (mode === 0) {
+    const units = Math.round(dpi / 8);
+    if (units > 0xff) {
+      throw new RangeError(
+        `A825 mode 0 stores DPI/8 in one byte; ${dpi} needs the 16-bit mode`,
+      );
+    }
     return [
-      instantFrame(INSTANT_COMMAND.dpi, [Math.round(dpi / 8), 0, 0, 0, 0, 0]),
+      instantFrame(INSTANT_COMMAND.dpi, [units, 0, 0, 0, 0, 0]),
       instantFrame(INSTANT_COMMAND.apply),
     ];
   }
@@ -292,28 +307,28 @@ export function instantModeFrames(enter: boolean): Uint8Array[] {
 }
 
 export interface InstantConfigImage {
-  /** Raw 0x0000-0x02FF configuration image. */
+  /** Bytes read from the configuration image; the array length is the requested range. */
   bytes: Uint8Array;
   /**
    * Byte at 0x3A. Ghidra shows it packs the lighting direction, symmetry and
    * a stage count (`FUN_00480b00` reads light_direction/light_symmetry here);
    * it is NOT the polling rate. Kept raw until the layout is fully named.
    */
-  lightingDirectionByte: number;
+  lightingDirectionByte: number | null;
 }
 
 export function decodeInstantConfig(bytes: Uint8Array): InstantConfigImage {
-  if (bytes.length < INSTANT_CONFIG.lightingDirection + 1) {
-    throw new RangeError("Instant config image is truncated");
-  }
   return {
     bytes,
-    lightingDirectionByte: bytes[INSTANT_CONFIG.lightingDirection]!,
+    lightingDirectionByte:
+      bytes.length > INSTANT_CONFIG.lightingDirection
+        ? bytes[INSTANT_CONFIG.lightingDirection]!
+        : null,
   };
 }
 
 export interface InstantStatus {
-  /** Firmware/build word at bytes 2-3, big-endian (0x0954 on the Kaze). */
+  /** Firmware/build word at bytes 2-3, little-endian (0x0954 on the Kaze). */
   firmware: number;
   /** State byte 1; changes with device activity. */
   state: number;
@@ -325,7 +340,9 @@ export interface InstantStatus {
 
 export function decodeInstantStatus(report: Uint8Array): InstantStatus | null {
   if (report.length < 20) return null;
-  const offset = report[0] === INSTANT_REPORT_ID ? 1 : 0;
+  const hasReportId = report.length === INSTANT_STATUS_LENGTH;
+  const offset = hasReportId ? 1 : 0;
+  if (hasReportId && report[0] !== INSTANT_REPORT_ID) return null;
   if (report.length < offset + 19) return null;
   return {
     firmware: report[offset + 1]! | (report[offset + 2]! << 8),

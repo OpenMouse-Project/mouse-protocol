@@ -48,6 +48,9 @@ test("block read uses little-endian addresses and a final commit", () => {
   assert.equal(hex(frames[1]!), "071803013a000001");
   assert.equal(hex(frames[2]!), "071800003a000000");
   assert.equal(hex(instantBlockReadByteFrame(0x003a, 1, 2)), "071805013a000001");
+  assert.throws(() => instantBlockReadByteFrame(0x003a, 1, 1), RangeError);
+  assert.throws(() => instantBlockReadByteFrame(0x10000, 0, 1), RangeError);
+  assert.throws(() => instantBlockReadFrames(0x003a, Number.NaN), RangeError);
   assert.equal(decodeInstantReadByte(new Uint8Array([0x07, 0x0b])), 0x0b);
   assert.equal(decodeInstantReadByte(new Uint8Array([0x07])), null);
 });
@@ -75,6 +78,7 @@ test("config decode keeps the lighting byte raw", () => {
   const config = decodeInstantConfig(new Uint8Array([...new Uint8Array(0x3a), 0x0b]));
   assert.equal(config.lightingDirectionByte, 0x0b);
   assert.equal(config.bytes[0x3a], 0x0b);
+  assert.equal(decodeInstantConfig(new Uint8Array(0x3a)).lightingDirectionByte, null);
 });
 
 test("DPI table is the vendor's 23-value table", () => {

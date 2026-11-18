@@ -2,9 +2,9 @@
 
 Generated from Ghidra's decompilation of `A825_BuildConfigImage` (0x481400)
 in `DevDock.exe` (SHA-256 `b76c4dff76598dbd8e3874d382ab1875feaa0979754c1e3e5dc12507b8cf1b87`).
-The map key is the byte offset in the configuration image.
+The map key is the record id that `A825_BuildConfigImage` uses. The mapping from each record id to a byte offset in the configuration image is not resolved; see `docs/devdock-functions.md`.
 
-| Offset | Value |
+| Record id | Value |
 | --- | --- |
 | `0x000` | `0x5a` |
 | `0x001` | `(-(cVar20 != '\0') & 3U) + (*(byte *)((int)this + 0x74c) & 3) * ' '` |

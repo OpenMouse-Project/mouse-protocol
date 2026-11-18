@@ -34,6 +34,7 @@ const STATUS = Uint8Array.of(
 function fakeDevice(options: {
   rate?: number;
   productId?: number;
+  numberedReply?: boolean;
 } = {}) {
   let rate = options.rate ?? 0x0b;
   let statusRead = false;
@@ -81,7 +82,10 @@ function fakeDevice(options: {
     async receiveFeatureReport(_reportId: number) {
       if (readSetup) {
         readSetup = false;
-        return new DataView(Uint8Array.of(INSTANT_REPORT_ID, rate, 0, 0, 0, 0, 0, 0).buffer);
+        const body = options.numberedReply === false
+          ? Uint8Array.of(rate, 0, 0, 0, 0, 0, 0)
+          : Uint8Array.of(INSTANT_REPORT_ID, rate, 0, 0, 0, 0, 0, 0);
+        return new DataView(body.buffer);
       }
       statusRead = true;
       return new DataView(STATUS.slice().buffer);
@@ -114,4 +118,21 @@ test("readStatus decodes firmware and stays read-only", async () => {
   assert.deepEqual(status.firmware, ["Build 0x0954"]);
   assert.equal(status.ui?.settingsReady, false);
   assert.equal(status.ui?.family, "sades-a825");
+  assert.equal(status.ui?.valuesVerified, false);
+});
+
+test("readConfigImage keeps a partial read and a stored 0x07 byte", async () => {
+  const fake = fakeDevice({ rate: 0x07 });
+  const client = new InstantA825HidClient(fake.device);
+  const image = await client.readConfigImage(1);
+  assert.equal(image.bytes.length, 1);
+  assert.equal(image.bytes[0], 0x07);
+  assert.equal(image.lightingDirectionByte, null);
+});
+
+test("readConfigImage accepts an unnumbered 7-byte reply", async () => {
+  const fake = fakeDevice({ rate: 0x07, numberedReply: false });
+  const client = new InstantA825HidClient(fake.device);
+  const image = await client.readConfigImage(1);
+  assert.deepEqual(Array.from(image.bytes), [0x07]);
 });

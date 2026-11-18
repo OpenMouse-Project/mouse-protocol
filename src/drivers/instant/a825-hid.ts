@@ -9,9 +9,11 @@ import {
   INSTANT_COMMAND,
   INSTANT_CONFIG_LENGTH,
   INSTANT_DPI_GEARS,
+  INSTANT_FRAME_LENGTH,
   INSTANT_POLLING_RATES,
   INSTANT_PRODUCT_IDS,
   INSTANT_REPORT_ID,
+  INSTANT_STATUS_LENGTH,
   INSTANT_USAGE,
   INSTANT_USAGE_PAGE,
   INSTANT_VENDOR_ID,
@@ -33,7 +35,18 @@ function hasConfigCollection(collections: readonly HIDCollectionInfo[]): boolean
 
 function statusBytes(view: DataView, reportId: number): Uint8Array {
   const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-  return bytes[0] === reportId ? bytes.slice(1) : bytes.slice();
+  // The A825 reports are fixed-size: a numbered reply is 8 bytes for a command
+  // and 32 for the status block. A reply of 7 or 31 bytes has no report ID, so
+  // do not guess from the first byte (a stored value may itself be 0x07).
+  const numbered =
+    bytes.length === INSTANT_FRAME_LENGTH || bytes.length === INSTANT_STATUS_LENGTH;
+  if (numbered) {
+    if (bytes[0] !== reportId) {
+      throw new Error(`Unexpected A825 report ID: ${bytes[0]}`);
+    }
+    return bytes.slice(1);
+  }
+  return bytes.slice();
 }
 
 /**
@@ -51,6 +64,7 @@ export class InstantA825HidClient {
   private queue: Promise<void> = Promise.resolve();
   private generation = 0;
   private opening: Promise<void> | null = null;
+  private closing: Promise<void> | null = null;
 
   constructor(device: HIDDevice) {
     this.device = device;
@@ -76,6 +90,7 @@ export class InstantA825HidClient {
     if (!InstantA825HidClient.isSupported(this.device)) {
       throw new Error("Unsupported A825 HID interface");
     }
+    if (this.closing) await this.closing;
     if (this.opening) return this.opening;
     if (this.device.opened) return;
     const generation = this.generation;
@@ -99,8 +114,16 @@ export class InstantA825HidClient {
     this.config = null;
     this.status = null;
     this.queue = Promise.resolve();
-    await this.opening?.catch(() => undefined);
-    if (this.device.opened) await this.device.close();
+    const task = (async () => {
+      await this.opening?.catch(() => undefined);
+      if (this.device.opened) await this.device.close();
+    })();
+    this.closing = task;
+    try {
+      await task;
+    } finally {
+      if (this.closing === task) this.closing = null;
+    }
   }
 
   /** Raw 32-byte status report, including report ID 7. */
@@ -150,18 +173,25 @@ export class InstantA825HidClient {
     const setup = instantBlockReadFrames(address, 1);
     for (const frame of setup) await this.send(frame);
     await this.send(instantBlockReadByteFrame(address, 0, 1));
-    const report = await this.readStatusReport();
+    const closeWindow = instantFrame(INSTANT_COMMAND.block, [
+      INSTANT_BLOCK.commit,
+      0,
+      address & 0xff,
+      (address >>> 8) & 0xff,
+      0,
+      0,
+    ]);
+    let report: Uint8Array;
+    try {
+      report = await this.readStatusReport();
+    } catch (error) {
+      // The read window is open even when the reply is lost. Try to close it,
+      // but keep the original failure.
+      await this.send(closeWindow).catch(() => undefined);
+      throw error;
+    }
     // The vendor closes the read window after every byte.
-    await this.send(
-      instantFrame(INSTANT_COMMAND.block, [
-        INSTANT_BLOCK.commit,
-        0,
-        address & 0xff,
-        (address >>> 8) & 0xff,
-        0,
-        0,
-      ]),
-    );
+    await this.send(closeWindow);
     const full = new Uint8Array(report.length + 1);
     full[0] = INSTANT_REPORT_ID;
     full.set(report, 1);
@@ -171,21 +201,32 @@ export class InstantA825HidClient {
   }
 
   /**
-   * Read the stored configuration image. This is 0x300 one-byte reads and is
-   * intentionally explicit: read a small range when only a few bytes matter.
+   * Read the stored configuration image. A full read is 0x1000 one-byte
+   * transfers; read a small range when only a few bytes matter.
    */
   async readConfigImage(length = INSTANT_CONFIG_LENGTH): Promise<InstantConfigImage> {
     if (!Number.isInteger(length) || length < 1 || length > INSTANT_CONFIG_LENGTH) {
       throw new RangeError(`Invalid A825 config length: ${length}`);
     }
     return this.serialize(async () => {
+      const generation = this.generation;
       await this.open();
-      const bytes = new Uint8Array(INSTANT_CONFIG_LENGTH);
+      if (generation !== this.generation) {
+        throw new Error("A825 disconnected while opening");
+      }
+      const bytes = new Uint8Array(length);
       for (let address = 0; address < length; address += 1) {
         bytes[address] = await this.readByte(address);
       }
-      this.config = decodeInstantConfig(bytes);
-      return this.getConfigImage()!;
+      if (generation !== this.generation) {
+        throw new Error("A825 disconnected during the configuration read");
+      }
+      const image = decodeInstantConfig(bytes);
+      if (length === INSTANT_CONFIG_LENGTH) this.config = image;
+      return {
+        bytes: image.bytes.slice(),
+        lightingDirectionByte: image.lightingDirectionByte,
+      };
     });
   }
 
@@ -197,6 +238,9 @@ export class InstantA825HidClient {
         throw new Error("A825 disconnected while opening");
       }
       const report = await this.readStatusReport();
+      if (generation !== this.generation) {
+        throw new Error("A825 disconnected during the status read");
+      }
       this.status = new Uint8Array(report.length + 1);
       this.status[0] = INSTANT_REPORT_ID;
       this.status.set(report, 1);
@@ -208,7 +252,7 @@ export class InstantA825HidClient {
         ui: {
           family: "sades-a825",
           settingsReady: false,
-          valuesVerified: decoded !== null,
+          valuesVerified: false,
           pollingReadOnly: true,
           hideProcessingCard: true,
           hideSignalCard: true,
@@ -227,7 +271,7 @@ export class InstantA825HidClient {
         connectionDetail: "USB",
         liftOffDistance: null,
         firmware:
-          decoded != null
+          decoded?.magicOk
             ? [`Build 0x${decoded.firmware.toString(16).padStart(4, "0")}`]
             : [],
       };

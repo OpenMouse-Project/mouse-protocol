@@ -131,10 +131,11 @@ Record `0x14` of `A825_BuildConfigImage` is:
   + (byte[0x829D] & 1)) * 2 + (byte[0x829C] & 1)
 ```
 
-The top two bits are a 2-bit field. All four values were written to `0x14` and
-read back correctly, but the measured report cadence stayed at ~125 Hz for
-every value. The field is therefore not confirmed as the polling rate; it may
-be applied only on save/reconnect or be a different setting.
+Bits 4-3 of this record (`(byte >> 3) & 3`) are a 2-bit field. All four values
+were written to `0x14` and read back correctly, but the measured report cadence
+stayed at ~125 Hz for every value. The field is therefore not confirmed as the
+polling rate; it may be applied only on save/reconnect or be a different
+setting.
 
 ## DPI
 
@@ -199,5 +200,3 @@ The A825 is a chipset. Public A825 mice:
 - `SadesKaze(A825).[20241009].exe` (vendor application).
 - `Instant A825 Mouse Reference Driver.[20250716]` (vendor reference build).
 - `https://github.com/helllopratik/ant-gm320-linux-experimental`.
-EOF
-echo rewritten; wc -l mproto/docs/instant-a825.md
