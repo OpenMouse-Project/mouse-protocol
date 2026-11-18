@@ -58,9 +58,9 @@ Post-merge hardware test (`AttackSharkX11hardwaretest.json`, webapp
 `BETA · v2.0.f3d`, 2026-10-06):
 
 - `supportedPollingRates: [125, 250, 500, 1000]`, battery 100 % pass.
-- DPI and polling-rate read-back fail: by firmware design, not a
-  regression — the X11 exposes no current-DPI or polling read-back, so the
-  driver reports its cached/default stages and last-applied rate.
+- DPI and polling-rate read-back fail. This build read report 0x04 with a
+  bare GET_FEATURE, which returns stale buffer contents; see "Config
+  read-back" below for the handshake that works.
 - Polling sampling skipped (`avg 64 Hz vs reported 1000 Hz`): dropout/rate
   mismatch during the sample, not counted as a failure.
 - Flash read-back fails (no decoded flash fields on this firmware).
@@ -77,6 +77,37 @@ The Bridge service log from the same session shows the pre-existing
 (`Attack Shark X11 native DPI control is not implemented yet`). DPI through
 Bridge's own profile-apply path goes through the generic
 `AttackSharkHidClient` 0x04 path there now.
+
+## Config read-back
+
+Genuine X11 (model id `0x55`, firmware `0x0107`) on the `1d57:fa60`
+receiver, Linux hidraw, native (collection-less) path, 2026-10-23.
+
+A bare GET_FEATURE on a config report returns whatever the receiver's
+control buffer last held (descriptor bytes, string descriptors, firmware
+code), so it never passes the 0x04 checksum. The reports read correctly
+through the vendor app's 0xa0 handshake (`compx/x11-config.ts`):
+`SET_FEATURE a0 [id, len, 0, flag, 0, 0, 0]`, poll `GET_FEATURE a0` until
+byte 1 is `0x01`, then `GET_FEATURE id`. Every report was ready on the first
+poll:
+
+```
+0x0b  0b 08 01 07 00 00 00 00                     firmware 0x0107 (flag 0)
+0x06  06 09 01 01 fe 00 00 00 00                  1000 Hz
+0x04  04 38 01 00 01 07 20 20 0c 0e 0f 12 75 81 01 01 00 00 00 00 00 01 00 00
+      02 ff 00 00 00 ff 00 00 00 ff ff ff 00 00 ff ff ff 00 ff ff 40 00 ff ff
+      ff 02 0e b3 00 00 00 00
+```
+
+The 0x04 table has three of six stages enabled (mask `0x07`: 550, 600,
+650 DPI, stage 2 active), the factory colours and `01 01` in the unused
+stage 7/8 slots, none of which the factory-table writer kept. A write built
+on this read-back (stage 3: 650 → 700 → 650) changed only byte 10 and the
+checksum, was acknowledged both times (`03 55 50 00 04`), and the restored
+table read back byte-identical.
+
+Read-back is only tried once a receiver message names model `0x55`; the
+handshake is unverified on the Delux M600 Pro sharing the receiver.
 
 ## Unknowns
 
