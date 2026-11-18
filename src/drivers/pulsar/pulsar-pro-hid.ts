@@ -2,7 +2,8 @@ import type { MouseStatus } from "../mouse-types.ts";
 import type { PulsarDeviceInfo } from "./pulsar-hid.ts";
 import {
   PULSAR_PRO_COMMAND as COMMAND,
-  PULSAR_PRO_PRODUCT_ID as PRO_DONGLE_PRODUCT_ID,
+  PULSAR_PRO_PRODUCT_IDS,
+  PULSAR_PRO_WIRED_PRODUCT_IDS,
   PULSAR_PRO_REPORT_ID as REPORT_ID,
   PULSAR_PRO_REPORT_LENGTH as REPORT_LENGTH,
   PULSAR_VENDOR_ID as VENDOR_ID,
@@ -13,6 +14,7 @@ import {
 
 export class PulsarProHidClient {
   private commandQueue: Promise<void> = Promise.resolve();
+  private dpiUpdateQueue: Promise<void> = Promise.resolve();
   private readonly unsupportedQueries = new Set<string>();
   private explicitlyClosed = false;
   private waiter: {
@@ -43,12 +45,18 @@ export class PulsarProHidClient {
 
   static isSupported(device: HIDDevice): boolean {
     return device.vendorId === VENDOR_ID
-      && device.productId === PRO_DONGLE_PRODUCT_ID
+      && PULSAR_PRO_PRODUCT_IDS.has(device.productId)
       && device.collections.some((collection) =>
-        collection.usagePage === 1
-        && collection.usage === 0
+        // The wired capture lacks the HID report descriptor, so do not
+        // assume the receiver's usage. The known PID and report pair select
+        // the control interface and exclude the pointer/keyboard interfaces.
+        (PULSAR_PRO_WIRED_PRODUCT_IDS.has(device.productId) || (collection.usagePage === 1 && collection.usage === 0))
         && collection.inputReports.some((report) => report.reportId === REPORT_ID)
         && collection.outputReports.some((report) => report.reportId === REPORT_ID));
+  }
+
+  private get wired(): boolean {
+    return PULSAR_PRO_WIRED_PRODUCT_IDS.has(this.device.productId);
   }
 
   async open(): Promise<void> {
@@ -67,9 +75,9 @@ export class PulsarProHidClient {
     return {
       cid: 0,
       mid: 0,
-      type: 3,
-      dongleType: 5,
-      connection: "Wireless",
+      type: this.wired ? 2 : 3,
+      dongleType: this.wired ? 0xff : 5,
+      connection: this.wired ? "Wired" : "Wireless",
       maximumPollingRateHz: 8000,
     };
   }
@@ -77,7 +85,7 @@ export class PulsarProHidClient {
   async readStatus(): Promise<MouseStatus> {
     await this.open();
     const battery = await this.query(COMMAND.battery);
-    const dpi = await this.query(COMMAND.dpi);
+    const dpi = await this.readDpiConfiguration();
     const polling = await this.query(COMMAND.polling);
     const lod = await this.query(COMMAND.lod);
     const motion = await this.queryOptional(COMMAND.motionSync);
@@ -94,9 +102,9 @@ export class PulsarProHidClient {
     const sleep = await this.queryOptional(COMMAND.powerSaving, 1500);
     const profile = await this.queryOptional(COMMAND.profile, 1500);
     const mouseVersion = await this.queryOptional(COMMAND.mouseVersion);
-    const dongleVersion = await this.queryOptional(COMMAND.dongleVersion);
-    const rssi = await this.queryOptional(COMMAND.rssi);
-    const dpiIndex = Math.min(dpi[3] ?? 0, 7);
+    const dongleVersion = this.wired ? null : await this.queryOptional(COMMAND.dongleVersion);
+    const rssi = this.wired ? null : await this.queryOptional(COMMAND.rssi);
+    const dpiIndex = dpi[3];
     const dpiOffset = 4 + dpiIndex * 4;
     const sleepMs = sleep ? readUint32LE(sleep, 2) : 0;
     return {
@@ -105,9 +113,19 @@ export class PulsarProHidClient {
       batteryPercent: battery[0] === COMMAND.battery ? Math.min(battery[1] ?? 0, 100) : null,
       batteryState: battery[6] === 1 ? "Charging" : "Discharging",
       dpi: readUint16LE(dpi, dpiOffset),
+      dpiStages: Array.from({ length: dpi[2] }, (_, stage) => readUint16LE(dpi, 4 + stage * 4)),
+      activeDpiStage: dpiIndex,
       pollingRateHz: readUint16LE(polling, 2),
       activeProfile: profile ? (profile[2] ?? 0) + 1 : null,
-      connectionDetail: "PID 0x5405 · Pulsar Pro protocol · Wireless",
+      connectionType: this.wired ? "Wired" : "Wireless",
+      connectionDetail: `PID 0x${this.device.productId.toString(16)} · Pulsar Pro protocol · ${this.wired ? "Wired" : "Wireless"}`,
+      ...(this.wired ? {
+        supportedPollingRates: [125, 250, 500, 1000, 2000, 4000, 8000],
+      } : {}),
+      ui: {
+        ...(this.wired ? { family: "pulsar", hideUnsupportedPollingRates: true, hideSignalCard: true } : {}),
+        dpiStageEditor: { maxStages: 6, countEditable: false, minDpi: 50, maxDpi: 32000, stepDpi: 50 },
+      },
       signalStrength: this.signalLevel(rssi?.[1]),
       debounceMs: debounce?.[2] ?? null,
       motionSync: motion ? motion[2] === 1 : null,
@@ -126,7 +144,7 @@ export class PulsarProHidClient {
       liftOffDistance: lod[2] === 1 ? "Low" : lod[2] === 2 ? "Medium" : lod[2] === 3 ? "High" : null,
       firmware: [
         mouseVersion ? this.formatVersion("Mouse", mouseVersion) : "Mouse firmware unavailable",
-        dongleVersion ? this.formatVersion("Dongle", dongleVersion) : "Dongle firmware unavailable",
+        ...(this.wired ? [] : [dongleVersion ? this.formatVersion("Dongle", dongleVersion) : "Dongle firmware unavailable"]),
       ],
     };
   }
@@ -139,22 +157,76 @@ export class PulsarProHidClient {
 
   async setDpi(value: number): Promise<number> {
     if (!this.getDpiOptions().includes(value)) throw new Error("Unsupported Pulsar Pro DPI value.");
+    return await this.withDpiUpdate(async () => {
+      const current = await this.readDpiConfiguration();
+      return await this.writeDpiStageValue(current, current[3], value);
+    });
+  }
+
+  /** Edits both axes of an enabled stage (0-based), preserving the active stage. */
+  async setDpiStageValue(stage: number, value: number): Promise<number> {
+    this.validateDpiStage(stage);
+    if (!this.getDpiOptions().includes(value)) throw new Error("Unsupported Pulsar Pro DPI value.");
+    return await this.withDpiUpdate(async () => {
+      const current = await this.readDpiConfiguration();
+      if (stage >= current[2]) throw new RangeError(`DPI stage ${stage} is outside this mouse's ${current[2]}-stage cycle.`);
+      return await this.writeDpiStageValue(current, stage, value);
+    });
+  }
+
+  /** Selects an enabled stage (0-based) without changing its stored DPI values. */
+  async setActiveDpiStage(stage: number): Promise<number> {
+    this.validateDpiStage(stage);
+    return await this.withDpiUpdate(async () => {
+      const current = await this.readDpiConfiguration();
+      const stageCount = current[2];
+      if (stage >= stageCount) throw new RangeError(`DPI stage ${stage} is outside this mouse's ${stageCount}-stage cycle.`);
+      await this.command(COMMAND.dpi, new Uint8Array([1, stageCount, stage, ...current.slice(4, 4 + stageCount * 4)]));
+      await this.applySettings();
+      const confirmed = await this.readDpiConfiguration();
+      if (confirmed[3] !== stage) throw new Error(`The mouse kept DPI stage ${confirmed[3]} instead of ${stage}.`);
+      return stage;
+    });
+  }
+
+  private withDpiUpdate(update: () => Promise<number>): Promise<number> {
+    // Hold a separate queue through readback; command() acquires commandQueue itself.
+    const result = this.dpiUpdateQueue.then(update);
+    this.dpiUpdateQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private validateDpiStage(stage: number): void {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= 6) throw new RangeError("DPI stage must be an index from 0 to 5.");
+  }
+
+  private async readDpiConfiguration(): Promise<Uint8Array> {
     const current = await this.query(COMMAND.dpi);
-    const stageCount = Math.min(current[2] ?? 0, 6);
-    const activeStage = Math.min(current[3] ?? 0, Math.max(stageCount - 1, 0));
-    if (stageCount < 1) throw new Error("The Pulsar Pro mouse reported no DPI stages.");
+    const stageCount = current[2] ?? 0;
+    if (stageCount < 1 || stageCount > 6 || current.length < 4 + stageCount * 4 || current[3] >= stageCount) {
+      throw new Error("The Pulsar Pro mouse reported an invalid DPI stage configuration.");
+    }
+    return current;
+  }
+
+  private async writeDpiStageValue(current: Uint8Array, stage: number, value: number): Promise<number> {
+    const stageCount = current[2];
+    const activeStage = current[3];
     const stages = current.slice(4, 4 + stageCount * 4);
-    const offset = activeStage * 4;
+    const offset = stage * 4;
     stages[offset] = value & 0xff;
     stages[offset + 1] = value >> 8;
     stages[offset + 2] = value & 0xff;
     stages[offset + 3] = value >> 8;
     await this.command(COMMAND.dpi, new Uint8Array([1, stageCount, activeStage, ...stages]));
     await this.applySettings();
-    const confirmed = await this.query(COMMAND.dpi);
-    const confirmedOffset = 4 + activeStage * 4;
+    const confirmed = await this.readDpiConfiguration();
+    if (confirmed[3] !== activeStage) throw new Error("The mouse changed the active DPI stage while editing its value.");
+    const confirmedOffset = 4 + stage * 4;
     const confirmedValue = readUint16LE(confirmed, confirmedOffset);
-    if (confirmedValue !== value) throw new Error(`The mouse kept ${confirmedValue} DPI instead of ${value} DPI.`);
+    if (confirmedValue !== value || readUint16LE(confirmed, confirmedOffset + 2) !== value) {
+      throw new Error(`The mouse did not keep ${value} DPI on both axes of stage ${stage}.`);
+    }
     return confirmedValue;
   }
 
@@ -278,7 +350,8 @@ export class PulsarProHidClient {
   }
 
   private async applySettings(): Promise<void> {
-    await this.command(COMMAND.saveAllow, new Uint8Array([1]));
+    // zywoo chosen-x: wired B1/B2/B5/B6/B7/C4 writes take effect directly, without the receiver's C3 save-allow command.
+    if (!this.wired) await this.command(COMMAND.saveAllow, new Uint8Array([1]));
   }
 
   private async command(command: number, parameters: Uint8Array, timeoutMs = 1500): Promise<Uint8Array> {
