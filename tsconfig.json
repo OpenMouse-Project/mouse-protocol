@@ -55,7 +55,8 @@
       "@openmouse/protocol/thermaltake": ["./src/thermaltake/index.ts"],
       "@openmouse/protocol/coolermaster": ["./src/coolermaster/index.ts"],
       "@openmouse/protocol/ajazz": ["./src/ajazz/index.ts"],
-      "@openmouse/protocol/hitscan": ["./src/hitscan/index.ts"]
+      "@openmouse/protocol/hitscan": ["./src/hitscan/index.ts"],
+      "@openmouse/protocol/xiaomi": ["./src/xiaomi/index.ts"]
     }
   },
   "include": ["src/**/*"],
