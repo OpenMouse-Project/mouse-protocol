@@ -688,8 +688,8 @@ export function xiaomiWriteMacroRequest(offset: number, events: readonly XiaomiM
 
 /**
  * Decode a macro read reply. Byte 3 is the number of event bytes in the
- * packet; events start at byte 8. A `packetSize` below the header length
- * signals the end of the macro.
+ * packet (0, 4, 8, …); events start at byte 8. A `packetSize` of 0 signals
+ * the end of the macro.
  */
 export function xiaomiDecodeMacroChunk(data: Uint8Array): XiaomiMacroChunk {
   if (data.length < XIAOMI_MACRO_PACKET_SIZE) {
@@ -699,7 +699,7 @@ export function xiaomiDecodeMacroChunk(data: Uint8Array): XiaomiMacroChunk {
     throw new Error("Xiaomi macro reply has an unexpected header");
   }
   const packetSize = data[3];
-  if (packetSize < XIAOMI_MACRO_HEADER_LENGTH) {
+  if (packetSize < XIAOMI_MACRO_EVENT_SIZE) {
     return { packetSize, events: [] };
   }
   const count = Math.min(packetSize / XIAOMI_MACRO_EVENT_SIZE, XIAOMI_MACRO_MAX_EVENTS_PER_PACKET);

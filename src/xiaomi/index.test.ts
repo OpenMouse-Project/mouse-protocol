@@ -261,6 +261,13 @@ test("macro chunk decode reads the event bytes and stops at the header length", 
     ],
   });
 
+  // A single-event packet (4 event bytes) must decode, not be treated as empty.
+  const single = macroReply(0x57, 0xf0, 0x0d, 4, 0, 0, 0, 0, 0x04, 0x00, 0x00, 0x00);
+  assert.deepEqual(xiaomiDecodeMacroChunk(single), {
+    packetSize: 4,
+    events: [{ key: 0x04, state: 0, delayMs: 0 }],
+  });
+
   const end = macroReply(0x57, 0xf0, 0x0d, 0, 0, 0, 0, 0);
   assert.deepEqual(xiaomiDecodeMacroChunk(end), { packetSize: 0, events: [] });
 

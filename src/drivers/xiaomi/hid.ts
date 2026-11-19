@@ -389,11 +389,25 @@ export class XiaomiHidClient {
       throw new Error(`Unsupported macro mode 0x${mode.toString(16)}.`);
     }
     const size = events.length * XIAOMI_MACRO_EVENT_SIZE;
-    await this.write(CONTROL_CHANNEL, xiaomiWriteBindingRequest(button, mode, (size >> 8) & 0xff, size & 0xff));
+    // The binding stores the size as a signed 16-bit value, so the device
+    // can only address 0x7fff bytes (8191 events). Reject larger macros
+    // before touching the device.
+    if (size > 0x7fff) {
+      throw new RangeError(
+        `Xiaomi macro is too large: ${events.length} events exceed the 8191-event device limit`,
+      );
+    }
+    // Encode every packet before writing anything, so an invalid event
+    // cannot leave the button with a partially written macro.
+    const packets: Uint8Array[] = [];
     let offset = 0;
     for (const chunk of xiaomiMacroPackets(events)) {
-      await this.write(MACRO_CHANNEL, xiaomiWriteMacroRequest(offset, chunk));
+      packets.push(xiaomiWriteMacroRequest(offset, chunk));
       offset += chunk.length * XIAOMI_MACRO_EVENT_SIZE;
+    }
+    await this.write(CONTROL_CHANNEL, xiaomiWriteBindingRequest(button, mode, (size >> 8) & 0xff, size & 0xff));
+    for (const packet of packets) {
+      await this.write(MACRO_CHANNEL, packet);
     }
   }
 }

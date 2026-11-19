@@ -401,3 +401,30 @@ test("setMacro writes the binding first, then streams the macro packets", async 
   assert.equal(packets[1]![7], 14); // first event key of the second packet
   assert.equal(packets[1]![31], 20); // last event key (event 6, byte 7)
 });
+
+test("setMacro rejects an invalid event before writing anything", async () => {
+  const fake = device();
+  const client = new XiaomiHidClient(fake);
+  // 15 valid events, then one with an out-of-range key in the second packet.
+  const events: XiaomiMacroEvent[] = [];
+  for (let i = 0; i < 15; i++) events.push({ key: i, state: i % 2, delayMs: 0 });
+  events.push({ key: 0x100, state: 0, delayMs: 0 });
+  await assert.rejects(
+    client.setMacro(5, XIAOMI_KEY_COMBOS.MACROS_NO_DELAY, events),
+    RangeError,
+  );
+  assert.equal(fake.sent.length, 0, "no frame may be written when an event is invalid");
+});
+
+test("setMacro rejects a macro larger than the signed 16-bit size limit", async () => {
+  const fake = device();
+  const client = new XiaomiHidClient(fake);
+  // 8192 events × 4 bytes = 32768 = 0x8000, which overflows the signed size.
+  const events: XiaomiMacroEvent[] = [];
+  for (let i = 0; i < 8192; i++) events.push({ key: i & 0xff, state: i % 2, delayMs: 0 });
+  await assert.rejects(
+    client.setMacro(5, XIAOMI_KEY_COMBOS.MACROS_NO_DELAY, events),
+    RangeError,
+  );
+  assert.equal(fake.sent.length, 0, "no frame may be written for an oversized macro");
+});
