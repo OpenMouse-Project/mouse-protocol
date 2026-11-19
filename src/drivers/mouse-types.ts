@@ -6,6 +6,8 @@
 import type { AtkDeviceFeatures } from "./atk/device-catalog.generated.js";
 
 export interface MouseUiHints {
+  /** This connection is carried by a receiver with its own configurable controls. */
+  receiverControls?: boolean;
   /** Stable driver id, e.g. "egg-we". */
   family?: string;
   /** When false, core settings grid stays hidden. Default true. */
@@ -207,7 +209,30 @@ export interface MagneticCalibrationProgress {
   steps: number;
 }
 
+export interface KeychronDynamicDpi {
+  profile: number;
+  enabled: boolean;
+  mode: number;
+  points: Array<{ speed: number; gain: number }>;
+}
+
+export interface KeychronReceiverStatus {
+  name: string;
+  firmware: string;
+  buttonMappings: Record<string, string>;
+  buttonOptions: string[];
+  lighting: MouseLighting;
+}
+
 export interface MouseStatus {
+  /** Controls for the configurable receiver carrying this mouse's wireless link. */
+  keychronReceiver?: KeychronReceiverStatus;
+  /** Optional Launcher 8K features, populated only after successful device reads. */
+  keychronMouse?: {
+    pairing: { mask: number; holdTime: number } | null;
+    dynamicDpi: KeychronDynamicDpi | null;
+    factoryReset: boolean;
+  };
   brand: "RAWM" | "Motospeed" | "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "Vancer" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "VAXEE" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Noir Gear" | "Lingbao" | "GearHub" | "AJAZZ" | "Corsair" | "Microsoft" | "Dareu" | "Redragon" | "Incott" | "HyperX" | "ASUS" | "Ryunix" | "Amkette" | "Delux" | "GravaStar" | "IPI" | "Rapoo" | "Fater" | "Cooler Master" | "AJAZZ" | "Scyrox" | "Hitscan" | "ROCCAT" | "Thermaltake" | "Redgear" | "AULA" | "Xiaomi";
   name: string;
   /** Optional LunaFury controls, populated only after successful device reads. */
