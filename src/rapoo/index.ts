@@ -52,6 +52,11 @@
 
 export const RAPOO_VENDOR_ID = 0x24ae;
 
+/** VT1 MAX identifiers and configuration collection from Rapoo's Web Hub manifest. */
+export const RAPOO_VT1_MAX_PRODUCT_IDS: ReadonlySet<number> = new Set([0x4644, 0x1444]);
+export const RAPOO_VT1_MAX_USAGE_PAGE = 0xff00;
+export const RAPOO_VT1_MAX_USAGE = 0x0002;
+
 /** The 2.4 GHz receiver's configuration interface. */
 export const RAPOO_WIRELESS_PRODUCT_ID = 0x1205;
 
