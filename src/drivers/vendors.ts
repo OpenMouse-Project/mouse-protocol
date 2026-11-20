@@ -134,6 +134,9 @@ import {
   RAPOO_CONFIG_USAGE_PAGE,
   RAPOO_PRODUCT_IDS,
   RAPOO_VENDOR_ID,
+  RAPOO_VT1_MAX_PRODUCT_IDS,
+  RAPOO_VT1_MAX_USAGE,
+  RAPOO_VT1_MAX_USAGE_PAGE,
 } from "@openmouse/protocol/rapoo";
 import {
   REDRAGON_CONFIG_USAGE,
@@ -967,6 +970,13 @@ export const RAPOO_HID_FILTERS: HIDDeviceFilter[] = [...RAPOO_PRODUCT_IDS].map((
   usage: RAPOO_CONFIG_USAGE,
 }));
 
+export const RAPOO_VT1_MAX_HID_FILTERS: HIDDeviceFilter[] = [...RAPOO_VT1_MAX_PRODUCT_IDS].map((productId) => ({
+  vendorId: RAPOO_VENDOR_ID,
+  productId,
+  usagePage: RAPOO_VT1_MAX_USAGE_PAGE,
+  usage: RAPOO_VT1_MAX_USAGE,
+}));
+
 export const MOTOSPEED_HID_FILTERS: HIDDeviceFilter[] = MOTOSPEED_PRODUCTS.map(({ productId }) => ({
   vendorId: MOTOSPEED_VENDOR_ID,
   productId,
@@ -1122,6 +1132,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...RYUNIX_HID_FILTERS,
   ...AMKETTE_XS_HID_FILTERS,
   ...RAPOO_HID_FILTERS,
+  ...RAPOO_VT1_MAX_HID_FILTERS,
   { vendorId: VENDOR_ID.coolermaster, usagePage: COOLERMASTER_USAGE_PAGE, usage: COOLERMASTER_USAGE },
   { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff00 },
   { vendorId: VENDOR_ID.ajazz, productId: AJAZZ_AK820_WIRED_PID, usagePage: 0xff60 },
