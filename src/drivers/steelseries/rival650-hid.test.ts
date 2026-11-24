@@ -324,16 +324,20 @@ test("Rival 650 retry saves the edited map even when it already matches active s
   assert.equal(sent.filter(({ payload }) => payload[0] === 0x09).length, 2);
 });
 
-test("Rival 650 never writes from identical padded battery reports when the button query is silent", async () => {
-  const { device, sent } = fakeDevice({
-    battery: [1, 0, 0], answerButtons: false, beforeButtons: [{ reportId: 0, bytes: [1, 0, 0] }],
+for (const batteryLevel of [1, 2]) {
+  test(`Rival 650 never writes from repeated stale battery reports with a battery probe of ${batteryLevel}%`, async () => {
+    const { device, sent } = fakeDevice({
+      battery: [batteryLevel, 0, 0],
+      answerButtons: false,
+      beforeButtons: [{ reportId: 0, bytes: [1, 0, 0] }],
+    });
+    const client = new SteelSeriesRival650HidClient(device);
+    await assert.rejects(client.updateVerifiedButtonsMapping(mapping => ({
+      ...mapping, button4: { type: "multimedia", code: 0xea },
+    })), /could not read/i);
+    assert.equal(sent.some(({ payload }) => payload[0] === 0x19 || payload[0] === 0x09), false);
   });
-  const client = new SteelSeriesRival650HidClient(device);
-  await assert.rejects(client.updateVerifiedButtonsMapping(mapping => ({
-    ...mapping, button4: { type: "multimedia", code: 0xea },
-  })), /could not read/i);
-  assert.equal(sent.some(({ payload }) => payload[0] === 0x19 || payload[0] === 0x09), false);
-});
+}
 
 test("Rival 650 ignores a delayed full button report while probing the battery", async () => {
   const fullMap = [1, 0, 0, 0, 0, 2, ...Array(58).fill(0)];

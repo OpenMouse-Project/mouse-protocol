@@ -233,7 +233,7 @@ export class SteelSeriesRival650HidClient {
   ): Promise<void> {
     await this.run(async () => {
       await this.open();
-      const before = await this.readButtons();
+      const before = await this.readButtons({ requireUnambiguous: true });
       const current = before && steelseriesRival650DecodeButtonsMapping(before);
       if (!current) throw new Error("Could not read the current Rival 650 button assignments.");
       const report = encodeCompleteButtonMap(edit(current));
@@ -258,7 +258,7 @@ export class SteelSeriesRival650HidClient {
     await this.write(steelseriesRival650SaveCommand());
   }
 
-  private async readButtons(): Promise<Uint8Array | null> {
+  private async readButtons({ requireUnambiguous = false } = {}): Promise<Uint8Array | null> {
     const read = async () => {
       const provisional: { sparse: Uint8Array | null } = { sparse: null };
       const full = await this.awaitResponse(steelseriesRival650ButtonsQuery(), payload => {
@@ -274,12 +274,13 @@ export class SteelSeriesRival650HidClient {
     };
 
     // A padded battery reply can look like a map with only the first button
-    // enabled. Prefer an unambiguous reply during each request window.
-    // For a sparse map, compare two button reads around a separate battery
-    // probe. If the payloads coincide with battery telemetry, there is no
-    // report discriminator: do not use that map as the basis of a write.
+    // enabled. Even repeated sparse replies can be stale battery telemetry.
+    // Only an unambiguous read can supply the original fields for an edit.
     const first = await read();
-    if (first.full || !first.sparse) return first.full;
+    if (requireUnambiguous || first.full || !first.sparse) return first.full;
+
+    // For display and explicit full-map readback, compare sparse replies
+    // around a battery probe and reject a match with that probe.
     const battery = await this.awaitResponse(steelseriesRival650BatteryQuery(), isBatteryReport);
     const second = await read();
     if (second.full) return second.full;
