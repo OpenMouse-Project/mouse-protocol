@@ -1,10 +1,13 @@
 import type { MouseStatus } from "../mouse-types.js";
 import {
+  RIVAL650_BUTTONS,
   RIVAL650_POLLING_RATES,
   STEELSERIES_PRODUCTS,
   STEELSERIES_VENDOR_ID,
   RIVAL650_REPORT_ID,
   steelseriesRival650BatteryQuery,
+  steelseriesRival650ButtonsQuery,
+  steelseriesRival650DecodeButtonsMapping,
   steelseriesRival650DecodeBattery,
   steelseriesRival650DpiOptions,
   steelseriesRival650EncodeButtonsMapping,
@@ -16,6 +19,7 @@ import {
   type Rival650Battery,
   type Rival650ButtonAction,
   type Rival650ButtonName,
+  type Rival650ButtonMappings,
 } from "@openmouse/protocol/steelseries";
 
 /** rivalcfg's `command_approve_delay`, shared across every SteelSeries family. */
@@ -26,6 +30,19 @@ const RESPONSE_TIMEOUT_MS = 500;
 const DEFAULT_DPI = 800;
 const DEFAULT_POLLING_HZ = 1000;
 
+function isBatteryReport(payload: Uint8Array): boolean {
+  return payload.length >= 3 && !payload.subarray(3).some(Boolean);
+}
+
+function encodeCompleteButtonMap(mapping: Rival650ButtonMappings): Uint8Array {
+  for (const name of Object.keys(RIVAL650_BUTTONS) as Rival650ButtonName[]) {
+    if (!Object.hasOwn(mapping, name) || !mapping[name]) {
+      throw new Error("A verified Rival 650 button map requires all seven assignments.");
+    }
+  }
+  return steelseriesRival650EncodeButtonsMapping(mapping);
+}
+
 /**
  * SteelSeries Rival 650 Wireless WebHID control (`1038:172B` wired mode,
  * `1038:1726` 2.4 GHz wireless mode).
@@ -33,8 +50,8 @@ const DEFAULT_POLLING_HZ = 1000;
  * DPI (two independent presets, `sensitivity1`/`sensitivity2` — this codec
  * exposes `setDpi` against preset 1 only, matching every other SteelSeries
  * family's single-`setDpi` surface), polling rate, lift-off distance,
- * buttons, and the sleep timer are all write-only — `rival650.py` defines no
- * getter for any of them. Unlike `SteelSeriesRival3WirelessHidClient`, this
+ * and the sleep timer are write-only in this driver. The current button
+ * mapping is read separately with 0x99. Unlike `SteelSeriesRival3WirelessHidClient`, this
  * device has **no firmware-query command** at all (`rival650.py` defines no
  * `firmware_version` block), so `readStatus` reports firmware as unknown
  * rather than probing for it. `battery_level` (`AA 01`) is readable and
@@ -60,6 +77,7 @@ export class SteelSeriesRival650HidClient {
   };
 
   private readonly onInputReport = (event: HIDInputReportEvent): void => {
+    if (event.reportId !== RIVAL650_REPORT_ID) return;
     const payload = new Uint8Array(
       event.data.buffer.slice(event.data.byteOffset, event.data.byteOffset + event.data.byteLength),
     );
@@ -101,6 +119,7 @@ export class SteelSeriesRival650HidClient {
     return await this.run(async () => {
       await this.open();
       const battery = await this.probeBattery();
+      const buttons = await this.readButtons().catch(() => null);
       const product = STEELSERIES_PRODUCTS.get(this.device.productId);
       const name = this.device.productName?.trim() || `SteelSeries ${product?.model ?? "Rival 650 Wireless"}`;
       return {
@@ -121,7 +140,7 @@ export class SteelSeriesRival650HidClient {
         pollingRateHz: this.lastWritten.pollingRateHz ?? DEFAULT_POLLING_HZ,
         supportedPollingRates: this.supportedPollingRates,
         activeProfile: null,
-        connectionType: "Wireless",
+        connectionType: this.device.productId === 0x172b ? "Wired" : "Wireless",
         // `MouseStatus.liftOffDistance` is the shared three-stop Low/Medium/
         // High enum; this device's 1–8 mm scale does not map onto it cleanly
         // (same reason every sibling SteelSeries client reports null here),
@@ -129,6 +148,7 @@ export class SteelSeriesRival650HidClient {
         // client (`this.lastWritten.liftOffDistance`) rather than surfaced.
         liftOffDistance: null,
         firmware: [],
+        rival650ButtonMappings: buttons ? steelseriesRival650DecodeButtonsMapping(buttons) : undefined,
       };
     });
   }
@@ -195,10 +215,79 @@ export class SteelSeriesRival650HidClient {
     const report = steelseriesRival650EncodeButtonsMapping(mapping);
     await this.run(async () => {
       await this.open();
-      await this.write(report);
-      await this.delay(COMMAND_DELAY_MS);
-      await this.write(steelseriesRival650SaveCommand());
+      await this.writeAndSaveButtons(report);
     });
+  }
+
+  /** Writes a complete map, requests a save, and checks the immediate device report. */
+  async setVerifiedButtonsMapping(mapping: Rival650ButtonMappings): Promise<void> {
+    await this.run(async () => {
+      await this.open();
+      await this.writeVerifiedButtonReport(encodeCompleteButtonMap(mapping));
+    });
+  }
+
+  /** Reads, merges and verifies an edit within the same queued operation. */
+  async updateVerifiedButtonsMapping(
+    edit: (current: Rival650ButtonMappings) => Rival650ButtonMappings,
+  ): Promise<void> {
+    await this.run(async () => {
+      await this.open();
+      const before = await this.readButtons();
+      const current = before && steelseriesRival650DecodeButtonsMapping(before);
+      if (!current) throw new Error("Could not read the current Rival 650 button assignments.");
+      const report = encodeCompleteButtonMap(edit(current));
+      // A previous attempt can have applied the map in RAM without saving it.
+      await this.writeVerifiedButtonReport(report);
+    });
+  }
+
+  private async writeVerifiedButtonReport(report: Uint8Array): Promise<void> {
+    await this.writeAndSaveButtons(report);
+    await this.delay(COMMAND_DELAY_MS);
+    const actual = await this.readButtons();
+    if (!actual) throw new Error("Could not read back the requested Rival 650 button assignments.");
+    if (report.subarray(1).some((byte, index) => byte !== actual[index])) {
+      throw new Error("The Rival 650 button readback does not match the requested assignments.");
+    }
+  }
+
+  private async writeAndSaveButtons(report: Uint8Array): Promise<void> {
+    await this.write(report);
+    await this.delay(COMMAND_DELAY_MS);
+    await this.write(steelseriesRival650SaveCommand());
+  }
+
+  private async readButtons(): Promise<Uint8Array | null> {
+    const read = async () => {
+      const provisional: { sparse: Uint8Array | null } = { sparse: null };
+      const full = await this.awaitResponse(steelseriesRival650ButtonsQuery(), payload => {
+        const mapping = steelseriesRival650DecodeButtonsMapping(payload);
+        if (!mapping) return false;
+        if (payload.subarray(3).some(Boolean)) return true;
+        if (mapping.button1.type !== "disabled" && mapping.button1.type !== "raw") {
+          provisional.sparse = payload;
+        }
+        return false;
+      });
+      return { full, sparse: provisional.sparse };
+    };
+
+    // A padded battery reply can look like a map with only the first button
+    // enabled. Prefer an unambiguous reply during each request window.
+    // For a sparse map, compare two button reads around a separate battery
+    // probe. If the payloads coincide with battery telemetry, there is no
+    // report discriminator: do not use that map as the basis of a write.
+    const first = await read();
+    if (first.full || !first.sparse) return first.full;
+    const battery = await this.awaitResponse(steelseriesRival650BatteryQuery(), isBatteryReport);
+    const second = await read();
+    if (second.full) return second.full;
+    const confirmed = second.sparse;
+    if (!confirmed || !battery || confirmed.subarray(0, 3).every((byte, index) => byte === battery[index])) {
+      return null;
+    }
+    return first.sparse.every((byte, index) => byte === confirmed[index]) ? confirmed : null;
   }
 
   /**
@@ -207,7 +296,7 @@ export class SteelSeriesRival650HidClient {
    * for `SteelSeriesRival3WirelessHidClient`.
    */
   private async probeBattery(): Promise<Rival650Battery> {
-    const payload = await this.awaitResponse(steelseriesRival650BatteryQuery());
+    const payload = await this.awaitResponse(steelseriesRival650BatteryQuery(), isBatteryReport);
     if (!payload) {
       throw new Error(
         "The Rival 650 Wireless did not answer on this interface. Close SteelSeries GG (and the SteelSeriesEngine service); if it still does not answer, add the device again and choose another entry.",
@@ -216,19 +305,24 @@ export class SteelSeriesRival650HidClient {
     return steelseriesRival650DecodeBattery(payload);
   }
 
-  private async awaitResponse(query: Uint8Array): Promise<Uint8Array | null> {
-    const response = new Promise<Uint8Array | null>((resolve) => {
-      let timer: ReturnType<typeof setTimeout>;
-      const finish = (payload: Uint8Array | null): void => {
-        clearTimeout(timer);
-        this.inputWaiters.delete(finish as (payload: Uint8Array) => void);
-        resolve(payload);
-      };
-      timer = setTimeout(() => finish(null), RESPONSE_TIMEOUT_MS);
-      this.inputWaiters.add(finish as (payload: Uint8Array) => void);
+  private async awaitResponse(
+    query: Uint8Array,
+    accept: (payload: Uint8Array) => boolean,
+  ): Promise<Uint8Array | null> {
+    let listener!: (payload: Uint8Array) => void;
+    let timer!: ReturnType<typeof setTimeout>;
+    const response = new Promise<Uint8Array | null>(resolve => {
+      listener = payload => { if (accept(payload)) resolve(payload); };
+      timer = setTimeout(() => resolve(null), RESPONSE_TIMEOUT_MS);
+      this.inputWaiters.add(listener);
     });
-    await this.write(query);
-    return await response;
+    try {
+      await this.write(query);
+      return await response;
+    } finally {
+      clearTimeout(timer);
+      this.inputWaiters.delete(listener);
+    }
   }
 
   private async write(payload: Uint8Array): Promise<void> {

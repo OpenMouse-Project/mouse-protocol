@@ -8,9 +8,21 @@ function fakeDevice(
     productId?: number;
     answerBattery?: boolean;
     battery?: number[];
+    beforeBattery?: number[][];
+    buttons?: number[];
+    answerButtons?: boolean;
+    beforeButtons?: Array<{ reportId: number; bytes: number[] }>;
+    acceptButtonWrites?: boolean;
+    mapBeforeEdit?: number[];
+    ignoreSave?: boolean;
+    loseReadbackAfterWrite?: boolean;
   } = {},
 ) {
   const sent: Array<{ reportId: number; payload: number[] }> = [];
+  let writtenMapping: number[] | undefined;
+  let savedMapping: number[] | undefined;
+  let buttonReads = 0;
+  let saveErrorPending = false;
   let listener: ((event: HIDInputReportEvent) => void) | null = null;
   const device = {
     vendorId: 0x1038,
@@ -28,8 +40,39 @@ function fakeDevice(
       sent.push({ reportId, payload });
       if (payload[0] === 0xaa && payload[1] === 0x01 && options.answerBattery !== false) {
         const response = new Uint8Array(options.battery ?? [72, 0x00, 0x00]);
-        queueMicrotask(() =>
-          listener?.({ reportId: 0, data: new DataView(response.buffer), device } as unknown as HIDInputReportEvent));
+        queueMicrotask(() => {
+          for (const bytes of options.beforeBattery ?? []) {
+            const stale = Uint8Array.from(bytes);
+            listener?.({ reportId: 0, data: new DataView(stale.buffer), device } as unknown as HIDInputReportEvent);
+          }
+          listener?.({ reportId: 0, data: new DataView(response.buffer), device } as unknown as HIDInputReportEvent);
+        });
+      }
+      if (payload[0] === 0x19) writtenMapping = payload.slice(1);
+      if (payload[0] === 0x09) {
+        if (saveErrorPending) {
+          saveErrorPending = false;
+          throw new Error("Save report failed.");
+        }
+        if (!options.ignoreSave) savedMapping = writtenMapping;
+      }
+      if (payload[0] === 0x99 && !(writtenMapping && options.loseReadbackAfterWrite)) {
+        buttonReads++;
+        const response = new Uint8Array(64);
+        response.set((options.acceptButtonWrites && (writtenMapping ?? savedMapping))
+          || (buttonReads > 1 && options.mapBeforeEdit) || options.buttons
+          || [1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 3, 0, 0, 0, 0,
+            0x61, 0xea, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x30]);
+        const emit = (reportId: number, data: Uint8Array) =>
+          listener?.({ reportId, data: new DataView(data.buffer), device } as unknown as HIDInputReportEvent);
+        queueMicrotask(() => {
+          for (const { reportId, bytes } of options.beforeButtons ?? []) {
+            const stray = new Uint8Array(64);
+            stray.set(bytes);
+            emit(reportId, stray);
+          }
+          if (options.answerButtons !== false) emit(0, response);
+        });
       }
     },
     sendFeatureReport: async () => { throw new Error("the Rival 650 Wireless protocol does not use feature reports"); },
@@ -37,7 +80,9 @@ function fakeDevice(
     addEventListener: (_type: string, attached: (event: HIDInputReportEvent) => void) => { listener = attached; },
     removeEventListener: () => { listener = null; },
   };
-  return { device: device as unknown as HIDDevice, sent };
+  const powerCycle = () => { writtenMapping = savedMapping; };
+  const failNextSave = () => { saveErrorPending = true; };
+  return { device: device as unknown as HIDDevice, sent, powerCycle, failNextSave };
 }
 
 test("claims only the Rival 650 Wireless product ids", () => {
@@ -59,14 +104,17 @@ test("claims only the Rival 650 Wireless product ids", () => {
   assert.equal(SteelSeriesRival650HidClient.isSupported({ ...device, vendorId: 0x1532 } as HIDDevice), false);
 });
 
-test("readStatus probes battery only, reports no firmware, and never claims to have read DPI/polling/LOD", async () => {
+test("readStatus reads battery and the current button map without writing settings", async () => {
   const { device, sent } = fakeDevice();
   const status = await new SteelSeriesRival650HidClient(device).readStatus();
-  assert.deepEqual(sent, [{ reportId: 0, payload: [0xaa, 0x01] }]);
+  assert.deepEqual(sent, [{ reportId: 0, payload: [0xaa, 0x01] }, { reportId: 0, payload: [0x99] }]);
+  assert.deepEqual(status.rival650ButtonMappings?.button4, { type: "multimedia", code: 0xea });
+  assert.deepEqual(status.rival650ButtonMappings?.button6, { type: "disabled" });
+  assert.deepEqual(status.rival650ButtonMappings?.button7, { type: "dpiSwitch" });
   assert.equal(status.brand, "SteelSeries");
   assert.equal(status.name, "SteelSeries Rival 650 Wireless");
   assert.deepEqual(status.firmware, []);
-  assert.equal(status.connectionType, "Wireless");
+  assert.equal(status.connectionType, "Wired");
   assert.equal(status.batteryPercent, 72);
   assert.equal(status.batteryState, "Discharging");
   assert.equal(status.dpi, 800);
@@ -152,4 +200,154 @@ test("concurrent setters never interleave their write/save pairs", async () => {
     [0x20, 0x01, 0x51, 0x55],
     [0x09],
   ]);
+});
+
+test("readStatus does not publish a blank response as the button map", async () => {
+  const { device } = fakeDevice({ buttons: [] });
+  const status = await new SteelSeriesRival650HidClient(device).readStatus();
+  assert.equal(status.rival650ButtonMappings, undefined);
+  assert.equal(status.batteryPercent, 72);
+});
+
+test("Rival 650 preserves an existing keyboard chord when rewriting a different button", async () => {
+  const bytes = Array(35).fill(0);
+  bytes[0] = 1;
+  bytes.splice(15, 5, 0x51, 0xe0, 0xe5, 0x06, 0);
+  const { device, sent } = fakeDevice({ buttons: bytes });
+  const client = new SteelSeriesRival650HidClient(device);
+  const { rival650ButtonMappings } = await client.readStatus();
+  assert.deepEqual(rival650ButtonMappings?.button4, { type: "raw", bytes: [0x51, 0xe0, 0xe5, 0x06, 0] });
+  await client.setButtonsMapping({ ...rival650ButtonMappings, button5: { type: "multimedia", code: 0xea } });
+  bytes.splice(20, 5, 0x61, 0xea, 0, 0, 0);
+  assert.deepEqual(sent.at(-2)?.payload, [0x19, ...bytes]);
+});
+
+test("Rival 650 receiver uses the same button read request and identifies as wireless", async () => {
+  const { device, sent } = fakeDevice({ productId: 0x1726 });
+  const status = await new SteelSeriesRival650HidClient(device).readStatus();
+  assert.equal(status.connectionType, "Wireless");
+  assert.deepEqual(sent.at(-1), { reportId: 0, payload: [0x99] });
+  assert.deepEqual(status.rival650ButtonMappings?.button4, { type: "multimedia", code: 0xea });
+});
+
+test("Rival 650 skips a padded battery reply and a wrong report ID before decoding the map", async () => {
+  const { device } = fakeDevice({ beforeButtons: [
+    { reportId: 0, bytes: [72, 0, 1] },
+    { reportId: 1, bytes: [1, 0, 0, 0, 0, 3] },
+  ] });
+  const status = await new SteelSeriesRival650HidClient(device).readStatus();
+  assert.deepEqual(status.rival650ButtonMappings?.button4, { type: "multimedia", code: 0xea });
+});
+
+for (const { name, acceptButtonWrites, loseReadbackAfterWrite, error } of [
+  { name: "accepts matching readback", acceptButtonWrites: true, loseReadbackAfterWrite: false, error: null },
+  { name: "rejects a mismatched readback", acceptButtonWrites: false, loseReadbackAfterWrite: false, error: /does not match/ },
+  { name: "rejects missing readback", acceptButtonWrites: true, loseReadbackAfterWrite: true, error: /could not read back/i },
+]) {
+  test(`Rival 650 verified button writer ${name}`, async () => {
+    const { device, sent } = fakeDevice({ acceptButtonWrites, loseReadbackAfterWrite });
+    const client = new SteelSeriesRival650HidClient(device);
+    const { rival650ButtonMappings } = await client.readStatus();
+    assert.ok(rival650ButtonMappings);
+    const result = client.setVerifiedButtonsMapping({
+      ...rival650ButtonMappings,
+      button4: { type: "multimedia", code: 0xe9 },
+    });
+    if (error) await assert.rejects(result, error);
+    else await result;
+    assert.deepEqual(sent.slice(-3).map(({ payload }) => payload[0]), [0x19, 0x09, 0x99]);
+  });
+}
+
+test("Rival 650 reads and verifies a map with only the primary click enabled", async () => {
+  const primaryOnly = Array(35).fill(0);
+  primaryOnly[0] = 1;
+  const { device, sent } = fakeDevice({
+    buttons: primaryOnly, acceptButtonWrites: true, beforeButtons: [{ reportId: 0, bytes: [72, 0, 0] }],
+  });
+  const client = new SteelSeriesRival650HidClient(device);
+  const { rival650ButtonMappings: mapping } = await client.readStatus();
+  assert.ok(mapping);
+  assert.deepEqual(mapping.button1, { type: "button", target: "button1" });
+  assert.deepEqual(mapping.button7, { type: "disabled" });
+  await client.setVerifiedButtonsMapping(mapping);
+  assert.deepEqual(sent.map(({ payload }) => payload[0]), [0xaa, 0x99, 0xaa, 0x99, 0x19, 0x09, 0x99, 0xaa, 0x99]);
+});
+
+test("Rival 650 edits start with a fresh read and preserve unrelated fields", async () => {
+  const latest = Array(35).fill(0);
+  latest[0] = 1;
+  const chord = [0x51, 0xe0, 0xe5, 0x06, 0];
+  latest.splice(20, 5, ...chord);
+  const { device, sent } = fakeDevice({ acceptButtonWrites: true, mapBeforeEdit: latest });
+  const client = new SteelSeriesRival650HidClient(device);
+  await client.readStatus();
+  await client.updateVerifiedButtonsMapping(mapping => ({
+    ...mapping, button4: { type: "multimedia", code: 0xe9 },
+  }));
+  const packets = sent.slice(2).map(({ payload }) => payload);
+  assert.deepEqual(packets.map(packet => packet[0]), [0x99, 0x19, 0x09, 0x99]);
+  assert.deepEqual(packets[1]?.slice(21, 26), chord);
+});
+
+test("Rival 650 edits never write without a current map", async () => {
+  const { device, sent } = fakeDevice({ buttons: [] });
+  const client = new SteelSeriesRival650HidClient(device);
+  await assert.rejects(client.updateVerifiedButtonsMapping(mapping => mapping), /could not read/i);
+  assert.equal(sent.some(({ payload }) => payload[0] === 0x19), false);
+});
+
+test("Rival 650 fixture distinguishes a matching active map from saved settings", async () => {
+  for (const ignoreSave of [false, true]) {
+    const { device, powerCycle } = fakeDevice({ acceptButtonWrites: true, ignoreSave });
+    const client = new SteelSeriesRival650HidClient(device);
+    const { rival650ButtonMappings: original } = await client.readStatus();
+    assert.ok(original);
+    const button4 = { type: "multimedia", code: 0xe9 } as const;
+    await client.setVerifiedButtonsMapping({ ...original, button4 });
+    powerCycle();
+    const { rival650ButtonMappings: afterPowerCycle } = await client.readStatus();
+    assert.deepEqual(afterPowerCycle?.button4, ignoreSave ? original.button4 : button4);
+  }
+});
+
+test("Rival 650 retry saves the edited map even when it already matches active settings", async () => {
+  const { device, failNextSave, powerCycle, sent } = fakeDevice({ acceptButtonWrites: true });
+  const client = new SteelSeriesRival650HidClient(device);
+  const button4 = { type: "multimedia", code: 0xe9 } as const;
+  const edit: Parameters<typeof client.updateVerifiedButtonsMapping>[0] = mapping => ({ ...mapping, button4 });
+  failNextSave();
+  await assert.rejects(client.updateVerifiedButtonsMapping(edit), /save report failed/i);
+  await client.updateVerifiedButtonsMapping(edit);
+  powerCycle();
+  assert.deepEqual((await client.readStatus()).rival650ButtonMappings?.button4, button4);
+  assert.equal(sent.filter(({ payload }) => payload[0] === 0x09).length, 2);
+});
+
+test("Rival 650 never writes from identical padded battery reports when the button query is silent", async () => {
+  const { device, sent } = fakeDevice({
+    battery: [1, 0, 0], answerButtons: false, beforeButtons: [{ reportId: 0, bytes: [1, 0, 0] }],
+  });
+  const client = new SteelSeriesRival650HidClient(device);
+  await assert.rejects(client.updateVerifiedButtonsMapping(mapping => ({
+    ...mapping, button4: { type: "multimedia", code: 0xea },
+  })), /could not read/i);
+  assert.equal(sent.some(({ payload }) => payload[0] === 0x19 || payload[0] === 0x09), false);
+});
+
+test("Rival 650 ignores a delayed full button report while probing the battery", async () => {
+  const fullMap = [1, 0, 0, 0, 0, 2, ...Array(58).fill(0)];
+  const { device } = fakeDevice({ beforeBattery: [fullMap] });
+  const status = await new SteelSeriesRival650HidClient(device).readStatus();
+  assert.equal(status.batteryPercent, 72);
+});
+
+test("Rival 650 verified APIs reject incomplete JavaScript mappings before writing", async () => {
+  const { device, sent } = fakeDevice({ acceptButtonWrites: true });
+  const client = new SteelSeriesRival650HidClient(device);
+  const partial = { button4: { type: "multimedia", code: 0xe9 } } as
+    Parameters<typeof client.setVerifiedButtonsMapping>[0];
+  await assert.rejects(client.setVerifiedButtonsMapping(partial), /requires all seven/i);
+  await assert.rejects(client.updateVerifiedButtonsMapping(() => partial), /requires all seven/i);
+  assert.equal(sent.some(({ payload }) => payload[0] === 0x19 || payload[0] === 0x09), false);
 });
