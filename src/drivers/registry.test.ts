@@ -12,6 +12,7 @@ import { HITSCAN_PRODUCTS, HITSCAN_XVI_PRODUCTS } from "@openmouse/protocol/hits
 import { ORBITAL_DEVICES } from "@openmouse/protocol/orbital";
 import { MCHOSE_V3_PRODUCT_IDS } from "@openmouse/protocol/mchose";
 import { KEYCHRON_8K_NORDIC_PRODUCT_IDS } from "@openmouse/protocol/keychron";
+import { PULSAR_PRO_PRODUCT_IDS } from "@openmouse/protocol/pulsar";
 import {
   DELUX_M600_PRO_WIRED_PID,
   DELUX_M800_MINI_WIRELESS_PID,
@@ -141,6 +142,8 @@ function candidateProductIds(): number[] {
     // The Keychron 8K Nordic driver claims its ids out of the 4K family's
     // shared collection, so the probe needs them to reach it.
     ...KEYCHRON_8K_NORDIC_PRODUCT_IDS,
+    // Pro ids live in the codec package, outside the driver source scan.
+    ...PULSAR_PRO_PRODUCT_IDS,
     // The Cooler Master driver matches on an id allowlist, but its only
     // product id (0x0101) is defined in src/coolermaster/ and appears as no
     // literal under src/drivers/, so the source scan below would not find it.
