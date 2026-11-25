@@ -261,6 +261,7 @@ export const VENDOR_ID = {
   hitscan: HITSCAN_VENDOR_ID,
   roccat: ROCCAT_VENDOR_ID,
   thermaltake: THERMALTAKE_VENDOR_ID,
+  xiaomi: 0x2717,
 } as const;
 
 /**
@@ -984,6 +985,17 @@ export const VAXEE_HID_FILTERS: HIDDeviceFilter[] = VAXEE_PRODUCT_IDS.map((produ
   vendorId: VAXEE_VENDOR_ID, productId, usagePage: VAXEE_USAGE_PAGE, usage: VAXEE_USAGE,
 }));
 
+/**
+ * Xiaomi Mi Gaming Mouse, wired (0x5009) and wireless (0x500b). No HID
+ * descriptor has been captured, so the usage page is unknown; the driver
+ * selects its collection by shape (any collection with input and output
+ * reports).
+ */
+export const XIAOMI_HID_FILTERS: HIDDeviceFilter[] = [0x5009, 0x500b].map((productId) => ({
+  vendorId: VENDOR_ID.xiaomi,
+  productId,
+}));
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   {
     vendorId: SC380_PRO_VENDOR_ID,
@@ -1143,4 +1155,5 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // 64-byte feature report 0 for control.hitscan.com).
   ...[...new Set([...HITSCAN_PRODUCTS.keys(), ...HITSCAN_XVI_PRODUCTS.keys()])]
     .map((productId) => ({ vendorId: VENDOR_ID.hitscan, productId })),
+  ...XIAOMI_HID_FILTERS,
 ];

@@ -261,6 +261,10 @@
     "./roccat": {
       "types": "./dist/roccat/index.d.ts",
       "import": "./dist/roccat/index.js"
+    },
+    "./xiaomi": {
+      "types": "./dist/xiaomi/index.d.ts",
+      "import": "./dist/xiaomi/index.js"
     }
   },
   "scripts": {
