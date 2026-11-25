@@ -1221,9 +1221,9 @@ export class AttackSharkHidClient {
     return ms;
   }
 
-  async setLiftOffDistance(lod: "Low" | "High"): Promise<string> {
+  async setLiftOffDistance(lod: NonNullable<MouseStatus["liftOffDistance"]>): Promise<string> {
     this.requireX3();
-    const index = X3_LOD.indexOf(lod);
+    const index = (X3_LOD as readonly string[]).indexOf(lod);
     if (index < 0) throw new RangeError("Lift-off distance must be Low (1 mm) or High (2 mm).");
     await this.applyX3((s) => { s.lod = index as 0 | 1; });
     return lod;

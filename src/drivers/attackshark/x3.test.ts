@@ -136,7 +136,7 @@ test("X3 rejects invalid values before anything is sent", async () => {
   await assert.rejects(() => client.setDeepSleepTimeout(0));
   await assert.rejects(() => client.setDpiStageCount(9));
   await assert.rejects(() => client.setDpiStageColor(0, "red"));
-  await assert.rejects(() => client.setLiftOffDistance("Medium" as "Low"));
+  await assert.rejects(() => client.setLiftOffDistance("Medium"));
   assert.deepEqual(sent, []);
 });
 
