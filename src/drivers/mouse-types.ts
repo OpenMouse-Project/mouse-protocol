@@ -4,6 +4,7 @@
  * stays free of brand-specific branching.
  */
 import type { AtkDeviceFeatures } from "./atk/device-catalog.generated.js";
+import type { Rival650ButtonMappings } from "../steelseries/rival650.js";
 
 export interface MouseUiHints {
   /** This connection is carried by a receiver with its own configurable controls. */
@@ -79,6 +80,11 @@ export interface MouseUiHints {
   dpiLighting?: {
     modes: readonly (0 | 1 | 2)[];
     brightness: readonly number[];
+    /**
+     * Modes in which brightness can be changed. Omitted when every lit mode
+     * accepts it; a mouse whose breathing effect has no brightness lists [1].
+     */
+    brightnessModes?: readonly (1 | 2)[];
     speed: readonly number[];
     /** Optional DPI-indicator-only sleep values in seconds. */
     sleepTimeouts?: readonly number[];
@@ -233,7 +239,7 @@ export interface MouseStatus {
     dynamicDpi: KeychronDynamicDpi | null;
     factoryReset: boolean;
   };
-  brand: "RAWM" | "Motospeed" | "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "Vancer" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "VAXEE" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Noir Gear" | "Lingbao" | "GearHub" | "AJAZZ" | "Corsair" | "Microsoft" | "Dareu" | "Redragon" | "Incott" | "HyperX" | "ASUS" | "Ryunix" | "Amkette" | "Delux" | "GravaStar" | "IPI" | "Rapoo" | "Fater" | "Cooler Master" | "AJAZZ" | "Scyrox" | "Hitscan" | "ROCCAT" | "Thermaltake" | "Redgear" | "AULA" | "Xiaomi";
+  brand: "RAWM" | "Motospeed" | "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "Vancer" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "VAXEE" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Noir Gear" | "Lingbao" | "GearHub" | "AJAZZ" | "Corsair" | "Microsoft" | "Dareu" | "Redragon" | "Incott" | "HyperX" | "ASUS" | "Ryunix" | "Amkette" | "Delux" | "GravaStar" | "IPI" | "Rapoo" | "Fater" | "Cooler Master" | "AJAZZ" | "Scyrox" | "Hitscan" | "ROCCAT" | "Thermaltake" | "Redgear" | "AULA" | "Sades" | "Xiaomi";
   name: string;
   /** Optional LunaFury controls, populated only after successful device reads. */
   lunafury?: import("../lamzu/lunafury.js").LunaFurySettings;
@@ -332,6 +338,8 @@ export interface MouseStatus {
    * fields above, which predate this and carry brand-specific shapes.
    */
   buttonMappings?: Record<string, string>;
+  /** The Rival 650's live assignments, including fields the UI cannot name. */
+  rival650ButtonMappings?: Rival650ButtonMappings;
   /**
    * Named power/performance modes a device offers as a single choice, with
    * `powerMode` holding the current one and a `setPowerMode(name)` method.
