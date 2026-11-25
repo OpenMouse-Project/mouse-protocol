@@ -4,6 +4,7 @@
  * stays free of brand-specific branching.
  */
 import type { AtkDeviceFeatures } from "./atk/device-catalog.generated.js";
+import type { Rival650ButtonMappings } from "../steelseries/rival650.js";
 
 export interface MouseUiHints {
   /** This connection is carried by a receiver with its own configurable controls. */
@@ -332,6 +333,8 @@ export interface MouseStatus {
    * fields above, which predate this and carry brand-specific shapes.
    */
   buttonMappings?: Record<string, string>;
+  /** The Rival 650's live assignments, including fields the UI cannot name. */
+  rival650ButtonMappings?: Rival650ButtonMappings;
   /**
    * Named power/performance modes a device offers as a single choice, with
    * `powerMode` holding the current one and a `setPowerMode(name)` method.
