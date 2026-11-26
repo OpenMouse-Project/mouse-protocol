@@ -28,6 +28,7 @@ import { SC380_PRO_RECEIVER_ID, SC380_PRO_USAGE, SC380_PRO_USAGE_PAGE, SC380_PRO
 import { GLORIOUS_SINOWEALTH_PRODUCTS } from "../glorious-sinowealth/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { HITSCAN_PRODUCTS, HITSCAN_VENDOR_ID, HITSCAN_XVI_PRODUCTS } from "@openmouse/protocol/hitscan";
+import { KMART_PRODUCT_IDS, KMART_USAGE, KMART_USAGE_PAGE, KMART_VENDOR_ID } from "@openmouse/protocol/kmart";
 import { VAXEE_PRODUCT_IDS, VAXEE_USAGE, VAXEE_USAGE_PAGE, VAXEE_VENDOR_ID } from "@openmouse/protocol/vaxee";
 import {
   GEARHUB_BLUETOOTH_USAGE,
@@ -198,6 +199,7 @@ export const VENDOR_ID = {
   coolermaster: COOLERMASTER_VENDOR_ID,
   ajazz: 0x1a2c,
   vaxee: VAXEE_VENDOR_ID,
+  kmart: KMART_VENDOR_ID,
   asus: ASUS_VENDOR_ID,
   ryunix: RYUNIX_VENDOR_ID,
   // Amkette's XS series shares the 0x04F3 OEM firmware and IDs with Ryunix; the
@@ -1007,6 +1009,10 @@ export const VAXEE_HID_FILTERS: HIDDeviceFilter[] = VAXEE_PRODUCT_IDS.map((produ
   vendorId: VAXEE_VENDOR_ID, productId, usagePage: VAXEE_USAGE_PAGE, usage: VAXEE_USAGE,
 }));
 
+export const KMART_HID_FILTERS: HIDDeviceFilter[] = KMART_PRODUCT_IDS.map((productId) => ({
+  vendorId: KMART_VENDOR_ID, productId, usagePage: KMART_USAGE_PAGE, usage: KMART_USAGE,
+}));
+
 /**
  * Xiaomi Mi Gaming Mouse, wired (0x5009) and wireless (0x500b). No HID
  * descriptor has been captured, so the usage page is unknown; the driver
@@ -1034,6 +1040,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
     usage: INSTANT_USAGE,
   })),
   ...VAXEE_HID_FILTERS,
+  ...KMART_HID_FILTERS,
   ...ASUS_HID_FILTERS,
   ...DAREU_HID_FILTERS,
   ...REDRAGON_HID_FILTERS,
