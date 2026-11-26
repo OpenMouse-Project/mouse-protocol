@@ -2,6 +2,7 @@ import type { MouseStatus } from "../mouse-types.ts";
 import {
   CORSAIR_BRAGI_MICE,
   CORSAIR_BRAGI_MODE,
+  CORSAIR_BRAGI_PACKET_SIZE,
   CORSAIR_BRAGI_PROPERTY,
   CORSAIR_BRAGI_RECEIVERS,
   CORSAIR_BRAGI_USAGE_PAGE,
@@ -18,20 +19,23 @@ const REPLY_POLL_MS = 5;
 const SUPPORTED_POLLING_RATES = [125, 250, 500, 1000];
 
 /**
- * Corsair Bragi mice (IRONCLAW RGB WIRELESS) over the cable or a SLIPSTREAM
- * receiver. Read-only on purpose: iCUE's DPI writes are decoded and encoded
- * in the codec, but they were captured with iCUE driving the mouse (software
- * mode), and nothing shows yet whether the live-DPI property reads back or
- * sticks in hardware mode with iCUE closed. ckb-next flips to software mode
- * before reading; this driver never changes the mode, because a mouse left in
- * software mode stops applying its onboard settings until something flips it
+ * Corsair Bragi mice (IRONCLAW RGB WIRELESS, SCIMITAR RGB ELITE) over the cable
+ * or a SLIPSTREAM receiver. Read-only on purpose: iCUE's writes are decoded and
+ * encoded in the codec, but this driver never sends one. On the SCIMITAR RGB
+ * ELITE, checked on hardware with iCUE closed and the mouse in hardware mode,
+ * the live DPI properties read back what was written but a replug discards it,
+ * while polling rate, brightness and angle snapping are stored. Whether the
+ * IRONCLAW behaves the same has not been checked. ckb-next flips to software
+ * mode before reading; this driver never changes the mode, because a mouse left
+ * in software mode stops applying its onboard settings until something flips it
  * back.
  *
- * A request is one 64-byte output report; its answer is the next input report
- * on the same interface with the same slot and command. Replies do not echo
- * the property, so all traffic goes through one queue. Windows hands every
- * open handle a copy of each input report, so a GET iCUE sends at the same
- * moment can answer ours: close iCUE for trustworthy values.
+ * A request is one output report (the mouse's `packetSize`, 64 or 128 bytes);
+ * its answer is the next input report on the same interface with the same
+ * slot and command. Replies do not echo the property, so all traffic goes
+ * through one queue. Windows hands every open handle a copy of each input
+ * report, so a GET iCUE sends at the same moment can answer ours: close iCUE
+ * for trustworthy values.
  */
 export class CorsairBragiHidClient {
   readonly device: HIDDevice;
@@ -57,6 +61,11 @@ export class CorsairBragiHidClient {
   get pollIntervalMs(): number { return 30_000; }
 
   getDpiOptions(): number[] { return []; }
+
+  /** Report size for this device's mice; receivers and unlisted ids use the 64-byte default. */
+  private get packetSize(): number {
+    return CORSAIR_BRAGI_MICE.get(this.device.productId)?.packetSize ?? CORSAIR_BRAGI_PACKET_SIZE;
+  }
 
   async open(): Promise<void> {
     if (!this.device.opened) await this.device.open();
@@ -107,12 +116,22 @@ export class CorsairBragiHidClient {
     const dpiX = await this.value(slot, CORSAIR_BRAGI_PROPERTY.dpiX);
     // A mouse that ignores X will not answer Y either; skip the second timeout.
     const dpiY = dpiX === null ? null : await this.value(slot, CORSAIR_BRAGI_PROPERTY.dpiY);
+    // Only mice whose table entry lists these were seen to answer them.
+    const extras = mouse?.extraProperties ?? [];
+    const brightness = extras.includes("brightness") ? await this.value(slot, CORSAIR_BRAGI_PROPERTY.brightness) : null;
+    const angle = extras.includes("angleSnapping") ? await this.value(slot, CORSAIR_BRAGI_PROPERTY.angleSnapping) : null;
+    const stage = extras.includes("dpiStage") ? await this.value(slot, CORSAIR_BRAGI_PROPERTY.dpiStage) : null;
+    const brightnessPercent = brightness === null ? null : corsairBragiDecode.brightnessPercent(brightness);
+    const angleSnapping = angle === null ? null : corsairBragiDecode.angleSnapping(angle);
 
     const software = mode === CORSAIR_BRAGI_MODE.software;
     const lines = [
       firmware ? `Firmware ${firmware}` : null,
       mode === null ? null : `Mode: ${software ? "software (iCUE is driving the mouse)" : mode === CORSAIR_BRAGI_MODE.hardware ? "hardware (onboard settings)" : `unknown (${mode})`}`,
       productId === null ? null : `Product id 0x${hex(productId, 4)}${receiver ? ` in receiver slot ${slot}` : ""}`,
+      brightnessPercent === null ? null : `Lighting brightness ${brightnessPercent} %`,
+      // iCUE numbers the stages from 1; the property is 0-based.
+      stage === null ? null : `Active DPI stage ${stage + 1}`,
     ].filter((line): line is string => line !== null);
 
     return {
@@ -130,6 +149,7 @@ export class CorsairBragiHidClient {
       connectionType: receiver ? "Wireless" : "Wired",
       connectionDetail: receiver ?? "USB",
       liftOffDistance: null,
+      ...(angleSnapping === null ? {} : { angleSnapping }),
       firmware: lines,
       ui: {
         family: "corsair-bragi",
@@ -140,7 +160,9 @@ export class CorsairBragiHidClient {
           ? "Identified the mouse, but it did not answer the DPI read. Close iCUE, reconnect the mouse, and add it again."
           : software
             ? "Read-only for now. iCUE has the mouse in software mode, so these are iCUE's values."
-            : "Read-only for now: DPI, polling rate and battery are read from the mouse but cannot be changed here yet.",
+            : extras.length > 0
+              ? "Read-only for now: DPI, polling rate, brightness and angle snapping are read from the mouse but cannot be changed here yet."
+              : "Read-only for now: DPI, polling rate and battery are read from the mouse but cannot be changed here yet.",
       },
     };
   }
@@ -152,7 +174,7 @@ export class CorsairBragiHidClient {
 
   /** One GET: send, then wait for the matching reply. Throws on a non-zero status or a timeout. */
   private async get(slot: number, property: number): Promise<Uint8Array> {
-    const request = corsairBragiEncode.get(slot, property);
+    const request = corsairBragiEncode.get(slot, property, this.packetSize);
     this.inbox = [];
     await this.device.sendReport(0, request.buffer as ArrayBuffer);
     const deadline = Date.now() + REPLY_TIMEOUT_MS;

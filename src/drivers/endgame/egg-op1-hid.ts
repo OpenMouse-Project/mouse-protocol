@@ -1,4 +1,5 @@
 import type { MouseStatus } from "../mouse-types.ts";
+import { isStaleHandleError } from "./stale-handle.ts";
 import {
   EGG_4K_DONGLE_PID,
   EGG_4K_OFFSET,
@@ -637,7 +638,9 @@ export class EggOp1HidClient {
     let lastError: unknown;
     for (let attempt = 0; attempt < 4; attempt += 1) {
       try {
-        await this.device.sendFeatureReport(EGG_REPORT.config, payload);
+        // Only the first attempt may close/reopen; later attempts are plain retries so
+        // recovery does not stack with this loop.
+        await this.sendFeatureRecovering(EGG_REPORT.config, payload, attempt === 0);
         lastError = undefined;
         break;
       } catch (error) {
@@ -715,7 +718,23 @@ export class EggOp1HidClient {
     command.set([operation, ...header]);
     // Payload sits at wire offset 16, i.e. 15 once the report ID is stripped.
     if (payload) command.set(payload, 15);
-    await this.device.sendFeatureReport(EGG_REPORT.command, command);
+    await this.sendFeatureRecovering(EGG_REPORT.command, command);
+  }
+
+  /**
+   * A handle left stale (sleep/resume, USB hiccup, an earlier page) rejects
+   * every write with "Failed to write the feature report" until the device is
+   * re-enumerated. Close and reopen it once and retry before giving up.
+   */
+  private async sendFeatureRecovering(reportId: number, data: BufferSource, recover = true): Promise<void> {
+    try {
+      await this.device.sendFeatureReport(reportId, data);
+    } catch (error) {
+      if (!recover || !isStaleHandleError(error)) throw error;
+      await this.device.close().catch(() => undefined);
+      await this.open();
+      await this.device.sendFeatureReport(reportId, data);
+    }
   }
 
   private async pollCommandOk(attempts: number): Promise<boolean> {

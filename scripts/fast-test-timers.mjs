@@ -21,12 +21,17 @@ import { sep } from "node:path";
 
 /** Test files that assert real elapsed timing and must keep real timers. */
 const TIMING_ASSERTING = [
+  // Delayed acknowledgements must arrive before the driver's reply timeout.
+  "ajazz/aj200p-hid.test.ts",
   // Receiver writes must keep a minimum real gap between overlapping calls.
   "attackshark/hid.test.ts",
   // Magnetic-button calibration follows live readings across a settle window.
   "gwolves/magnetic.test.ts",
   // Telemetry must stay quiet for a real interval before it is accepted.
   "pulsar/pulsar-areson-hid.test.ts",
+  // The GM3 cable path ignores a block write that does not follow the read
+  // reply by a real gap, so the write-order test measures elapsed time.
+  "leobog/hid.test.ts",
 ];
 
 /** Longest delay a mocked timer is allowed to take. */

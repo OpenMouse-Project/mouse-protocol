@@ -52,13 +52,16 @@ checklist.
 | G-Wolves | `@openmouse/protocol/gwolves` |
 | GearHub (AJAZZ / Attack Shark / Lingbao) | `@openmouse/protocol/gearhub` |
 | Glorious | `@openmouse/protocol/glorious` |
-| Glorious classic (Model O/D/I) | `@openmouse/protocol/glorious-classic` |
+| Glorious classic (Model O/D/I, Series One Pro) | `@openmouse/protocol/glorious-classic` |
 | Glorious core2 (O2/D2 Pro 4K/8K) | `@openmouse/protocol/glorious-core2` |
+| Hitscan (Hyperlight web control / native Utility) | `@openmouse/protocol/hitscan` |
 | HyperX | `@openmouse/protocol/hyperx` |
 | Incott | `@openmouse/protocol/incott` |
+| Instant A825 | `@openmouse/protocol/instant` |
 | K-snake | `@openmouse/protocol/ksnake` |
 | Keychron | `@openmouse/protocol/keychron` |
 | Lamzu / CRDRAKO / Attack Shark / LunaFury | `@openmouse/protocol/lamzu` |
+| LEOBOG GM3 | `@openmouse/protocol/leobog` |
 | Logitech | `@openmouse/protocol/logitech` |
 | MCHOSE | `@openmouse/protocol/mchose` |
 | Microsoft | `@openmouse/protocol/microsoft` |
@@ -71,7 +74,9 @@ checklist.
 | Razer legacy/current | `@openmouse/protocol/razer` |
 | Rapoo VT9 Pro | `@openmouse/protocol/rapoo` |
 | Razer V4 | `@openmouse/protocol/razer-v4` |
+| Redragon (M612 / M724 / M690 PRO / M719RGB-PRO) | `@openmouse/protocol/redragon` |
 | Ryunix | `@openmouse/protocol/ryunix` |
+| Amkette XS series | `@openmouse/protocol/amkette` |
 | SteelSeries Rival 3 (Gen 1) | `@openmouse/protocol/steelseries` |
 | Teevolution | `@openmouse/protocol/teevolution` |
 | VGN | `@openmouse/protocol/vgn` |
@@ -105,3 +110,11 @@ rivalcfg project, corroborated against libratbag and OpenRGB. The device is
 write-only — only the firmware version can be read back — and no entry is
 marked hardware-verified yet. See
 [docs/steelseries-testing.md](docs/steelseries-testing.md).
+
+Glorious Series One Pro Wireless (`258a:2018` wired, `258a:2031` 2.4 GHz
+receiver) is listed in the Glorious classic driver. Only its firmware and
+battery reads have been exercised on hardware (wired); the classic RGB, DPI,
+polling, lift-off and debounce writes have not. See
+[docs/glorious-series-one-pro.md](docs/glorious-series-one-pro.md) for those
+replies and the resident Compx bootloader protocol (entry, read-back,
+erase/program behavior).

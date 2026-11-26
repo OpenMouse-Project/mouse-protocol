@@ -620,6 +620,7 @@ test("the receiver's model id names the mouse, never the PID", async () => {
 
 test("the declared DPI report length picks the 56-byte receiver form", async () => {
   resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
   const { unit, sent } = linuxX11Receiver(55);
   const client = new AttackSharkHidClient(unit, { batteryWaitMs: 0 });
   assert.equal(await client.setDpi(1600), 1600);
