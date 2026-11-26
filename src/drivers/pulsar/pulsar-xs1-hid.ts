@@ -34,6 +34,7 @@ const XS1_PRODUCT_NAMES: ReadonlyMap<number, string> = new Map([
   [0x3404, "Pulsar X2A v3"],
   [0x5402, "Pulsar X3 M"],
   [EIGHT_K_RECEIVER_PRODUCT_ID, "Pulsar 8K Dongle"],
+  [0x5406, "Pulsar CrazyLight 8K Dongle"],
 ]);
 
 const LIFT_OFF_DISTANCES: ReadonlyArray<readonly [number, LiftOffDistance]> = [
@@ -118,7 +119,7 @@ export class PulsarXs1HidClient {
     await this.open();
     this.deviceInfo = {
       connection: PULSAR_XS1_WIRELESS_PRODUCT_IDS.has(this.device.productId) ? "Wireless" : "Wired",
-      maximumPollingRateHz: this.device.productId === EIGHT_K_RECEIVER_PRODUCT_ID ? 8000 : 1000,
+      maximumPollingRateHz: this.device.productId === EIGHT_K_RECEIVER_PRODUCT_ID || this.device.productId === 0x5406 ? 8000 : 1000,
     };
     return this.deviceInfo;
   }

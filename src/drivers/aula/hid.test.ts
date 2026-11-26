@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { decodeSc380ProSettings } from "../../aula/index.ts";
 import { createSupportedClient, DEVICE_DRIVERS } from "../registry.ts";
 import { AulaSc380ProHidClient } from "./hid.ts";
+import { Sinowealth520HidClient } from "../sinowealth-520/hid.ts";
 
 const signature = [4, 0, 0, 0, 0, 0x2e];
 
@@ -52,12 +53,11 @@ function mockReceiver({ linked = true, identity = signature, keepWrites = true, 
   return { device, writes };
 }
 
-test("the registry selects only the SC380 Pro receiver configuration collection", async () => {
+test("the registry hands the SC380 Pro receiver to the shared SinoWealth client", async () => {
   const { device } = mockReceiver();
-  assert.deepEqual(DEVICE_DRIVERS.filter((driver) => driver.supports(device)).map((driver) => driver.brand), ["AULA"]);
+  assert.deepEqual(DEVICE_DRIVERS.filter((driver) => driver.supports(device)).map((driver) => driver.brand), ["AULA / LEOBOG"]);
   const client = createSupportedClient(device);
-  assert.ok(client instanceof AulaSc380ProHidClient);
-  assert.equal(createSupportedClient({ ...device, productId: 0x0136 }), null);
+  assert.ok(client instanceof Sinowealth520HidClient);
   assert.equal(createSupportedClient({ ...device, collections: [] }), null);
   const status = await client.readStatus();
   assert.equal(status.name, "AULA SC380 Pro");

@@ -16,6 +16,36 @@ import {
   X11_DPI_STEP,
   X11_DPI_VALUES,
 } from "../../compx/x11-dpi.ts";
+import {
+  buildX11QueryRequest,
+  decodeX11FirmwareVersion,
+  decodeX11PollingReport,
+  X11_QUERY_REPORT_ID,
+  X11_VERSION_REPORT_ID,
+  x11QueryReady,
+} from "../../compx/x11-config.ts";
+import {
+  buildX3Burst,
+  buildX3MacroChunks,
+  defaultX3Settings,
+  X3_BUTTON_OPTIONS,
+  X3_BUTTON_SLOT,
+  X3_FACTORY_BUTTONS,
+  X3_MACRO_GAP_MS,
+  x3ActionLabel,
+  x3ParseActionLabel,
+  type X3MacroEvent,
+  parseX3Battery,
+  X3_DPI_MAX,
+  X3_DPI_MIN,
+  X3_DPI_STEP,
+  X3_MAX_STAGES,
+  X3_RECEIVER_GAP_MS,
+  X3_WIRED_GAP_MS,
+  type X3PollingHz,
+  type X3Rgb,
+  type X3Settings,
+} from "../../compx/x3-config.ts";
 
 // Attack Shark mice ship from multiple OEMs with different VIDs and protocols:
 //
@@ -262,16 +292,23 @@ const X11_DPI_PIDS: ReadonlySet<number> = new Set([0xfa55, 0xfa60]);
 // (R1 0x10, X3 0x4d/0x4e, X6 0x85, …) stay read-only.
 const X11_REBUILT_CONFIG_MODELS: ReadonlySet<number> = new Set([DELUX_M600_PRO_MODEL_ID, X11_MODEL_ID]);
 
-// The firmware has no cheap "current DPI" command, so — exactly like the
-// reference driver — the last full six-stage table this process wrote (or
-// read back, when the read succeeds) is remembered here and re-sent whole on
-// every edit. Module-level because the desktop app opens a fresh short-lived
-// client per write and the table must survive between them.
+// The firmware has no partial DPI update, so the whole six-stage table is
+// re-sent on every edit. Over a native adapter the live table is read back
+// first (the 0xa0 handshake, compx/x11-config.ts) and kept with its raw
+// report, so a write changes only what was edited: stage colours and disabled
+// stages survive. Without a read-back the last table this process wrote (or
+// the factory one) is used, like the reference driver. Module-level because
+// the desktop app opens a fresh short-lived client per write and the table
+// must survive between them.
 interface X11DpiState {
   stages: number[];
   activeStage: number;
   angleSnap: boolean;
   rippleControl: boolean;
+  /** Stage-enabled bits (bit i = stage i + 1). */
+  enabledMask: number;
+  /** The last report read from or written to the mouse, when there is one. */
+  base?: Uint8Array;
 }
 
 const x11DpiStates = new Map<number, X11DpiState>();
@@ -284,10 +321,24 @@ function x11DpiStateFor(productId: number): X11DpiState {
       activeStage: X11_DPI_DEFAULT_ACTIVE,
       angleSnap: false,
       rippleControl: true,
+      enabledMask: 0x3f,
     };
     x11DpiStates.set(productId, state);
   }
   return state;
+}
+
+/**
+ * Hardware stages (0-based) the DPI button cycles through, in order. The
+ * shared UI lists and indexes only these, so a disabled stage is neither
+ * shown nor re-enabled by an edit.
+ */
+function x11EnabledStages(state: X11DpiState): number[] {
+  const enabled: number[] = [];
+  for (let i = 0; i < X11_DPI_STAGE_COUNT; i++) {
+    if ((state.enabledMask >> i) & 0x01) enabled.push(i);
+  }
+  return enabled.length > 0 ? enabled : [...Array(X11_DPI_STAGE_COUNT).keys()];
 }
 
 /** Test/diagnostic hook: forget cached X11 DPI state (defaults come back). */
@@ -295,13 +346,15 @@ export function resetAttackSharkX11DpiState(): void {
   x11DpiStates.clear();
 }
 
-// Battery and polling rate are both push/last-known rather than readable: the
-// receiver streams `03 55 40 01 <pct>` on interface 2 on its own, and the
-// firmware has no polling-rate read-back. This process keeps the last value it
-// saw per product id so a short-lived client can still report it. The X11's
-// reference driver and the web app's own X11 bridge both default the polling
-// rate to 1,000 Hz for the same reason.
+// Battery is push-only: the receiver streams `03 55 40 01 <pct>` on interface
+// 2 on its own. The polling rate is read back over a native adapter; elsewhere
+// this process keeps the last value it applied per product id so a
+// short-lived client can still report it, defaulting to 1,000 Hz like the
+// reference driver and the web app's own X11 bridge.
 const X11_DEFAULT_POLLING_HZ = 1000;
+/** Ready polls on report 0xa0 before a read-back is given up (the X11 is ready on the first). */
+const X11_QUERY_POLLS = 10;
+const X11_QUERY_POLL_MS = 50;
 /** How long a battery sample stays fresh enough to skip waiting for another. */
 const X11_BATTERY_TTL_MS = 30_000;
 /** Longest a status read waits for the receiver's next battery packet. */
@@ -313,6 +366,10 @@ interface X11RuntimeState {
   batteryAt: number;
   /** Model id from the last receiver message, when it names a known model. */
   modelId: number | null;
+  /** Firmware version read back from report 0x0b, e.g. 0x0107. */
+  firmwareVersion: number | null;
+  /** True once the 0xa0 read-back has worked over this transport. */
+  readBackWorks: boolean;
 }
 
 const x11RuntimeStates = new Map<number, X11RuntimeState>();
@@ -320,7 +377,14 @@ const x11RuntimeStates = new Map<number, X11RuntimeState>();
 function x11RuntimeFor(productId: number): X11RuntimeState {
   let state = x11RuntimeStates.get(productId);
   if (!state) {
-    state = { pollingRateHz: X11_DEFAULT_POLLING_HZ, batteryPercent: null, batteryAt: 0, modelId: null };
+    state = {
+      pollingRateHz: X11_DEFAULT_POLLING_HZ,
+      batteryPercent: null,
+      batteryAt: 0,
+      modelId: null,
+      firmwareVersion: null,
+      readBackWorks: false,
+    };
     x11RuntimeStates.set(productId, state);
   }
   return state;
@@ -331,15 +395,49 @@ function x11RuntimeFor(productId: number): X11RuntimeState {
 // (Delux M600 Pro, docs/delux-m600-pro-testing.md). The receiver answers each
 // write within ~10 ms, so the gap is enforced from the last write rather than
 // waiting on that answer. Module-level for the same short-lived-client reason
-// as the state above.
+// as the state above. A read-back (0xa0 request) is a SET_FEATURE too, so it
+// keeps the same gap from the last config write, and the next config write
+// keeps it from the last read-back; back-to-back read-backs need no gap (all
+// three of a status read were ready on the first poll on an X11).
 const X11_RECEIVER_WRITE_GAP_MS = 1000;
 const x11LastReceiverWriteAt = new Map<number, number>();
+const x11LastReceiverQueryAt = new Map<number, number>();
 
 /** Test/diagnostic hook: forget cached X11 battery/polling state. */
 export function resetAttackSharkX11RuntimeState(): void {
   x11RuntimeStates.clear();
   x11LastReceiverWriteAt.clear();
+  x11LastReceiverQueryAt.clear();
+  x3States.clear();
 }
+
+const X3_MODEL_ID = 0x4d;
+const X3_PIDS: ReadonlySet<number> = new Set([0xfa60, 0xfa61]);
+const X3_POLLING_RATES: X3PollingHz[] = [125, 250, 500, 1000];
+const X3_SLEEP_STEP_S = 30;
+const X3_LOD = ["Low", "High"] as const;
+
+interface X3State {
+  settings: X3Settings;
+  battery: { percent: number; voltageMv: number; charging: boolean } | null;
+}
+
+const x3States = new Map<number, X3State>();
+
+function x3StateFor(productId: number): X3State {
+  let state = x3States.get(productId);
+  if (!state) {
+    state = { settings: defaultX3Settings(), battery: null };
+    x3States.set(productId, state);
+  }
+  return state;
+}
+
+export function resetAttackSharkX3State(): void {
+  x3States.clear();
+}
+
+const rgbToHex = (c: X3Rgb): string => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 
 /**
  * If the granted devices include an X11-family unit that no driver could
@@ -461,10 +559,17 @@ export class AttackSharkHidClient {
   private readonly receiverWriteGapMs: number;
   private lastStatus: MouseStatus | null = null;
   private queue: Promise<unknown> = Promise.resolve();
+  private exclusiveQueue: Promise<unknown> = Promise.resolve();
   private batteryPercent: number | null = null;
   private listening = false;
 
-  constructor(device: HIDDevice, options: { batteryWaitMs?: number; receiverWriteGapMs?: number } = {}) {
+  private readonly x3BurstGapMs: number | undefined;
+
+  constructor(
+    device: HIDDevice,
+    options: { batteryWaitMs?: number; receiverWriteGapMs?: number; x3BurstGapMs?: number } = {},
+  ) {
+    this.x3BurstGapMs = options.x3BurstGapMs;
     this.device = device;
     this.family = detectFamily(device);
     this.batteryWaitMs = options.batteryWaitMs ?? X11_BATTERY_WAIT_MS;
@@ -500,11 +605,33 @@ export class AttackSharkHidClient {
       && x11RebuiltConfigCollection(this.device);
   }
 
+  /**
+   * True when the config reports can be read back (the 0xa0 handshake). Only
+   * native adapters try it: over WebHID every GET_FEATURE on this firmware
+   * timed out (about 5 s each) on the measured hardware. And only once a
+   * receiver message names a genuine X11, the one model the handshake was
+   * verified on; the Delux M600 Pro on the same receiver keeps the cache.
+   */
+  private get x11ReadBack(): boolean {
+    return this.nativeConfig
+      && X11_DPI_PIDS.has(this.device.productId)
+      && this.receiverModelId === X11_MODEL_ID;
+  }
+
   /** True when this unit's DPI report 0x04 can be driven. */
   private get x11DpiSupported(): boolean {
     return this.family === "1d57-x11"
       && this.x11ConfigReachable
       && X11_DPI_PIDS.has(this.device.productId);
+  }
+
+  private get x3Active(): boolean {
+    return this.family === "1d57-x11"
+      && X3_PIDS.has(this.device.productId)
+      && this.receiverModelId === X3_MODEL_ID
+      && (this.nativeConfig
+        || x11ConfigReportBytes(this.device) !== null
+        || x11RebuiltConfigCollection(this.device));
   }
 
   static isSupported(device: HIDDevice): boolean {
@@ -527,8 +654,31 @@ export class AttackSharkHidClient {
       packet[0] = event.reportId;
       packet.set(data, 1);
     }
+    if (packet[0] === BATTERY_REPORT_ID && packet[1] === 0x10 && this.x3Active) {
+      const battery = parseX3Battery(packet);
+      if (battery) {
+        const entry = { percent: battery.percent, voltageMv: Math.round(battery.voltage * 1000), charging: battery.charging };
+        x3StateFor(this.device.productId).battery = entry;
+        if (this.lastStatus) {
+          this.lastStatus = {
+            ...this.lastStatus,
+            batteryPercent: entry.percent,
+            batteryVoltageMv: entry.voltageMv,
+            batteryState: entry.charging ? "Charging" : "Discharging",
+          };
+        }
+      }
+      return;
+    }
     if (packet[0] === BATTERY_REPORT_ID && X11_RECEIVER_MODELS.has(packet[1])) {
-      x11RuntimeFor(this.device.productId).modelId = packet[1];
+      const runtime = x11RuntimeFor(this.device.productId);
+      // A different mouse behind the same PID: its table is not the cached one.
+      if (runtime.modelId !== null && runtime.modelId !== packet[1]) {
+        x11DpiStates.delete(this.device.productId);
+        runtime.readBackWorks = false;
+        runtime.firmwareVersion = null;
+      }
+      runtime.modelId = packet[1];
     }
     const percent = AttackSharkHidClient.parseBatteryReport(packet);
     if (percent !== null) {
@@ -604,6 +754,7 @@ export class AttackSharkHidClient {
   }
 
   getSupportedPollingRates(): number[] {
+    if (this.x3Active) return [...X3_POLLING_RATES];
     if (this.family === "1d57") return POLLING_RATES_1D57.map(([, hz]) => hz);
     if (this.family === "25a7") return [...POLLING_CODES_25A7.keys()];
     // Native transport: the X11 exposes the same 0x06 polling command the
@@ -616,6 +767,9 @@ export class AttackSharkHidClient {
     // 25a7 devices expose up to 8 DPI slots per profile.
     // The actual values are read dynamically in readStatus(); we return a
     // standard set of supported DPI steps so the UI can offer them.
+    if (this.x3Active) {
+      return Array.from({ length: (X3_DPI_MAX - X3_DPI_MIN) / X3_DPI_STEP + 1 }, (_, i) => X3_DPI_MIN + i * X3_DPI_STEP);
+    }
     if (this.family === "25a7") {
       return [400, 800, 1200, 1600, 2400, 3200, 6400, 12000, 26000];
     }
@@ -627,6 +781,7 @@ export class AttackSharkHidClient {
 
   async readStatus(): Promise<MouseStatus> {
     await this.open();
+    if (this.x3Active) return this.readX3Status();
 
     let pollingRateHz = 0;
     let dpi = 0;
@@ -650,26 +805,33 @@ export class AttackSharkHidClient {
       await this.waitForX11Battery(x11RuntimeFor(this.device.productId));
     }
 
+    // The wireless receiver pushes battery on its own; give it a bounded
+    // moment to arrive. Its message also names the model, which decides
+    // whether the config read-back below is tried.
+    const x11Runtime = this.family === "1d57-x11" && this.x11ConfigReachable
+      ? x11RuntimeFor(this.device.productId)
+      : null;
+    if (x11Runtime && this.isWireless()) await this.waitForX11Battery(x11Runtime);
+
     const dpiState = this.x11DpiSupported ? x11DpiStateFor(this.device.productId) : null;
-    // Only native adapters try the read: over WebHID every GET_FEATURE on
-    // this firmware timed out (about 5 s each) on the measured hardware.
-    if (dpiState && this.nativeConfig) {
-      await this.readX11DpiState();
+    if (dpiState && this.x11ReadBack) {
+      await this.exclusive(() => this.readX11DpiState());
     }
     if (dpiState) {
       dpi = dpiState.stages[dpiState.activeStage - 1] ?? 0;
     }
 
-    // Native X11: polling rate has no read-back (report the last value this
-    // process applied, defaulting to 1,000 Hz), and the wireless receiver
-    // pushes battery on its own — give it a bounded moment to arrive.
-    const x11Runtime = this.family === "1d57-x11" && this.x11ConfigReachable
-      ? x11RuntimeFor(this.device.productId)
-      : null;
+    // X11 polling rate: read back when possible, otherwise the last value
+    // this process applied (defaulting to 1,000 Hz).
     if (x11Runtime) {
-      if (this.isWireless()) await this.waitForX11Battery(x11Runtime);
+      if (this.x11ReadBack) await this.exclusive(() => this.readX11Runtime(x11Runtime));
       pollingRateHz = x11Runtime.pollingRateHz;
+      if (x11Runtime.firmwareVersion !== null) {
+        const version = x11Runtime.firmwareVersion;
+        firmware = [`Firmware ${version >> 8}.${(version & 0xff).toString(16).padStart(2, "0")}`];
+      }
     }
+    const enabledStages = dpiState ? x11EnabledStages(dpiState) : [];
     const batteryPercent = x11Runtime ? x11Runtime.batteryPercent : this.batteryPercent;
 
     return this.lastStatus = {
@@ -714,8 +876,8 @@ export class AttackSharkHidClient {
       dpi,
       ...(dpiState
         ? {
-          dpiStages: [...dpiState.stages],
-          activeDpiStage: dpiState.activeStage - 1,
+          dpiStages: enabledStages.map((index) => dpiState.stages[index]),
+          activeDpiStage: Math.max(0, enabledStages.indexOf(dpiState.activeStage - 1)),
           angleSnapping: dpiState.angleSnap,
           rippleControl: dpiState.rippleControl,
         }
@@ -730,6 +892,13 @@ export class AttackSharkHidClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
+    if (this.x3Active) {
+      if (!X3_POLLING_RATES.includes(pollingRateHz as X3PollingHz)) {
+        throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
+      }
+      await this.applyX3((s) => { s.pollingHz = pollingRateHz as X3PollingHz; });
+      return pollingRateHz;
+    }
     if (this.family === "1d57-x11") {
       if (!this.x11ConfigReachable) {
         throw new Error(
@@ -738,11 +907,11 @@ export class AttackSharkHidClient {
         );
       }
       // Native transport: the same 0x06 feature report the 0x1d57 (R1) path
-      // uses. This firmware exposes no read-back command, so trust the write
-      // and cache the value rather than confirming it.
+      // uses. The write is trusted and cached rather than confirmed; the next
+      // status read reads the rate back where the 0xa0 handshake is available.
       const entry = POLLING_RATES_1D57.find(([, hz]) => hz === pollingRateHz);
       if (!entry) throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
-      await this.write1d57PollingRate(entry[0]);
+      await this.exclusive(() => this.write1d57PollingRate(entry[0]));
       x11RuntimeFor(this.device.productId).pollingRateHz = pollingRateHz;
       if (this.lastStatus) this.lastStatus = { ...this.lastStatus, pollingRateHz };
       return pollingRateHz;
@@ -783,9 +952,9 @@ export class AttackSharkHidClient {
   }
 
   /**
-   * Re-send the full six-stage table. The firmware has no partial update and
-   * no reliable read-back, so every edit carries the whole table — the same
-   * approach the reference driver takes.
+   * Re-send the full six-stage table. The firmware has no partial update, so
+   * every edit carries the whole table, built on the last read-back report
+   * when there is one so bytes the edit does not touch are kept.
    */
   private async writeX11Dpi(): Promise<void> {
     const state = x11DpiStateFor(this.device.productId);
@@ -795,7 +964,10 @@ export class AttackSharkHidClient {
       angleSnap: state.angleSnap,
       rippleControl: state.rippleControl,
       wired: this.x11UsesShortDpiReport(),
+      enabledMask: state.enabledMask,
+      base: state.base,
     });
+    state.base = report.slice();
     // The buffer's leading byte is the report id; WebHID/Tauri take it
     // separately. Copy so the payload is a plain ArrayBuffer-backed view.
     const payload = new Uint8Array(report.length - 1);
@@ -820,26 +992,64 @@ export class AttackSharkHidClient {
   }
 
   /**
-   * Best-effort read of the live table. The reference driver only documents
-   * this for the wireless receiver (a GET on report 0x04); the wired unit
-   * returns nothing. A failure leaves the cached table untouched rather than
-   * aborting the status read.
+   * Best-effort read of the live table through the 0xa0 handshake (verified
+   * on the wireless receiver; the wired unit is untested and skipped). A
+   * failure leaves the cached table untouched rather than aborting the
+   * status read. True when the live table was read.
    */
-  private async readX11DpiState(): Promise<void> {
-    if (this.device.productId === 0xfa55) return;
+  private async readX11DpiState(): Promise<boolean> {
+    if (this.device.productId === 0xfa55) return false;
     const state = x11DpiStateFor(this.device.productId);
     try {
-      const view = await this.run(() => this.device.receiveFeatureReport(X11_DPI_REPORT_ID));
-      const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-      const decoded = decodeX11DpiReport(bytes);
-      if (!decoded) return;
+      const bytes = await this.queryX11Report(X11_DPI_REPORT_ID);
+      const decoded = bytes && decodeX11DpiReport(bytes);
+      if (!decoded) return false;
       state.stages = [...decoded.stages];
       state.activeStage = decoded.activeStage;
       state.angleSnap = decoded.angleSnap;
       state.rippleControl = decoded.rippleControl;
+      state.enabledMask = decoded.enabledMask;
+      state.base = decoded.base;
+      x11RuntimeFor(this.device.productId).readBackWorks = true;
+      return true;
     } catch {
       // No read-back on this firmware/transport; keep the cached table.
+      return false;
     }
+  }
+
+  /** Best-effort read of the polling rate (0x06) and firmware version (0x0b). */
+  private async readX11Runtime(runtime: X11RuntimeState): Promise<void> {
+    if (this.device.productId === 0xfa55) return;
+    try {
+      const polling = await this.queryX11Report(POLLING_REPORT_ID);
+      const hz = polling && decodeX11PollingReport(polling);
+      if (hz) runtime.pollingRateHz = hz;
+      // The vendor app stages the version report with flag 0.
+      const version = await this.queryX11Report(X11_VERSION_REPORT_ID, 0x00);
+      const decoded = version && decodeX11FirmwareVersion(version);
+      if (decoded) runtime.firmwareVersion = decoded;
+    } catch {
+      // Keep the cached values.
+    }
+  }
+
+  /**
+   * Read one config report: stage it with a 0xa0 request, poll 0xa0 until the
+   * firmware says it is ready, then fetch it. A bare GET without the request
+   * returns stale buffer contents. Null when the mouse never gets ready
+   * (asleep or out of range).
+   */
+  private async queryX11Report(reportId: number, flag?: number): Promise<Uint8Array | null> {
+    await this.sendConfigReport(X11_QUERY_REPORT_ID, buildX11QueryRequest(reportId, flag), "query");
+    for (let poll = 0; poll < X11_QUERY_POLLS; poll++) {
+      await this.delay(X11_QUERY_POLL_MS);
+      const ready = this.copyView(await this.run(() => this.device.receiveFeatureReport(X11_QUERY_REPORT_ID)));
+      if (x11QueryReady(ready)) {
+        return this.copyView(await this.run(() => this.device.receiveFeatureReport(reportId)));
+      }
+    }
+    return null;
   }
 
   /**
@@ -860,63 +1070,324 @@ export class AttackSharkHidClient {
     }
   }
 
+  /**
+   * The table an edit starts from. When it can be read back, the live one is
+   * read before every edit: the DPI button changes the active stage behind
+   * this process's back, and a cached or factory table would undo that or
+   * reset what the mouse holds (stage colours, disabled stages). Once the
+   * read-back has worked over this transport, a failed read means the mouse
+   * is asleep or out of range and the edit is refused rather than written
+   * from a guess. Before that (a transport where the handshake was never
+   * seen working), the cached table is used as before.
+   */
+  private async x11DpiForEdit(): Promise<X11DpiState> {
+    this.requireX11Dpi();
+    if (this.x11ReadBack && !(await this.readX11DpiState())
+      && x11RuntimeFor(this.device.productId).readBackWorks) {
+      throw new Error("The mouse did not answer; move it to wake it up and try again.");
+    }
+    return x11DpiStateFor(this.device.productId);
+  }
+
+  /** Hardware stage behind a 0-based index into the enabled stages the UI shows. */
+  private x11HardwareStage(state: X11DpiState, stage: number): number {
+    const enabled = x11EnabledStages(state);
+    if (!Number.isInteger(stage) || stage < 0 || stage >= enabled.length) {
+      throw new RangeError(`This mouse has no DPI stage ${stage + 1}.`);
+    }
+    return enabled[stage];
+  }
+
+  /**
+   * Run one edit start to finish: read the live table, change it, write it
+   * back. Held exclusively so no other read or edit slips its own request in
+   * between and so no read lands between this edit's read and its write.
+   */
+  private editX11<T>(apply: (state: X11DpiState) => Promise<T>): Promise<T> {
+    return this.exclusive(async () => apply(await this.x11DpiForEdit()));
+  }
+
   /** Sets the active stage's DPI, preserving the other five. */
   async setDpi(dpi: number, _dpiY?: number): Promise<number> {
-    this.requireX11Dpi();
-    const state = x11DpiStateFor(this.device.productId);
-    const value = nearestX11Dpi(dpi);
-    state.stages[state.activeStage - 1] = value;
-    await this.writeX11Dpi();
-    if (this.lastStatus) this.lastStatus = { ...this.lastStatus, dpi: value };
-    return value;
+    if (this.x3Active) return this.setDpiStageValue(x3StateFor(this.device.productId).settings.activeStage, dpi);
+    return this.editX11(async (state) => {
+      const value = nearestX11Dpi(dpi);
+      state.stages[state.activeStage - 1] = value;
+      await this.writeX11Dpi();
+      if (this.lastStatus) this.lastStatus = { ...this.lastStatus, dpi: value };
+      return value;
+    });
   }
 
   /** Edits one stage's DPI. `stage` is 0-based, matching the shared UI contract. */
   async setDpiStageValue(stage: number, dpi: number): Promise<number> {
-    this.requireX11Dpi();
-    if (!Number.isInteger(stage) || stage < 0 || stage >= X11_DPI_STAGE_COUNT) {
-      throw new RangeError(`This mouse has no DPI stage ${stage + 1}.`);
+    if (this.x3Active) {
+      await this.applyX3((s) => {
+        this.requireX3Stage(s, stage);
+        s.dpiStages[stage] = dpi;
+      });
+      return dpi;
     }
-    const state = x11DpiStateFor(this.device.productId);
-    const value = nearestX11Dpi(dpi);
-    state.stages[stage] = value;
-    await this.writeX11Dpi();
-    if (this.lastStatus) this.lastStatus = { ...this.lastStatus, dpiStages: [...state.stages] };
-    return value;
+    return this.editX11(async (state) => {
+      const hardware = this.x11HardwareStage(state, stage);
+      const value = nearestX11Dpi(dpi);
+      state.stages[hardware] = value;
+      await this.writeX11Dpi();
+      if (this.lastStatus) {
+        this.lastStatus = {
+          ...this.lastStatus,
+          dpiStages: x11EnabledStages(state).map((index) => state.stages[index]),
+        };
+      }
+      return value;
+    });
   }
 
   /** Selects the active stage. `stage` is 0-based, matching the shared UI contract. */
   async setActiveDpiStage(stage: number): Promise<number> {
-    this.requireX11Dpi();
-    if (!Number.isInteger(stage) || stage < 0 || stage >= X11_DPI_STAGE_COUNT) {
-      throw new RangeError(`This mouse has no DPI stage ${stage + 1}.`);
+    if (this.x3Active) {
+      await this.applyX3((s) => {
+        this.requireX3Stage(s, stage);
+        s.activeStage = stage;
+      });
+      return stage;
     }
-    const state = x11DpiStateFor(this.device.productId);
-    state.activeStage = stage + 1;
-    await this.writeX11Dpi();
-    if (this.lastStatus) {
-      this.lastStatus = {
-        ...this.lastStatus,
-        dpi: state.stages[stage] ?? this.lastStatus.dpi,
-        activeDpiStage: stage,
-      };
-    }
-    return stage;
+    return this.editX11(async (state) => {
+      const hardware = this.x11HardwareStage(state, stage);
+      state.activeStage = hardware + 1;
+      await this.writeX11Dpi();
+      if (this.lastStatus) {
+        this.lastStatus = {
+          ...this.lastStatus,
+          dpi: state.stages[hardware] ?? this.lastStatus.dpi,
+          activeDpiStage: stage,
+        };
+      }
+      return stage;
+    });
   }
 
   async setAngleSnapping(enabled: boolean): Promise<boolean> {
-    this.requireX11Dpi();
-    x11DpiStateFor(this.device.productId).angleSnap = enabled;
-    await this.writeX11Dpi();
-    if (this.lastStatus) this.lastStatus = { ...this.lastStatus, angleSnapping: enabled };
-    return enabled;
+    if (this.x3Active) {
+      await this.applyX3((s) => { s.angleSnap = enabled; });
+      return enabled;
+    }
+    return this.editX11(async (state) => {
+      state.angleSnap = enabled;
+      await this.writeX11Dpi();
+      if (this.lastStatus) this.lastStatus = { ...this.lastStatus, angleSnapping: enabled };
+      return enabled;
+    });
   }
 
   async setRippleControl(enabled: boolean): Promise<boolean> {
-    this.requireX11Dpi();
-    x11DpiStateFor(this.device.productId).rippleControl = enabled;
-    await this.writeX11Dpi();
-    if (this.lastStatus) this.lastStatus = { ...this.lastStatus, rippleControl: enabled };
+    if (this.x3Active) {
+      await this.applyX3((s) => { s.ripple = enabled; });
+      return enabled;
+    }
+    return this.editX11(async (state) => {
+      state.rippleControl = enabled;
+      await this.writeX11Dpi();
+      if (this.lastStatus) this.lastStatus = { ...this.lastStatus, rippleControl: enabled };
+      return enabled;
+    });
+  }
+
+  private requireX3(): void {
+    if (!this.x3Active) throw new Error("This setting is only available on the Attack Shark X3.");
+  }
+
+  private requireX3Stage(s: X3Settings, stage: number): void {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= s.dpiStages.length) {
+      throw new RangeError(`This mouse has no DPI stage ${stage + 1}.`);
+    }
+  }
+
+  private async applyX3(change: (settings: X3Settings) => void): Promise<void> {
+    const state = x3StateFor(this.device.productId);
+    const next = structuredClone(state.settings);
+    change(next);
+    const burst = buildX3Burst(next);
+    const gap = this.x3BurstGapMs ?? (this.isWireless() ? X3_RECEIVER_GAP_MS : X3_WIRED_GAP_MS);
+    await this.run(async () => {
+      for (const report of burst) {
+        const payload = new Uint8Array(report.length - 1);
+        payload.set(report.subarray(1));
+        await this.device.sendFeatureReport(report[0], payload);
+        await this.delay(gap);
+      }
+    });
+    state.settings = next;
+    if (this.lastStatus) this.lastStatus = { ...this.lastStatus, ...this.x3Fields(next) };
+  }
+
+  private x3Fields(s: X3Settings): Partial<MouseStatus> {
+    const count = Math.min(s.dpiStages.length, X3_MAX_STAGES);
+    return {
+      dpi: s.dpiStages[s.activeStage] ?? 0,
+      dpiStages: [...s.dpiStages],
+      dpiStageColors: s.stageColors.slice(0, count).map(rgbToHex),
+      activeDpiStage: s.activeStage,
+      pollingRateHz: s.pollingHz,
+      liftOffDistance: X3_LOD[s.lod],
+      rippleControl: s.ripple,
+      angleSnapping: s.angleSnap,
+      motionSync: s.motionSync,
+      sleepTimeout: s.sleepMinutes * 60,
+      debounceMs: s.debounceMs,
+      ...this.x3Buttons(s),
+    };
+  }
+
+  private x3Buttons(s: X3Settings): Partial<MouseStatus> {
+    const buttonMappings: Record<string, string> = {};
+    const fixedButtons: string[] = [];
+    for (const [name, slot] of Object.entries(X3_BUTTON_SLOT)) {
+      const label = x3ActionLabel(s.buttons[slot]);
+      buttonMappings[name] = label ?? "Custom (read-only)";
+      if (!label) fixedButtons.push(name);
+    }
+    return { buttonMappings, buttonOptions: [...X3_BUTTON_OPTIONS], fixedButtons };
+  }
+
+  private readX3Status(): MouseStatus {
+    const state = x3StateFor(this.device.productId);
+    const battery = state.battery;
+    return this.lastStatus = {
+      brand: this.deviceBrand(),
+      name: this.displayName(),
+      ui: {
+        family: "attackshark",
+        settingsReady: true,
+        hideUnsupportedPollingRates: true,
+        hideProcessingCard: false,
+        showAdvancedSection: true,
+        forceShowBattery: this.isWireless(),
+        dpiStageEditor: {
+          maxStages: X3_MAX_STAGES,
+          countEditable: true,
+          minDpi: X3_DPI_MIN,
+          maxDpi: X3_DPI_MAX,
+          stepDpi: X3_DPI_STEP,
+        },
+      },
+      batteryPercent: battery?.percent ?? null,
+      batteryVoltageMv: battery?.voltageMv ?? null,
+      batteryState: battery ? (battery.charging ? "Charging" : "Discharging") : "Unknown",
+      ...this.x3Fields(state.settings),
+      supportedPollingRates: [...X3_POLLING_RATES],
+      supportedLiftOffDistances: [...X3_LOD],
+      activeProfile: null,
+      connectionType: this.isWireless() ? "Wireless" : "Wired",
+      firmware: [],
+    } as MouseStatus;
+  }
+
+  getButtonOptions(): string[] {
+    return [...X3_BUTTON_OPTIONS];
+  }
+
+  async setButtonMapping(button: string, action: string): Promise<void> {
+    this.requireX3();
+    const index = X3_BUTTON_SLOT[button];
+    if (index === undefined) throw new RangeError(`Unknown X3 button: ${button}`);
+    const slot = x3ParseActionLabel(action);
+    if (!slot) throw new RangeError(`${action} is not an X3 button action.`);
+    await this.applyX3((s) => { s.buttons[index] = slot; });
+  }
+
+  async resetButtonMappings(): Promise<void> {
+    this.requireX3();
+    await this.applyX3((s) => { s.buttons = X3_FACTORY_BUTTONS.map((b) => [...b] as unknown as X3Settings["buttons"][number]); });
+  }
+
+  async uploadMacro(macro: { slot?: number; events: readonly X3MacroEvent[] }): Promise<void> {
+    this.requireX3();
+    const chunks = buildX3MacroChunks(macro.events, macro.slot ?? 2);
+    await this.run(async () => {
+      for (const chunk of chunks) {
+        await this.device.sendFeatureReport(chunk[0], chunk.slice(1));
+        await this.delay(this.x3BurstGapMs ?? X3_MACRO_GAP_MS);
+      }
+    });
+  }
+
+  async setDpiStageCount(count: number): Promise<number> {
+    this.requireX3();
+    await this.applyX3((s) => {
+      if (!Number.isInteger(count) || count < 1 || count > X3_MAX_STAGES) {
+        throw new RangeError(`This mouse has 1 to ${X3_MAX_STAGES} DPI stages.`);
+      }
+      const last = s.dpiStages[s.dpiStages.length - 1] ?? 800;
+      s.dpiStages = Array.from({ length: count }, (_, i) => s.dpiStages[i] ?? last);
+      s.activeStage = Math.min(s.activeStage, count - 1);
+    });
+    return count;
+  }
+
+  async setDpiStageColor(stage: number, color: string): Promise<string> {
+    this.requireX3();
+    const match = /^#([0-9a-f]{6})$/i.exec(color);
+    if (!match) throw new TypeError("DPI stage colour must be #rrggbb.");
+    const rgb = [0, 2, 4].map((i) => parseInt(match[1].slice(i, i + 2), 16)) as unknown as X3Rgb;
+    await this.applyX3((s) => {
+      this.requireX3Stage(s, stage);
+      s.stageColors[stage] = rgb;
+    });
+    return color.toLowerCase();
+  }
+
+  getSleepOptions(): number[] {
+    return Array.from({ length: 60 }, (_, i) => (i + 1) * X3_SLEEP_STEP_S);
+  }
+
+  async setSleepTimeout(seconds: number): Promise<number> {
+    this.requireX3();
+    if (!Number.isInteger(seconds) || seconds % X3_SLEEP_STEP_S !== 0) {
+      throw new RangeError("Sleep time must be a multiple of 30 seconds.");
+    }
+    await this.applyX3((s) => { s.sleepMinutes = seconds / 60; });
+    return seconds;
+  }
+
+  async setDeepSleepTimeout(minutes: number): Promise<number> {
+    this.requireX3();
+    await this.applyX3((s) => { s.deepSleepMinutes = minutes; });
+    return minutes;
+  }
+
+  getDeepSleepTimeout(): number {
+    return x3StateFor(this.device.productId).settings.deepSleepMinutes;
+  }
+
+  getDebounceMaxMs(): number {
+    return 50;
+  }
+
+  getDebounceOptions(): number[] {
+    return Array.from({ length: 25 }, (_, i) => (i + 1) * 2);
+  }
+
+  async setDebounceTime(ms: number): Promise<number> {
+    this.requireX3();
+    if (!Number.isInteger(ms) || ms < 2 || ms > 50 || ms % 2 !== 0) {
+      throw new RangeError("Debounce time must be an even 2 to 50 ms.");
+    }
+    await this.applyX3((s) => { s.debounceMs = ms; });
+    return ms;
+  }
+
+  async setLiftOffDistance(lod: NonNullable<MouseStatus["liftOffDistance"]>): Promise<string> {
+    this.requireX3();
+    const index = (X3_LOD as readonly string[]).indexOf(lod);
+    if (index < 0) throw new RangeError("Lift-off distance must be Low (1 mm) or High (2 mm).");
+    await this.applyX3((s) => { s.lod = index as 0 | 1; });
+    return lod;
+  }
+
+  async setMotionSync(enabled: boolean): Promise<boolean> {
+    this.requireX3();
+    await this.applyX3((s) => { s.motionSync = enabled; });
     return enabled;
   }
 
@@ -1022,20 +1493,30 @@ export class AttackSharkHidClient {
 
   /**
    * Send one config report, holding it back until the receiver gap since the
-   * previous write has passed. Runs inside the command queue so overlapping
-   * callers are spaced too.
+   * previous write (and, for a write, the previous read-back request) has
+   * passed. Runs inside the command queue so overlapping callers are spaced
+   * too.
    */
-  private sendConfigReport(reportId: number, data: Uint8Array<ArrayBuffer>): Promise<void> {
+  private sendConfigReport(
+    reportId: number,
+    data: Uint8Array<ArrayBuffer>,
+    kind: "write" | "query" = "write",
+  ): Promise<void> {
     return this.run(async () => {
       const paced = this.family === "1d57-x11" && this.isWireless();
+      const productId = this.device.productId;
       if (paced) {
-        const wait = (x11LastReceiverWriteAt.get(this.device.productId) ?? 0) + this.receiverWriteGapMs - Date.now();
+        const last = Math.max(
+          x11LastReceiverWriteAt.get(productId) ?? 0,
+          kind === "write" ? x11LastReceiverQueryAt.get(productId) ?? 0 : 0,
+        );
+        const wait = last + this.receiverWriteGapMs - Date.now();
         if (wait > 0) await this.delay(wait);
       }
       try {
         await this.device.sendFeatureReport(reportId, data);
       } finally {
-        if (paced) x11LastReceiverWriteAt.set(this.device.productId, Date.now());
+        if (paced) (kind === "write" ? x11LastReceiverWriteAt : x11LastReceiverQueryAt).set(productId, Date.now());
       }
     });
   }
@@ -1043,6 +1524,19 @@ export class AttackSharkHidClient {
   private run<T>(task: () => Promise<T>): Promise<T> {
     const next = this.queue.then(task, task);
     this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  /**
+   * Run a multi-step exchange with the receiver without letting another one
+   * start in the middle. `run` only orders single transfers; a read handshake
+   * (stage, wait, fetch) and an edit (read, write) span several, and a second
+   * request staged in between replaces the first. Never call this from inside
+   * a task already running here.
+   */
+  private exclusive<T>(task: () => Promise<T>): Promise<T> {
+    const next = this.exclusiveQueue.then(task, task);
+    this.exclusiveQueue = next.catch(() => undefined);
     return next;
   }
 

@@ -82,11 +82,12 @@
  * self-contained (matching `./aerox5-wireless.ts`'s precedent of not sharing
  * command/decode functions across families even when bytes happen to match).
  *
- * DPI presets, polling rate, lift-off distance, buttons, and sleep timer
- * remain write-only: `rival650.py` defines no getter for any of them, same
- * as every other SteelSeries profile in rivalcfg. Settings apply
- * immediately; the save command (`0x09`) persists them to onboard flash.
- * None of this has been verified on physical hardware by this project.
+ * Rivalcfg documents writes for DPI, polling rate, lift-off distance and
+ * the sleep timer. The button read command was identified in the Rival 650
+ * 1.26-B313 firmware command table and verified on 1038:172B and 1038:1726.
+ * The save command (`0x09`) requests persistence. After a wireless reconnect,
+ * the mouse may use its default button actions while reporting the previous map.
+ * The other configuration commands are described as documented by Rivalcfg.
  */
 
 export const RIVAL650_REPORT_ID = 0x00;
@@ -98,6 +99,7 @@ export const RIVAL650_COMMAND = {
   pollingRate: [0x17],
   liftOffDistance: [0x20, 0x01],
   buttonsMapping: [0x19],
+  readButtonsMapping: [0x99],
   sleepTimer: [0x2b, 0x01, 0x01, 0x00, 0x00, 0x00],
   /** `AA 01` — battery percentage + charging state, 3-byte input-report reply. */
   batteryLevel: [0xaa, 0x01],
@@ -202,7 +204,7 @@ export function steelseriesRival650EncodeSleepTimer(minutes: number): Uint8Array
   return new Uint8Array([...RIVAL650_COMMAND.sleepTimer, seconds & 0xff, (seconds >> 8) & 0xff]);
 }
 
-/** `09` — commit the current settings to onboard flash. */
+/** `09` — request that the mouse save the current settings. */
 export function steelseriesRival650SaveCommand(): Uint8Array {
   return new Uint8Array(RIVAL650_COMMAND.save);
 }
@@ -279,7 +281,46 @@ export type Rival650ButtonAction =
   | { type: "scrollUp" }
   | { type: "scrollDown" }
   | { type: "keyboard"; code: number }
-  | { type: "multimedia"; code: number };
+  | { type: "multimedia"; code: number }
+  | { type: "raw"; bytes: readonly number[] };
+
+export type Rival650ButtonMappings = Record<Rival650ButtonName, Rival650ButtonAction>;
+
+const BUTTON_NAMES = Object.keys(RIVAL650_BUTTONS) as Rival650ButtonName[];
+const BUTTON_MAP_LENGTH = BUTTON_NAMES.length * RIVAL650_BUTTON_FIELD_LENGTH;
+
+/** Operation 0x19 with the firmware's read bit set. */
+export function steelseriesRival650ButtonsQuery(): Uint8Array {
+  return new Uint8Array(RIVAL650_COMMAND.readButtonsMapping);
+}
+
+/** Seven five-byte fields, starting at byte zero of the padded HID input report. */
+export function steelseriesRival650DecodeButtonsMapping(payload: Uint8Array): Rival650ButtonMappings | undefined {
+  if (payload.length !== 64 || payload.subarray(BUTTON_MAP_LENGTH).some(Boolean)) return undefined;
+  return Object.fromEntries(BUTTON_NAMES.map(name => {
+    const { offset } = RIVAL650_BUTTONS[name];
+    const bytes = Array.from(payload.subarray(offset, offset + RIVAL650_BUTTON_FIELD_LENGTH));
+    return [name, decodeButtonField(bytes)];
+  })) as Rival650ButtonMappings;
+}
+
+function decodeButtonField(bytes: number[]): Rival650ButtonAction {
+  const [type, code, ...tail] = bytes;
+  if (!tail.some(Boolean)) {
+    if (type === RIVAL650_BUTTON_KEYBOARD) return { type: "keyboard", code };
+    if (type === RIVAL650_BUTTON_MULTIMEDIA) return { type: "multimedia", code };
+    if (code === 0) {
+      if (type === RIVAL650_BUTTON_DISABLE) return { type: "disabled" };
+      if (type === RIVAL650_BUTTON_DPI_SWITCH) return { type: "dpiSwitch" };
+      if (type === RIVAL650_BUTTON_SCROLL_UP) return { type: "scrollUp" };
+      if (type === RIVAL650_BUTTON_SCROLL_DOWN) return { type: "scrollDown" };
+      const target = BUTTON_NAMES.find(name => name !== "button7" && RIVAL650_BUTTONS[name].id === type);
+      if (target && target !== "button7") return { type: "button", target };
+    }
+  }
+  // In particular, keyboard chords carry extra bytes after the first key.
+  return { type: "raw", bytes };
+}
 
 /**
  * `19` + one 35-byte (`7 buttons × 5-byte field length`) packet, zero-filled
@@ -291,8 +332,7 @@ export type Rival650ButtonAction =
 export function steelseriesRival650EncodeButtonsMapping(
   mapping: Partial<Record<Rival650ButtonName, Rival650ButtonAction>>,
 ): Uint8Array {
-  const names = Object.keys(RIVAL650_BUTTONS) as Rival650ButtonName[];
-  const packet = new Array<number>(names.length * RIVAL650_BUTTON_FIELD_LENGTH).fill(0x00);
+  const packet = new Array<number>(BUTTON_MAP_LENGTH).fill(0x00);
 
   for (const [name, action] of Object.entries(mapping) as Array<[Rival650ButtonName, Rival650ButtonAction]>) {
     const slot = RIVAL650_BUTTONS[name];
@@ -335,6 +375,14 @@ export function steelseriesRival650EncodeButtonsMapping(
         }
         packet[offset] = RIVAL650_BUTTON_MULTIMEDIA;
         packet[offset + 1] = action.code;
+        break;
+      }
+      case "raw": {
+        if (action.bytes.length !== RIVAL650_BUTTON_FIELD_LENGTH
+          || Array.from(action.bytes).some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255)) {
+          throw new Rival650ProtocolError("A raw Rival 650 button field needs five bytes.");
+        }
+        packet.splice(offset, RIVAL650_BUTTON_FIELD_LENGTH, ...action.bytes);
         break;
       }
       default: {
