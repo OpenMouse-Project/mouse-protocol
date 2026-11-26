@@ -159,6 +159,12 @@ import {
   REDRAGON_VENDOR_ID,
 } from "@openmouse/protocol/redragon";
 import {
+  UTECHSMART_VENUS_CONFIG_USAGE,
+  UTECHSMART_VENUS_CONFIG_USAGE_PAGE,
+  UTECHSMART_VENUS_PRODUCT_ID,
+  UTECHSMART_VENUS_VENDOR_ID,
+} from "@openmouse/protocol/utechsmart";
+import {
   FATER_CONFIG_USAGE,
   FATER_CONFIG_USAGE_PAGE,
   FATER_PRODUCT_IDS,
@@ -254,6 +260,7 @@ export const VENDOR_ID = {
   microsoft: MICROSOFT_VENDOR_ID,
   dareu: DAREU_VENDOR_ID,
   redragon: REDRAGON_VENDOR_ID,
+  utechsmart: UTECHSMART_VENUS_VENDOR_ID,
   // Shares SinoWealth's 0x258a with the Glorious classic line (see
   // `gloriousClassic` above); disjoint by product id.
   redragonM690Pro: REDRAGON_M690_PRO_VENDOR_ID,
@@ -362,6 +369,14 @@ export const REDRAGON_M719_PRO_HID_FILTERS: HIDDeviceFilter[] = REDRAGON_M719_PR
     usage: REDRAGON_M719_PRO_NOTIFY_USAGE,
   },
 ]);
+
+/** Owner-verified Venus config collection on USB interface 2; no mouse/keyboard grants. */
+export const UTECHSMART_VENUS_HID_FILTERS: HIDDeviceFilter[] = [{
+  vendorId: UTECHSMART_VENUS_VENDOR_ID,
+  productId: UTECHSMART_VENUS_PRODUCT_ID,
+  usagePage: UTECHSMART_VENUS_CONFIG_USAGE_PAGE,
+  usage: UTECHSMART_VENUS_CONFIG_USAGE,
+}];
 
 /**
  * LEOBOG GM3 (SinoWealth): the wired mouse and 2.4 GHz receiver expose the
@@ -1044,6 +1059,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...ASUS_HID_FILTERS,
   ...DAREU_HID_FILTERS,
   ...REDRAGON_HID_FILTERS,
+  ...UTECHSMART_VENUS_HID_FILTERS,
   ...REDRAGON_M690_PRO_HID_FILTERS,
   ...REDRAGON_M719_PRO_HID_FILTERS,
   ...LEOBOG_GM3_HID_FILTERS,
