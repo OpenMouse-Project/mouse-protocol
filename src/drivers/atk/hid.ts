@@ -790,6 +790,7 @@ export class AtkHidClient {
     // read-modify-write-verify sequence holds the queue. Without it a second
     // edit can read the row before this write and put its stale copy back.
     const before = Array.from(await this.readUnqueued(groupAddress, 8));
+    await this.assertR1KeepsLeftClickUnqueued(index, record, groupAddress, before);
     const after = [...before];
     after.splice(recordOffset, record.length, ...record);
 
@@ -852,6 +853,36 @@ export class AtkHidClient {
    * Restores one button row only if the device still holds the row this write
    * attempted, so a concurrent writer's newer row is not overwritten.
    */
+  /**
+   * Refuses a write that would take Left click off the last button holding
+   * it, so the mouse can always click to undo a remap. A mouse that already
+   * has no Left click (set elsewhere) is not blocked from other changes.
+   */
+  private async assertR1KeepsLeftClickUnqueued(
+    index: number,
+    record: readonly number[],
+    groupAddress: number,
+    group: readonly number[],
+  ): Promise<void> {
+    const isLeftClick = (bytes: readonly number[]): boolean => bytes[0] === 0x01 && bytes[1] === 0x01 && bytes[2] === 0x00;
+    const target = ATK_R1_BUTTONS[index]!;
+    const current = group.slice(target.address - groupAddress, target.address - groupAddress + 4);
+    // Only a write that takes Left click off this button can leave none.
+    if (!isLeftClick(current) || isLeftClick(record)) return;
+    const rows = new Map<number, readonly number[]>([[groupAddress, group]]);
+    for (const button of ATK_R1_BUTTONS) {
+      if (button === target) continue;
+      const rowAddress = button.address - ((button.address - ATK_R1_BUTTONS[0]!.address) % 8);
+      let row = rows.get(rowAddress);
+      if (row === undefined) {
+        row = Array.from(await this.readUnqueued(rowAddress, 8));
+        rows.set(rowAddress, row);
+      }
+      if (isLeftClick(row.slice(button.address - rowAddress, button.address - rowAddress + 4))) return;
+    }
+    throw new Error("Keep Left click on at least one button, or the mouse cannot click.");
+  }
+
   private async restoreR1ButtonRowIfUnchangedUnqueued(
     button: { label: string },
     groupAddress: number,

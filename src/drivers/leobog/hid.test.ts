@@ -648,18 +648,18 @@ test("writes the whole table for a single remap", async () => {
 test("the client's own copy carries earlier remaps into the next write", async () => {
   const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
   const device = client(fake);
-  await device.setButtonMapping("Left", "Disabled", { overwriteUnknownBindings: true });
+  await device.setButtonMapping("Middle", "Disabled", { overwriteUnknownBindings: true });
   await device.setButtonMapping("Right", "Volume +");
 
   const writes = buttonTableWrites(fake);
   assert.equal(writes.length, 2);
   assert.deepEqual([...writes[1]!.slice(0, 12)], [
+    0x01, 0x01, 0x01, 0x00,
     0x00, 0x00, 0x00, 0x00,
-    0x01, 0x02, 0x01, 0x00,
     0x02, 0x00, 0x00, 0xe9,
   ]);
   const mappings = (await device.readStatus()).buttonMappings;
-  assert.equal(mappings?.Left, "Disabled");
+  assert.equal(mappings?.Middle, "Disabled");
   assert.equal(mappings?.Right, "Volume +");
 });
 
@@ -681,11 +681,11 @@ test("refuses a button or an action this model does not have", async () => {
 test("restores the factory table, remaps it again afterwards", async () => {
   const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
   const device = client(fake);
-  await device.setButtonMapping("Left", "Disabled", { overwriteUnknownBindings: true });
+  await device.setButtonMapping("Middle", "Disabled", { overwriteUnknownBindings: true });
 
   const status = await device.readStatus();
-  assert.equal(status.defaultButtonMappings?.Left, "Left click");
-  assert.notEqual(status.buttonMappings?.Left, status.defaultButtonMappings?.Left);
+  assert.equal(status.defaultButtonMappings?.Middle, "Middle click");
+  assert.notEqual(status.buttonMappings?.Middle, status.defaultButtonMappings?.Middle);
 
   await device.resetButtonMappings();
 
@@ -788,9 +788,31 @@ test("requires explicit consent before replacing unknown button bindings", async
   const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
   const device = client(fake);
   assert.match((await device.readStatus()).ui?.statusNote ?? "", /factory defaults, not verified/);
-  await assert.rejects(device.setButtonMapping("Left", "Disabled"), /Confirm replacing all unknown bindings/);
+  await assert.rejects(device.setButtonMapping("Middle", "Disabled"), /Confirm replacing all unknown bindings/);
   assert.equal(buttonTableWrites(fake).length, 0);
   await device.resetButtonMappings();
+  await device.setButtonMapping("Middle", "Disabled");
+  assert.equal(buttonTableWrites(fake).length, 2);
+});
+
+test("a configuration block that does not decode is never written back", async () => {
+  const fake = new FakeGm3(LEOBOG_GM3_WIRED_PRODUCT_ID);
+  fake.block[3] = 0x00; // no enabled DPI stages: not a block the vendor app writes
+  const device = client(fake);
+  await assert.rejects(device.setPollingRate(500), /did not read back cleanly/);
+  assert.equal(fake.sent.filter((payload) => payload[1] === 0x04).length, 0, "no configuration write");
+});
+
+test("a remap never takes Left click off the last button holding it", async () => {
+  const fake = new FakeGm3(LEOBOG_GM3_RECEIVER_PRODUCT_ID);
+  const device = client(fake);
+  await assert.rejects(
+    device.setButtonMapping("Left", "Disabled", { overwriteUnknownBindings: true }),
+    /Keep Left click on at least one button/,
+  );
+  assert.equal(buttonTableWrites(fake).length, 0);
+  // Moving Left click to another button first makes the swap allowed.
+  await device.setButtonMapping("Middle", "Left click", { overwriteUnknownBindings: true });
   await device.setButtonMapping("Left", "Disabled");
   assert.equal(buttonTableWrites(fake).length, 2);
 });

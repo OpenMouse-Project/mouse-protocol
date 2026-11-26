@@ -695,15 +695,49 @@ test("R1 SE receiver writes one button record and preserves its paired neighbour
   );
 });
 
-test("R1 SE receiver binds an existing macro slot without rewriting it", async () => {
+test("R1 button writes never take Left click off the last button holding it", async () => {
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });
   (fake as unknown as FakeAtkDevice).replies = [
     reply(0x10, 0x0000, [0x02, 0x29]),
     reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0068, [...button(1, 3), ...button(1, 4)]),
+    reply(0x08, 0x0070, [...button(1, 5), ...button(2, 1)]),
+  ];
+  await assert.rejects(
+    new AtkHidClient(fake).setR1ButtonAssignment(0, "dpi-cycle"),
+    /Keep Left click on at least one button/,
+  );
+  assert.equal(
+    (fake as unknown as FakeAtkDevice).sent.some(({ reportId, data }) => reportId === 8 && data[0] === 0x07),
+    false,
+    "nothing was written",
+  );
+});
+
+test("R1 Left button can change when another button keeps Left click", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
+    reply(0x08, 0x0068, [...button(1, 3), ...button(1, 4)]),
+    reply(0x08, 0x0070, [...button(1, 1), ...button(2, 1)]),
+    reply(0x08, 0x0060, [...button(2, 1), ...button(1, 2)]),
+  ];
+  const assignment = await new AtkHidClient(fake).setR1ButtonAssignment(0, "dpi-cycle");
+  assert.equal(assignment.label, "DPI cycle");
+});
+
+test("R1 SE receiver binds an existing macro slot without rewriting it", async () => {
+  const fake = device(0xf58e, "VXE Mouse 1K Dongle");
+  Object.assign(fake, { vendorId: 0x3554 });
+  (fake as unknown as FakeAtkDevice).replies = [
+    reply(0x10, 0x0000, [0x02, 0x29]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 1)]),
     reply(0x08, 0x0060, [
       ...button(6, 7, ATK_R1_MACRO_START_TYPES.repeatUntilAnyKeyPress),
-      ...button(1, 2),
+      ...button(1, 1),
     ]),
   ];
 
@@ -725,7 +759,7 @@ test("R1 SE receiver binds an existing macro slot without rewriting it", async (
     Array.from(bind!.data.subarray(5, 13)),
     [
       ...button(6, 7, ATK_R1_MACRO_START_TYPES.repeatUntilAnyKeyPress),
-      ...button(1, 2),
+      ...button(1, 1),
     ],
   );
 });
@@ -742,8 +776,8 @@ test("R1 SE receiver writes the macro slot and binds the macro button record", a
     reply(0x08, 0x061e, new Array<number>(8).fill(0)),
     // The uploaded payload is read back before the button is bound.
     reply(0x08, 0x061f, [1, 0x81, 4, 0, 0, 20, 0xbb]),
-    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 2)]),
-    reply(0x08, 0x0060, [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)]),
+    reply(0x08, 0x0060, [...button(1, 1), ...button(1, 1)]),
+    reply(0x08, 0x0060, [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 1)]),
   ];
 
   await new AtkHidClient(fake).setR1ButtonMacro(
@@ -768,7 +802,7 @@ test("R1 SE receiver writes the macro slot and binds the macro button record", a
   assert.ok(bind);
   assert.deepEqual(
     Array.from(bind!.data.subarray(5, 13)),
-    [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)],
+    [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 1)],
   );
 });
 
@@ -799,8 +833,8 @@ test("R1 binding failure restores the macro slot it uploaded", async () => {
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
   const before = new Array<number>(38).fill(0);
-  const buttonBefore = [...button(1, 1), ...button(1, 2)];
-  const buttonAfter = [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
+  const buttonBefore = [...button(1, 1), ...button(1, 1)];
+  const buttonAfter = [...button(6, 2, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 1)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x20]),
     reply(0x08, 0x0600, before.slice(0, 10)),
@@ -875,8 +909,8 @@ test("R1 button write failures clear the cached status", async () => {
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
-  const before = [...button(1, 1), ...button(1, 2)];
-  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
+  const before = [...button(1, 1), ...button(1, 1)];
+  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 1)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x29]),
     reply(0x08, 0x0060, before),
@@ -904,8 +938,8 @@ test("R1 confirmation failures restore the captured button row", async () => {
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
-  const before = [...button(1, 1), ...button(1, 2)];
-  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
+  const before = [...button(1, 1), ...button(1, 1)];
+  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 1)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x29]),
     reply(0x08, 0x0060, before),
@@ -929,8 +963,8 @@ test("R1 rejected send does not overwrite a concurrently changed button row", as
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
-  const before = [...button(1, 1), ...button(1, 2)];
-  const concurrent = [...button(1, 3), ...button(1, 2)];
+  const before = [...button(1, 1), ...button(1, 1)];
+  const concurrent = [...button(1, 3), ...button(1, 1)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x29]),
     reply(0x08, 0x0060, before),
@@ -956,8 +990,8 @@ test("R1 readback mismatch leaves a concurrently changed button row untouched", 
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
-  const before = [...button(1, 1), ...button(1, 2)];
-  const concurrent = [...button(1, 3), ...button(1, 2)];
+  const before = [...button(1, 1), ...button(1, 1)];
+  const concurrent = [...button(1, 3), ...button(1, 1)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x29]),
     reply(0x08, 0x0060, before),
@@ -982,7 +1016,7 @@ test("R1 button row state is unknown when confirmation and inspection reads both
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
-  const before = [...button(1, 1), ...button(1, 2)];
+  const before = [...button(1, 1), ...button(1, 1)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x29]),
     reply(0x08, 0x0060, before),
@@ -1008,8 +1042,8 @@ test("R1 button writes without cached mappings force a full reload", async () =>
   const fake = device(0xf58e, "VXE Mouse 1K Dongle");
   Object.assign(fake, { vendorId: 0x3554 });
   const raw = fake as unknown as FakeAtkDevice;
-  const before = [...button(1, 1), ...button(1, 2)];
-  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 2)];
+  const before = [...button(1, 1), ...button(1, 1)];
+  const after = [...button(6, 1, ATK_R1_MACRO_START_TYPES.stopImmediately), ...button(1, 1)];
   raw.replies = [
     reply(0x10, 0x0000, [0x02, 0x29]),
     reply(0x08, 0x0060, before),

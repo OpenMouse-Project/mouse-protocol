@@ -137,6 +137,11 @@ function defaultButtonTable(): LeobogGm3ButtonCode[] {
 }
 
 /** Label for a macro binding, or null when the entry is something else. */
+/** The vendor Left click code; a remap must leave it on at least one button. */
+function isLeftClick(code: LeobogGm3ButtonCode): boolean {
+  return code[0] === 0x01 && code[1] === 0x01 && code[2] === 0x01 && code[3] === 0x00;
+}
+
 function macroBindingLabel(code: LeobogGm3ButtonCode): string | null {
   if (!leobogGm3IsMacroBinding(code)) return null;
   const slot = code[3]!;
@@ -313,6 +318,9 @@ export class LeobogGm3HidClient {
         throw new Error("The button list contains factory defaults, not the mouse's bindings. Confirm replacing all unknown bindings with overwriteUnknownBindings: true, or explicitly reset the button mappings first.");
       }
       const table = this.buttonTable.map((entry, index) => (index === slot ? code : entry));
+      if (this.buttonTable.some(isLeftClick) && !table.some(isLeftClick)) {
+        throw new Error("Keep Left click on at least one button, or the mouse cannot click.");
+      }
       await this.open();
       await this.writeButtonTable(leobogGm3EncodeButtonTable(table));
       this.buttonTable = table;
@@ -790,6 +798,11 @@ export class LeobogGm3HidClient {
     };
     await this.open();
     const before = await readBlock(CONFIG_WRITE_DEADLINE_MS);
+    // Every change rewrites the whole block, so a reply that does not decode
+    // (a stale or misaligned buffer) must never be written back to the mouse.
+    if (leobogGm3DecodeOnboard(before) === null) {
+      throw new Error("The GM3 configuration block did not read back cleanly, so nothing was written. Wake the mouse and try again.");
+    }
     await sleep(WRITE_GAP_MS);
     await this.writeOnboard(transform(before));
     await sleep(RESPONSE_DELAY_MS);
