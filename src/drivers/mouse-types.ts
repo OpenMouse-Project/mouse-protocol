@@ -4,6 +4,7 @@
  * stays free of brand-specific branching.
  */
 import type { AtkDeviceFeatures } from "./atk/device-catalog.generated.js";
+import type { LeobogGm3Macro } from "../leobog/index.js";
 import type { Rival650ButtonMappings } from "../steelseries/rival650.js";
 
 export interface MouseUiHints {
@@ -89,6 +90,12 @@ export interface MouseUiHints {
     /** Optional DPI-indicator-only sleep values in seconds. */
     sleepTimeouts?: readonly number[];
   };
+  /**
+   * Hide the Single DPI view (and the custom-value box) for a mouse whose DPI
+   * only exists as a stage table, so the Sensitivity card offers the stage
+   * editor alone instead of a Stages/Single pill.
+   */
+  hideSingleDpi?: boolean;
 }
 
 /**
@@ -239,7 +246,7 @@ export interface MouseStatus {
     dynamicDpi: KeychronDynamicDpi | null;
     factoryReset: boolean;
   };
-  brand: "RAWM" | "Motospeed" | "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "Vancer" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "VAXEE" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Noir Gear" | "Lingbao" | "GearHub" | "AJAZZ" | "Corsair" | "Microsoft" | "Dareu" | "Redragon" | "Incott" | "HyperX" | "ASUS" | "Ryunix" | "Amkette" | "Delux" | "GravaStar" | "IPI" | "Rapoo" | "Fater" | "Cooler Master" | "AJAZZ" | "Scyrox" | "Hitscan" | "ROCCAT" | "Thermaltake" | "Redgear" | "AULA" | "Sades" | "Xiaomi";
+  brand: "RAWM" | "Motospeed" | "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "Vancer" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "VAXEE" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Noir Gear" | "Lingbao" | "GearHub" | "AJAZZ" | "Corsair" | "Microsoft" | "Dareu" | "Redragon" | "Incott" | "HyperX" | "ASUS" | "Ryunix" | "Amkette" | "Delux" | "GravaStar" | "IPI" | "Rapoo" | "Fater" | "Cooler Master" | "AJAZZ" | "Scyrox" | "Hitscan" | "ROCCAT" | "Thermaltake" | "Redgear" | "AULA" | "Sades" | "Xiaomi" | "LEOBOG";
   name: string;
   /** Optional LunaFury controls, populated only after successful device reads. */
   lunafury?: import("../lamzu/lunafury.js").LunaFurySettings;
@@ -351,6 +358,12 @@ export interface MouseStatus {
   profileNames?: string[];
   /** Every action `setButtonMapping` will accept, in display order. */
   buttonOptions?: string[];
+  /**
+   * Factory assignments for the same button names, when the device has a reset
+   * we have measured. Set together with a `resetButtonMappings()` method, and
+   * the shared button remapper offers "restore defaults".
+   */
+  defaultButtonMappings?: Record<string, string>;
   /** Button names the device reported in an unknown or macro encoding. */
   fixedButtons?: string[];
   deviceMode?: "Onboard" | "Host" | "Unknown";
@@ -411,6 +424,11 @@ export interface MouseStatus {
    */
   incottFireKeyTimes?: number | null;
   incottFireKeyIntervalMs?: number | null;
+  /**
+   * GM3 onboard macros. The device answers no read for them, so this is the
+   * driver's own copy of what it uploaded; null entries are empty slots.
+   */
+  leobogMacros?: Array<LeobogGm3Macro | null> | null;
   signalStrength?: number | null;
   motionSync?: boolean | null;
   /** On-device DPI stages, where supported (Teevolution, Ninjutso, …). */

@@ -327,10 +327,14 @@ The wired R1 button matrix contains six four-byte records at `0x0060`,
 `0x0064`, `0x0068`, `0x006c`, `0x0070`, and `0x0074`. Each record is
 `[class, value1, value2, checksum]` and all four bytes must sum to `0x55`
 modulo 256. OpenMouse reads them in the same three eight-byte groups as ATK
-HUB, preserves unknown values, and reports checksum failures. It does not write
-button records. Shortcut slots begin at `0x0100` in 32-byte increments. The
+HUB, preserves unknown values, and reports checksum failures. Button record
+writes go through `AtkHidClient.setR1ButtonAssignment` and
+`AtkHidClient.setR1ButtonMacroBinding`. Shortcut slots begin at `0x0100` in
+32-byte increments. The
 vendor address table defines 12 macro slots beginning at `0x0300` in 384-byte
-increments and ending at `0x1500`. Neither region is read during ordinary
+increments and ending at `0x1500`. Macro action records use ATK HUB's five-byte
+format: keyboard type `1`, mouse-button type `4` with button masks `1`, `2`,
+`4`, `8`, and `16`, and scroll type `6`. Neither region is read during ordinary
 status polling.
 
 Receiver command `0x03` reports online state and the three-byte RF identifier.
