@@ -262,9 +262,9 @@ test("other models keep their exact single-report writes", async () => {
     rippleControl: true,
     wired: false,
   });
-  assert.equal(x11.sent.length, 1);
-  assert.equal(x11.sent[0].reportId, 0x04);
-  assert.deepEqual(x11.sent[0].data, [...expected.subarray(1)]);
+  // The edit first asks for the live DPI table (0xa0); this fake never answers, so the cached table is written.
+  assert.deepEqual(x11.sent.map((s) => s.reportId), [0xa0, 0x04]);
+  assert.deepEqual(x11.sent[1].data, [...expected.subarray(1)]);
   assert.equal(x11.client.getDpiOptions().at(-1), 22000);
 });
 

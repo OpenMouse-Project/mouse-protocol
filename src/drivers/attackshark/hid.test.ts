@@ -194,6 +194,252 @@ test("native X11 adapter writes polling over 0x06 and DPI over 0x04", async () =
   assert.equal(withBattery.pollingRateHz, 500);
 });
 
+// A native adapter in front of a genuine X11 receiver (1d57:fa60, firmware
+// 0x0107), answering the 0xa0 read handshake with the reports it returned on
+// hardware: three of six stages enabled, 1,000 Hz.
+function nativeX11WithReadBack(options: { asleep?: boolean } = {}) {
+  const hex = (text: string) => text.split(" ").map((byte) => parseInt(byte, 16));
+  const reports = new Map<number, number[]>([
+    [0x04, hex("04 38 01 00 01 07 20 20 0c 0e 0f 12 75 81 01 01 00 00 00 00 00 01 00 00 02 ff 00 00 00 ff 00 00 "
+      + "00 ff ff ff 00 00 ff ff ff 00 ff ff 40 00 ff ff ff 02 0e b3 00 00 00 00")],
+    [0x06, hex("06 09 01 01 fe 00 00 00 00")],
+    [0x0b, hex("0b 08 01 07 00 00 00 00")],
+  ]);
+  const sent: Array<{ reportId: number; data: number[] }> = [];
+  const listeners = new Map<string, (event: { reportId: number; data: DataView }) => void>();
+  let staged: number | null = null;
+  let staleReads = 0;
+  const device = {
+    vendorId: 0x1d57,
+    productId: 0xfa60,
+    productName: "2.4G Wireless Device",
+    collections: [],
+    opened: false,
+    open() { (this as { opened: boolean }).opened = true; return Promise.resolve(); },
+    close() { return Promise.resolve(); },
+    sendFeatureReport(reportId: number, data: BufferSource) {
+      const bytes = [...new Uint8Array(data as ArrayBuffer)];
+      sent.push({ reportId, data: bytes });
+      if (reportId === 0xa0) staged = bytes[0];
+      return Promise.resolve();
+    },
+    receiveFeatureReport(reportId: number) {
+      // Without a staged request the firmware returns stale buffer bytes.
+      const reply = reportId === 0xa0
+        ? [0xa0, staged === null || options.asleep ? 0 : 1, 0, 0, 0, 0, 0, 0]
+        : reportId === staged ? reports.get(reportId)! : [0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x15, 0x00];
+      if (reportId !== 0xa0) {
+        if (reportId !== staged) staleReads++;
+        staged = null;
+      }
+      return Promise.resolve(new DataView(new Uint8Array(reply).buffer));
+    },
+    addEventListener(type: string, listener: (event: { reportId: number; data: DataView }) => void) {
+      listeners.set(type, listener);
+    },
+    removeEventListener() { return undefined; },
+  } as unknown as HIDDevice;
+  const announce = (model: number) => listeners.get("inputreport")?.({
+    reportId: 0x03,
+    data: new DataView(new Uint8Array([model, 0x40, 0x01, 0x50]).buffer),
+  });
+  return { device, sent, announce, reports, staleReads: () => staleReads };
+}
+
+test("a named X11 over a native adapter reads its live table, polling rate and firmware", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, sent, announce } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  const status = await client.readStatus();
+  assert.equal(status.name, "Attack Shark X11");
+  // Only the enabled stages are listed, and the index points into them.
+  assert.deepEqual(status.dpiStages, [550, 600, 650]);
+  assert.equal(status.activeDpiStage, 1);
+  assert.equal(status.dpi, 600);
+  assert.equal(status.pollingRateHz, 1000);
+  assert.deepEqual(status.firmware, ["Firmware 1.07"]);
+  assert.deepEqual(
+    sent.map(({ reportId, data }) => [reportId, ...data.slice(0, 4)]),
+    [[0xa0, 0x04, 0x38, 0x00, 0x01], [0xa0, 0x06, 0x09, 0x00, 0x01], [0xa0, 0x0b, 0x08, 0x00, 0x00]],
+  );
+});
+
+test("a named X11 edit keeps the mouse's disabled stages and colours", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, sent, announce } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  await client.readStatus();
+  sent.length = 0;
+
+  // UI stage 3 is hardware stage 3; stages 4-6 stay disabled. The edit
+  // re-reads the table first.
+  assert.equal(await client.setDpiStageValue(2, 1600), 1600);
+  assert.deepEqual(sent.map(({ reportId }) => reportId), [0xa0, 0x04]);
+  const payload = sent[1].data;
+  assert.equal(payload[4], 0x07);
+  assert.equal(payload[9], 0x25);
+  assert.deepEqual(payload.slice(24, 48), [
+    0xff, 0, 0, 0, 0xff, 0, 0, 0, 0xff, 0xff, 0xff, 0, 0, 0xff, 0xff, 0xff, 0, 0xff, 0xff, 0x40, 0, 0xff, 0xff, 0xff,
+  ]);
+  assert.deepEqual(payload.slice(13, 15), [0x01, 0x01]);
+  await assert.rejects(() => client.setDpiStageValue(3, 800), /no DPI stage 4/);
+  await assert.rejects(() => client.setActiveDpiStage(5), /no DPI stage 6/);
+});
+
+test("an X11 edit before any status read fetches the live table first", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, sent, announce } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  await client.setDpi(700);
+  assert.deepEqual(sent.map(({ reportId }) => reportId), [0xa0, 0x04]);
+  assert.equal(sent[1].data[4], 0x07);
+});
+
+test("an X11 edit starts from the stage the DPI button selected, not the cached one", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, sent, announce, reports } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  await client.readStatus();
+  // The user presses the DPI button: the mouse now has stage 3 active.
+  const table = reports.get(0x04)!;
+  table[24] = 0x03;
+  table[51] += 1;
+  sent.length = 0;
+  await client.setDpi(700);
+  const payload = sent[1].data;
+  assert.equal(payload[23], 0x03);
+  assert.equal(payload[9], 0x10);
+});
+
+test("once read-back has worked, an X11 edit is refused while the mouse cannot answer", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const mouse = { asleep: false };
+  const { device, sent, announce } = nativeX11WithReadBack(mouse);
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  await client.readStatus();
+  mouse.asleep = true;
+  sent.length = 0;
+  await assert.rejects(() => client.setDpiStageValue(0, 800), /did not answer/);
+  // Only read requests went out; nothing was written from a guessed table.
+  assert.ok(sent.every(({ reportId }) => reportId === 0xa0));
+});
+
+test("an X11 edit over a transport where read-back never worked uses the cached table", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, sent, announce } = nativeX11WithReadBack({ asleep: true });
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  assert.equal(await client.setDpiStageValue(0, 800), 800);
+  const write = sent.find(({ reportId }) => reportId === 0x04);
+  assert.ok(write);
+  assert.equal(write.data[4], 0x3f);
+});
+
+test("X11 read-back requests keep the receiver gap from config writes, both ways", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, sent, announce } = nativeX11WithReadBack();
+  const times: number[] = [];
+  const send = device.sendFeatureReport.bind(device);
+  device.sendFeatureReport = (reportId: number, data: BufferSource) => {
+    times.push(Date.now());
+    return send(reportId, data);
+  };
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 200 });
+  await client.open();
+  announce(0x55);
+  await client.setDpi(700);
+  await client.readStatus();
+  await client.setDpi(650);
+  assert.deepEqual(
+    sent.map(({ reportId }) => reportId),
+    [0xa0, 0x04, 0xa0, 0xa0, 0xa0, 0xa0, 0x04],
+  );
+  // query -> write, write -> query, query -> write: each at least the gap.
+  assert.ok(times[1] - times[0] >= 200);
+  assert.ok(times[2] - times[1] >= 200);
+  assert.ok(times[6] - times[5] >= 200);
+  // Back-to-back read-backs are not spaced.
+  assert.ok(times[4] - times[3] < 200);
+});
+
+test("a different model behind the same receiver drops the cached X11 table", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, sent, announce } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  await client.readStatus();
+  announce(0x20);
+  sent.length = 0;
+  await client.setDpi(800);
+  // The M600 Pro is written from the factory table, not the X11's bytes.
+  assert.deepEqual(sent.map(({ reportId }) => reportId), [0x04]);
+  assert.equal(sent[0].data[4], 0x3f);
+});
+
+test("a different model behind the same receiver stops reporting the X11's firmware", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, announce } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  assert.deepEqual((await client.readStatus()).firmware, ["Firmware 1.07"]);
+  announce(0x20);
+  assert.deepEqual((await client.readStatus()).firmware, []);
+});
+
+test("overlapping X11 status reads and edits do not interleave their read handshakes", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, announce, staleReads } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  announce(0x55);
+  const [status, applied, again] = await Promise.all([
+    client.readStatus(),
+    client.setDpiStageValue(2, 1600),
+    client.readStatus(),
+  ]);
+  assert.equal(applied, 1600);
+  assert.deepEqual(status.firmware, ["Firmware 1.07"]);
+  assert.deepEqual(again.firmware, ["Firmware 1.07"]);
+  // A fetch the firmware was not asked to stage returns stale buffer bytes.
+  assert.equal(staleReads(), 0);
+});
+
+test("X11 read-back is not tried before a receiver message names the X11", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const { device, sent, announce } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0 });
+  await client.open();
+  await client.readStatus();
+  // The Delux M600 Pro shares the receiver; the handshake is unverified there.
+  announce(0x20);
+  await client.readStatus();
+  assert.deepEqual(sent, []);
+});
+
 test("X11-family grants get a native-only explanation, other refusals do not", () => {
   const wireless = attackSharkNativeOnlyMessage([x11Entry(0xfa60, [[0x01, 0x06]])]);
   assert.match(wireless ?? "", /Attack Shark mouse \(2\.4 GHz receiver\)/);
