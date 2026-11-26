@@ -2,7 +2,7 @@
 
 USB HID configuration and resident Compx nRF52840 bootloader protocol of the **Glorious Forge Series One Pro Wireless** (`FCC ID: 2AXP2-SP22`, PCB `CM2852-BAMF 20220516`).
 
-**Evidence.** "Verified" means observed on one retail mouse and its receiver on firmware v1.0.0.0 (Linux hidraw, mouse wired except in §2.4, 2026-11-12, 2026-11-13 and 2026-11-17). Bootloader-entry and bootloader packet layouts come from the IL of the official updater `FirmwareUpdate.exe` 1.0.8229.18185 (`C52840Dongle`, SHA-256 `37ae7be701ba36ec987ec86d58b07819834aab0385ac4345138f49e9d9511ea5`); the battery read uses the classic layout already in this module. Code addresses are in the official v1.0.0.0 application images (`CM2856_Mouse_USB_v1.00.00_20220810`, `CM2856_Receiver_USB_v1.00.00_20220810`), read by disassembly. Anything else is marked as not exercised. Full notes and tools: [mouse-firmware-re](https://github.com/0zLloen/mouse-firmware-re/tree/main/devices/glorious-series-one-pro).
+**Evidence.** "Verified" means observed on one retail mouse and its receiver on firmware v1.0.0.0 (Linux hidraw, mouse wired except in §2.4, 2026-11-12 through 2026-11-26). Bootloader-entry and bootloader packet layouts come from the IL of the official updater `FirmwareUpdate.exe` 1.0.8229.18185 (`C52840Dongle`, SHA-256 `37ae7be701ba36ec987ec86d58b07819834aab0385ac4345138f49e9d9511ea5`); the mouse bootloader itself (`0x0000`–`0x5FFF`) was read from the unit on 2026-11-19. The battery read uses the classic layout already in this module. Code addresses are in the official v1.0.0.0 application images (`CM2856_Mouse_USB_v1.00.00_20220810`, `CM2856_Receiver_USB_v1.00.00_20220810`), read by disassembly. Anything else is marked as not exercised. Full notes and tools: [mouse-firmware-re](https://github.com/0zLloen/mouse-firmware-re/tree/main/devices/glorious-series-one-pro).
 
 ---
 
@@ -12,8 +12,8 @@ USB HID configuration and resident Compx nRF52840 bootloader protocol of the **G
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Wired mouse application** | `258a:2018` | `0x0101` | `Series One PRO Wireless` | Interface 2, usage page `0xFFFF`, usage `0x0000`, 64-byte Feature report, no report ID | Verified (descriptors 91 / 163 / 20 bytes) |
 | **2.4 GHz receiver application** | `258a:2031` | `0x0100` | `Series One PRO Wireless` | Same, identical descriptors | Verified (enumeration; relay and local commands in §2.4) |
-| **Wired mouse bootloader** | `258a:2103` | not recorded | `Glorious bootloader` | Same 64-byte Feature report channel | Verified |
-| **Receiver bootloader** | `258a:2113` | unknown | unknown | presumably the same | PID constant in the updater only |
+| **Wired mouse bootloader** | `258a:2103` | `0x0200` | `Glorious bootloader` | Single interface 0, same 20-byte report descriptor | Verified (`lsusb -v` & sysfs, 2026-11-18) |
+| **Receiver bootloader** | `258a:2113` | unknown | unknown | presumably the same | Wireless `Config.ini` `BLPID = 2113` only (not seen on USB) |
 
 ---
 
@@ -50,41 +50,48 @@ All offsets below (`body[0..63]`) omit the leading report ID byte (`0x00`): `bod
   body[6] = 0xb0 (mode: bootloader)
   every other byte 0x00
   ```
-- **Behavior**: the mouse resets (the SET_REPORT itself fails with `EPROTO` on Linux) and enumerates as `258a:2103`. Traced in the stock image: `0x14824` compares the mode byte (`body[6]`) with `0xb0` and branches to `0x1484C`, which writes `0xA55AA55A` to `0x2003FFFC` (top word of the 256 KB SRAM) and calls `NVIC_SystemReset()` at `0x71B8`. The bootloader (24 KB at `0x00000000`–`0x00005FFF`, inferred from the image base `0x6000`) has never been read, so how it uses that word is inferred.
+- **Behavior**: the mouse resets (the SET_REPORT itself fails with `EPROTO` on Linux) and enumerates as `258a:2103`. Traced in the stock image: `0x14824` compares the mode byte (`body[6]`) with `0xb0` and branches to `0x1484C`, which writes `0xA55AA55A` to `0x2003FFFC` (top word of the 256 KB SRAM) and calls `NVIC_SystemReset()` at `0x71B8`. From the bootloader's own code (`0x0000`–`0x5FFF`, read from a retail unit on 2026-11-19): it honors `0xA55AA55A` only after a soft reset and clears it, decides whether to boot the application from flag page `0x5000`, and has its own built-in recovery chord — **Back + Forward + DPI** held while plugging USB in with the switch off (verified on hardware, 2026-11-19).
 
 ### 2.4 Through the 2.4 GHz Receiver (`258a:2031`)
 
-Same Feature report channel. Relay and status behavior verified with the mouse on the receiver (2026-11-13) and matching the receiver's disassembly; rows marked "Disassembly" are read from the receiver image only.
+Same Feature report channel. Relay and status behavior verified with the mouse on the receiver (2026-11-13 through 2026-11-26) and matching the receiver's disassembly; rows marked "Disassembly" are read from the receiver image only.
 
 - **Relay**: the receiver forwards a request to the mouse only when `body[2] = 0x02`. It sends `body[3] + 6` bytes over the radio in 8-byte chunks and copies back `body[3] + 6` bytes of the reply, the length the **request** asked for; the rest of the 64 bytes is stale.
-- **Status**: `body[0]` reads `0xa0` while the request is pending and `0xa4` when the link is down. `0xa4` can be transient: while the mouse erased a flash page (a profile save on a patched build) the receiver showed `0xa4` at about 270 ms and the real reply arrived at about 770 ms. Poll until a deadline and treat only a final `0xa4` as an unreachable mouse. With the mouse awake and still, the link also drops briefly: polling `0x89` every 3 ms showed `01 → 00 → 01` drops of 40 ms every 0.5–1.8 s (2026-11-17). A relayed request sent during a drop answered `0xa4` at once (4 ms); one cut by a drop answered `0xa4` after 128–248 ms. A single retry about 60 ms later answered in 20 ms. Why the link drops while the mouse is still is unknown.
+- **Status & link drops**: `body[0]` reads `0xa0` while the request is pending and `0xa4` when the link is down. `0xa4` can be transient: while the mouse erased a flash page (a profile save on a patched build) the receiver showed `0xa4` at about 270 ms and the real reply arrived at about 770 ms. Poll until a deadline and treat only a final `0xa4` as an unreachable mouse. With the mouse awake and still, polling `0x89` every 3 ms on one host showed `01 → 00 → 01` drops of 32–40 ms every ~0.5–1.8 s (233 drops in 195.4 s still vs. 3 in 98.5 s moving and 0 in 63.3 s steady scrolling, 2026-11-18), while a second host with the same mouse and receiver showed **0 drops** in 60 s still and 60 s of use (2026-11-19), consistent with host USB SOF clock drift. A relayed request sent during a drop answers `0xa4` at once (4 ms); one cut by a drop answers `0xa4` after 128–248 ms; a single retry ~60 ms later succeeds.
+- **Downlink sequence-62 wrap bug (verified on hardware, 2026-11-26)**: the receiver's 6-bit downlink sequence wraps modulo 63 with an off-by-one bug, duplicating every 62nd distinct 8-byte downlink chunk (seq 62 resent as seq 0). If the duplicated chunk is the **last** chunk of a multi-chunk request, the mouse executes a zeroed group-0 `0x00` request whose reply (`a1 00 00 00 00 00 00 00 …`) replaces the real reply in the receiver's buffer. Host drivers sending many relayed requests in a row should verify the echoed group/command bytes (`body[4..5]`) and retry once on mismatch.
 - **Receiver-local handlers**: with `body[2] != 0x02`, the receiver runs its own handler only when `body[4] = 0x00`, with the command in `body[5]`. Any other `body[4]` answers `0xa3` with no handler.
 
 | `body[5]` | Receiver-local effect | Evidence |
 | :--- | :--- | :--- |
 | `0x81` | Receiver firmware version | Verified |
 | `0x89` | Link state: `body[6] = 01` linked, `00` with the mouse switched off or during a link drop | Verified (`01` and `00`) |
-| `0x8a` | Reads the receiver's RF ID | Disassembly |
-| `0x00` | **Dangerous.** Sets the receiver's device mode; `body[6] = 0xb0` writes `0xA55AA55A` to `0x20007FFC` and reboots the receiver into its bootloader (`258a:2113`) | Disassembly |
-| `0x0a` | **Dangerous.** Rewrites the stored RF ID, which unpairs the mouse | Disassembly |
-| other | `0xa3` and an echo | Disassembly |
+| `0x8a` | Reads the receiver's 4-byte RF ID (matches mouse `0x8a` and `FICR DEVICEID[0]`; used by `GloriousPairingUtility.exe`) | Verified (2026-11-26) |
+| `0x00` | **Dangerous.** Sets the receiver's device mode: `0xb0` writes `0xA55AA55A` to `0x20007FFC` and reboots into bootloader `258a:2113`; `0xa0` enters RF test mode (`radio_test`); `0xc0` resets when `body[7] = 0` | Disassembly |
+| `0x0a` | **Dangerous.** Rewrites the stored 4-byte RF ID (`0x38000 + 2`), which unpairs the mouse (`GloriousPairingUtility.exe` writes the mouse's `0x8a` ID here) | Disassembly |
+| other | `0xa3` and an echo | Verified (`0x83`) / Disassembly |
 
 The bootloader-entry packet of §2.3 (`body[2] = 0x00`, `body[4] = 0x00`, `body[5] = 0x00`) is therefore not relayed: sent to `258a:2031` it acts on the receiver itself. Writes meant for the mouse must use `body[2] = 0x02`.
+
+### 2.5 Stock Firmware Quirks Relevant to Host Drivers
+
+- **Brightness "get" (`group 2, cmd 0x82`) writes instead of reading** (disassembly/emulation): `0x82` stores `body[7]` into the brightness RAM byte without saving and echoes it, so it cannot read the current brightness.
+- **Three onboard LED chords corrupt stored settings on stock v1.0.0.0** (verified on hardware for Middle + Forward + DPI, 2026-11-19): a 3-zone loop into a 1-zone profile layout overwrites stored DPI fields, stage table, and button slot 0 (disabling Left Click after a profile switch).
+- **Interface 1 notifications (`Report ID 0x04`, Usage Page `0xFFA0`)**: DPI button/shift presses emit `04 01 <stage+1> <dpi_x_be16> <dpi_y_be16> 00 00` (verified on hardware, 2026-11-26); link loss / link up emit `04 06 00 …` / `04 06 01 …` (verified).
 
 ---
 
 ## 3. Resident Compx USB HID Bootloader Protocol (`258a:2103`)
 
-Every command carries `body[2] = deviceID` (`0x00` for the wired mouse). All five were exercised on the wired mouse, ending in a verified flash of a patched build of the v1.0.0.0 application; the official image was then restored the same way, read back and booted.
+Every command carries `body[2] = deviceID` (`0x00` for the wired mouse). All five were exercised on the wired mouse, ending in a verified flash of a patched build of the v1.0.0.0 application; the official image was then restored the same way, read back and booted. The bootloader's own code (`0x0000`–`0x5FFF`) was read from the unit on 2026-11-19.
 
 | Command | `body[3]` (Len) | `body[4]` | `body[5]` (Cmd) | `body[6..10]` | `body[11..63]` | Behavior / Reply |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`GetBLFW`** | `0x06` | `0xB0` | `0x80` | `00..` | `00..` | `body[0] = 0xA1`, version at `body[8..11]`: `b0 01 00 00`. |
-| **`Erase`** | `0x08` | `0xB0` | `0x01` | `00..` | `00..` | Cleared `0x0001E000` up to at least `0x0004D7FF` but **kept `0x00006000`–`0x0001DFFF`** (the old image, vector table included). It does not reach `0x7E000`: data saved there survived two full flashes. Whether it reaches the `0x88000`+ pairing pages is unknown. Do not rely on it to blank the application. |
-| **`Program`** | `len + 5` | `0xB0` | `0x02` | `body[6] = len` (`<= 32`)<br>`body[7..10] = addr` (BE `u32`) | `len` bytes of `data ^ 0x55` | XOR `0x55` on the wire only. **Read-modify-write**: the bytes land exactly as sent (bits can go 0 → 1) and the rest of the 4 KB page is kept, so no prior erase is needed. |
-| **`VerifyByAddress`** | `0x20` | `0xB0` | `0x83` | `body[6] = len` (`<= 32`)<br>`body[7..10] = addr` (BE `u32`) | `00..` | `body[0] = 0xA1` and `len` bytes XOR `0x55` at `body[11..]`. Reads succeed for `0x00006000`–`0x0004D7FF`; from `0x0004D800` up the status is `0xA2`, so the pairing/profile pages cannot be read over USB. Addresses below `0x6000` were not tried. |
-| **`Exit`** | `0x01` | `0xB0` | `0x04` | `body[6] = 0x01` | `00..` | Boots the application at `0x00006000` (the SET_REPORT fails with `ETIMEDOUT` as the device resets). Any validation it performs is unknown. |
+| **`GetBLFW`** | `0x06` | `0xB0` | `0x80` | `00..` | `00..` | `body[0] = 0xA1`, app PID `20 18` at `body[6..7]`, 4-byte version at `body[8..11]`: `b0 01 00 00`. |
+| **`Erase`** | `0x08` | `0xB0` | `0x01` | `00..` | `00..` | **Changes no flash** on the mouse bootloader: it only drops the pending 4 KB RAM page buffer. |
+| **`Program`** | `len + 5` | `0xB0` | `0x02` | `body[6] = len` (`<= 32`)<br>`body[7..10] = addr` (BE `u32`) | `len` bytes of `data ^ 0x55` | XOR `0x55` on the wire only. Accepted for `0x6000 <= addr < 0x4D800` (else `0xA2`). Writes through a 4 KB read-modify-write page buffer to **`addr + 0x47800`** (second copy at `0x4D800`–`0x94FFF`). The running application at `0x6000` is untouched until `Exit`. |
+| **`VerifyByAddress`** | `0x20` | `0xB0` | `0x83` | `body[6] = len` (`<= 32`)<br>`body[7..10] = addr` (BE `u32`) | `00..` | Flushes the pending page buffer, then returns `body[0] = 0xA1` and `len` bytes XOR `0x55` at `body[11..]` read from **`addr + 0x47800`**. Succeeds for `0x00006000`–`0x0004D7FF`; `0xA2` below `0x6000` and from `0x4D800` up. |
+| **`Exit`** | `0x01` | `0xB0` | `0x04` | `body[6] = 0x01` | `00..` | Flushes the pending page, marks flag page `0x5000` copy-pending, **copies the touched span of the second copy (`0x4D800` → `0x6000`)**, marks `0x5000` valid, and resets (SET_REPORT fails with `ETIMEDOUT` or `EPROTO`). Performs no image validation. |
 
-Status byte `body[0]` (the updater's result codes): `0xA1`/`0x02` success, `0xA2` fail (also: address out of the readable range), `0xA3` unknown command, `0xA4` out of range.
+Status byte `body[0]` (the updater's result codes): `0xA1`/`0x02` success, `0xA2` fail (also: address out of the accepted range), `0xA3` unknown command, `0xA4` out of range.
 
-The flash order used here: `Erase`, then `Program` `0xFF` over the first 32-byte block at `0x6000`–`0x601F` (initial stack pointer, reset vector and the next six exception vectors) and read it back, program and verify the rest of the image from `0x6020` (including the remaining vector-table entries), write that first block last in a single `Program` request and read it back, then `Exit`. Because the final write is one request, the table cannot be left with some of its first-block entries written and others still `0xFF`. `Program` rewrites the whole 4 KB page (read-modify-write), so an interruption inside that last request could, if the bootloader erases the page before rewriting it, leave `0x6000`–`0x6FFF` erased; this is inferred from the read-modify-write behavior and untested. The `0xFF` write protects against a half-written vector table only once it has landed. An interruption during or right after `Erase` leaves the old vector table with `0x6000`–`0x1DFFF` intact and the range `Erase` clears (from `0x1E000`) erased, or only partly erased if `Erase` itself was cut short: still a complete image for the stock application (it ends at `0x1CC8F`), a broken one for any old image that reached `0x1E000`. Whether the bootloader boots it, or stays resident when `0x6000` is `0xFF`, is unknown: its code has never been read and an interrupted flash has not been tried.
+**Two-copy safety and size limit (`0x36800`):** Because `Program` writes only to the second copy (`0x4D800`–`0x94FFF`) and `Exit` copies it into `0x6000` with a copy-pending marker in `0x5000`, an interrupted flash leaves the running application untouched and an interrupted `Exit` finishes automatically at the next power-up. However, the second copy overlaps the unit's settings pages (`0x7E000` custom settings, `0x8B000` stock profiles, `0x8C000` macro directory; `0x88000` is blank and pairing uses `FICR DEVICEID[0]`), so **flashed images must end at or below `0x00036800` (`194 KiB`)** to avoid overwriting `0x7E000` (`0x43800` overwrites `0x8B000`). `UICR.APPROTECT` is enabled (`0xFFFFFF00`), so SWD cannot back up the chip without mass-erasing the bootloader.
