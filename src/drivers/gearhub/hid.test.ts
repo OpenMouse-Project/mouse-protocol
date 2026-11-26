@@ -630,6 +630,20 @@ describe("GearHubHidClient", () => {
     assert.equal(client.getDpiOptions().at(-1), 26000, "PAW3395 DPI ceiling");
   });
 
+  it("identifies the Attack Shark X3 Pro (device id 1660, PAW3395)", async () => {
+    const { device } = fakeReceiver({
+      deviceId: 1660,
+      replies: {
+        [CMD.GET_DPI]: dpiReply([1800, 26000], 1),
+        [CMD.GET_OPTIONPARAM0]: opt0Reply({ rate: 129, lod: 0 }),
+      },
+    });
+    const status = await new GearHubHidClient(device).readStatus();
+
+    assert.equal(status.name, "Attack Shark X3 Pro");
+    assert.ok(status.firmware.includes("PixArt PAW3395"));
+  });
+
   it("maps the PAW3950 R3 revision (device id 3310) to the 42000 DPI profile", async () => {
     const { device } = fakeReceiver({
       deviceId: 3310,

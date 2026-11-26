@@ -133,6 +133,21 @@ export interface X11DpiConfig {
   rippleControl: boolean;
   /** Wired units take only the first 52 bytes. */
   wired?: boolean;
+  /** Stage-enabled bits (bit i = stage i + 1). All six when omitted. */
+  enabledMask?: number;
+  /**
+   * The report as read back from the mouse (leading id included). Bytes the
+   * fields above do not describe (stage colours, the two unused stage slots)
+   * are kept from it instead of reset to factory values, and a stage whose
+   * value is 0 keeps its stored bytes.
+   */
+  base?: Uint8Array;
+}
+
+/** A decoded read-back, with the full report kept for the next write. */
+export interface X11DpiReadBack extends X11DpiConfig {
+  enabledMask: number;
+  base: Uint8Array;
 }
 
 function checksum(buffer: Uint8Array): number {
@@ -147,16 +162,44 @@ function checksum(buffer: Uint8Array): number {
  */
 export function buildX11DpiReport(config: X11DpiConfig): Uint8Array {
   const buffer = new Uint8Array(56);
+  const base = config.base && config.base.length >= 52
+    && config.base[0] === X11_DPI_REPORT_ID && config.base[1] === 0x38
+    ? config.base
+    : null;
+  if (base) {
+    buffer.set(base.subarray(0, 56));
+  } else {
+    // Factory stage colours; 14, 15, 22, 23 (stages 7 and 8) stay zero.
+    buffer[25] = 0xff;
+    buffer[29] = 0xff;
+    buffer[33] = 0xff;
+    buffer[34] = 0xff;
+    buffer[35] = 0xff;
+    buffer[38] = 0xff;
+    buffer[39] = 0xff;
+    buffer[40] = 0xff;
+    buffer[42] = 0xff;
+    buffer[43] = 0xff;
+    buffer[44] = 0x40;
+    buffer[46] = 0xff;
+    buffer[47] = 0xff;
+    buffer[48] = 0xff;
+  }
   buffer[0] = X11_DPI_REPORT_ID;
   buffer[1] = 0x38;
   buffer[2] = 0x01;
   buffer[3] = config.angleSnap ? 0x01 : 0x00;
   buffer[4] = config.rippleControl ? 0x01 : 0x00;
-  buffer[5] = 0x3f;
+  buffer[5] = config.enabledMask ?? (base ? base[5] : 0x3f);
 
-  let mask = 0;
+  // Bits 6 and 7 belong to the unused stage slots; keep whatever is there.
+  let mask = buffer[6] & 0xc0;
   for (let i = 0; i < X11_DPI_STAGE_COUNT; i++) {
     const dpi = config.stages[i] ?? X11_DPI_DEFAULT_STAGES[i] ?? 800;
+    if (base && dpi === 0) {
+      mask |= buffer[6] & (0x01 << i);
+      continue;
+    }
     buffer[8 + i] = encodeX11DpiByte(dpi);
     if (dpi > 12000) mask |= 0x01 << i;
     const high = (dpi >= 10100 && dpi <= 12000) || (dpi >= 20100 && dpi <= 22000);
@@ -164,23 +207,7 @@ export function buildX11DpiReport(config: X11DpiConfig): Uint8Array {
   }
   buffer[6] = mask;
   buffer[7] = mask;
-  // 14, 15, 22, 23 stay zero.
   buffer[24] = config.activeStage;
-
-  buffer[25] = 0xff;
-  buffer[29] = 0xff;
-  buffer[33] = 0xff;
-  buffer[34] = 0xff;
-  buffer[35] = 0xff;
-  buffer[38] = 0xff;
-  buffer[39] = 0xff;
-  buffer[40] = 0xff;
-  buffer[42] = 0xff;
-  buffer[43] = 0xff;
-  buffer[44] = 0x40;
-  buffer[46] = 0xff;
-  buffer[47] = 0xff;
-  buffer[48] = 0xff;
   buffer[49] = 0x02;
 
   const sum = checksum(buffer);
@@ -196,7 +223,7 @@ export function buildX11DpiReport(config: X11DpiConfig): Uint8Array {
  * form some adapters return (`receiveFeatureReport` strips it), normalising to
  * the full layout. Returns null when the signature or checksum do not match.
  */
-export function decodeX11DpiReport(data: Uint8Array): X11DpiConfig | null {
+export function decodeX11DpiReport(data: Uint8Array): X11DpiReadBack | null {
   let buffer = data;
   if (buffer.length >= 2 && buffer[0] === 0x38 && buffer[1] === 0x01) {
     const full = new Uint8Array(buffer.length + 1);
@@ -222,7 +249,12 @@ export function decodeX11DpiReport(data: Uint8Array): X11DpiConfig | null {
           ? MID_REVERSE
           : LOW_REVERSE;
     const dpi = table.get(byte) ?? LOW_REVERSE.get(byte);
-    if (dpi === undefined) return null;
+    if (dpi === undefined) {
+      // A disabled stage may hold an empty slot; only an enabled one must decode.
+      if (((buffer[5] >> i) & 0x01) === 1) return null;
+      stages.push(0);
+      continue;
+    }
     stages.push(dpi);
   }
 
@@ -232,5 +264,7 @@ export function decodeX11DpiReport(data: Uint8Array): X11DpiConfig | null {
     activeStage,
     angleSnap: buffer[3] === 0x01,
     rippleControl: buffer[4] === 0x01,
+    enabledMask: buffer[5],
+    base: buffer.slice(0, Math.min(buffer.length, 56)),
   };
 }

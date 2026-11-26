@@ -1046,19 +1046,21 @@ test("the Diamondback exposes 21 unknown, write-only LED cells beside its whole-
   assert.equal(sent.some((packet) => packet[6] === 0x03 && packet[7] === 0x0c), false);
 });
 
-test("painting LED 20 uploads only that cell before activating the volatile custom frame", async () => {
+test("painting LED 20 uploads all 21 cells before activating the volatile custom frame", async () => {
   const { client, sent } = fakeChromaMouse();
   const status = await client.readStatus();
   sent.length = 0;
   await client.setLighting({ ...status.lightingZones![21], mode: "Static", color: "#123456" });
   assert.deepEqual(sent.map((p) => [p[1], p[5], p[6], p[7]]), [[0xff, 0x32, 0x03, 0x0c], [0xff, 0x02, 0x03, 0x0a]]);
-  assert.deepEqual([...sliceArgs(sent[0], 0, 5)], [20, 20, 0x12, 0x34, 0x56]);
+  assert.deepEqual([...sliceArgs(sent[0], 0, 2)], [0, 20]);
+  assert.ok(sliceArgs(sent[0], 2, 60).every((byte) => byte === 0));
+  assert.deepEqual([...sliceArgs(sent[0], 62, 3)], [0x12, 0x34, 0x56]);
   assert.deepEqual([...sliceArgs(sent[1], 0, 2)], [0x05, 0x00]);
   const after = await client.readStatus();
   assert.equal(after.lighting?.mode, null);
   assert.equal(after.lightingZones![21].mode, "Static");
   assert.equal(after.lightingZones![21].color, "#123456");
-  assert.equal(after.lightingZones![1].mode, null);
+  assert.equal(after.lightingZones![1].mode, "Off");
 });
 
 test("LED zero supports Off without overwriting other cells or global brightness", async () => {
@@ -1067,8 +1069,8 @@ test("LED zero supports Off without overwriting other cells or global brightness
   await client.setLighting({ ...zones[2], mode: "Static", color: "#abcdef" });
   sent.length = 0;
   await client.setLighting({ ...zones[1], mode: "Off", color: "#ff0000", brightness: 25 });
-  assert.equal(sent.length, 1);
-  assert.deepEqual([...sliceArgs(sent[0], 0, 5)], [0, 0, 0, 0, 0]);
+  assert.deepEqual(sent.map((p) => p[7]), [0x0c, 0x0a]);
+  assert.deepEqual([...sliceArgs(sent[0], 0, 8)], [0, 20, 0, 0, 0, 0xab, 0xcd, 0xef]);
   const after = await client.readStatus();
   assert.equal(after.lightingZones![1].mode, "Off");
   assert.equal(after.lightingZones![2].color, "#abcdef");
@@ -1129,7 +1131,8 @@ test("concurrent LED writes keep the upload and activation together", async () =
     client.setLighting({ ...zones[1], mode: "Static", color: "#112233" }),
     client.setLighting({ ...zones[2], mode: "Static", color: "#445566" }),
   ]);
-  assert.deepEqual(sent.map((p) => p[7]), [0x0c, 0x0a, 0x0c]);
+  assert.deepEqual(sent.map((p) => p[7]), [0x0c, 0x0a, 0x0c, 0x0a]);
+  assert.deepEqual([...sliceArgs(sent[2], 0, 8)], [0, 20, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
   const after = await client.readStatus();
   assert.equal(after.lightingZones![1].color, "#112233");
   assert.equal(after.lightingZones![2].color, "#445566");

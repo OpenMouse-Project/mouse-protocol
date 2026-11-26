@@ -5,8 +5,11 @@ import {
   GLORIOUS_CLASSIC_PROFILE_DEFAULT,
   buildGloriousClassicActiveStagePayload,
   buildGloriousClassicBatteryRequestPayload,
+  buildGloriousClassicBootloaderExitPayload,
   buildGloriousClassicDebouncePayload,
   buildGloriousClassicDpiStagesPayload,
+  buildGloriousClassicEnterBootloaderPayload,
+  buildGloriousClassicFirmwareRequestPayload,
   buildGloriousClassicLiftOffPayload,
   buildGloriousClassicPollingRatePayload,
   buildGloriousClassicRgbPayload,
@@ -14,6 +17,7 @@ import {
   gloriousClassicEncodePollingRate,
   gloriousClassicRateByte,
   parseGloriousClassicBatteryResponse,
+  parseGloriousClassicFirmwareResponse,
 } from "../../glorious-classic/index.ts";
 
 // Every assertion below is written against the source's own `bfr[n]` buffer
@@ -178,4 +182,42 @@ test("lift-off distance payload encodes millimetres-1", () => {
 
   const twoMm = buildGloriousClassicLiftOffPayload(2);
   assert.equal(twoMm[6], 0x01); // bfr[7] = 2mm - 1
+});
+
+test("firmware request and response match Series One Pro hardware reply", () => {
+  const expectedReq = new Uint8Array(64);
+  expectedReq[3] = 0x06; // bfr[4] length
+  expectedReq[5] = 0x81; // bfr[6] firmware command
+  assert.deepEqual(buildGloriousClassicFirmwareRequestPayload(), expectedReq);
+
+  // Captured reply from a wired Series One Pro on v1.0.0.0
+  const reply = new Uint8Array(64);
+  reply.set([0xa1, 0x00, 0x00, 0x03, 0x00, 0x81, 0x01, 0x00, 0x00, 0x00, 0x20, 0x18]);
+  assert.deepEqual(parseGloriousClassicFirmwareResponse(reply), {
+    version: "1.0.0.0",
+    major: 1,
+    minor: 0,
+    patch: 0,
+    build: 0,
+    productId: 0x2018,
+  });
+});
+
+test("bootloader entry payload matches C52840Dongle::SetBLDeviceMode", () => {
+  const expected = new Uint8Array(64);
+  expected[3] = 0x01; // bfr[4] length
+  expected[6] = 0xb0; // bfr[7] mode: bootloader (bfr[3] deviceID 0, bfr[6] "set device mode" 0)
+  assert.deepEqual(buildGloriousClassicEnterBootloaderPayload(), expected);
+});
+
+test("bootloader exit payload matches C52840Dongle Exit", () => {
+  const expected = new Uint8Array(64);
+  expected.set([0x01, 0xb0, 0x04, 0x01], 3); // bfr[4..7]
+  assert.deepEqual(buildGloriousClassicBootloaderExitPayload(), expected);
+});
+
+test("battery response decodes the Series One Pro wired reply", () => {
+  const reply = new Uint8Array(64);
+  reply.set([0xa1, 0x00, 0x02, 0x02, 0x00, 0x83, 0x00, 0x64]);
+  assert.deepEqual(parseGloriousClassicBatteryResponse(reply), { state: "Normal", percent: 100, charging: false });
 });

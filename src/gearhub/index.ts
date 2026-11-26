@@ -345,6 +345,24 @@ export const ATTACK_SHARK_R3_3950_PROFILE: GearHubProfile = {
   maxDpi: 42000,
 };
 
+/**
+ * Attack Shark X3 Pro. Same GearHub-V5 platform, VID:PID and block protocol as
+ * the R2 / R3. Device id 1660 (0x067C) confirmed from a user diagnostic on
+ * 0x3151:0x402D (2.4 GHz receiver) - firmware v3.00, six-stage DPI table,
+ * polling up to 8000 Hz, every relay read answering. The PAW3395 sensor and
+ * its 26000 DPI ceiling are from the vendor spec, not read from the device.
+ */
+export const ATTACK_SHARK_X3_PRO_PROFILE: GearHubProfile = {
+  deviceId: 1660,
+  brand: "Attack Shark",
+  model: "X3 Pro",
+  sensor: "PixArt PAW3395",
+  maxPollingHz: 8000,
+  minDpi: 50,
+  maxDpi: 26000,
+  dpiStep: 50,
+};
+
 /** AJ179 PRO, device id 1851. Verified on receiver, USB cable and Bluetooth.
  * Vendor AJAZZ Driver (R) also maps id 1851 to its PAW3395 AJ179 PRO profile.
  * See docs/ajazz-aj179-pro.md for measured capabilities and limitations. */
@@ -379,6 +397,7 @@ export const GEARHUB_DEVICE_PROFILES: ReadonlyMap<number, GearHubProfile> = new 
   [3485, ATTACK_SHARK_R3_PROFILE],
   [ATTACK_SHARK_R3_3950_PROFILE.deviceId, ATTACK_SHARK_R3_3950_PROFILE],
   [3310, ATTACK_SHARK_R3_3950_PROFILE],
+  [ATTACK_SHARK_X3_PRO_PROFILE.deviceId, ATTACK_SHARK_X3_PRO_PROFILE],
 ]);
 
 /**

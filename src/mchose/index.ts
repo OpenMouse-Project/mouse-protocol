@@ -20,6 +20,15 @@
 
 export const MCHOSE_VENDOR_ID = 0x3837;
 
+/**
+ * MCHOSE's older id, manufacturer string "RealTek", still used by L7 and some
+ * A7 units with the same configuration channel. Other MCHOSE product lines sit
+ * under it too, so it is only ever matched together with these PIDs: the 8K
+ * receiver and the A7 Ultra's cable link.
+ */
+export const MCHOSE_REALTEK_VENDOR_ID = 0x5253;
+export const MCHOSE_REALTEK_PRODUCT_IDS: readonly number[] = [0x1020, 0x1011];
+
 /** Vendor configuration collection. */
 export const MCHOSE_CONFIG_USAGE_PAGE = 0xff01;
 export const MCHOSE_CONFIG_USAGE = 0x0001;
@@ -491,6 +500,8 @@ export interface MchoseProduct {
   dpiMax: number;
   /** Lift-off steps in millimetres, in firmware index order. */
   liftOffDistances: readonly number[];
+  /** Firmware index of the first lift-off step; 0 when omitted. */
+  liftOffIndexBase?: number;
   /** Highest polling rate on a wired or 2.4 GHz link. */
   maxPollingRate: number;
 }
@@ -501,6 +512,13 @@ export const MCHOSE_PRODUCTS: readonly MchoseProduct[] = [
   { name: "A7 V2 Pro+", productId: 0x4023, dpiMax: 26000, liftOffDistances: [1, 2], maxPollingRate: 8000 },
   { name: "A7 V2 Ultra", productId: 0x4019, dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
   { name: "A7 V2 Ultra+", productId: 0x4021, dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
+  // Under VID 0x5253. Its receiver leaves the 0x06 reply empty, so it is found
+  // by name; 0x1011 is its cable link, which enumerates as the mouse's own id.
+  { name: "A7 Ultra", productId: 0x1011, dpiMax: 42000, liftOffDistances: [0.7, 1, 2], maxPollingRate: 8000 },
+  // Under VID 0x5253, per github.com/alexfrih/mchose-linux (verified on hardware).
+  { name: "L7 Pro", productId: 0x00b0, dpiMax: 26000, liftOffDistances: [1, 2], maxPollingRate: 8000 },
+  // Firmware 5.32.5.0 reports 1 mm and 2 mm as lift-off indices 1 and 2.
+  { name: "L7 Pro+", productId: 0x4015, dpiMax: 26000, liftOffDistances: [1, 2], liftOffIndexBase: 1, maxPollingRate: 8000 },
 ];
 
 /** Rate lists the firmware exposes, keyed by the model's maximum rate. */
@@ -556,10 +574,18 @@ export function mchoseEncodeReadProfileName(index: number): number[] {
   return [MCHOSE_COMMAND.readProfileName, index];
 }
 
+/** Factory names are Chinese ("默认板载2"), shown as "Default onboard 2". */
+const FACTORY_PROFILE_NAME = /^默认板载(\d+)$/;
+
+/**
+ * Decode a `0x12 0x68` reply (profile index, then a NUL-terminated UTF-8 name).
+ * Returns null when the name is empty.
+ */
 export function mchoseDecodeProfileName(payload: Uint8Array): string | null {
   if (payload.length < 2) return null;
   let end = 1;
   while (end < payload.length && payload[end] !== 0) end += 1;
-  const name = String.fromCharCode(...payload.subarray(1, end)).trim();
-  return name.length ? name : null;
+  const name = new TextDecoder().decode(payload.subarray(1, end)).trim();
+  if (!name.length) return null;
+  return name.replace(FACTORY_PROFILE_NAME, "Default onboard $1");
 }

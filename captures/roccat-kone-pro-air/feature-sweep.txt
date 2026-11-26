@@ -1,0 +1,12 @@
+# GET (feature report) sweep — negative result
+# Interface 2 (0xFF00:0x0001), node-hid, Windows, 2026-10-14.
+#
+# For every report id 0x00..0xFF a 64-byte getFeatureReport was issued
+# (0.4 s each). Every call threw "timed out" or returned nothing readable.
+# Interfaces 0 and 1 behave the same.
+#
+# Conclusion: the whole protocol is output-report + input-stream based.
+# The WebHID driver writes sendReport(0, 64B) and matches echoes on the
+# inputreport event, echoing the frame's byte 1 (class byte).
+# Sweep transcript shape (all ids identical):
+#   GET id 0x00 .. 0xFF -> no readable data

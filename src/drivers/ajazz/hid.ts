@@ -234,7 +234,7 @@ export class AjazzHidClient {
       liftOffDistance: null,
       connectionType: wired ? "Wired" : "Wireless",
       connectionDetail: wired ? "Wired USB" : "2.4 GHz receiver",
-      sleepTimeout: config && config.sleepMinutes > 0 ? config.sleepMinutes * 60 : null,
+      sleepTimeout: config ? config.sleepMinutes * 60 : null,
       scrollDirection: config ? (config.scrollFlag === 1 ? "Reverse" : "Forward") : null,
       firmware: version ? [`${model} ${version}`] : [model],
       // Generic remap interface: the shared ButtonMappingCard renders these

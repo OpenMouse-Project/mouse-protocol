@@ -1,0 +1,380 @@
+[
+ {
+  "t": 1481079,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "a7 fe ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1481114,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a a7 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1481115,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1d fe fe ff 9b fd fd f9 d8 b3 c8 df af 8d 90 d4 fe ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1481220,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1481224,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1481228,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fb f7 ca d1 cc cd d1 ca d1 cf ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1481228,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fb 55 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1481232,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1481236,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fb f8 ca d1 c8 d1 c9 d1 cf ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1481236,
+  "kind": "feature-out",
+  "reportId": "0x12",
+  "hex": "98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1481245,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a 98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1481250,
+  "kind": "feature-in",
+  "reportId": "0x12",
+  "hex": "12 98 fe dd dd fd df fc bf f9 7f f3 7f f3 ff e6 6f 9a f9 fd f7 fc ff ff ff ff ef ff ff ff df ff ff ff cf ff ff ff bf ff ff ff af ff ff ff ff ff ff ff ff ff 7f df fc bf f9 7f f3 7f f3 ff e6 6f 9a"
+ },
+ {
+  "t": 1481250,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1481254,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1481258,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fc fe ac ad df ef fe ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1481419,
+  "kind": "feature-out",
+  "reportId": "0x12",
+  "hex": "98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1481427,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a 98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1481432,
+  "kind": "feature-in",
+  "reportId": "0x12",
+  "hex": "12 98 fe dd dd fd df fc bf f9 7f f3 7f f3 ff e6 6f 9a f9 fd f7 fc ff ff ff ff ef ff ff ff df ff ff ff cf ff ff ff bf ff ff ff af ff ff ff ff ff ff ff ff ff 7f df fc bf f9 7f f3 7f f3 ff e6 6f 9a"
+ },
+ {
+  "t": 1482942,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1482949,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1482954,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fc fe ac ad df ef fe ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1482956,
+  "kind": "feature-out",
+  "reportId": "0x12",
+  "hex": "98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1482969,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a 98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1482974,
+  "kind": "feature-in",
+  "reportId": "0x12",
+  "hex": "12 98 fe dd dd fd df fc bf f9 7f f3 7f f3 ff e6 6f 9a f9 fd f7 fc ff ff ff ff ef ff ff ff df ff ff ff cf ff ff ff bf ff ff ff af ff ff ff ff ff ff ff ff ff 7f df fc bf f9 7f f3 7f f3 ff e6 6f 9a"
+ },
+ {
+  "t": 1482976,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fd ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1482979,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fd ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1488863,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "bc fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1488870,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a bc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1488870,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1488873,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1488877,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fb f7 ca d1 cc cd d1 ca d1 cf ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1488877,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fb 55 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1488881,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1488885,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fb f8 ca d1 c8 d1 c9 d1 cf ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1488885,
+  "kind": "feature-out",
+  "reportId": "0x12",
+  "hex": "98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1488893,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a 98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1488897,
+  "kind": "feature-in",
+  "reportId": "0x12",
+  "hex": "12 98 fe dd dd fd df fc bf f9 7f f3 7f f3 ff e6 6f 9a f9 fd fb fc ff ff ff ff ef ff ff ff df ff ff ff cf ff ff ff bf ff ff ff af ff ff ff ff ff ff ff ff ff 7f df fc bf f9 7f f3 7f f3 ff e6 6f 9a"
+ },
+ {
+  "t": 1488897,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1488901,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1488905,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fc fe ac ad df ef fe ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1490513,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "a7 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1490551,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a a7 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1490552,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1d fe fe ff 9b ff fd fe d8 b3 c8 df af 8d 90 d4 ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1490656,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1490660,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1490664,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fb f7 ca d1 cc cd d1 ca d1 cf ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1490664,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fb 55 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1490668,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fb ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1490672,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fb f8 ca d1 c8 d1 c9 d1 cf ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1490672,
+  "kind": "feature-out",
+  "reportId": "0x12",
+  "hex": "98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1490793,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a 98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1490798,
+  "kind": "feature-in",
+  "reportId": "0x12",
+  "hex": "12 98 ff df df ff df fc bf f9 7f f3 7f f3 ff e6 6f 9a fe 7e ff fd ff ff ff ff ef ff ff ff df ff ff ff cf ff ff ff bf ff ff ff af ff ff ff ff ff ff ff ff ff 7f df fc bf f9 7f f3 7f f3 ff e6 6f 9a"
+ },
+ {
+  "t": 1490798,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1490802,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1490806,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fc fe ac ad df ef fe ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1491459,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1491463,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fc ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1491467,
+  "kind": "feature-in",
+  "reportId": "0x11",
+  "hex": "11 fc fe ac ad df ef fe ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1491467,
+  "kind": "feature-out",
+  "reportId": "0x12",
+  "hex": "98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1491580,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a 98 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ },
+ {
+  "t": 1491584,
+  "kind": "feature-in",
+  "reportId": "0x12",
+  "hex": "12 98 ff df df ff df fc bf f9 7f f3 7f f3 ff e6 6f 9a fe 7e ff fd ff ff ff ff ef ff ff ff df ff ff ff cf ff ff ff bf ff ff ff af ff ff ff ff ff ff ff ff ff 7f df fc bf f9 7f f3 7f f3 ff e6 6f 9a"
+ },
+ {
+  "t": 1491586,
+  "kind": "feature-out",
+  "reportId": "0x11",
+  "hex": "fd ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff"
+ },
+ {
+  "t": 1491589,
+  "kind": "input",
+  "reportId": 19,
+  "hex": "1a fd ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ }
+]

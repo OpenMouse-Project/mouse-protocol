@@ -1,0 +1,61 @@
+# Redragon M724 K1NG 1K (04d9:fc7a): hidraw writes confirmed on hardware 2026-10-31.
+# Every write: F5 00, the write, the F1 02 commits listed, F5 01, then an F2 read-back that matched.
+# Frames are report 2, 16 bytes, report id first. Outcome after '=>' was confirmed by the user or measured.
+
+# DPI profile 1 stage 1 -> 1600 (=> cursor ~2x faster)
+SET 02 f5 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f3 44 00 05 00 00 00 01 24 00 24 00 00 00 00
+SET 02 f1 02 02 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f5 01 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+# Profile select 2 with F1 02 01 only (=> stored, NOT applied: LED and DPI unchanged)
+SET 02 f5 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f3 2c 00 02 00 00 00 01 00 00 00 00 00 00 00
+SET 02 f1 02 01 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f5 01 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+# Profile select 2 with the full commit block (=> LED and DPI of profile 2 applied)
+SET 02 f5 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f3 2c 00 02 00 00 00 01 00 00 00 00 00 00 00
+SET 02 f1 02 01 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f1 02 04 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f1 02 01 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f1 02 02 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f1 02 08 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f1 02 10 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f5 01 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+# Profile 2 active stage -> 4 (=> 2400 -> 5500 DPI felt)
+SET 02 f5 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f3 02 01 01 00 00 00 03 00 00 00 00 00 00 00
+SET 02 f1 02 02 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f1 02 10 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f5 01 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+# Profile 2 polling -> 125 Hz (=> median report gap 8.00 ms; back to 01 gives 1.00 ms)
+SET 02 f5 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f3 34 00 02 00 00 00 08 00 00 00 00 00 00 00
+SET 02 f1 02 08 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f5 01 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+# Profile 2 LED -> static green, brightness 3 (=> solid green)
+SET 02 f5 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f3 50 04 08 00 00 00 80 00 ff 00 01 04 01 03
+SET 02 f1 02 04 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f5 01 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+# Profile 2 forward button -> key A (=> keyboard interface sends usage 04)
+SET 02 f5 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f3 4e 01 04 00 00 00 90 00 04 00 00 00 00 00
+SET 02 f1 02 04 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f1 02 01 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f1 02 02 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f1 02 08 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f1 02 10 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f5 01 00 00 00 00 00 00 00 00 00 00 00 00 00
+
+# Lift-off 0x2a -> 02 (=> user felt tracking stop at a different height)
+SET 02 f5 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f3 2a 00 02 00 00 00 02 00 00 00 00 00 00 00
+SET 02 f1 02 08 00 00 00 00 00 00 00 00 00 00 00 00
+SET 02 f5 01 00 00 00 00 00 00 00 00 00 00 00 00 00
