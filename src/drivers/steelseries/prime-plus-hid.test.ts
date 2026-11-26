@@ -27,9 +27,17 @@ function fakeDevice(options: { productId?: number } = {}) {
   return { device: device as unknown as HIDDevice, sent };
 }
 
-test("claims only the Prime+ product id", () => {
+test("claims the Prime family product ids and nothing else", () => {
   const { device } = fakeDevice();
-  assert.equal(SteelSeriesPrimePlusHidClient.isSupported(device), true);
+  // prime.py is byte-identical to prime_plus.py, so the plain Prime models
+  // share this driver with Prime+.
+  for (const productId of [0x182c, 0x182e, 0x182a, 0x1856]) {
+    assert.equal(
+      SteelSeriesPrimePlusHidClient.isSupported({ ...device, productId } as HIDDevice),
+      true,
+      `expected 0x${productId.toString(16)} to be claimed`,
+    );
+  }
   // Every sibling-cluster PID (Rival 3 Gen 1, Aerox 3, Rival 3 Wireless,
   // Aerox 5, Aerox 5 Wireless, Rival 650, Aerox 9 Wireless) must not be
   // claimed by this driver.
@@ -45,9 +53,6 @@ test("claims only the Prime+ product id", () => {
     0x1726, // Rival 650 Wireless (2.4 GHz mode)
     0x185a, // Aerox 9 Wireless (wired mode)
     0x1858, // Aerox 9 Wireless (2.4 GHz mode)
-    0x182e, // plain Prime — must NOT be claimed
-    0x182a, // Prime Rainbow 6 Siege Black Ice Edition — must NOT be claimed
-    0x1856, // Prime CS:GO Neo Noir Edition — must NOT be claimed
   ];
   for (const productId of foreignPids) {
     assert.equal(

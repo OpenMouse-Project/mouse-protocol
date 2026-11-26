@@ -41,9 +41,9 @@
  * two mainline device files. Per this rollout's instructions, rivalcfg's
  * mainline file is treated as authoritative over the PR description, and
  * because the DPI command genuinely differs, `1038:0x1870` is **not** added
- * to this module's or any registry's product table here — a Rival 3 Gen 2
- * driver needs its own DPI encoder and is out of scope for this cluster
- * (Aerox 3 only). Nothing in this file claims or matches that PID.
+ * to this module's product table — it is registered under its own
+ * `"rival3-v2"` family instead (see `./rival-3-v2.ts`), which is also where
+ * its DPI encoder lives. Nothing in this file claims or matches that PID.
  *
  * Every command is an HID **output report** with report id 0x00 on the
  * vendor configuration interface (hidapi `endpoint` / `interface_number ==

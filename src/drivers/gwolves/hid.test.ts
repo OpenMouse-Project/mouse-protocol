@@ -72,7 +72,7 @@ test("poll interval is shorter over the wireless receiver", () => {
   assert.equal(receiver.pollIntervalMs, 10_000);
 });
 
-test("DPI options follow the shared VGN-family 50-step range", () => {
+test("DPI options follow the G-Wolves 50-step range", () => {
   // Arrange / Act
   const client = new GWolvesHidClient(device(0x5618));
   const options = client.getDpiOptions();

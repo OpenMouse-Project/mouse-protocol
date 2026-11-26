@@ -1,14 +1,28 @@
-import type { MouseLighting, MouseLightingMode, MouseStatus } from "../mouse-types.js";
+import type { AsusOmniDevice, AsusOmniInfo, MouseLighting, MouseLightingMode, MouseStatus } from "../mouse-types.js";
 
 import {
   ASUS_DEBOUNCE_MS,
   ASUS_MICE,
+  ASUS_OMNI_KEYBOARDS,
+  ASUS_OMNI_PRODUCT_ID,
+  ASUS_OMNI_REPORT_ID,
+  ASUS_OMNI_REPORT_SIZE,
+  ASUS_OMNI_USAGE_PAGE,
   ASUS_POLLING_RATES,
   ASUS_REPORT_ID,
   ASUS_REPORT_SIZE,
   ASUS_USAGE,
   ASUS_USAGE_PAGE,
   ASUS_VENDOR_ID,
+  asusOmniBoosterRequest,
+  asusOmniDecodeFirmware,
+  asusOmniDecodePairedDevices,
+  asusOmniDeviceKind,
+  asusOmniFirmwareRequest,
+  asusOmniPairedDevicesRequest,
+  asusOmniPairingModeRequest,
+  asusOmniRebootRequest,
+  asusOmniUnpairRequest,
   asusDecodeBattery,
   asusDecodeDpiColors,
   asusDecodeDpiXY,
@@ -36,6 +50,7 @@ import {
   type AsusLightingEffect,
   type AsusLiftOffDistance,
   type AsusMouseModel,
+  type AsusOmniSlot,
   type AsusProfile,
   type AsusRawLightingZone,
   type AsusRgb,
@@ -43,6 +58,12 @@ import {
 } from "../../asus/index.js";
 
 const RESPONSE_TIMEOUT_MS = 1000;
+
+const UNPAIR_TIMEOUT_MS = 10_000;
+
+const UNPAIR_POLL_MS = 500;
+
+const OMNI_NAME = "ROG Omni receiver";
 
 const COLOR_MODES: readonly MouseLightingMode[] = ["Static", "Breathing single", "Reactive", "Wave"];
 
@@ -52,15 +73,26 @@ function copyDataView(view: DataView): Uint8Array {
   return new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
 }
 
-function hasConfigCollection(collections: readonly HIDCollectionInfo[]): boolean {
+function hasConfigCollection(collections: readonly HIDCollectionInfo[], usagePage: number, reportId: number): boolean {
   return collections.some(
     (collection) =>
-      (collection.usagePage === ASUS_USAGE_PAGE &&
+      (collection.usagePage === usagePage &&
         collection.usage === ASUS_USAGE &&
-        collection.inputReports.some((report) => report.reportId === ASUS_REPORT_ID) &&
-        collection.outputReports.some((report) => report.reportId === ASUS_REPORT_ID)) ||
-      hasConfigCollection(collection.children),
+        collection.inputReports.some((report) => report.reportId === reportId) &&
+        collection.outputReports.some((report) => report.reportId === reportId)) ||
+      hasConfigCollection(collection.children, usagePage, reportId),
   );
+}
+
+function omniDevice(slot: AsusOmniSlot): AsusOmniDevice {
+  const name = ASUS_MICE.get(slot.productId)?.name
+    ?? ASUS_OMNI_KEYBOARDS.get(slot.productId)
+    ?? `ASUS device 0x${slot.productId.toString(16).padStart(4, "0")}`;
+  return { productId: slot.productId, kind: asusOmniDeviceKind(slot), name };
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function hexByte(value: number): string {
@@ -80,24 +112,46 @@ function parseHexColor(color: string | null): [number, number, number] {
 export class AsusHidClient {
   readonly device: HIDDevice;
 
-  readonly model: AsusMouseModel;
+  readonly isOmni: boolean;
+
+  /** On an Omni receiver, the paired mouse from the last pair-list read. */
+  private pairedModel: AsusMouseModel | null;
+
+  private mouseReportId = ASUS_REPORT_ID;
+
+  private mouseProductId: number | null = null;
+
+  private booster = false;
 
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(device: HIDDevice) {
-    const model = ASUS_MICE.get(device.productId);
-    if (!model) {
+    this.isOmni = device.productId === ASUS_OMNI_PRODUCT_ID;
+    this.pairedModel = ASUS_MICE.get(device.productId) ?? null;
+    if (!this.pairedModel && !this.isOmni) {
       throw new Error(`ASUS product 0x${device.productId.toString(16)} is not supported.`);
     }
 
     this.device = device;
-    this.model = model;
   }
 
   static isSupported(device: HIDDevice): boolean {
-    return (
-      device.vendorId === ASUS_VENDOR_ID && ASUS_MICE.has(device.productId) && hasConfigCollection(device.collections)
-    );
+    if (device.vendorId !== ASUS_VENDOR_ID) return false;
+    if (device.productId === ASUS_OMNI_PRODUCT_ID) {
+      return hasConfigCollection(device.collections, ASUS_OMNI_USAGE_PAGE, ASUS_OMNI_REPORT_ID);
+    }
+    return ASUS_MICE.has(device.productId) && hasConfigCollection(device.collections, ASUS_USAGE_PAGE, ASUS_REPORT_ID);
+  }
+
+  get model(): AsusMouseModel {
+    if (!this.pairedModel) {
+      throw new Error(`No supported mouse is paired to this ${OMNI_NAME}.`);
+    }
+    return this.pairedModel;
+  }
+
+  private get label(): string {
+    return this.pairedModel?.name ?? OMNI_NAME;
   }
 
   async open(): Promise<void> {
@@ -122,7 +176,7 @@ export class AsusHidClient {
   }
 
   getSupportedPollingRates(): number[] {
-    return [...ASUS_POLLING_RATES];
+    return ASUS_POLLING_RATES.filter((rate) => this.booster || rate <= 1000);
   }
 
   private async run<T>(task: () => Promise<T>): Promise<T> {
@@ -131,10 +185,20 @@ export class AsusHidClient {
     return started;
   }
 
+  /** Report 0 is the mouse's own 64-byte channel; every Omni report is 63 bytes. */
+  private payload(request: Uint8Array, reportId: number): ArrayBuffer {
+    const size = reportId === ASUS_REPORT_ID ? ASUS_REPORT_SIZE : ASUS_OMNI_REPORT_SIZE;
+    const payload = new ArrayBuffer(size);
+    new Uint8Array(payload).set(request.subarray(0, size));
+    return payload;
+  }
+
   /** Sends `request` and resolves with the first reply echoing its first `matchLength` bytes. */
-  private async exchange(request: Uint8Array, matchLength = 3): Promise<Uint8Array> {
+  private async exchange(request: Uint8Array, matchLength = 3, reportId = this.mouseReportId): Promise<Uint8Array> {
     return this.run(async () => {
       await this.open();
+
+      const payload = this.payload(request, reportId);
 
       return new Promise<Uint8Array>((resolve, reject) => {
         const cleanup = (): void => {
@@ -143,15 +207,15 @@ export class AsusHidClient {
         };
 
         const listener = (event: HIDInputReportEvent): void => {
-          if (event.reportId !== ASUS_REPORT_ID) return;
+          if (event.reportId !== reportId) return;
 
           const data = copyDataView(event.data);
-          if (data.length < ASUS_REPORT_SIZE) return;
+          if (data.length < payload.byteLength) return;
 
           // `FF AA` is the firmware's reply while asleep, out of range, or refusing a request.
           if (data[0] === 0xff && data[1] === 0xaa) {
             cleanup();
-            reject(new Error(`${this.model.name} is asleep or refused the request.`));
+            reject(new Error(`${this.label} is asleep or refused the request.`));
             return;
           }
 
@@ -160,20 +224,17 @@ export class AsusHidClient {
           }
 
           cleanup();
-          resolve(data.subarray(0, ASUS_REPORT_SIZE));
+          resolve(data.subarray(0, payload.byteLength));
         };
 
         const timer = setTimeout(() => {
           this.device.removeEventListener("inputreport", listener);
-          reject(new Error(`${this.model.name} did not answer the HID request.`));
+          reject(new Error(`${this.label} did not answer the HID request.`));
         }, RESPONSE_TIMEOUT_MS);
 
         this.device.addEventListener("inputreport", listener);
 
-        const payload = new ArrayBuffer(request.byteLength);
-        new Uint8Array(payload).set(request);
-
-        this.device.sendReport(ASUS_REPORT_ID, payload).catch((error: unknown) => {
+        this.device.sendReport(reportId, payload).catch((error: unknown) => {
           cleanup();
           reject(error);
         });
@@ -181,12 +242,69 @@ export class AsusHidClient {
     });
   }
 
+  /** For receiver commands that GearLink sends without waiting for a reply. */
+  private async sendToReceiver(request: Uint8Array): Promise<void> {
+    if (!this.isOmni) {
+      throw new Error(`The ${this.label} is not a ${OMNI_NAME}.`);
+    }
+
+    await this.run(async () => {
+      await this.open();
+      await this.device.sendReport(ASUS_OMNI_REPORT_ID, this.payload(request, ASUS_OMNI_REPORT_ID));
+    });
+  }
+
+  /** Reads the pair list and switches to whichever supported mouse it names. */
+  async readOmniReceiver(): Promise<AsusOmniInfo> {
+    const firmware = asusOmniDecodeFirmware(await this.exchange(asusOmniFirmwareRequest(), 2, ASUS_OMNI_REPORT_ID));
+    const slots = asusOmniDecodePairedDevices(
+      await this.exchange(asusOmniPairedDevicesRequest(), 2, ASUS_OMNI_REPORT_ID),
+    );
+
+    const mouse = slots.find((slot) => asusOmniDeviceKind(slot) === "mouse" && ASUS_MICE.has(slot.productId));
+    if (!mouse) {
+      this.pairedModel = null;
+      this.mouseProductId = null;
+      this.booster = false;
+    } else if (mouse.productId !== this.mouseProductId || mouse.reportId !== this.mouseReportId) {
+      this.booster = (await this.exchange(asusOmniBoosterRequest(), 3, mouse.reportId))[4] === 0x01;
+      this.pairedModel = { ...ASUS_MICE.get(mouse.productId)!, wireless: true };
+      this.mouseReportId = mouse.reportId;
+      this.mouseProductId = mouse.productId;
+    }
+
+    return { firmware, devices: slots.map(omniDevice) };
+  }
+
+  async setOmniPairingMode(enabled: boolean): Promise<void> {
+    await this.sendToReceiver(asusOmniPairingModeRequest(enabled));
+  }
+
+  /** Resolves once the pair list no longer holds `productId`. */
+  async unpairOmniDevice(productId: number): Promise<void> {
+    await this.sendToReceiver(asusOmniUnpairRequest(productId));
+
+    const deadline = Date.now() + UNPAIR_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await wait(UNPAIR_POLL_MS);
+      const { devices } = await this.readOmniReceiver();
+      if (!devices.some((device) => device.productId === productId)) return;
+    }
+
+    throw new Error(`The ${OMNI_NAME} still lists device 0x${productId.toString(16)}.`);
+  }
+
+  /** The receiver drops off USB and comes back, so this client's device handle ends here. */
+  async rebootOmniReceiver(): Promise<void> {
+    await this.sendToReceiver(asusOmniRebootRequest());
+  }
+
   private async save(): Promise<void> {
     await this.exchange(asusSaveRequest(), 2);
   }
 
   private async readSettings(): Promise<AsusSettings> {
-    const settings = asusDecodeSettings(this.model, await this.exchange(asusReadSettingsRequest()));
+    const settings = asusDecodeSettings(this.model, await this.exchange(asusReadSettingsRequest()), this.booster);
 
     if (this.model.dpiXY) {
       settings.dpiStages = asusDecodeDpiXY(this.model, await this.exchange(asusReadDpiXYRequest()));
@@ -283,6 +401,10 @@ export class AsusHidClient {
   }
 
   async setPollingRate(rate: number): Promise<number> {
+    if (!this.getSupportedPollingRates().includes(rate)) {
+      throw new Error(`${rate} Hz is not supported by the ${this.model.name} on this connection.`);
+    }
+
     await this.exchange(asusSetPollingRateRequest(this.model, rate));
     await this.save();
 
@@ -396,7 +518,36 @@ export class AsusHidClient {
     return (await this.readLighting())[zone];
   }
 
+  /** An Omni receiver with no supported mouse: only the receiver card has anything to show. */
+  private receiverOnlyStatus(omni: AsusOmniInfo): MouseStatus {
+    return {
+      brand: "ASUS",
+      name: OMNI_NAME,
+      ui: {
+        family: "asus",
+        settingsReady: false,
+        statusNote: `No supported mouse is paired to this ${OMNI_NAME}. Pair one under Advanced.`,
+        defaultDisplayName: OMNI_NAME,
+      },
+      batteryPercent: null,
+      batteryState: "Unknown",
+      dpi: 0,
+      pollingRateHz: 0,
+      activeProfile: null,
+      connectionType: "Wireless",
+      connectionDetail: OMNI_NAME,
+      liftOffDistance: null,
+      firmware: [`Receiver ${omni.firmware}`],
+      asusOmni: omni,
+    };
+  }
+
   async readStatus(): Promise<MouseStatus> {
+    const omni = this.isOmni ? await this.readOmniReceiver() : undefined;
+    if (omni && !this.pairedModel) {
+      return this.receiverOnlyStatus(omni);
+    }
+
     const { model } = this;
 
     const settings = await this.readSettings();
@@ -449,7 +600,7 @@ export class AsusHidClient {
       profileCount: model.profiles,
 
       connectionType: model.wireless ? "Wireless" : "Wired",
-      connectionDetail: model.wireless ? "2.4 GHz receiver" : "Wired USB",
+      connectionDetail: omni ? OMNI_NAME : model.wireless ? "2.4 GHz receiver" : "Wired USB",
 
       debounceMs: model.debounce ? settings.debounceMs : null,
       angleSnapping: settings.angleSnapping,
@@ -460,7 +611,8 @@ export class AsusHidClient {
       lighting: lightingZones[0],
       lightingZones,
 
-      firmware: [],
+      firmware: omni ? [`Receiver ${omni.firmware}`] : [],
+      asusOmni: omni,
     };
   }
 }

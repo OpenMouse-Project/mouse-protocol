@@ -49,6 +49,19 @@ test("recognizes a core2 device (Model O3 Wireless, VID 0x3794)", () => {
   assert.equal(GloriousClassicHidClient.isSupported(device), true);
 });
 
+test("claims the Model O 2 PRO pair and Series 2 PRO from CORE's device table", () => {
+  // 0x2019/0x2033 are the O 2 PRO wired PID + receiver (CORE's SupportDevice.DB
+  // pairs them; 0x2033 was previously mislabeled "Model O 2 Wireless").
+  assert.equal(GloriousClassicHidClient.isSupported(fakeDevice(VENDOR_ID.gloriousClassic, 0x2019).device), true);
+  assert.equal(GloriousClassicHidClient.isSupported(fakeDevice(VENDOR_ID.gloriousClassic, 0x2033).device), true);
+  // Series 2 PRO, wired + receiver: classic commands for everything except
+  // >1000 Hz polling, which the classic payload cannot express.
+  assert.equal(GloriousClassicHidClient.isSupported(fakeDevice(VENDOR_ID.gloriousClassic, 0x201d).device), true);
+  assert.equal(GloriousClassicHidClient.isSupported(fakeDevice(VENDOR_ID.gloriousClassic, 0x2039).device), true);
+  const series2 = new GloriousClassicHidClient(fakeDevice(VENDOR_ID.gloriousClassic, 0x201d).device);
+  assert.deepEqual(series2.getSupportedPollingRates(), [125, 250, 500, 1000]);
+});
+
 test("recognizes a Model D Wireless whose config lives on the 0xffff:0 collection", () => {
   // A real 0x258a:0x2012 (Model D Wireless) exposed `usage 0xffff:0 feat[0x0]`
   // as its control interface; the old 0xff01/0xff00-only match rejected it.
@@ -150,9 +163,9 @@ test("core2 device (Model O3 Wireless) has no DPI/polling/LOD, only RGB/debounce
   assert.equal(status.ui?.statusNote?.includes("newer protocol generation"), true);
 });
 
-test("core2 device (Model D 2 PRO 4K/8KHz Edition, wired) also gets the reduced feature set", async () => {
-  const { device } = fakeDevice(VENDOR_ID.gloriousClassic, 0x2036);
-  const client = new GloriousClassicHidClient(device);
-  assert.deepEqual(client.getDpiOptions(), []);
-  await assert.rejects(() => client.setDpi(1600), /not confirmed/);
+test("Model D 2 PRO 4K/8KHz Edition left the classic table for the core2 driver", () => {
+  // 0x201c/0x2036 graduated to GLORIOUS_CORE2_PRODUCTS (full DPI/polling/driver
+  // support); the classic driver must no longer claim either PID.
+  assert.equal(GloriousClassicHidClient.isSupported(fakeDevice(VENDOR_ID.gloriousClassic, 0x201c).device), false);
+  assert.equal(GloriousClassicHidClient.isSupported(fakeDevice(VENDOR_ID.gloriousClassic, 0x2036).device), false);
 });

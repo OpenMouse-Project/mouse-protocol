@@ -1,0 +1,14 @@
+# Same capture: interface 1 input report 4 (8 bytes after the report id), sent by the mouse when
+# the DPI button was pressed during the first 41 s, before CORE wrote anything. Format:
+# <seconds since the first packet of this device> < <hex>. Layout: 01, stage (1-based), DPI X (u16 BE), DPI Y (u16 BE), 00 00.
+14.207 < 01 02 03 20 03 20 00 00
+14.315 < 01 03 06 40 06 40 00 00
+20.879 < 01 04 0c 80 0c 80 00 00
+26.487 < 01 01 01 90 01 90 00 00
+26.575 < 01 02 03 20 03 20 00 00
+31.469 < 01 04 0c 80 0c 80 00 00
+31.525 < 01 01 01 90 01 90 00 00
+33.657 < 01 02 03 20 03 20 00 00
+33.733 < 01 03 06 40 06 40 00 00
+40.937 < 01 04 0c 80 0c 80 00 00
+41.050 < 01 01 01 90 01 90 00 00

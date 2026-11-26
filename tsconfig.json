@@ -19,6 +19,7 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "paths": {
+      "@openmouse/protocol/redgear": ["./src/redgear/index.ts"],
       "@openmouse/protocol": ["./src/index.ts"],
       "@openmouse/protocol/atk": ["./src/atk/index.ts"],
       "@openmouse/protocol/endgame-gear-we": ["./src/endgame-gear/wireless.ts"],
@@ -28,6 +29,7 @@
       "@openmouse/protocol/incott": ["./src/incott/index.ts"],
       "@openmouse/protocol/keychron": ["./src/keychron/index.ts"],
       "@openmouse/protocol/lamzu": ["./src/lamzu/index.ts"],
+      "@openmouse/protocol/leobog": ["./src/leobog/index.ts"],
       "@openmouse/protocol/logitech": ["./src/logitech/index.ts"],
       "@openmouse/protocol/microsoft": ["./src/microsoft/index.ts"],
       "@openmouse/protocol/motospeed": ["./src/motospeed/index.ts"],
@@ -35,6 +37,7 @@
       "@openmouse/protocol/moddo": ["./src/moddo/index.ts"],
       "@openmouse/protocol/orbital": ["./src/orbital/index.ts"],
       "@openmouse/protocol/pulsar": ["./src/pulsar/index.ts"],
+      "@openmouse/protocol/redragon": ["./src/redragon/index.ts"],
       "@openmouse/protocol/razer": ["./src/razer/index.ts"],
       "@openmouse/protocol/razer-devices": ["./src/razer/devices.ts"],
       "@openmouse/protocol/razer-v4": ["./src/razer/v4.ts"],
@@ -50,8 +53,11 @@
       "@openmouse/protocol/bytech": ["./src/bytech/index.ts"],
       "@openmouse/protocol/rapoo": ["./src/rapoo/index.ts"],
       "@openmouse/protocol/fater": ["./src/fater/index.ts"],
+      "@openmouse/protocol/thermaltake": ["./src/thermaltake/index.ts"],
       "@openmouse/protocol/coolermaster": ["./src/coolermaster/index.ts"],
-      "@openmouse/protocol/ajazz": ["./src/ajazz/index.ts"]
+      "@openmouse/protocol/ajazz": ["./src/ajazz/index.ts"],
+      "@openmouse/protocol/hitscan": ["./src/hitscan/index.ts"],
+      "@openmouse/protocol/xiaomi": ["./src/xiaomi/index.ts"]
     }
   },
   "include": ["src/**/*"],

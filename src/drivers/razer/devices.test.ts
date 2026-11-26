@@ -145,12 +145,26 @@ test("the wired DeathAdder V3 writes polling on the extended command", () => {
   const wired = RAZER_PRODUCTS.get(0x00b2);
   assert.equal(wired?.wireless, false);
   assert.equal(wired?.highRatePolling, true);
+  // Both writes stay on 0x1f. The dongle's commit uses 0xff; copying that
+  // here would address a transaction this mouse does not use for the commit.
+  assert.equal(wired?.extendedPollingCommitTransactionId, RAZER_TRANSACTION_ID);
   // The rate the hardware was found at has to survive the round trip, or the
   // picker offers a value the mouse is already sitting at and cannot be set to.
   assert.ok(wired?.pollingRates.includes(2000));
   for (const rate of wired?.pollingRates ?? []) {
     assert.doesNotThrow(() => razerSetExtendedPollingCommand(rate));
   }
+});
+
+test("the wireless Viper V3 Pro commits polling with selector 0x01", () => {
+  // Issue #228: the extended write applied live but the rate reverted after the
+  // mouse powered off. OpenRazer sends a second selector-`0x01` write on `0x1f`
+  // for `VIPER_V3_PRO_WIRELESS`; the wired id is not in that list and keeps the
+  // single write.
+  const wireless = RAZER_PRODUCTS.get(0x00c1);
+  assert.equal(wireless?.highRatePolling, true);
+  assert.equal(wireless?.extendedPollingCommitTransactionId, RAZER_TRANSACTION_ID);
+  assert.equal(RAZER_PRODUCTS.get(0x00c0)?.extendedPollingCommitTransactionId, undefined);
 });
 
 test("the standalone HyperPolling dongle exposes 8 kHz and its two-step commit", () => {

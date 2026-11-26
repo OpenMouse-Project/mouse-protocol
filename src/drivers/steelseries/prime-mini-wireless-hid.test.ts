@@ -40,9 +40,11 @@ function fakeDevice(
   return { device: device as unknown as HIDDevice, sent };
 }
 
-test("claims only the Prime Mini Wireless PIDs (both transports) and nothing else", () => {
+test("claims the Prime Mini Wireless and plain Prime Wireless PIDs (both transports) and nothing else", () => {
   const { device } = fakeDevice();
-  for (const productId of [0x184a, 0x1848]) {
+  // The plain Prime Wireless shares the Prime Mini Wireless settings dict,
+  // so both models share this driver.
+  for (const productId of [0x184a, 0x1848, 0x1842, 0x1840]) {
     assert.equal(
       SteelSeriesPrimeMiniWirelessHidClient.isSupported({ ...device, productId } as HIDDevice),
       true,
@@ -61,9 +63,6 @@ test("claims only the Prime Mini Wireless PIDs (both transports) and nothing els
   assert.equal(SteelSeriesPrimeMiniWirelessHidClient.isSupported({ ...device, productId: 0x1852 } as HIDDevice), false); // Aerox 5 Wireless (2.4GHz)
   assert.equal(SteelSeriesPrimeMiniWirelessHidClient.isSupported({ ...device, productId: 0x185c } as HIDDevice), false); // Aerox 5 Wireless Destiny 2 (2.4GHz)
   assert.equal(SteelSeriesPrimeMiniWirelessHidClient.isSupported({ ...device, productId: 0x1860 } as HIDDevice), false); // Aerox 5 Wireless Diablo IV (2.4GHz)
-  // Out-of-scope sibling PIDs from the same rivalcfg profile (plain Prime Wireless) must not be claimed.
-  assert.equal(SteelSeriesPrimeMiniWirelessHidClient.isSupported({ ...device, productId: 0x1842 } as HIDDevice), false); // Prime Wireless (wired)
-  assert.equal(SteelSeriesPrimeMiniWirelessHidClient.isSupported({ ...device, productId: 0x1840 } as HIDDevice), false); // Prime Wireless (2.4GHz)
   assert.equal(SteelSeriesPrimeMiniWirelessHidClient.isSupported({ ...device, vendorId: 0x1532 } as HIDDevice), false);
 });
 

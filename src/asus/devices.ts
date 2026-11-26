@@ -30,10 +30,8 @@
  * touch firmware or calibration except the lift-off write, which is only
  * enabled where G-Helper already sends it.
  *
- * ## Deliberately absent
- *
- * The ROG Omni receiver (`0x1ace`) is shared by several mice and needs a model
- * identification handshake before any of this applies.
+ * The ROG Omni receiver (`0x1ace`) is not in this table. It names the paired
+ * mouse by its own receiver PID, which is looked up here (see `omni.ts`).
  */
 
 /** Effect names, spelled as the shared `MouseLightingMode` values. */

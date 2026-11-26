@@ -1,0 +1,137 @@
+{
+  "device": {
+    "present": true,
+    "brand": "Redragon",
+    "name": "Redragon K1NG 1K",
+    "vendorId": 1241,
+    "productId": 64634,
+    "productName": "Redragon K1NG 1K",
+    "transport": "webhid",
+    "connectionType": "Wired",
+    "pollingRateHz": 1000,
+    "supportedPollingRates": [
+      125,
+      250,
+      500,
+      1000
+    ],
+    "dpi": 800,
+    "dpiStages": [
+      800,
+      1200,
+      2200,
+      2400,
+      2800
+    ],
+    "activeDpiStage": 0,
+    "batteryPercent": null,
+    "batteryState": "Unknown",
+    "firmware": null,
+    "liftOffDistance": "High",
+    "driverFamily": "redragon",
+    "deviceMode": null,
+    "collectionsSummary": "interfaces 0x000C:0x0001, 0xFFA0:0x0001",
+    "signalStrength": null,
+    "receiverOnline": null,
+    "receiverRfId": null,
+    "pairingInProgress": false
+  },
+  "results": [
+    {
+      "key": "connection",
+      "label": "Device connected",
+      "status": "pass",
+      "detail": "Connected through WebHID"
+    },
+    {
+      "key": "interface",
+      "label": "Control interface",
+      "status": "pass",
+      "detail": "interfaces 0x000C:0x0001, 0xFFA0:0x0001"
+    },
+    {
+      "key": "identity",
+      "label": "Device identity",
+      "status": "pass",
+      "detail": "Redragon Redragon K1NG 1K"
+    },
+    {
+      "key": "driver",
+      "label": "Driver identification",
+      "status": "pass",
+      "detail": "Redragon redragon"
+    },
+    {
+      "key": "dpi",
+      "label": "DPI read-back",
+      "status": "pass",
+      "detail": "800 DPI"
+    },
+    {
+      "key": "pollingRead",
+      "label": "Polling rate read-back",
+      "status": "pass",
+      "detail": "1000 Hz"
+    },
+    {
+      "key": "battery",
+      "label": "Battery read-back",
+      "status": "skip",
+      "detail": "Not reported by this device."
+    },
+    {
+      "key": "firmware",
+      "label": "Firmware read-back",
+      "status": "skip",
+      "detail": "Not reported by this device."
+    },
+    {
+      "key": "liftOff",
+      "label": "Lift-off read-back",
+      "status": "pass",
+      "detail": "High"
+    },
+    {
+      "key": "dpiStages",
+      "label": "DPI stages read-back",
+      "status": "pass",
+      "detail": "800, 1.200, 2.200, 2.400, 2.800 DPI"
+    },
+    {
+      "key": "link",
+      "label": "Wireless link (receiver)",
+      "status": "skip",
+      "detail": null
+    },
+    {
+      "key": "flashRead",
+      "label": "Flash / EEPROM read-back",
+      "status": "pass",
+      "detail": "decoded fields are in range (dpi, polling, lift-off, dpi stages)"
+    },
+    {
+      "key": "sampling",
+      "label": "Polling rate sampling",
+      "status": "pass",
+      "detail": "avg 976 Hz · peak 1000 Hz · stability 98% · 4894 samples"
+    },
+    {
+      "key": "flashWrite",
+      "label": "Flash write round-trip",
+      "status": "pass",
+      "detail": "wrote 1.600 DPI → read back → restored 800 DPI · wrote 500 Hz → read back → restored 1.000 Hz · wrote Medium → read back → restored High"
+    }
+  ],
+  "verdict": "pass",
+  "durationMs": 20754.5,
+  "runAt": "2026-10-31T15:31:39.118Z",
+  "build": "BETA · v2.0.1348",
+  "supportedPage": {
+    "listed": true,
+    "status": "supported",
+    "label": "Supported",
+    "matchedBy": "pid",
+    "pageModel": "M724 K1NG 1K",
+    "detail": "already listed as Supported on the supported-devices page — no update needed."
+  }
+}

@@ -2,23 +2,33 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   AJAZZ_BLANK_CONFIG,
+  AJAZZ_BUTTON_ACTIONS,
+  AJAZZ_BUTTON_NAMES,
+  AJAZZ_DEFAULT_KEYS,
   AJAZZ_DONGLE_VENDOR_ID,
   AJAZZ_PRODUCTS,
   AJAZZ_REPORT_ID,
   AJAZZ_USAGE,
   AJAZZ_USAGE_PAGE,
   AJAZZ_USB_VENDOR_ID,
+  ajazzBindingLabel,
   ajazzDecodeBattery,
   ajazzDecodeConfig,
+  ajazzDecodeKeys,
   ajazzDecodePollingRate,
   ajazzDecodeVersion,
+  ajazzApplyKeyDefaults,
   ajazzEncodePollingRate,
   ajazzEncodeSetConfig,
+  ajazzEncodeSetKeys,
+  ajazzFindButtonAction,
   ajazzGetBatteryRequest,
   ajazzGetConfigRequest,
+  ajazzGetKeysRequest,
   ajazzGetVersionRequest,
   ajazzIsValidDpi,
   ajazzIsValidSleepSeconds,
+  ajazzKeysLookPlausible,
   type AjazzConfig,
 } from "../../ajazz/index.ts";
 import { AjazzHidClient } from "./hid.ts";
@@ -133,8 +143,54 @@ describe("ajazz codec", () => {
     assert.equal(ajazzIsValidDpi(800.5, 24000), false);
     assert.equal(ajazzIsValidSleepSeconds(300), true);
     assert.equal(ajazzIsValidSleepSeconds(90), false);
-    assert.equal(ajazzIsValidSleepSeconds(0), false);
+    assert.equal(ajazzIsValidSleepSeconds(0), true); // the panel's "never sleep"
     assert.equal(ajazzIsValidSleepSeconds(6060), false);
+  });
+
+  it("frames the key requests and round-trips the six slots", () => {
+    assert.deepEqual([...ajazzGetKeysRequest().slice(0, 4)], [0x08, 0x01, 0x0b, 0x2c]);
+    assert.equal(ajazzGetKeysRequest().length, 63);
+    const wire = ajazzEncodeSetKeys([...AJAZZ_DEFAULT_KEYS]);
+    assert.deepEqual([...wire.slice(0, 4)], [0x09, 0x01, 0x22, 0x30]);
+    assert.equal(wire.length, 63);
+    // Six remappable slots up front, then the fixed wheel entries.
+    assert.deepEqual([...wire.slice(7, 31)], [32, 1, 0, 0, 32, 2, 0, 0, 32, 4, 0, 0, 32, 8, 0, 0, 32, 16, 0, 0, 33, 85, 0, 0]);
+    assert.deepEqual([...wire.slice(31, 39)], [33, 56, 1, 0, 33, 56, 255, 0]);
+    const wireReply = Uint8Array.from(wire);
+    wireReply[0] = 0x08;
+    assert.deepEqual(ajazzDecodeKeys(wireReply), [...AJAZZ_DEFAULT_KEYS]);
+    assert.equal(ajazzKeysLookPlausible(ajazzDecodeKeys(wireReply)!), true);
+    assert.equal(ajazzDecodeKeys(reply(0x09)), null);
+    assert.equal(ajazzDecodeKeys(new Uint8Array(20)), null);
+    // Default-binding markers (type 0/0xff) are plausible per slot and fall
+    // back to the factory bindings, like the vendor panel's merge.
+    const marked = ajazzDecodeKeys(wireReply)!.map((key, i) => (i % 2 ? { ...key, type: 0xff } : key));
+    assert.equal(ajazzKeysLookPlausible(marked), true);
+    assert.deepEqual(ajazzApplyKeyDefaults(marked), [...AJAZZ_DEFAULT_KEYS]);
+    const blank = new Uint8Array(63);
+    blank[0] = 0x08;
+    assert.equal(ajazzKeysLookPlausible(ajazzDecodeKeys(blank)!), true);
+    assert.deepEqual(ajazzApplyKeyDefaults(ajazzDecodeKeys(blank)!), [...AJAZZ_DEFAULT_KEYS]);
+    // Anything outside the 0/0xff/known-type set is still rejected.
+    const garbage = ajazzDecodeKeys(wireReply)!.map((key) => ({ ...key, type: 7 }));
+    assert.equal(ajazzKeysLookPlausible(garbage), false);
+  });
+
+  it("names catalog bindings and keeps macros readable", () => {
+    assert.equal(ajazzBindingLabel({ type: 32, code1: 1, code2: 0, code3: 0 }), "Left click");
+    assert.equal(ajazzBindingLabel({ type: 33, code1: 85, code2: 0, code3: 0 }), "DPI loop");
+    assert.equal(ajazzBindingLabel({ type: 112, code1: 2, code2: 0, code3: 0 }), "Macro 3");
+    assert.equal(ajazzBindingLabel({ type: 16, code1: 3, code2: 4, code3: 0 }), null);
+    assert.deepEqual(ajazzFindButtonAction("Mute"), { type: 48, code1: 226, code2: 0, code3: 0 });
+    assert.equal(ajazzFindButtonAction("Nope"), null);
+    // Letters/digits map to their HID usage so a button can send "W" etc.
+    assert.deepEqual(ajazzFindButtonAction("W"), { type: 16, code1: 0, code2: 26, code3: 0 });
+    assert.deepEqual(ajazzFindButtonAction("A"), { type: 16, code1: 0, code2: 4, code3: 0 });
+    assert.deepEqual(ajazzFindButtonAction("0"), { type: 16, code1: 0, code2: 39, code3: 0 });
+    assert.ok(AJAZZ_BUTTON_ACTIONS.length > 100);
+    // Labels must stay unique or the remap UI would pick the wrong binding.
+    assert.equal(new Set(AJAZZ_BUTTON_ACTIONS.map((a) => a.label)).size, AJAZZ_BUTTON_ACTIONS.length);
+    assert.deepEqual([...AJAZZ_BUTTON_NAMES], ["Left", "Right", "Middle", "Backward", "Forward", "DPI"]);
   });
 });
 
@@ -145,6 +201,8 @@ interface MouseOptions {
   silent?: boolean;
   /** Acknowledge SET_CONFIG but keep the old block. */
   ignoreWrites?: boolean;
+  /** Drop the first N SET_CONFIG/SET_KEYS frames, like a busy 2.4G link. */
+  dropWrites?: number;
   /** Push a status report before every answer, like the mouse does on DPI changes. */
   noisy?: boolean;
 }
@@ -152,7 +210,17 @@ interface MouseOptions {
 /** A mock mouse that answers the vendor frames from a stored config block. */
 function fakeMouse(options: MouseOptions = {}) {
   const block = Uint8Array.from(FACTORY_SET_BODY);
+  const keyBlock = new Uint8Array(32);
+  keyBlock.set([32, 1, 0, 0, 32, 2, 0, 0, 32, 4, 0, 0, 32, 8, 0, 0, 32, 16, 0, 0, 33, 85, 0, 0, 33, 56, 1, 0, 33, 56, 255, 0]);
   const sent: Uint8Array[] = [];
+  let dropped = 0;
+  const shouldDrop = (): boolean => {
+    if (options.dropWrites && dropped < options.dropWrites) {
+      dropped++;
+      return true;
+    }
+    return false;
+  };
   const listeners = new Set<(event: HIDInputReportEvent) => void>();
   const emit = (data: Uint8Array): void => {
     const event = { reportId: AJAZZ_REPORT_ID, data: new DataView(data.buffer.slice(0)) };
@@ -183,8 +251,19 @@ function fakeMouse(options: MouseOptions = {}) {
           break;
         }
         case 0x0f:
-          if (!options.ignoreWrites) block.set(request.slice(8, 54), 8);
+          if (!options.ignoreWrites && !shouldDrop()) block.set(request.slice(8, 54), 8);
           emit(reply(0x0f));
+          break;
+        case 0x08: {
+          const wire = new Uint8Array(63);
+          wire[0] = 0x08;
+          wire.set(keyBlock.slice(0, 24), 7);
+          emit(wire);
+          break;
+        }
+        case 0x09:
+          if (!options.ignoreWrites && !shouldDrop()) keyBlock.set(request.slice(7, 39), 0);
+          emit(reply(0x09));
           break;
         case 0x30:
           emit(reply(0x30, (d) => { d[7] = 64; d[8] = 0; }));
@@ -195,8 +274,12 @@ function fakeMouse(options: MouseOptions = {}) {
       }
     },
   };
-  const client = new AjazzHidClient(device as unknown as HIDDevice, { replyTimeoutMs: 20, settleAfterWriteMs: 0 });
-  return { device: device as unknown as HIDDevice, client, block, sent };
+  const client = new AjazzHidClient(device as unknown as HIDDevice, {
+    replyTimeoutMs: 20,
+    settleAfterWriteMs: 0,
+    confirmTimeoutMs: 300,
+  });
+  return { device: device as unknown as HIDDevice, client, block, keyBlock, sent };
 }
 
 describe("AjazzHidClient", () => {
@@ -219,7 +302,7 @@ describe("AjazzHidClient", () => {
     assert.notEqual(createSupportedClient(ksnake)?.constructor.name, "AjazzHidClient");
   });
 
-  it("reads identity, battery, DPI stages, polling, sleep and scroll direction", async () => {
+  it("reads identity, battery, DPI stages, polling, sleep, scroll and buttons", async () => {
     const { client } = fakeMouse();
     const status = await client.readStatus();
     assert.equal(status.brand, "AJAZZ");
@@ -237,11 +320,31 @@ describe("AjazzHidClient", () => {
     assert.equal(status.connectionType, "Wireless");
     assert.deepEqual(status.firmware, ["NJ07 MC 1.0.5"]);
     assert.equal(status.ui?.dpiStageEditor?.maxDpi, 24000);
+    assert.deepEqual(status.buttonMappings, {
+      Left: "Left click",
+      Right: "Right click",
+      Middle: "Middle click",
+      Backward: "Backward",
+      Forward: "Forward",
+      DPI: "DPI loop",
+    });
+    assert.ok((status.buttonOptions?.length ?? 0) > 40);
   });
 
   it("reports a wired mouse as wired", async () => {
     const { client } = fakeMouse({ vendorId: AJAZZ_USB_VENDOR_ID });
     assert.equal((await client.readStatus()).connectionType, "Wired");
+  });
+
+  it("reports sleepMinutes 0 as a 0-second timeout so the sleep card stays enabled", async () => {
+    // The vendor panel's 0 means "never sleep" and is a settable option, so it
+    // must come back as 0 ("Never") rather than null — null disables the card.
+    const { client, block } = fakeMouse();
+    block[51] = 0; // sleep_light
+    const status = await client.readStatus();
+    assert.equal(status.sleepTimeout, 0);
+    await client.setSleepTimeout(300);
+    assert.equal(ajazzDecodeConfig(Uint8Array.from([0x0e, ...block.slice(1)]))!.sleepMinutes, 5);
   });
 
   it("falls back to identity only when the mouse stays silent", async () => {
@@ -306,9 +409,67 @@ describe("AjazzHidClient", () => {
     await assert.rejects(client.setPollingRate(125), /kept 1000 Hz instead of 125 Hz/);
   });
 
+  it("retries once so a dropped 2.4G frame still lands", async () => {
+    const config = fakeMouse({ dropWrites: 1 });
+    assert.equal(await config.client.setPollingRate(125), 125);
+    assert.deepEqual((await config.client.readStatus()).dpiStages, [400, 800, 1200, 1600, 2400, 3200]);
+
+    const keys = fakeMouse({ dropWrites: 1 });
+    await keys.client.setButtonMapping("Forward", "W");
+    assert.equal((await keys.client.readStatus()).buttonMappings?.["Forward"], "W");
+  });
+
   it("does not write when the current config cannot be read", async () => {
     const { client, sent } = fakeMouse({ silent: true });
     await assert.rejects(client.setPollingRate(500), /Could not read the current config/);
     assert.equal(sent.some((r) => r[0] === 0x0f), false);
+  });
+
+  it("remaps one button and keeps the other slots", async () => {
+    const { client, keyBlock } = fakeMouse();
+    await client.setButtonMapping("Forward", "Mute");
+    const wire = new Uint8Array(63);
+    wire[0] = 0x08;
+    wire.set(keyBlock.slice(0, 24), 7);
+    const keys = ajazzDecodeKeys(wire)!;
+    assert.deepEqual(keys[4], { type: 48, code1: 226, code2: 0, code3: 0 });
+    assert.deepEqual(keys[0], { type: 32, code1: 1, code2: 0, code3: 0 });
+    // The fixed wheel tail survives every write.
+    assert.deepEqual([...keyBlock.slice(24, 32)], [33, 56, 1, 0, 33, 56, 255, 0]);
+    const status = await client.readStatus();
+    assert.equal(status.buttonMappings?.["Forward"], "Mute");
+  });
+
+  it("remaps a side button to a keyboard key like W", async () => {
+    const { client, keyBlock } = fakeMouse();
+    await client.setButtonMapping("Forward", "W");
+    const wire = new Uint8Array(63);
+    wire[0] = 0x08;
+    wire.set(keyBlock.slice(0, 24), 7);
+    assert.deepEqual(ajazzDecodeKeys(wire)![4], { type: 16, code1: 0, code2: 26, code3: 0 });
+    assert.equal((await client.readStatus()).buttonMappings?.["Forward"], "W");
+  });
+
+  it("refuses unknown buttons, locked Left and unknown actions", async () => {
+    const { client, sent } = fakeMouse();
+    await assert.rejects(client.setButtonMapping("Wheel", "Mute"), /has no "Wheel" button/);
+    await assert.rejects(client.setButtonMapping("Left", "Mute"), /fixed and cannot be reassigned/);
+    await assert.rejects(client.setButtonMapping("Forward", "Turbo"), /Unknown button action/);
+    assert.equal(sent.some((r) => r[0] === 0x09), false);
+  });
+
+  it("fails loudly when the mouse keeps the old button map", async () => {
+    const { client } = fakeMouse({ ignoreWrites: true });
+    await assert.rejects(client.setButtonMapping("Forward", "Mute"), /did not keep the new button map/);
+  });
+
+  it("restores the factory button map", async () => {
+    const { client, keyBlock } = fakeMouse();
+    await client.setButtonMapping("Forward", "Mute");
+    await client.resetButtonMap();
+    const wire = new Uint8Array(63);
+    wire[0] = 0x08;
+    wire.set(keyBlock.slice(0, 24), 7);
+    assert.deepEqual(ajazzDecodeKeys(wire), [...AJAZZ_DEFAULT_KEYS]);
   });
 });

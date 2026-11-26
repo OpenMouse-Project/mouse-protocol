@@ -9,6 +9,7 @@ import {
   eggClampCpi,
   eggDecodeButtonAction,
   eggDpiOptions,
+  eggExposedFeatures,
   eggEncodeButtonAction,
   eggFormatFirmwareVersion,
   eggIsValidCpi,
@@ -160,4 +161,32 @@ test("all supported button actions round-trip through the wire codec", () => {
     assert.deepEqual(eggEncodeButtonAction(eggDecodeButtonAction(encoded.type, encoded.params)), encoded);
   }
   assert.deepEqual(eggEncodeButtonAction({ key: "cpi-loop" })!.params, [0xf1, 0, 0, 0, 0]);
+});
+
+test("each K26/W26 device lists its exposed features", () => {
+  const base = [
+    "dpi-stages", "polling-rate", "lift-off-distance", "motion-sync",
+    "angle-snapping", "ripple-control", "slamclick-filter", "spdt-mode",
+    "cpi-levels", "multiclick-filter", "button-mapping", "left-handed-mode",
+    "factory-reset", "firmware-version",
+  ];
+  const v1 = EGG_DEVICE_PROFILES.get(0x1964)!;
+  assert.deepEqual(eggExposedFeatures(v1), [...base, "motion-jitter-filter"]);
+  const purple = EGG_DEVICE_PROFILES.get(0x1976)!;
+  assert.deepEqual(
+    eggExposedFeatures(purple),
+    [...base, "glass-mode", "motion-jitter-filter"],
+  );
+  const v2 = EGG_DEVICE_PROFILES.get(0x1978)!;
+  assert.deepEqual(
+    eggExposedFeatures(v2),
+    [...base, "glass-mode", "sensor-angle-tuning", "force-max-fps", "led-lift-off", "motion-jitter-filter"],
+  );
+  const w4k = EGG_DEVICE_PROFILES.get(0x1972)!;
+  assert.deepEqual(eggExposedFeatures(w4k), [...base, "motion-jitter-filter"]);
+  const w4kv2 = EGG_DEVICE_PROFILES.get(0x1984)!;
+  assert.deepEqual(
+    eggExposedFeatures(w4kv2),
+    [...base, "glass-mode", "sensor-angle-tuning", "force-max-fps", "led-lift-off"],
+  );
 });

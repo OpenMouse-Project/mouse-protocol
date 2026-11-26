@@ -18,9 +18,17 @@
     "CONTRIBUTING.md"
   ],
   "exports": {
+    "./redgear": {
+      "types": "./dist/redgear/index.d.ts",
+      "import": "./dist/redgear/index.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./aula": {
+      "types": "./dist/aula/index.d.ts",
+      "import": "./dist/aula/index.js"
     },
     "./bytech": {
       "types": "./dist/bytech/index.d.ts",
@@ -42,6 +50,10 @@
       "types": "./dist/endgame-gear/op1.d.ts",
       "import": "./dist/endgame-gear/op1.js"
     },
+    "./endgame-gear-ot": {
+      "types": "./dist/endgame-gear/ot.d.ts",
+      "import": "./dist/endgame-gear/ot.js"
+    },
     "./finalmouse": {
       "types": "./dist/finalmouse/index.d.ts",
       "import": "./dist/finalmouse/index.js"
@@ -61,6 +73,10 @@
     "./lamzu": {
       "types": "./dist/lamzu/index.d.ts",
       "import": "./dist/lamzu/index.js"
+    },
+    "./leobog": {
+      "types": "./dist/leobog/index.d.ts",
+      "import": "./dist/leobog/index.js"
     },
     "./mchose": {
       "types": "./dist/mchose/index.d.ts",
@@ -122,6 +138,10 @@
       "types": "./dist/valkyrie/index.d.ts",
       "import": "./dist/valkyrie/index.js"
     },
+    "./kmart": {
+      "types": "./dist/kmart/index.d.ts",
+      "import": "./dist/kmart/index.js"
+    },
     "./vaxee": {
       "types": "./dist/vaxee/index.d.ts",
       "import": "./dist/vaxee/index.js"
@@ -178,6 +198,14 @@
       "types": "./dist/glorious-classic/index.d.ts",
       "import": "./dist/glorious-classic/index.js"
     },
+    "./glorious-sinowealth": {
+      "types": "./dist/glorious-sinowealth/index.d.ts",
+      "import": "./dist/glorious-sinowealth/index.js"
+    },
+    "./glorious-core2": {
+      "types": "./dist/glorious-core2/index.d.ts",
+      "import": "./dist/glorious-core2/index.js"
+    },
     "./ksnake": {
       "types": "./dist/ksnake/index.d.ts",
       "import": "./dist/ksnake/index.js"
@@ -194,6 +222,14 @@
       "types": "./dist/ryunix/index.d.ts",
       "import": "./dist/ryunix/index.js"
     },
+    "./instant": {
+      "types": "./dist/instant/index.d.ts",
+      "import": "./dist/instant/index.js"
+    },
+    "./amkette": {
+      "types": "./dist/amkette/index.d.ts",
+      "import": "./dist/amkette/index.js"
+    },
     "./rapoo": {
       "types": "./dist/rapoo/index.d.ts",
       "import": "./dist/rapoo/index.js"
@@ -206,23 +242,48 @@
       "types": "./dist/fater/index.d.ts",
       "import": "./dist/fater/index.js"
     },
+    "./thermaltake": {
+      "types": "./dist/thermaltake/index.d.ts",
+      "import": "./dist/thermaltake/index.js"
+    },
     "./ajazz": {
       "types": "./dist/ajazz/index.d.ts",
       "import": "./dist/ajazz/index.js"
     },
+    "./ajazz/aj200p": {
+      "types": "./dist/ajazz/aj200p.d.ts",
+      "import": "./dist/ajazz/aj200p.js"
+    },
     "./coolermaster": {
       "types": "./dist/coolermaster/index.d.ts",
       "import": "./dist/coolermaster/index.js"
+    },
+    "./scyrox": {
+      "types": "./dist/scyrox/index.d.ts",
+      "import": "./dist/scyrox/index.js"
+    },
+    "./hitscan": {
+      "types": "./dist/hitscan/index.d.ts",
+      "import": "./dist/hitscan/index.js"
+    },
+    "./roccat": {
+      "types": "./dist/roccat/index.d.ts",
+      "import": "./dist/roccat/index.js"
+    },
+    "./xiaomi": {
+      "types": "./dist/xiaomi/index.d.ts",
+      "import": "./dist/xiaomi/index.js"
     }
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.json",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "tsx --import ./scripts/fast-test-timers.mjs --test \"src/**/*.test.ts\"",
     "check": "npm run build && npm test && npm pack --dry-run",
     "prepare": "npm run build"
   },
   "devDependencies": {
+    "@types/node": "^26.2.0",
     "semantic-release": "25.0.9",
     "tsx": "^4.23.11",
     "typescript": "^5.8.3"

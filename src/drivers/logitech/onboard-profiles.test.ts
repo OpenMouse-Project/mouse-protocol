@@ -1025,6 +1025,12 @@ test("DPI slot limits are per format, not global", () => {
   assert.equal(clampDpi(Number.NaN, narrow), 200);
 });
 
+test("a legacy format accepts a slot whose lift-off was copied from another slot (G305 slot 3)", () => {
+  const limits = capabilitiesForFormat(3).dpiStages;
+  const stages = [800, 1200, 1600].map((dpi) => ({ x: dpi, y: dpi, lod: 2 }));
+  assert.equal(validateDpiStagePlan({ stages, defaultIndex: 0 }, limits, true), null);
+});
+
 test("unwritable DPI stage plans are rejected before they reach flash", () => {
   const limits = capabilitiesForFormat(7).dpiStages;
   const stage = { x: 800, y: 800, lod: 1 };

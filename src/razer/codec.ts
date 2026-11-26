@@ -451,6 +451,34 @@ export function razerSetStandardEffectCommand(
   }
 }
 
+/** Activate the volatile frame after writing single-row RGB cells. */
+export function razerSetStandardCustomEffectCommand(): RazerCommand {
+  // OpenRazer's standard custom effect selects the volatile frame (NOSTORE).
+  return { commandClass: 0x03, commandId: 0x0a, dataSize: 0x02, args: [0x05, 0x00] };
+}
+
+/**
+ * Diamondback Chroma / Mamba TE single-row frame (`0x03`/`0x0c`), matching
+ * OpenRazer's razer_chroma_misc_one_row_set_custom_frame. Columns are inclusive
+ * and zero-based. The fixed 0x32 header is a firmware convention, not the
+ * argument capacity: the 80-byte argument area holds 26 RGB cells after the
+ * two column bytes. OpenRGB sends all 21 Diamondback cells in one report.
+ */
+export function razerSetOneRowCustomFrameCommand(startColumn: number, colors: readonly string[]): RazerCommand {
+  if (!Number.isInteger(startColumn) || startColumn < 0 || startColumn > 255) {
+    throw new RazerProtocolError("The start column must be a whole byte from 0 to 255.");
+  }
+  if (colors.length < 1 || colors.length > 26 || startColumn + colors.length - 1 > 255) {
+    throw new RazerProtocolError("A single-row frame needs 1 to 26 colours within columns 0 to 255.");
+  }
+  return {
+    commandClass: 0x03,
+    commandId: 0x0c,
+    dataSize: 0x32,
+    args: [startColumn, startColumn + colors.length - 1, ...colors.flatMap((color) => parseRazerColor(color))],
+  };
+}
+
 /** Backlight brightness read (`0x03`/`0x83`); the level answers in the third byte. */
 export const RAZER_BACKLIGHT_BRIGHTNESS_READ: RazerCommand = {
   commandClass: 0x03,

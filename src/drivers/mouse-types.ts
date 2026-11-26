@@ -3,7 +3,13 @@
  * Drivers added in a PR should set only the flags they need so the shell
  * stays free of brand-specific branching.
  */
+import type { AtkDeviceFeatures } from "./atk/device-catalog.generated.js";
+import type { LeobogGm3Macro } from "../leobog/index.js";
+import type { Rival650ButtonMappings } from "../steelseries/rival650.js";
+
 export interface MouseUiHints {
+  /** This connection is carried by a receiver with its own configurable controls. */
+  receiverControls?: boolean;
   /** Stable driver id, e.g. "egg-we". */
   family?: string;
   /** When false, core settings grid stays hidden. Default true. */
@@ -40,6 +46,8 @@ export interface MouseUiHints {
    * invisible without this. Set it only when a card in there will show.
    */
   showAdvancedSection?: boolean;
+  /** Keep RGB controls in the Lighting tab without duplicating them under Advanced. */
+  hideAdvancedLighting?: boolean;
   /** Always show battery column (even wired with null %). */
   forceShowBattery?: boolean;
   /** Group the device's battery, DPI-indicator, and sleep controls on Overview. */
@@ -51,6 +59,8 @@ export interface MouseUiHints {
   statusNote?: string;
   /** Override the polling-rate footnote. */
   pollingNote?: string;
+  /** Explain coupled sleep settings when applying the timeout also changes another timer. */
+  sleepNote?: string;
   /** Sidebar name before first status read. */
   defaultDisplayName?: string;
   /**
@@ -71,10 +81,21 @@ export interface MouseUiHints {
   dpiLighting?: {
     modes: readonly (0 | 1 | 2)[];
     brightness: readonly number[];
+    /**
+     * Modes in which brightness can be changed. Omitted when every lit mode
+     * accepts it; a mouse whose breathing effect has no brightness lists [1].
+     */
+    brightnessModes?: readonly (1 | 2)[];
     speed: readonly number[];
     /** Optional DPI-indicator-only sleep values in seconds. */
     sleepTimeouts?: readonly number[];
   };
+  /**
+   * Hide the Single DPI view (and the custom-value box) for a mouse whose DPI
+   * only exists as a stage table, so the Sensitivity card offers the stage
+   * editor alone instead of a Stages/Single pill.
+   */
+  hideSingleDpi?: boolean;
 }
 
 /**
@@ -110,7 +131,7 @@ export interface MouseLighting {
   brightnessLevels?: readonly number[];
   /** True when the mouse cannot report the effect back (Razer effect writes). */
   writeOnly?: boolean;
-  /** HID++ per-key/per-LED zone id when this is a directly painted RGB cell. */
+  /** Driver-specific per-LED zone id when this is a directly painted RGB cell. */
   hardwareZoneId?: number;
   /** Lets the UI group individually painted cells into one physical surface. */
   group?: string;
@@ -152,6 +173,17 @@ export interface AtkReceiverInfo {
   pairingSecondsRemaining: number | null;
 }
 
+export interface AsusOmniDevice {
+  productId: number;
+  kind: "mouse" | "keyboard" | "unknown";
+  name: string;
+}
+
+export interface AsusOmniInfo {
+  firmware: string;
+  devices: AsusOmniDevice[];
+}
+
 export interface MagneticButtonStatus {
   /** Null when the mouse has a single switch type or did not report it. */
   switchType: "magnetic" | "optical" | null;
@@ -190,8 +222,31 @@ export interface MagneticCalibrationProgress {
   steps: number;
 }
 
+export interface KeychronDynamicDpi {
+  profile: number;
+  enabled: boolean;
+  mode: number;
+  points: Array<{ speed: number; gain: number }>;
+}
+
+export interface KeychronReceiverStatus {
+  name: string;
+  firmware: string;
+  buttonMappings: Record<string, string>;
+  buttonOptions: string[];
+  lighting: MouseLighting;
+}
+
 export interface MouseStatus {
-  brand: "RAWM" | "Motospeed" | "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "VAXEE" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Noir Gear" | "Lingbao" | "GearHub" | "AJAZZ" | "Corsair" | "Microsoft" | "Dareu" | "Redragon" | "Incott" | "HyperX" | "ASUS" | "Ryunix" | "Delux" | "GravaStar" | "IPI" | "Rapoo" | "Fater" | "Cooler Master" | "AJAZZ";
+  /** Controls for the configurable receiver carrying this mouse's wireless link. */
+  keychronReceiver?: KeychronReceiverStatus;
+  /** Optional Launcher 8K features, populated only after successful device reads. */
+  keychronMouse?: {
+    pairing: { mask: number; holdTime: number } | null;
+    dynamicDpi: KeychronDynamicDpi | null;
+    factoryReset: boolean;
+  };
+  brand: "RAWM" | "Motospeed" | "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "G-Wolves" | "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "Vancer" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VXE" | "VGN" | "VAXEE" | "Finalmouse" | "Keychron" | "moddoMOUSE" | "Ninjutso" | "Zaunkoenig" | "Fantech" | "Wooting" | "WALLHACK" | "SteelSeries" | "Glorious" | "MCHOSE" | "K-snake" | "Noir Gear" | "Lingbao" | "GearHub" | "AJAZZ" | "Corsair" | "Microsoft" | "Dareu" | "Redragon" | "Incott" | "HyperX" | "ASUS" | "Ryunix" | "Amkette" | "Delux" | "GravaStar" | "IPI" | "Rapoo" | "Fater" | "Cooler Master" | "AJAZZ" | "Scyrox" | "Hitscan" | "ROCCAT" | "Thermaltake" | "Redgear" | "AULA" | "Sades" | "Xiaomi" | "LEOBOG" | "Kmart";
   name: string;
   /** Optional LunaFury controls, populated only after successful device reads. */
   lunafury?: import("../lamzu/lunafury.js").LunaFurySettings;
@@ -203,6 +258,21 @@ export interface MouseStatus {
   dpi: number;
   dpiY?: number;
   supportsSeparateDpiAxes?: boolean;
+  /**
+   * Logitech bunny hop on a mouse running from software (Host mode), in ms, 0 for
+   * off. The mouse has no known read for it, so the driver never sets this: the
+   * control panel fills it in from the last value it wrote.
+   */
+  hostBunnyHopMs?: number;
+  /**
+   * What a game profile makes the side buttons of a Logitech mouse running from
+   * software do, by the button's bit in the mouse's report (8 the back side
+   * button, 16 the front one): a HID keyboard usage and a modifier mask, or a
+   * media key by its HID consumer usage. A button with no entry keeps its normal
+   * Back or Forward click. The mouse holds none of this; Bridge presses the keys
+   * while the game runs.
+   */
+  hostButtons?: Record<number, { key: number; modifiers: number } | { consumer: number }>;
   /** Hall-effect primary-button tuning exposed by Logitech's 0x1B0C HID++ feature. */
   analogButtonTuning?: {
     maxActuation: number;
@@ -224,6 +294,13 @@ export interface MouseStatus {
   magneticButtons?: MagneticButtonsStatus;
   pollingRateHz: number;
   supportedPollingRates?: number[];
+  /**
+   * The report rate for one connection, for a game profile that sets wired and
+   * wireless apart. The mouse only has the rate of the connection it is on, so
+   * the driver never sets these: the control panel fills in the current link's.
+   */
+  pollingRateWirelessHz?: number;
+  pollingRateWiredHz?: number;
   activeProfile: number | null;
   /** Number of firmware-managed ATK configuration banks, when readable. */
   atkProfileCount?: number;
@@ -231,6 +308,8 @@ export interface MouseStatus {
   atkButtonMappings?: AtkStoredButton[];
   /** Receiver and pairing telemetry. Pairing controls are intentionally separate. */
   atkReceiver?: AtkReceiverInfo;
+  /** ROG Omni receiver firmware and paired devices. */
+  asusOmni?: AsusOmniInfo;
   /**
    * F1 Ultimate sensor sampling-rate mode: 0 Basic, 1 Shard, 2 Shard MAX.
    * Null until read; drivers without the 0x00b5 row leave it undefined.
@@ -248,6 +327,11 @@ export interface MouseStatus {
    */
   atkDongleLight?: number | null;
   /**
+   * Vendor catalog capability flags for ATK/VXE mice (e.g. noBottomButton,
+   * noAthleticsMax, supportDpiToggle). Undefined when the model is unlisted.
+   */
+  atkCatalogFeatures?: AtkDeviceFeatures;
+  /**
    * How many onboard profiles the device exposes, when it has a simple
    * numbered set the user can switch between (distinct from Logitech's
    * onboard-profile editor). Set together with a 1-based `activeProfile` and a
@@ -261,6 +345,8 @@ export interface MouseStatus {
    * fields above, which predate this and carry brand-specific shapes.
    */
   buttonMappings?: Record<string, string>;
+  /** The Rival 650's live assignments, including fields the UI cannot name. */
+  rival650ButtonMappings?: Rival650ButtonMappings;
   /**
    * Named power/performance modes a device offers as a single choice, with
    * `powerMode` holding the current one and a `setPowerMode(name)` method.
@@ -272,6 +358,12 @@ export interface MouseStatus {
   profileNames?: string[];
   /** Every action `setButtonMapping` will accept, in display order. */
   buttonOptions?: string[];
+  /**
+   * Factory assignments for the same button names, when the device has a reset
+   * we have measured. Set together with a `resetButtonMappings()` method, and
+   * the shared button remapper offers "restore defaults".
+   */
+  defaultButtonMappings?: Record<string, string>;
   /** Button names the device reported in an unknown or macro encoding. */
   fixedButtons?: string[];
   deviceMode?: "Onboard" | "Host" | "Unknown";
@@ -288,6 +380,35 @@ export interface MouseStatus {
   finalmouseDongleLedMode?: number | null;
   finalmouseTournamentScrollMode?: number | null;
   finalmouseTournamentScrollTimeoutMs?: number | null;
+  /** True on Starlight X dongles; false/undefined on Ultralight X. */
+  finalmouseIsSlx?: boolean | null;
+  /** Starlight X click mode per switch: 0 mechanical, 1 TMR analog. */
+  finalmouseClickModeL?: number | null;
+  finalmouseClickModeR?: number | null;
+  /** Starlight X release point per switch: 0 normal, 1 early, 2 late. */
+  finalmouseClickReleaseL?: number | null;
+  finalmouseClickReleaseR?: number | null;
+  /** Starlight X TMR actuation steps in 0.01 mm units (1-40). */
+  finalmouseTmrThrL?: number | null;
+  finalmouseTmrThrR?: number | null;
+  /** Starlight X rapid-trigger sensitivity in µm (150-250). */
+  finalmouseTmrHystL?: number | null;
+  finalmouseTmrHystR?: number | null;
+  /** Starlight X calibrated most-sensitive-point reference in µm. */
+  finalmouseTmrMspL?: number | null;
+  finalmouseTmrMspR?: number | null;
+  /** Starlight X PAW lift-off in millimetres (0.7-2.0). */
+  finalmousePawLodMm?: number | null;
+  /** True when the PAW value came from the custom slider rather than a preset. */
+  finalmousePawLodCustom?: boolean | null;
+  /** Starlight X profile roster size, when readable. */
+  finalmouseProfileCount?: number | null;
+  /** Starlight X active profile as a 0-based index. */
+  finalmouseProfileActive?: number | null;
+  /** Starlight X profile enable bitmask. */
+  finalmouseProfileEnabledMask?: number | null;
+  /** Starlight X profile names by 0-based index. */
+  finalmouseProfileNames?: Record<number, string> | null;
   /**
    * Incott's 2.4 GHz receiver LED: 0 connect & polling rate, 1 battery
    * status, 2 battery warning. A property of the dongle, so it is omitted
@@ -303,10 +424,17 @@ export interface MouseStatus {
    */
   incottFireKeyTimes?: number | null;
   incottFireKeyIntervalMs?: number | null;
+  /**
+   * GM3 onboard macros. The device answers no read for them, so this is the
+   * driver's own copy of what it uploaded; null entries are empty slots.
+   */
+  leobogMacros?: Array<LeobogGm3Macro | null> | null;
   signalStrength?: number | null;
   motionSync?: boolean | null;
   /** On-device DPI stages, where supported (Teevolution, Ninjutso, …). */
   dpiStages?: number[];
+  /** Per-stage Y DPI on devices that support independently stored axes. */
+  dpiStagesY?: number[];
   /** RGB colour for each DPI stage, as lowercase #rrggbb. */
   dpiStageColors?: string[];
   /** Active DPI stage index into `dpiStages` (0-based). */
@@ -355,6 +483,19 @@ export interface MouseStatus {
    */
   longRangeMode?: boolean | null;
   hyperMode?: boolean | null;
+  /** Hitscan web-protocol SPDT speed mode, per primary button. */
+  hitscanSpdt?: { left: boolean; right: boolean } | null;
+  /** Hitscan's four-way click timing, milliseconds, when its firmware reports it. */
+  hitscanClickTimings?: {
+    beforePress: number;
+    beforeRelease: number;
+    afterPress: number;
+    afterRelease: number;
+  } | null;
+  /** Hitscan scroll-wheel high-performance ("Tournament scroll") state. */
+  hitscanTournamentScroll?: boolean | null;
+  /** Hitscan competitive/tracking mode, when read. */
+  hitscanCompetitiveMode?: boolean | null;
   /** Sensor pinned to its highest frame rate (WLmouse "Turbo Mode"). */
   turboMode?: boolean | null;
   /** Whether button chords can change mouse settings without the driver. */
@@ -362,6 +503,27 @@ export interface MouseStatus {
   sensorMode?: "Eco" | "High" | "Ultra" | null;
   sensorModeStored?: 0 | 1 | null;
   sensorModeEditable?: boolean | null;
+  /**
+   * WALLHACK M-001 sensor scanning mode (function area 116): HIGH is the
+   * default frame rate, ACCEL pins the sensor to high performance at higher
+   * battery cost. Undefined when the mouse did not answer.
+   */
+  sensorScanningMode?: "HIGH" | "ACCEL" | null;
+  /** WALLHACK M-001 DPI acceleration on/off. Needs mouse firmware 57+. */
+  dynamicSensitivityEnabled?: boolean | null;
+  /** WALLHACK M-001 active DPI-acceleration curve. Needs mouse firmware 57+. */
+  dynamicSensitivityMode?: "classic" | "natural" | "jump" | "custom" | null;
+  /** WALLHACK M-001 motion-speed reporting (used to preview curves). */
+  dynamicSensitivitySpeedReporting?: boolean | null;
+  /**
+   * WALLHACK M-001 DPI-acceleration curve tables by mode. Each curve holds
+   * exactly 5 points: speed in sensor counts/ms, gain multiplier. Read on
+   * demand (not with the status poll); null until loaded.
+   */
+  dynamicSensitivityCurves?: Record<
+    "classic" | "natural" | "jump" | "custom",
+    Array<{ speed: number; gain: number }>
+  > | null;
   performanceDuration?: number | null;
   angleTuning?: number | null;
   wheelAcceleration?: boolean | null;
@@ -389,6 +551,12 @@ export interface MouseStatus {
     millimetres: number;
     minMillimetres: number;
     maxMillimetres: number;
+    /**
+     * The height of every code from `min` to `max`, index 0 being `min`, for
+     * scales whose steps are uneven. Left undefined, the heights between the
+     * two ends are interpolated linearly.
+     */
+    millimetresByCode?: number[];
   } | null;
   /** Explicit LOD choices when a mouse does not support all three common levels. */
   supportedLiftOffDistances?: Array<NonNullable<MouseStatus["liftOffDistance"]>>;

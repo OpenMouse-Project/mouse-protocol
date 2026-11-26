@@ -15,11 +15,10 @@
  *   Mini Wireless), built by comprehending `prime_wireless_wired.py`'s
  *   `settings`/`battery_level`/`save_command` through one `_patch_command`
  *   helper — same transform this file implements as `applyPrimeMiniWirelessFlag`.
- *   Both files were read in full. This module implements only the two Prime
- *   Mini Wireless product ids (`0x184A` wired, `0x1848` 2.4 GHz) per the
- *   scope of this change — see "Scope" below for why the plain Prime
- *   Wireless PIDs (`0x1842`/`0x1840`) are deliberately not registered here
- *   even though the command set is identical.
+ *   Both files were read in full. This module encodes the shared command set
+ *   for the two Prime Mini Wireless product ids (`0x184A` wired, `0x1848`
+ *   2.4 GHz) and the two plain Prime Wireless product ids (`0x1842` wired,
+ *   `0x1840` 2.4 GHz) — see "Scope" below.
  * - rivalcfg `rivalcfg/devices/dpi/truemove_air.py` — same TrueMove Air
  *   sensor table as the Rival 3 Wireless and Aerox 5 Wireless — imported
  *   from `./rival3-wireless.ts`'s `TRUEMOVE_AIR_DPI_TO_BYTE`, not re-derived.
@@ -60,19 +59,15 @@
  * in `PRIME_MINI_WIRELESS_COMMAND` below is the wired-mode value;
  * `applyPrimeMiniWirelessFlag` produces the 2.4 GHz-mode byte from it on demand.
  *
- * ## Scope: Prime Mini Wireless only, not the plain Prime Wireless
+ * ## Scope: Prime Mini Wireless and the plain Prime Wireless
  *
  * `prime_wireless_wired.py`/`prime_wireless_wireless.py` document the Prime
  * Mini Wireless and the plain (non-Mini) Prime Wireless as one shared
  * `settings` dict — genuinely the same command bytes, same DPI table, same
- * battery shape, differing only in physical product id. This change is
- * scoped to the Prime Mini Wireless cluster only: `./devices.ts` registers
- * `0x184A`/`0x1848` (Prime Mini Wireless) under family
- * `"prime-mini-wireless"` and deliberately does **not** register
- * `0x1842`/`0x1840` (plain Prime Wireless) — even though this module's
- * exported functions would encode identical bytes for either PID group, the
- * plain Prime Wireless is out of scope for this change and is left for
- * whichever future change actually verifies and ships it.
+ * battery shape, differing only in physical product id. `./devices.ts`
+ * registers `0x184A`/`0x1848` (Prime Mini Wireless) and `0x1842`/`0x1840`
+ * (plain Prime Wireless) under family `"prime-mini-wireless"`; this
+ * module's exported functions encode identical bytes for either PID group.
  *
  * ## No corroboration beyond rivalcfg was possible in this environment
  *

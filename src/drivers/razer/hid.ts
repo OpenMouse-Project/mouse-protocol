@@ -58,6 +58,8 @@ import {
   razerSetSleepTimeoutCommand,
   razerSetBacklightBrightnessCommand,
   razerSetStandardEffectCommand,
+  razerSetStandardCustomEffectCommand,
+  razerSetOneRowCustomFrameCommand,
   razerReadExtendedBrightnessCommand,
   razerSetExtendedBrightnessCommand,
   razerSetExtendedEffectCommand,
@@ -210,6 +212,8 @@ export class RazerHidClient {
   private lighting: MouseLighting | null = null;
   /** Same cache, one entry per led, for the extended-matrix family. */
   private lightingZones: MouseLighting[] | null = null;
+  private perLedLighting: MouseLighting[] | null = null;
+  private lightingQueue: Promise<unknown> = Promise.resolve();
 
   readonly device: HIDDevice;
 
@@ -374,7 +378,11 @@ export class RazerHidClient {
     // background refresh for every model that does not have it.
     const liftOff = this.profile()?.liftOff === true ? await this.readLiftOff() : null;
     const lighting = this.profile()?.standardMatrixLighting === true ? await this.readLighting() : null;
-    const lightingZones = this.profile()?.extendedMatrixLighting === true ? await this.readExtendedLighting() : null;
+    const lightingZones = this.profile()?.extendedMatrixLighting === true
+      ? await this.readExtendedLighting()
+      : lighting && this.profile()?.oneRowCustomFrameLedCount
+        ? [lighting, ...this.perLedLightingFromCache()]
+        : null;
     return {
       brand: "Razer",
       name: this.displayName(),
@@ -544,6 +552,14 @@ export class RazerHidClient {
    * breathing alone fails on hardware, that is the assumption to revisit.
    */
   async setLighting(lighting: MouseLighting): Promise<MouseLighting> {
+    // Keep a frame upload and activation together, including concurrent callers.
+    const run = this.lightingQueue.then(() => this.writeLighting(lighting));
+    this.lightingQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async writeLighting(lighting: MouseLighting): Promise<MouseLighting> {
+    if (lighting.hardwareZoneId !== undefined) return this.setPerLedLighting(lighting);
     if (this.profile()?.extendedMatrixLighting === true) return this.setExtendedLighting(lighting);
     if (this.profile()?.standardMatrixLighting !== true) {
       throw new Error("This mouse does not support changing the lighting yet.");
@@ -566,6 +582,9 @@ export class RazerHidClient {
     // Cached before the brightness step so a refused brightness cannot leave
     // the panel showing an effect the mouse is no longer running.
     this.lighting = { ...lighting, brightness: previous.brightness };
+    // A whole-mouse effect overrides every individual cell on screen. Its
+    // custom frame buffer remains on the device, but cannot be read back.
+    for (const cell of this.perLedLightingFromCache()) cell.mode = null;
     if (lighting.brightness != null && lighting.brightness !== previous.brightness) {
       await this.request(razerSetBacklightBrightnessCommand(lighting.brightness));
       const confirmed = decodeBacklightBrightness(await this.request(RAZER_BACKLIGHT_BRIGHTNESS_READ));
@@ -575,6 +594,56 @@ export class RazerHidClient {
       this.lighting = { ...this.lighting, brightness: confirmed };
     }
     return this.lighting;
+  }
+
+  private async setPerLedLighting(lighting: MouseLighting): Promise<MouseLighting> {
+    const cells = this.perLedLightingFromCache();
+    const index = lighting.hardwareZoneId!;
+    const previous = cells[index];
+    if (!Number.isInteger(index) || index < 0 || !previous || previous.zone !== lighting.zone) {
+      throw new Error(`This mouse has no "${lighting.zone}" individual LED zone.`);
+    }
+    if (lighting.mode !== "Off" && lighting.mode !== "Static") {
+      throw new Error("Individual LEDs support only Off or Static.");
+    }
+    if (lighting.mode === "Static" && lighting.color === null) {
+      throw new Error("An individual LED needs a colour.");
+    }
+    // Match OpenRGB's Diamondback path: upload the entire row from column 0,
+    // then latch custom mode on every edit. Single-cell uploads were accepted
+    // but the ticket reporter only saw LED 0 change. Unknown cells start black
+    // because this model cannot read its current custom-frame colours.
+    const colors = cells.map((cell) => cell.mode === "Static" ? cell.color ?? "#000000" : "#000000");
+    colors[index] = lighting.mode === "Off" ? "#000000" : lighting.color!;
+    await this.request(razerSetOneRowCustomFrameCommand(0, colors));
+    await this.request(razerSetStandardCustomEffectCommand());
+    // Commit the entire write-only cache only after upload and activation.
+    for (let i = 0; i < cells.length; i++) {
+      cells[i] = i === index
+        ? { ...previous, mode: lighting.mode, color: lighting.color }
+        : { ...cells[i], mode: cells[i].mode ?? "Off" };
+    }
+    this.lighting = { ...this.lightingFromCache(), mode: null };
+    return { ...cells[index] };
+  }
+
+  private perLedLightingFromCache(): MouseLighting[] {
+    this.perLedLighting ??= Array.from({ length: this.profile()?.oneRowCustomFrameLedCount ?? 0 }, (_, index) => ({
+      zone: `LED ${index}`,
+      group: "Custom frame",
+      hardwareZoneId: index,
+      modes: ["Off", "Static"],
+      mode: null,
+      color: "#00ff00",
+      color2: null,
+      colorModes: ["Static"],
+      dualColorModes: [],
+      reactiveModes: [],
+      speeds: [],
+      speed: null,
+      writeOnly: true,
+    }));
+    return this.perLedLighting;
   }
 
   /**

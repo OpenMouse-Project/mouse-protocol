@@ -1,6 +1,8 @@
 import type { MouseStatus, MouseUiHints } from "../mouse-types.ts";
 import {
   incottButtonActionCode,
+  incottMacroBindingForButton,
+  incottMacroSlotFromBinding,
   incottDecodeButtonBinding,
   incottDecodeDebounce,
   incottDecodeDpiStage,
@@ -35,12 +37,14 @@ import {
   incottIsWiredProduct,
   incottMacroChunks,
   incottLiftOffLabel,
+  incottLiftOffStepsForSensor,
   incottLiftOffTenths,
   incottNormalizeProductName,
   incottPerformanceModeFromWire,
   incottPerformanceModeToWire,
   incottValidateDpi,
   INCOTT_BUTTON_ACTIONS,
+  INCOTT_MACRO_ACTION_LABEL,
   INCOTT_BUTTON_NAMES,
   INCOTT_BUTTON_WIRE_INDEX,
   INCOTT_CMD_QUERY_BUTTON,
@@ -59,6 +63,7 @@ import {
   INCOTT_DPI_STAGE_COUNT,
   INCOTT_DPI_STEP,
   INCOTT_INPUT_REPORT_ID,
+  INCOTT_MACRO_CHUNK_SETTLE_MS,
   INCOTT_PERFORMANCE_MODE_NAMES,
   INCOTT_POLLING_STEPS_HZ,
   INCOTT_POLLING_STEPS_HZ_WIRED,
@@ -176,18 +181,29 @@ export class IncottTransactionQueue {
   }
 
   /**
-   * Sends a 32-byte OUTPUT report, the macro upload's data path. Queued with
-   * everything else so it cannot interleave with the 8-byte header that
-   * announces it, and followed by a settle delay because the vendor waits
-   * 80 ms between the two halves of each chunk.
+   * Sends one macro chunk: the 8-byte feature report announcing it, the gap
+   * the device needs to get ready, then the 32-byte OUTPUT report carrying
+   * it — as ONE queue entry.
+   *
+   * The two halves must be one entry, not two. Queueing them separately looks
+   * ordered and is not: `await`ing the header hands control back to the event
+   * loop, so anything queued meanwhile — a status refresh, a battery read,
+   * any of the app's background polling — runs between a header and the chunk
+   * it announced. The device is waiting for an output report at that point
+   * and gets a feature query instead. Nothing acknowledges a chunk, so the
+   * damage is silent.
    */
-  sendOutput(reportId: number, payload: Uint8Array): Promise<void> {
+  sendChunk(header: Uint8Array, reportId: number, chunk: Uint8Array, settleMs = this.settleMs): Promise<void> {
     const run = this.tail.then(async () => {
       if (!this.transport.sendReport) {
         throw new Error("This transport cannot send output reports, which the macro upload needs.");
       }
-      await this.transport.sendReport(reportId, toArrayBuffer(payload));
-      await this.sleep(this.settleMs);
+      await this.transport.sendFeatureReport(INCOTT_REPORT_ID, toArrayBuffer(header));
+      // The settle happens BETWEEN the header and the chunk. The vendor waits
+      // there — not after — which reads as the device needing that gap to get
+      // ready for the output report.
+      await this.sleep(settleMs);
+      await this.transport.sendReport(reportId, toArrayBuffer(chunk));
     });
     this.tail = run.catch(() => undefined);
     return run;
@@ -456,6 +472,11 @@ export class IncottHidClient {
    * look-alike (see the class comment and `open()`).
    */
   private collectionVerified: boolean | null = null;
+  /**
+   * The fitted sensor from the latest identity reply (`open()`/`readStatus()`),
+   * `null` until one decodes. Lift-off's wire table depends on it.
+   */
+  private sensorId: number | null = null;
 
   constructor(device: HIDDevice, options?: IncottTransactionOptions) {
     this.device = device;
@@ -601,6 +622,7 @@ export class IncottHidClient {
     this.device.addEventListener("inputreport", this.onInputReport);
     const identity = incottDecodeIdentity(await this.query(INCOTT_CMD_QUERY_IDENTITY, INCOTT_SUB_NONE));
     this.collectionVerified = identity !== null;
+    this.sensorId = identity?.sensorId ?? null;
   }
 
   async close(): Promise<void> {
@@ -694,9 +716,9 @@ export class IncottHidClient {
     // nibble trick (`incottDecodeLiftOff`/`incottDecodeMotionSync`, still
     // exported and tested): verified on hardware 2026-09-08 that both forms
     // agree at every step (lift-off hw 0/1/2, motion sync 0/1/0).
-    const liftOffTenths = dead
-      ? null
-      : incottDecodeLiftOffDirect(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_LOD));
+    // Decoded once the identity reply below has named the sensor: the
+    // hw-to-millimetre table differs between the PAW3950 and the PAW3395.
+    const liftOffFrame = dead ? null : await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_LOD);
     const motionSync = dead
       ? null
       : incottDecodeToggle(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_MOTION_SYNC), INCOTT_SUB_MOTION_SYNC);
@@ -751,6 +773,10 @@ export class IncottHidClient {
     const identity = dead
       ? null
       : incottDecodeIdentity(await this.query(INCOTT_CMD_QUERY_IDENTITY, INCOTT_SUB_NONE));
+    // A failed refresh keeps the sensor the last good reply named, so one
+    // dropped identity query cannot switch a PAW3395 to the PAW3950 table.
+    if (identity?.sensorId != null) this.sensorId = identity.sensorId;
+    const liftOffTenths = liftOffFrame === null ? null : incottDecodeLiftOffDirect(liftOffFrame, this.sensorId);
 
     // The model READ FROM THE DEVICE is preferred over the product string:
     // it is the only source that works on the 2.4 GHz dongle, where the
@@ -891,12 +917,24 @@ export class IncottHidClient {
       // when no input report has arrived yet, regardless of connection.
       batteryState: batteryCharging === null ? "Unknown" : batteryCharging ? "Charging" : "Discharging",
       liftOffDistance: liftOffTenths === null ? null : incottLiftOffLabel(liftOffTenths),
-      supportedLiftOffDistances: ["Low", "Medium", "High"],
+      supportedLiftOffDistances: incottLiftOffStepsForSensor(this.sensorId).map((tenths) => incottLiftOffLabel(tenths)!),
       // Both fields together, or neither: the shared remapper only renders
       // when it has the current assignments AND the list of actions it may
       // write back.
       ...(buttonMappings !== null
-        ? { buttonMappings, buttonOptions: INCOTT_BUTTON_ACTIONS.map(([label]) => label) }
+        ? {
+            buttonMappings,
+            // One "Macro" entry, not ten numbered slots: a button can only
+            // run the buffer carrying its own index, so offering a choice of
+            // slot would list combinations the device ignores. Nothing can
+            // ask which buffers hold a macro, so the option is always
+            // present; choosing it on a button with no macro uploaded is
+            // accepted and does nothing, as in the vendor tool.
+            buttonOptions: [
+              ...INCOTT_BUTTON_ACTIONS.map(([label]) => label),
+              INCOTT_MACRO_ACTION_LABEL,
+            ],
+          }
         : {}),
       motionSync,
       rippleControl,
@@ -966,13 +1004,29 @@ export class IncottHidClient {
    * The device does not acknowledge any of it, so unlike every other setter
    * here there is nothing to verify against: there is no macro read command.
    * Bind a button to `Macro <n>` and press it — that is the only confirmation
-   * available.
+   * available. That makes both halves of `sendChunk` load-bearing: a chunk
+   * sent too early, or after something else has been allowed in between, is
+   * dropped in silence and the buffer keeps whatever that region held before
+   * — so a short macro can replay the tail of a longer one it replaced, or a
+   * setting can survive the upload meant to change it.
+   *
+   * Re-bind the button AFTER every upload, even when it is already on
+   * `Macro`: `setButtonMapping(button, "Macro")`. HARDWARE-CONFIRMED
+   * 2026-11-06: the loop mode and repeat count take effect when the binding is
+   * written, not when the buffer is. Uploading alone replaced the steps but
+   * kept the old loop mode, so a macro set to repeat ran only while held. The
+   * vendor writes the binding after the buffer on every save, which is why
+   * its own captures never show the problem.
    */
   async uploadMacro(macro: IncottMacro): Promise<void> {
     const chunks = incottMacroChunks(incottEncodeMacroBuffer(macro));
     for (const [index, chunk] of chunks.entries()) {
-      await this.write(incottEncodeMacroChunkHeader(index, macro.bufferId));
-      await this.queue.sendOutput(INCOTT_REPORT_ID, chunk);
+      await this.queue.sendChunk(
+        incottEncodeMacroChunkHeader(index, macro.bufferId),
+        INCOTT_REPORT_ID,
+        chunk,
+        INCOTT_MACRO_CHUNK_SETTLE_MS,
+      );
     }
   }
 
@@ -1058,10 +1112,10 @@ export class IncottHidClient {
 
   async setLiftOffDistance(level: LiftOffLevel): Promise<LiftOffLevel> {
     const tenths = incottLiftOffTenths(level);
-    await this.write(incottEncodeSetLiftOff(tenths));
+    await this.write(incottEncodeSetLiftOff(tenths, this.sensorId));
     // Symmetric single-purpose read (`0x84`/`0x01`), preferred over the
     // packed byte-7 nibble form — see the comment in `readStatus()`.
-    const gotTenths = incottDecodeLiftOffDirect(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_LOD));
+    const gotTenths = incottDecodeLiftOffDirect(await this.query(INCOTT_CMD_QUERY_SENSOR, INCOTT_SUB_LOD), this.sensorId);
     const got = gotTenths === null ? null : incottLiftOffLabel(gotTenths);
     if (got !== level) {
       throw new Error(`The mouse kept a ${got ?? "unreadable"} lift-off distance instead of ${level}.`);
@@ -1150,6 +1204,17 @@ export class IncottHidClient {
       const index = INCOTT_BUTTON_WIRE_INDEX[name];
       const binding = incottDecodeButtonBinding(await this.query(INCOTT_CMD_QUERY_BUTTON, index), index);
       if (binding === null) return null;
+      // A macro binding is only meaningful against the button it was read
+      // from: the slot it names should be that button's own index. One
+      // pointing elsewhere was written by something that had the model wrong,
+      // so report it rather than showing it as a working macro.
+      const macroSlot = incottMacroSlotFromBinding(binding.code);
+      if (macroSlot !== null) {
+        mappings[name] = macroSlot === INCOTT_BUTTON_NAMES.indexOf(name)
+          ? INCOTT_MACRO_ACTION_LABEL
+          : `Macro (buffer ${macroSlot})`;
+        continue;
+      }
       mappings[name] = binding.label ?? `Unknown (0x${binding.code.toString(16).padStart(8, "0")})`;
     }
     return mappings;
@@ -1167,7 +1232,11 @@ export class IncottHidClient {
   async setButtonMapping(button: string, actionLabel: string): Promise<void> {
     const name = INCOTT_BUTTON_NAMES.find((candidate) => candidate === button);
     if (name === undefined) throw new Error(`This mouse has no "${button}" button.`);
-    const code = incottButtonActionCode(actionLabel);
+    // "Macro" resolves per button: the buffer a button runs is its own
+    // display index, so the binding cannot be looked up from the label alone.
+    const code = actionLabel === INCOTT_MACRO_ACTION_LABEL
+      ? incottMacroBindingForButton(name)
+      : incottButtonActionCode(actionLabel);
     if (code === null) throw new Error(`Unknown button action "${actionLabel}".`);
 
     const index = INCOTT_BUTTON_WIRE_INDEX[name];

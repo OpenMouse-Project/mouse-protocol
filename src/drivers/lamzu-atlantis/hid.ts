@@ -1,5 +1,6 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import {
+  LAMZU_ATLANTIS_CLEAR_SETTINGS as CLEAR_SETTINGS,
   LAMZU_ATLANTIS_COMMAND as COMMAND,
   LAMZU_ATLANTIS_FLASH as FLASH,
   LAMZU_ATLANTIS_MAX_DPI as DPI_MAX,
@@ -9,6 +10,7 @@ import {
   LAMZU_ATLANTIS_MIN_DPI as DPI_MIN,
   LAMZU_ATLANTIS_PROFILE_COUNT as PROFILE_COUNT,
   LAMZU_ATLANTIS_REPORT_ID as REPORT_ID,
+  LAMZU_ATLANTIS_SENSOR3955_STAGE_STRIDE as SENSOR3955_STAGE_STRIDE,
   LAMZU_ATLANTIS_SLEEP_OPTIONS as SLEEP_OPTIONS,
   LAMZU_ATLANTIS_STAGE_STRIDE as STAGE_STRIDE,
   LAMZU_ATLANTIS_DPI_STEP as DPI_STEP,
@@ -16,21 +18,30 @@ import {
   LAMZU_ATLANTIS_USAGE as CONFIG_USAGE,
   LAMZU_ATLANTIS_USAGE_PAGE as CONFIG_USAGE_PAGE,
   LAMZU_ATLANTIS_WRITE_ACTIVE_PROFILE as WRITE_ACTIVE_PROFILE,
+  lamzuAtlantisDecodeAngleTuning,
   lamzuAtlantisDecodeBattery,
   lamzuAtlantisDecodeDpiStage,
+  lamzuAtlantisDecodeDpiStage3955,
   lamzuAtlantisDecodeFirmware,
   lamzuAtlantisDecodeLiftOffDistance,
   lamzuAtlantisDecodePollingRate,
   lamzuAtlantisDecodeReply,
+  lamzuAtlantisEncodeAngleTuning,
+  lamzuAtlantisEncodeDpiStage,
+  lamzuAtlantisEncodeDpiStage3955,
   lamzuAtlantisEncodeLiftOffDistance,
   lamzuAtlantisEncodePollingRate,
   lamzuAtlantisEncodeRequest,
   lamzuAtlantisFieldIsIntact,
+  lamzuAtlantisLiftOffScale,
+  lamzuAtlantisNearestLiftOffStop,
   lamzuAtlantisProduct,
   lamzuAtlantisSealField,
+  type LamzuAtlantisDpiLayout,
+  type LamzuAtlantisDpiStage,
   type LamzuAtlantisProduct,
+  type LamzuAtlantisRateFamily,
 } from "@openmouse/protocol/lamzu";
-import { pulsarVgnEncodeDpi } from "@openmouse/protocol/pulsar";
 import {
   TEEVOLUTION_SHARED_BUTTON_OPTIONS,
   teevolutionDecodeButtonMappings,
@@ -40,9 +51,19 @@ import {
 
 const RESPONSE_TIMEOUT_MS = 600;
 const RESPONSE_ATTEMPTS = 3;
+/** How long Scyrox's configurator waits for the ClearSetting echo. */
+const RESTORE_TIMEOUT_MS = 6000;
 const DEBOUNCE_MAX_MS = 15;
+const ANGLE_TUNING_MAX_DEGREES = 30;
 
 type LiftOffDistance = NonNullable<MouseStatus["liftOffDistance"]>;
+
+/** One side of a linked pair of one-byte flags (turbo and performance mode). */
+interface LinkedFlag {
+  address: number;
+  field: "turboMode" | "performanceMode";
+  label: string;
+}
 
 /**
  * Lamzu's Atlantis generation (0x3554), which speaks CompX's report-8
@@ -98,8 +119,70 @@ export class LamzuAtlantisHidClient {
       && LamzuAtlantisHidClient.hasConfigCollection(device);
   }
 
-  private product(): LamzuAtlantisProduct | undefined {
+  protected product(): LamzuAtlantisProduct | undefined {
     return this.productOverride ?? lamzuAtlantisProduct(this.device.vendorId, this.device.productId);
+  }
+
+  /**
+   * The rate bytes are per-family: the same byte means different rates on
+   * different CompX generations (0x10 is 1,000 Hz on a Lamzu receiver and
+   * 2,000 Hz on a Scyrox), so decoding needs the product's declaration.
+   */
+  protected rateFamily(): LamzuAtlantisRateFamily {
+    return this.product()?.rateFamily ?? "wired";
+  }
+
+  /**
+   * Where this product's DPI stage values live. CompX's 3955-sensor firmware
+   * moved them to six-byte records at flash 6912 and left the factory
+   * defaults behind in the legacy fields, so a 3955 mouse read through the
+   * legacy region reports a DPI it is not on. The stage read, write and
+   * verify all route through the helpers below.
+   */
+  protected dpiLayout(): LamzuAtlantisDpiLayout {
+    return this.product()?.dpiLayout ?? "legacy";
+  }
+
+  private isSensor3955(): boolean {
+    return this.dpiLayout() === "sensor3955";
+  }
+
+  private dpiStageAddress(stage: number): number {
+    return this.isSensor3955()
+      ? FLASH.sensor3955DpiValues + stage * SENSOR3955_STAGE_STRIDE
+      : FLASH.dpiValues + stage * STAGE_STRIDE;
+  }
+
+  private dpiStageStride(): number {
+    return this.isSensor3955() ? SENSOR3955_STAGE_STRIDE : STAGE_STRIDE;
+  }
+
+  private decodeDpiStage(field: Uint8Array): LamzuAtlantisDpiStage | null {
+    return this.isSensor3955()
+      ? lamzuAtlantisDecodeDpiStage3955(field)
+      : lamzuAtlantisDecodeDpiStage(field);
+  }
+
+  /**
+   * The flash byte that switches 20,000 FPS sensor scanning, or null when the
+   * product has no such switch. Read raw rather than seal-checked: the vendor
+   * reads this byte without a checksum too (its map calls it Scyrox20K on
+   * Scyrox hardware, where other CompX models keep a different field at the
+   * same address), and a never-written byte may carry no seal at all.
+   */
+  protected turboModeAddress(): number | null {
+    return null;
+  }
+
+  /**
+   * Whether turbo and performance mode move together: turbo on turns
+   * performance mode on first, and performance mode off turns turbo off
+   * first. Off by default, where turbo on without performance mode is refused
+   * and performance mode is written on its own; a subclass opts in only where
+   * the vendor's own tool links the two.
+   */
+  protected linksTurboToPerformanceMode(): boolean {
+    return false;
   }
 
   protected minimumDpi(): number {
@@ -228,7 +311,7 @@ export class LamzuAtlantisHidClient {
   }
 
   getDebounceMaxMs(): number {
-    return DEBOUNCE_MAX_MS;
+    return this.debounceMaxMs();
   }
 
   getSleepOptions(): readonly number[] {
@@ -256,6 +339,7 @@ export class LamzuAtlantisHidClient {
     return await this.transaction(async () => {
       if (live && this.lastStatus) return await this.readLiveStatus(this.lastStatus);
 
+      await this.identify();
       const battery = lamzuAtlantisDecodeBattery(await this.request(COMMAND.batteryLevel));
       const profileCount = this.onboardProfileCount();
       const activeProfile = profileCount > 0 ? (await this.request(COMMAND.getCurrentConfig))[0] ?? 0 : null;
@@ -272,20 +356,34 @@ export class LamzuAtlantisHidClient {
       const stagesY: number[] = [];
       const colors: string[] = [];
       for (let stage = 0; stage < stageCount; stage += 1) {
-        const address = FLASH.dpiValues + stage * STAGE_STRIDE;
-        const decoded = lamzuAtlantisDecodeDpiStage(await this.readRaw(address, STAGE_STRIDE));
+        const address = this.dpiStageAddress(stage);
+        const decoded = this.decodeDpiStage(await this.readRaw(address, this.dpiStageStride()));
         // A stage carries its own checksum, so a failed decode means a corrupt
         // read. Reporting a plausible-looking 50 DPI instead would be a lie.
         if (!decoded) throw new Error(`The mouse returned a corrupt DPI stage from address ${address}.`);
         stages.push(decoded.x);
         stagesY.push(decoded.y);
+        // Stage colours did not move with the values: the 3955 layout keeps
+        // them in the legacy region too.
         const color = await this.readField(FLASH.dpiStageColors + stage * STAGE_STRIDE, 3);
         colors.push(`#${[...color].map((value) => value.toString(16).padStart(2, "0")).join("")}`);
       }
 
-      const liftOffRaw = this.supports("supportsLiftOffDistance")
+      const liftOffMillimetres = this.product()?.liftOffMillimetres;
+      const liftOffStopCodes = this.product()?.liftOffStopCodes;
+      const liftOffRaw = this.supports("supportsLiftOffDistance") || liftOffMillimetres || liftOffStopCodes
         ? (await this.readField(FLASH.liftOffDistance, 1))[0] ?? 0
         : null;
+      const liftOffScale = liftOffMillimetres && liftOffRaw !== null
+        ? lamzuAtlantisLiftOffScale(liftOffRaw, liftOffMillimetres)
+        : undefined;
+      // A scale product's byte is a height code, not one of Lamzu's two stops,
+      // and a stop-code product's byte is whatever its own table says.
+      const liftOffDistance = liftOffStopCodes
+        ? this.liftOffStopForCode(liftOffRaw)
+        : liftOffScale
+          ? lamzuAtlantisNearestLiftOffStop(liftOffScale.millimetres)
+          : liftOffRaw === null || liftOffMillimetres ? null : lamzuAtlantisDecodeLiftOffDistance(liftOffRaw);
       const debounceMs = (await this.readField(FLASH.debounceTime, 1))[0] ?? 0;
       const sleepRaw = this.supports("supportsSleepTimeout")
         ? (await this.readField(FLASH.sleepTime, 1))[0] ?? 0
@@ -305,7 +403,14 @@ export class LamzuAtlantisHidClient {
       const hyperMode = this.supports("supportsHyperMode")
         ? (await this.readField(FLASH.highPerformance, 1))[0] === 1
         : undefined;
-      const keys = await teevolutionReadKeyTable((address, length) => this.readRaw(address, length));
+      const turboAddress = this.turboModeAddress();
+      const turboMode = turboAddress === null
+        ? undefined
+        : (await this.readRaw(turboAddress, 1))[0] !== 0;
+      const angleTuning = this.product()?.supportsAngleTuning === true
+        ? await this.readAngleTuning()
+        : undefined;
+      const keys =await teevolutionReadKeyTable((address, length) => this.readRaw(address, length));
       const buttonMappings = teevolutionDecodeButtonMappings(keys, 0);
 
       const wireless = this.isWireless();
@@ -335,7 +440,7 @@ export class LamzuAtlantisHidClient {
         dpiStages: stages,
         dpiStageColors: colors,
         activeDpiStage: stageIndex,
-        pollingRateHz: lamzuAtlantisDecodePollingRate(pollingRaw) ?? this.getSupportedPollingRates()[0] ?? 1000,
+        pollingRateHz: lamzuAtlantisDecodePollingRate(pollingRaw, this.rateFamily()) ?? this.getSupportedPollingRates()[0] ?? 1000,
         supportedPollingRates: this.getSupportedPollingRates(),
         // The profile byte is 0-based on the wire and 1-based in Lamzu's UI.
         activeProfile: activeProfile === null ? null : activeProfile + 1,
@@ -344,12 +449,18 @@ export class LamzuAtlantisHidClient {
         connectionDetail: wireless ? "2.4 GHz receiver" : "Wired USB",
         debounceMs,
         ...(sleepRaw !== null ? { sleepTimeout: sleepRaw > 0 ? sleepRaw * TIMER_STEP_SECONDS : null } : {}),
-        liftOffDistance: liftOffRaw === null ? null : lamzuAtlantisDecodeLiftOffDistance(liftOffRaw),
+        liftOffDistance,
+        ...(liftOffScale !== undefined ? { liftOffScale } : {}),
+        ...(liftOffStopCodes
+          ? { supportedLiftOffDistances: (["Low", "Medium", "High"] as const).filter((stop) => liftOffStopCodes[stop] !== undefined) }
+          : {}),
         ...(motionSync !== undefined ? { motionSync } : {}),
         ...(angleSnapping !== undefined ? { angleSnapping } : {}),
         ...(rippleControl !== undefined ? { rippleControl } : {}),
         ...(performanceMode !== undefined ? { performanceMode } : {}),
         ...(hyperMode !== undefined ? { hyperMode } : {}),
+        ...(turboMode !== undefined ? { turboMode } : {}),
+        ...(angleTuning !== undefined ? { angleTuning } : {}),
         buttonMappings,
         buttonOptions: TEEVOLUTION_SHARED_BUTTON_OPTIONS,
         firmware: [this.firmware],
@@ -360,23 +471,37 @@ export class LamzuAtlantisHidClient {
   private async readLiveStatus(previous: MouseStatus): Promise<MouseStatus> {
     const battery = lamzuAtlantisDecodeBattery(await this.request(COMMAND.batteryLevel));
     const pollingRaw = (await this.readField(FLASH.reportRate, 1))[0] ?? 0;
+    // The DPI button and the vendor's configurator move the active stage
+    // without telling this client, so the live sweep re-reads the index. The
+    // stage list itself changes only through software, which drops the cache.
+    const stages = previous.dpiStages ?? [];
+    const stageIndex = Math.min(
+      (await this.readField(FLASH.currentDpi, 1))[0] ?? previous.activeDpiStage ?? 0,
+      Math.max(stages.length - 1, 0),
+    );
+    const dpi = stages[stageIndex];
     return this.lastStatus = {
       ...previous,
       batteryPercent: battery.percent,
       batteryVoltageMv: battery.millivolts,
       batteryState: battery.charging ? "Charging" : "Discharging",
-      pollingRateHz: lamzuAtlantisDecodePollingRate(pollingRaw) ?? previous.pollingRateHz,
+      pollingRateHz: lamzuAtlantisDecodePollingRate(pollingRaw, this.rateFamily()) ?? previous.pollingRateHz,
+      ...(dpi === undefined ? {} : {
+        activeDpiStage: stageIndex,
+        dpi,
+        dpiY: this.stagesY[stageIndex] ?? dpi,
+      }),
     };
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
     return await this.transaction(async () => {
       const supported = this.getSupportedPollingRates();
-      const encoded = lamzuAtlantisEncodePollingRate(pollingRateHz, this.product()?.rateFamily ?? "wired");
+      const encoded = lamzuAtlantisEncodePollingRate(pollingRateHz, this.rateFamily());
       if (encoded === null || !supported.includes(pollingRateHz)) {
         throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
       }
-      const confirmed = lamzuAtlantisDecodePollingRate(await this.writeByte(FLASH.reportRate, encoded));
+      const confirmed = lamzuAtlantisDecodePollingRate(await this.writeByte(FLASH.reportRate, encoded), this.rateFamily());
       if (confirmed !== pollingRateHz) {
         throw new Error(`The mouse kept ${confirmed ?? "an unknown rate"} instead of ${pollingRateHz} Hz.`);
       }
@@ -385,8 +510,31 @@ export class LamzuAtlantisHidClient {
     });
   }
 
+  private debounceMaxMs(): number {
+    return this.product()?.maxDebounceMs ?? DEBOUNCE_MAX_MS;
+  }
+
+  private liftOffStopForCode(code: number | null): LiftOffDistance | null {
+    const table = this.product()?.liftOffStopCodes;
+    if (!table || code === null) return null;
+    return (["Low", "Medium", "High"] as const).find((stop) => table[stop] === code) ?? null;
+  }
+
   async setLiftOffDistance(value: LiftOffDistance): Promise<LiftOffDistance> {
     return await this.transaction(async () => {
+      const stopCodes = this.product()?.liftOffStopCodes;
+      if (stopCodes) {
+        const code = stopCodes[value as "Low" | "Medium" | "High"];
+        if (code === undefined) {
+          throw new Error(`This mouse does not support a ${value.toLowerCase()} lift-off distance.`);
+        }
+        const confirmed = this.liftOffStopForCode(await this.writeByte(FLASH.liftOffDistance, code));
+        if (confirmed !== value) {
+          throw new Error(`The mouse kept a ${String(confirmed).toLowerCase()} lift-off distance instead of ${value.toLowerCase()}.`);
+        }
+        this.patch({ liftOffDistance: confirmed });
+        return confirmed;
+      }
       if (!this.supports("supportsLiftOffDistance")) {
         throw new Error("This mouse does not expose a configurable lift-off distance.");
       }
@@ -403,10 +551,67 @@ export class LamzuAtlantisHidClient {
     });
   }
 
+  /** The height-code setter for products with a lift-off scale (`liftOffMillimetres`). */
+  async setLiftOffScale(code: number): Promise<number> {
+    return await this.transaction(async () => {
+      const millimetres = this.product()?.liftOffMillimetres;
+      if (!millimetres) throw new Error("This mouse does not expose a lift-off scale.");
+      if (lamzuAtlantisLiftOffScale(code, millimetres) === null) {
+        throw new Error(`Lift-off must be a code between 1 and ${millimetres.length}.`);
+      }
+      const confirmed = await this.writeByte(FLASH.liftOffDistance, code);
+      const scale = lamzuAtlantisLiftOffScale(confirmed, millimetres);
+      if (confirmed !== code || !scale) {
+        throw new Error(`The mouse kept lift-off code ${confirmed} instead of ${code}.`);
+      }
+      this.patch({ liftOffScale: scale, liftOffDistance: lamzuAtlantisNearestLiftOffStop(scale.millimetres) });
+      return confirmed;
+    });
+  }
+
+  async setAngleTuning(degrees: number): Promise<number> {
+    return await this.transaction(async () => {
+      if (this.product()?.supportsAngleTuning !== true) throw new Error("This mouse does not expose angle tuning.");
+      if (!Number.isInteger(degrees) || Math.abs(degrees) > ANGLE_TUNING_MAX_DEGREES) {
+        throw new Error(`Angle tuning must be a whole number of degrees between -${ANGLE_TUNING_MAX_DEGREES} and ${ANGLE_TUNING_MAX_DEGREES}.`);
+      }
+      // The vendor configurator switches the feature on before its first angle
+      // write and never switches it off again.
+      if ((await this.readField(FLASH.angleTuneState, 1))[0] !== 1
+        && await this.writeByte(FLASH.angleTuneState, 1) !== 1) {
+        throw new Error("The mouse did not switch angle tuning on.");
+      }
+      const stored = await this.writeByte(FLASH.angleTune, lamzuAtlantisEncodeAngleTuning(degrees));
+      const confirmed = lamzuAtlantisDecodeAngleTuning(stored);
+      if (confirmed !== degrees) throw new Error(`The mouse kept a ${confirmed} degree angle instead of ${degrees}.`);
+      this.patch({ angleTuning: confirmed });
+      return confirmed;
+    });
+  }
+
+  /**
+   * Restores the factory settings with CompX's ClearSetting. The mouse echoes
+   * the command once its flash is rewritten, which can take seconds, so the
+   * request goes out once with a long wait instead of being retried: a retry
+   * would only erase it again. The cache is dropped before the request, since
+   * it describes the settings being erased.
+   */
+  async factoryReset(): Promise<void> {
+    await this.transaction(async () => {
+      if (this.product()?.supportsFactoryReset !== true) {
+        throw new Error("This mouse does not expose a settings restore.");
+      }
+      this.lastStatus = null;
+      this.stagesY = [];
+      await this.exchange(CLEAR_SETTINGS, 0, [], { timeoutMs: RESTORE_TIMEOUT_MS, attempts: 1 });
+    });
+  }
+
   async setDebounceTime(milliseconds: number): Promise<number> {
     return await this.transaction(async () => {
-      if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > DEBOUNCE_MAX_MS) {
-        throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${DEBOUNCE_MAX_MS}.`);
+      const max = this.debounceMaxMs();
+      if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > max) {
+        throw new Error(`Debounce must be a whole number of milliseconds between 0 and ${max}.`);
       }
       const confirmed = await this.writeByte(FLASH.debounceTime, milliseconds);
       if (confirmed !== milliseconds) {
@@ -428,11 +633,18 @@ export class LamzuAtlantisHidClient {
         || seconds % TIMER_STEP_SECONDS !== 0) {
         throw new Error(`The sleep timeout must be a whole number of ${TIMER_STEP_SECONDS}-second steps up to ${MAX_TIMER_SECONDS} seconds.`);
       }
-      const confirmed = (await this.writeByte(FLASH.sleepTime, seconds / TIMER_STEP_SECONDS)) * TIMER_STEP_SECONDS;
+      const units = seconds / TIMER_STEP_SECONDS;
+      const confirmed = (await this.writeByte(FLASH.sleepTime, units)) * TIMER_STEP_SECONDS;
       if (confirmed !== seconds) {
         throw new Error(`The mouse kept a ${confirmed} second sleep timeout instead of ${seconds} seconds.`);
       }
       this.patch({ sleepTimeout: confirmed });
+      if (this.product()?.mirrorSleepToPerformanceTime === true) {
+        const mirrored = await this.writeByte(FLASH.performanceTime, units);
+        if (mirrored !== units) {
+          throw new Error(`The mouse kept ${mirrored * TIMER_STEP_SECONDS} seconds in its performance timer instead of ${seconds}.`);
+        }
+      }
       return confirmed;
     });
   }
@@ -454,12 +666,54 @@ export class LamzuAtlantisHidClient {
 
   async setPerformanceMode(enabled: boolean): Promise<boolean> {
     if (!this.supports("supportsPerformanceMode")) throw new Error("This mouse does not expose performance mode.");
-    return await this.setFlag(FLASH.performanceState, enabled, "performanceMode", "competition mode");
+    const turboAddress = this.turboModeAddress();
+    if (enabled || turboAddress === null || !this.linksTurboToPerformanceMode()) {
+      return await this.setFlag(FLASH.performanceState, enabled, "performanceMode", "competition mode");
+    }
+    // Linked: turbo only runs under performance mode, so switching that off
+    // takes turbo with it rather than leaving a stored turbo byte the mouse
+    // would act on later.
+    return await this.transaction(async () => {
+      await this.writeLinkedFlags(
+        { address: turboAddress, field: "turboMode", label: "turbo mode" },
+        { address: FLASH.performanceState, field: "performanceMode", label: "competition mode" },
+        false,
+      );
+      return false;
+    });
   }
 
   async setHyperMode(enabled: boolean): Promise<boolean> {
     if (!this.supports("supportsHyperMode")) throw new Error("This mouse does not expose a high-performance mode.");
     return await this.setFlag(FLASH.highPerformance, enabled, "hyperMode", "high performance");
+  }
+
+  /**
+   * 20,000 FPS sensor scanning, shown as the shared "turbo mode" switch. It
+   * only runs under performance mode. Where the two are linked, turning turbo
+   * on turns performance mode on first; otherwise it is refused until
+   * performance mode is on.
+   */
+  async setTurboMode(enabled: boolean): Promise<boolean> {
+    return await this.transaction(async () => {
+      const address = this.turboModeAddress();
+      if (address === null) throw new Error("This mouse does not expose a turbo frame-rate mode.");
+      if (enabled && (await this.readField(FLASH.performanceState, 1))[0] !== 1) {
+        if (!this.linksTurboToPerformanceMode()) {
+          throw new Error("20,000 FPS mode requires performance mode to be turned on first.");
+        }
+        await this.writeLinkedFlags(
+          { address: FLASH.performanceState, field: "performanceMode", label: "competition mode" },
+          { address, field: "turboMode", label: "turbo mode" },
+          true,
+        );
+        return true;
+      }
+      const confirmed = (await this.writeByte(address, enabled ? 1 : 0)) === 1;
+      if (confirmed !== enabled) throw new Error(`The mouse left turbo mode ${confirmed ? "on" : "off"}.`);
+      this.patch({ turboMode: confirmed });
+      return confirmed;
+    });
   }
 
   async setDpi(dpi: number): Promise<number> {
@@ -486,14 +740,17 @@ export class LamzuAtlantisHidClient {
     if (!Number.isInteger(dpi) || dpi < minDpi || dpi > maxDpi || (dpi - minDpi) % dpiStep !== 0) {
       throw new Error(`DPI must be between ${minDpi} and ${maxDpi} in ${dpiStep}-DPI steps.`);
     }
-    const address = FLASH.dpiValues + stage * STAGE_STRIDE;
-    // pulsarVgnEncodeDpi returns the stage's four bytes with its checksum
-    // already in place, so this writes them as-is rather than re-sealing.
-    // It writes one value to both axes, so a stage Lamzu's own app had set to
-    // separate x and y is flattened here; asymmetric writes are not attempted
-    // without hardware to confirm the flags layout for them.
-    await this.write(address, [...pulsarVgnEncodeDpi(dpi)]);
-    const stored = lamzuAtlantisDecodeDpiStage(await this.readRaw(address, STAGE_STRIDE));
+    const address = this.dpiStageAddress(stage);
+    // Both encoders return the stage's bytes with their checksum already in
+    // place, so this writes them as-is rather than re-sealing. Each writes one
+    // value to both axes, so a stage the vendor app had set to separate x and
+    // y is flattened here; asymmetric writes are not attempted without
+    // hardware to confirm the flags layout for them.
+    const record = this.isSensor3955()
+      ? lamzuAtlantisEncodeDpiStage3955(dpi)
+      : lamzuAtlantisEncodeDpiStage(dpi);
+    await this.write(address, record);
+    const stored = this.decodeDpiStage(await this.readRaw(address, this.dpiStageStride()));
     const confirmed = stored?.x ?? null;
     if (confirmed !== dpi) {
       throw new Error(`The mouse kept ${confirmed?.toLocaleString() ?? "an unknown DPI"} instead of ${dpi.toLocaleString()}.`);
@@ -630,6 +887,56 @@ export class LamzuAtlantisHidClient {
     });
   }
 
+  /**
+   * Sets two linked one-byte flags to `value`, `first` then `second`, as one
+   * change. Each write is read back. If `second` does not take, `first` is put
+   * back to the byte it held before, so a failure never leaves one switch
+   * changed without the other. The caller holds the transaction.
+   */
+  private async writeLinkedFlags(first: LinkedFlag, second: LinkedFlag, value: boolean): Promise<void> {
+    const target = value ? 1 : 0;
+    const state = value ? "off" : "on";
+    const before = (await this.readRaw(first.address, 1))[0] ?? 0;
+    if ((await this.writeByte(first.address, target)) !== target) {
+      throw new Error(`The mouse left ${first.label} ${state}.`);
+    }
+    let secondTook = false;
+    let failure: unknown = null;
+    try {
+      secondTook = (await this.writeByte(second.address, target)) === target;
+    } catch (error) {
+      failure = error;
+    }
+    if (!secondTook) {
+      let restored = true;
+      try {
+        restored = (await this.writeByte(first.address, before)) === before;
+      } catch {
+        restored = false;
+      }
+      const cause = failure instanceof Error ? ` (${failure.message})` : "";
+      throw new Error(restored
+        ? `The mouse left ${second.label} ${state}${cause}, so ${first.label} was put back.`
+        : `The mouse left ${second.label} ${state}${cause}, and ${first.label} could not be put back.`);
+    }
+    this.patch({ [first.field]: value, [second.field]: value });
+  }
+
+  /**
+   * Both angle fields must carry their seal, which is what the vendor
+   * configurator checks before it shows the slider at all, so a firmware
+   * without them reads as unsupported rather than as a 0 degree angle. The
+   * value is shown whatever the state byte says, as the vendor tool does.
+   */
+  private async readAngleTuning(): Promise<number | undefined> {
+    const stateOffset = FLASH.angleTuneState - FLASH.angleTune;
+    const fields = await this.readRaw(FLASH.angleTune, stateOffset + 2);
+    const angle = fields.subarray(0, 2);
+    const state = fields.subarray(stateOffset, stateOffset + 2);
+    if (!lamzuAtlantisFieldIsIntact(angle) || !lamzuAtlantisFieldIsIntact(state)) return undefined;
+    return lamzuAtlantisDecodeAngleTuning(angle[0] ?? 0);
+  }
+
   private patch(changes: Partial<MouseStatus>): void {
     if (this.lastStatus) this.lastStatus = { ...this.lastStatus, ...changes };
   }
@@ -692,18 +999,30 @@ export class LamzuAtlantisHidClient {
     return await run;
   }
 
+  /**
+   * Runs at the start of every full status read, inside the transaction and
+   * before the name is computed, so a subclass can tell models apart that share
+   * a product id. The default has nothing to ask.
+   */
+  protected async identify(): Promise<void> {}
+
   /** Unqueued: the caller already holds the transaction lock. */
-  private async request(command: number, address = 0, payload: readonly number[] = []): Promise<Uint8Array> {
+  protected async request(command: number, address = 0, payload: readonly number[] = []): Promise<Uint8Array> {
     return await this.exchange(command, address, payload);
   }
 
-  private async exchange(command: number, address: number, payload: readonly number[]): Promise<Uint8Array> {
+  private async exchange(
+    command: number,
+    address: number,
+    payload: readonly number[],
+    { timeoutMs = RESPONSE_TIMEOUT_MS, attempts = RESPONSE_ATTEMPTS } = {},
+  ): Promise<Uint8Array> {
     if (this.closed) throw new Error("The connection to the mouse was closed.");
     await this.ensureOpen();
     const request = lamzuAtlantisEncodeRequest({ command, address, payload });
-    for (let attempt = 0; attempt < RESPONSE_ATTEMPTS; attempt += 1) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (this.closed) throw new Error("The connection to the mouse was closed.");
-      const reply = await this.sendAndWait(request, command, address);
+      const reply = await this.sendAndWait(request, command, address, timeoutMs);
       if (this.closed) throw new Error("The connection to the mouse was closed.");
       if (!reply) continue;
       if (reply.error !== 0) {
@@ -726,7 +1045,7 @@ export class LamzuAtlantisHidClient {
    * would then verify against the wrong field. Every reply echoes the address
    * it was asked for, so flash replies are matched on it too.
    */
-  private async sendAndWait(request: Uint8Array<ArrayBuffer>, command: number, address: number) {
+  private async sendAndWait(request: Uint8Array<ArrayBuffer>, command: number, address: number, timeoutMs: number) {
     const addressed = command === COMMAND.readFlashData || command === COMMAND.writeFlashData;
     return await new Promise<ReturnType<typeof lamzuAtlantisDecodeReply>>((resolve) => {
       let settled = false;
@@ -738,7 +1057,7 @@ export class LamzuAtlantisHidClient {
         globalThis.clearTimeout(timer);
         resolve(value);
       };
-      const timer = globalThis.setTimeout(() => finish(null), RESPONSE_TIMEOUT_MS);
+      const timer = globalThis.setTimeout(() => finish(null), timeoutMs);
       this.abortPending = () => finish(null);
       this.pending = (body) => {
         const reply = lamzuAtlantisDecodeReply(body);

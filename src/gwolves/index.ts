@@ -1,18 +1,19 @@
 /**
- * G-Wolves HTX Ultra protocol, pure functions, unit-tested without WebHID.
+ * G-Wolves XVI:0 (report-5) protocol, pure functions, unit-tested without WebHID.
  *
- * G-Wolves mice enumerate under G-Wolves' own vendor id (0x33e4) but speak
- * the exact same wire protocol as the shared VGN-family reference design
- * already implemented independently in this repo for the VGN Dragonfly F2
- * Master+ and (as `pulsarVgn*` in pulsar/index.ts) the Pulsar 4K Wireless
- * Receiver: 16-byte packets on report id 8, opcode 0x07 writes an EEPROM
- * address and 0x08 reads one, and every packet's bytes (plus the report id)
- * sum to 0x55. Following the pattern already established for the Pulsar/VGN
- * case, this is an independent implementation rather than an import of
- * vgn/index.ts's functions — same algorithm, kept as its own module so a
- * G-Wolves-specific quirk (like ATK's differing DPI stage encoding
- * relative to Endgame Gear WE) can diverge cleanly later without touching
- * code another brand's driver depends on.
+ * G-Wolves' XVI:0 mice enumerate under G-Wolves' own vendor id (0x33e4) and
+ * speak the brand's own report-5 protocol: 16-byte packets on report id 8,
+ * opcode 0x07 writes an EEPROM address and 0x08 reads one, and every
+ * packet's bytes (plus the report id) sum to 0x55. The wire format matches
+ * the shared VGN-family reference design already implemented independently
+ * in this repo for the VGN Dragonfly F2 Master+ and (as `pulsarVgn*` in
+ * pulsar/index.ts) the Pulsar 4K Wireless Receiver. Following the pattern
+ * already established for the Pulsar/VGN case, this is an independent
+ * implementation rather than an import of vgn/index.ts's functions — same
+ * algorithm, kept as its own module so a G-Wolves-specific quirk (like
+ * ATK's differing DPI stage encoding relative to Endgame Gear WE) can
+ * diverge cleanly later without touching code another brand's driver
+ * depends on.
  *
  * Confirmed against real hardware 2026-08-21: a live HID capture (browser
  * sendReport/inputreport patch) while changing DPI, LOD, and polling rate

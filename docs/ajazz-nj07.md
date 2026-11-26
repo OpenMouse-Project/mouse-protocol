@@ -1,9 +1,16 @@
 # AJAZZ NJ07 / NJ08 family
 
-Requested in the OpenMouse Discord (ticket 0156) for the NJ07 MC. No capture
-of any of these mice exists. The driver was written from the JavaScript of the
-vendor's WebHID panel, https://nacodex.yjx2012.com/ (device class "V1",
-Next.js chunk 515 plus the `/detail` route), and has not run on hardware.
+Requested in the OpenMouse Discord (ticket 0156) for the NJ07 MC. The driver
+was written from the JavaScript of the vendor's WebHID panel,
+https://nacodex.yjx2012.com/ (device class "V1", Next.js chunk 515 plus the
+`/detail` route).
+
+Hardware evidence (ticket 0156, NJ07 MC PID `0x2167` on VID `0xA8A5`, firmware
+`2.0.1`): GET_CONFIG / battery / version replies decode exactly as this
+driver does (all-400 DPI stages, stage 0 active, 1000 Hz, 1-minute sleep,
+opaque wake byte `0x10`), and a flash write round-trip (800 DPI, 500 Hz, then
+restore) passes on-device. Only the key-map path (`0x08`/`0x09`) is still
+unverified on hardware; it follows the same panel JS.
 
 ## Which mice
 
@@ -27,6 +34,10 @@ Same command family as the K-snake X11, different framing:
   data byte echoes the command; the mouse also pushes DPI (`0xFA`), battery
   (`0x30`) and status (`0xED`) reports unprompted.
 - `0x04` version, `0x30` battery, `0x0E` read config, `0x0F` write config.
+- `0x08` read keys, `0x09` write keys: six four-byte slots at reply/body offset
+  7, then two fixed wheel slots (scroll up `[33,56,1,0]`, scroll down
+  `[33,56,255,0]`) on write. Read keys is `08 01 0B 2C`, write keys starts
+  `09 01 22 30`.
 - Read config is `0E 01 0B 2E`, write config starts `0F 01 0A 2F`. Offsets in
   `src/ajazz/index.ts` are body offsets (the report id is not counted).
 - The config block holds light mode, polling index (0 to 3 for 125, 250, 500,
@@ -46,12 +57,19 @@ byte opaque and writes back exactly what it read.
 
 Identity, battery, firmware, DPI stages (read, edit one stage, pick the active
 stage), polling rate (125, 500, 1000 Hz, the panel's per-model list), sleep
-timer and scroll direction.
+timer (including 0 = never sleep) and scroll direction. Button remapping for
+the six buttons (Left locked, Right, Middle, Backward, Forward, DPI) with the
+vendor's key catalog, plus factory-map restore; macro (type 112) and modified
+keyboard-combo bindings read back as opaque labels and are preserved across
+writes.
 
-Not done: buttons and macros (same slot layout as the K-snake, report `0x08`
-and `0x09`), lighting (the panel only shows it for the NJ08 family, modes 0
-to 6), wake mode, line correction, lift-off, debounce. The panel has no
-controls for the last two.
+Writes are fire-and-forget like the panel (`setMouseConfigData` /
+`setMouseKeys` never wait for an echo), then read back with retries: a slow
+flash commit no longer fails the setter or stalls it for two reply timeouts.
+
+Not done: macros (upload uses commands `0x0D`/`0x10` plus a report-6 read, same
+shape as the K-snake macro store), NJ08 lighting, wake mode, line correction,
+lift-off, debounce. The panel has no controls for the last two.
 
 ## To test
 

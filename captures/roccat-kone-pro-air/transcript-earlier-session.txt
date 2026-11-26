@@ -1,0 +1,29 @@
+# Discovery session outline — module-earlier capture (mouse awake)
+# Same node-hid shape as session-2026-10-14.txt, from the session during which
+# the settings query DID return the twenty-slot stage table. Frames trimmed the
+# same way (trailing zeros cut). Numeric outline of the session, in order:
+#
+# OUT  00 90 0a
+# IN   90 0a 04 00 00 1e 00 00 a0 0a 1e                      (first poll)
+# IN   90 0a 04 00 00 1e 00 00 a0 0a 1e                      (second poll)
+# OUT  00 10 50 14 00 01 <spinning write> ...                 (settings write)
+# IN   10 50 03 00 ec fa 04                                  (write echo)
+# OUT  00 10 50 18 04                                         (commit tail)
+# IN   10 50 03 00 ec ac                                     (commit echo)
+# OUT  00 90 0a
+# IN   90 0a 04 00 00 1e 00 00 9a 0a 1e                      (post-write poll)
+# OUT  00 10 10 0b 00 09 64 64 64 06 00 00 00 00 00 00 00
+# IN   10 10 03 00 ec ac                                     (lighting echo)
+#
+# The discovery session's settings QUERY (a distinct, later probe) echoed:
+# IN   10 50 03 00 ec fa 0d 00 10 10 18 18 20 20 40 40 64 64 01 02 00 00
+#
+# decoded: byte2=0x03, both slot lists identical —
+#   offsets 8..17 = 10 10 18 18 20 20 40 40 64 64
+#   = five entries of 800/1200/1600/3200/5000 (dpi/50) x 2 axes,
+#     matching the unit's THEN-current Swarm settings, not the factory:
+#     evidence that the echo table reflects live on-device state.
+#
+# Later idle-session query echoes only returned the empty body shape
+# (`10 50 03 00 ec fa 04` then zeros), so the table's appearance is
+# mouse-state-dependent.

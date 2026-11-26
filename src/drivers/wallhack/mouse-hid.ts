@@ -1,24 +1,67 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import {
+  wallhackBuildCurveRead,
+  wallhackBuildCustomCurveWrite,
+  wallhackBuildGetKeys,
+  wallhackBuildGetMacro,
   wallhackBuildRead,
   wallhackBuildSetDpiStage,
+  wallhackBuildBatteryRead,
+  wallhackBuildPollRateWrite,
+  wallhackBuildSetKeys,
+  wallhackBuildSetMacro,
   wallhackBuildSimple,
   wallhackBuildWrite,
+  wallhackBindingFromLabel,
+  wallhackBindingLabel,
+  wallhackCurveModeFromIndex,
+  wallhackCurveStatusText,
   wallhackDecodeBattery,
+  wallhackDecodeCustomCurve,
+  wallhackDecodeKeysReply,
+  wallhackDecodeMacro,
+  wallhackDecodePresetCurve,
+  wallhackDecodeTriplet,
   wallhackDecodeVersions,
+  wallhackEncodeBinding,
+  wallhackEncodeMacro,
   wallhackIsReplyFor,
   wallhackLodFromCode,
   wallhackLodToCode,
+  wallhackMacroIndexAddress,
+  wallhackMacroReplyBytes,
+  wallhackMacroWriteBlocks,
   wallhackMouseName,
   wallhackPollingHzToRank,
   wallhackPollingRankToHz,
+  wallhackRawToSensorAngle,
+  wallhackScanningModeFromByte,
+  wallhackScanningModeToByte,
+  wallhackSensorAngleToRaw,
+  wallhackTripletsEqual,
+  WALLHACK_BUTTON_OPTIONS,
+  WALLHACK_BUTTON_ORDER,
   WALLHACK_COMMAND,
+  WALLHACK_CURVE_ADDRESS,
+  WALLHACK_DPI_MAX,
+  WALLHACK_DPI_MIN,
+  WALLHACK_CURVE_MODE_INDEX,
+  WALLHACK_DEBOUNCE_MAX_MS,
+  WALLHACK_DEBOUNCE_MIN_MS,
   WALLHACK_FLASH,
+  WALLHACK_KEY_SLOTS,
+  WALLHACK_MACRO_SLOTS,
+  WALLHACK_MACRO_SLOT_BYTES,
   WALLHACK_MOUSE_PRODUCT_IDS,
   WALLHACK_MOUSE_USAGE_PAGE,
   WALLHACK_POLLING_RATES,
   WALLHACK_REPORT_ID,
   WALLHACK_VENDOR_ID,
+  type WallhackCurveMode,
+  type WallhackCurvePoint,
+  type WallhackMacroStep,
+  type WallhackSensorScanningMode,
+  type WallhackTriplet,
 } from "@openmouse/protocol/wallhack";
 
 /**
@@ -26,14 +69,20 @@ import {
  *
  * The M-001 speaks a report-id-4, 63-byte protocol on its 0xFF1C command
  * interface: a command table plus a byte-addressed config "function area" that
- * holds DPI, polling, lift-off and the processing toggles. This driver reads
- * that map into a `MouseStatus` and writes it back, verifying each change by
- * reading the byte again (the same read-after-write discipline the other
- * OpenMouse mouse drivers use).
+ * holds DPI, polling, lift-off and the processing toggles, an 8-slot button
+ * table (GET_KEYS/SET_KEYS), 4 onboard macro slots (GET_MACRO/SET_MACRO) and
+ * 4 DPI-acceleration curve tables. This driver reads that state into a
+ * `MouseStatus` and writes it back, verifying each change by reading the
+ * value again (the same read-after-write discipline the other OpenMouse
+ * mouse drivers use).
  *
- * Wire format reverse-engineered from the WALLHACK Terminal app; not yet
- * confirmed against hardware here, so writes always read back and refuse to
- * claim success the mouse did not report.
+ * Wire format reverse-engineered from the WALLHACK Terminal app
+ * (terminal.wallhack.com, bundle `index-DVQlQedp.js` plus the
+ * `WallHack_K-001_V*.js` firmware chunks); not yet confirmed against
+ * hardware here, so writes always read back and refuse to claim success the
+ * mouse did not report. Feature gates observed in the app (mouse-Nordic
+ * firmware): sensor scanning 52+, button mapping and sensor rotation 53+,
+ * macros and dynamic sensitivity 57+.
  */
 
 const RESPONSE_TIMEOUT_MS = 1000;
@@ -125,21 +174,27 @@ export class WallhackMouseHidClient {
     const dpiStageReply = await this.readByte(WALLHACK_FLASH.dpiRank);
     const activeDpiStage = dpiStageReply ?? 0;
     const dpi = await this.readDpi();
-    const pollRank = await this.readByte(WALLHACK_FLASH.reportUsb);
+    // Poll byte lives at reportUser (104); reportEsb/dpiRank are 0-7 receiver ranks.
+    const pollRank = await this.readByte(WALLHACK_FLASH.reportUser);
     const wirelessRank = await this.readByte(WALLHACK_FLASH.reportEsb);
     const lodCode = await this.readByte(WALLHACK_FLASH.silentHeight);
     const motionSync = await this.readByte(WALLHACK_FLASH.motionSyncEnable);
     const angleSnap = await this.readByte(WALLHACK_FLASH.angleSnapEnable);
     const ripple = await this.readByte(WALLHACK_FLASH.rippleControlEnable);
     const debounce = await this.readByte(WALLHACK_FLASH.keyDebounceTime);
-    const sleep = await this.readByte(WALLHACK_FLASH.sleepTime);
+    const sleepSeconds = await this.readSleepSeconds();
     const autoSleepOff = await this.readByte(WALLHACK_FLASH.turnOffAutomaticSleep);
     const gameMode = await this.readByte(WALLHACK_FLASH.gameMode);
     const angleTune = await this.readByte(WALLHACK_FLASH.angleTuneValue);
     const profileIndex = await this.readByte(WALLHACK_FLASH.profileIndex);
+    const dynEnabled = await this.readByte(WALLHACK_FLASH.dynamicDpiEnable);
+    const dynMode = await this.readByte(WALLHACK_FLASH.dynamicDpiMode);
+    const dynReporting = await this.readByte(WALLHACK_FLASH.dynamicDpiCoordinateReportEnable);
+    const buttons = await this.readButtonBindings().catch(() => null);
 
     const batteryInfo = battery ? wallhackDecodeBattery(battery) : null;
     const pollingRateHz = pollRank !== null ? wallhackPollingRankToHz(pollRank) : null;
+    const sensorAngle = angleTune !== null ? wallhackRawToSensorAngle(angleTune) : null;
 
     return {
       brand: "WALLHACK",
@@ -163,12 +218,16 @@ export class WallhackMouseHidClient {
       motionSync: motionSync === null ? null : motionSync === 1,
       angleSnapping: angleSnap === null ? null : angleSnap === 1,
       rippleControl: ripple === null ? null : ripple === 1,
-      angleTuning: angleTune,
+      angleTuning: sensorAngle,
+      sensorScanningMode: gameMode !== null ? wallhackScanningModeFromByte(gameMode) : null,
+      dynamicSensitivityEnabled: dynEnabled === null ? null : dynEnabled !== 0,
+      dynamicSensitivityMode: dynMode !== null ? wallhackCurveModeFromIndex(dynMode) : null,
+      dynamicSensitivitySpeedReporting: dynReporting === null ? null : dynReporting !== 0,
       debounceMs: debounce,
-      sleepTimeout: autoSleepOff === 1 ? null : sleep,
-      gamingSurfaceMode: gameMode === 1 ? "On" : "Off",
+      sleepTimeout: autoSleepOff === 1 ? null : sleepSeconds !== null ? Math.round(sleepSeconds / 60) : null,
       liftOffDistance: lodCode !== null ? wallhackLodFromCode(lodCode) : null,
       supportedLiftOffDistances: ["Low", "Medium", "High"],
+      ...(buttons !== null ? { buttonMappings: buttons.mappings, buttonOptions: buttons.options } : {}),
       firmware: this.firmwareLines(version),
     };
   }
@@ -178,8 +237,8 @@ export class WallhackMouseHidClient {
   // ---------------------------------------------------------------------------
 
   async setDpi(dpi: number): Promise<number> {
-    if (!Number.isInteger(dpi) || dpi < 50 || dpi > 26000) {
-      throw new Error("WALLHACK DPI must be between 50 and 26000.");
+    if (!Number.isInteger(dpi) || dpi < WALLHACK_DPI_MIN || dpi > WALLHACK_DPI_MAX) {
+      throw new Error(`WALLHACK DPI must be between ${WALLHACK_DPI_MIN} and ${WALLHACK_DPI_MAX}.`);
     }
     await this.send(wallhackBuildSetDpiStage(dpi));
     const confirmed = await this.readDpi();
@@ -190,11 +249,9 @@ export class WallhackMouseHidClient {
   async setPollingRate(hz: number): Promise<number> {
     const rank = wallhackPollingHzToRank(hz);
     if (rank === null) throw new Error(`${hz} Hz is not a supported WALLHACK polling rate.`);
-    // Wired and wireless polling live in separate bytes; write both so the rate
-    // holds across a dongle/cable switch.
-    await this.writeByte(WALLHACK_FLASH.reportUsb, rank);
-    await this.writeByte(WALLHACK_FLASH.reportEsb, rank);
-    const confirmed = await this.readByte(WALLHACK_FLASH.reportUsb);
+    // Single rate byte at reportUser (104), per vendor `pO`. Verified by re-read.
+    await this.send(wallhackBuildPollRateWrite(hz));
+    const confirmed = await this.readByte(WALLHACK_FLASH.reportUser);
     if (confirmed !== rank) throw new Error(`The mouse did not confirm ${hz} Hz.`);
     return hz;
   }
@@ -221,10 +278,24 @@ export class WallhackMouseHidClient {
   }
 
   async setDebounceTime(debounceMs: number): Promise<number> {
-    if (!Number.isInteger(debounceMs) || debounceMs < 0 || debounceMs > 20) {
-      throw new Error("WALLHACK debounce time must be between 0 and 20 ms.");
+    // EXPERIMENTAL: vendor Terminal has no debounce path (`keyDebounceTime`
+    // absent from `Ar`/`O()`/auto-read/UI/demo defaults); raw byte at 109,
+    // scale unverified. Prefer `readDebounceTime()` first and stay at the
+    // factory default until hardware confirms the unit. Cross-vendor bounds
+    // are 0-30 ms single-byte (Incott) or stepped tables (Rapoo 1-32 ms).
+    if (!Number.isInteger(debounceMs) || debounceMs < WALLHACK_DEBOUNCE_MIN_MS || debounceMs > WALLHACK_DEBOUNCE_MAX_MS) {
+      throw new Error(`WALLHACK debounce time must be between ${WALLHACK_DEBOUNCE_MIN_MS} and ${WALLHACK_DEBOUNCE_MAX_MS} ms.`);
     }
     return await this.writeVerifiedByte(WALLHACK_FLASH.keyDebounceTime, debounceMs, "debounce time", (value) => value === debounceMs).then(() => debounceMs);
+  }
+
+  /**
+   * Read-only debounce probe (safe): raw byte at function area 109, or
+   * null when the mouse stays silent. Run this on hardware first — the
+   * factory default constrains the scale (small int ⇒ ms-like).
+   */
+  async readDebounceTime(): Promise<number | null> {
+    return await this.readByte(WALLHACK_FLASH.keyDebounceTime);
   }
 
   async setSleepTimeout(minutes: number): Promise<number> {
@@ -234,13 +305,267 @@ export class WallhackMouseHidClient {
     // A non-zero timeout implies auto-sleep is on; zero disables it.
     await this.writeByte(WALLHACK_FLASH.turnOffAutomaticSleep, minutes === 0 ? 1 : 0);
     if (minutes > 0) {
-      await this.writeVerifiedByte(WALLHACK_FLASH.sleepTime, minutes, "sleep timeout", (value) => value === minutes);
+      // The timer is a u16LE second count at `sleepTime` (1-30 minutes).
+      if (minutes < 1 || minutes > 30) throw new Error("WALLHACK sleep timeout must be between 1 and 30 minutes.");
+      const seconds = minutes * 60;
+      await this.send(wallhackBuildWrite(WALLHACK_FLASH.sleepTime, [seconds & 0xff, (seconds >> 8) & 0xff]));
+      const confirmed = await this.readSleepSeconds();
+      if (confirmed === null || Math.round(confirmed / 60) !== minutes) {
+        throw new Error("The mouse did not confirm the requested sleep timeout.");
+      }
     }
     return minutes;
   }
 
+  /**
+   * Battery via `BATTERY` (0xBA). UNVERIFIED: the vendor mouse port never
+   * sends this command, so the reply layout (percent at byte 7, charging
+   * at byte 8) is best-effort. Returns nulls when the mouse stays silent.
+   */
+  async readBattery(): Promise<{ percent: number | null; charging: boolean } | null> {
+    const reply = await this.exchange(wallhackBuildBatteryRead(), WALLHACK_COMMAND.battery).catch(() => null);
+    return reply ? wallhackDecodeBattery(reply) : null;
+  }
+
+  /**
+   * Sensor rotation in degrees (-30..+30). The `angleTuneValue` byte stores
+   * degrees + 30. Picked up by OpenMouse as `angleTuningWritable`.
+   */
+  async setAngleTuning(degrees: number): Promise<number> {
+    const raw = wallhackSensorAngleToRaw(degrees);
+    await this.writeVerifiedByte(WALLHACK_FLASH.angleTuneValue, raw, "sensor angle", (value) => value === raw);
+    return degrees;
+  }
+
+  /**
+   * Sensor scanning mode: HIGH is the default frame rate, ACCEL pins the
+   * sensor to high performance at higher battery cost. Needs mouse
+   * firmware 52+.
+   */
+  async setSensorScanningMode(mode: WallhackSensorScanningMode): Promise<WallhackSensorScanningMode> {
+    await this.writeVerifiedByte(
+      WALLHACK_FLASH.gameMode,
+      wallhackScanningModeToByte(mode),
+      "sensor scanning mode",
+      (value) => wallhackScanningModeFromByte(value) === mode,
+    );
+    return mode;
+  }
+
   async setGameMode(enabled: boolean): Promise<boolean> {
     return (await this.writeVerifiedBoolean(WALLHACK_FLASH.gameMode, enabled, "game mode"));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dynamic sensitivity (DPI acceleration) curves. Needs mouse firmware 57+.
+  // ---------------------------------------------------------------------------
+
+  async setDynamicSensitivityEnabled(enabled: boolean): Promise<boolean> {
+    return (await this.writeVerifiedBoolean(WALLHACK_FLASH.dynamicDpiEnable, enabled, "dynamic sensitivity"));
+  }
+
+  async setDynamicSensitivityMode(mode: WallhackCurveMode): Promise<WallhackCurveMode> {
+    const index = WALLHACK_CURVE_MODE_INDEX[mode];
+    if (index === undefined) throw new Error(`Unknown WALLHACK curve mode "${mode}".`);
+    await this.writeVerifiedByte(WALLHACK_FLASH.dynamicDpiMode, index, "dynamic sensitivity mode", (value) => value === index);
+    return mode;
+  }
+
+  async setDynamicSensitivitySpeedReporting(enabled: boolean): Promise<boolean> {
+    return (await this.writeVerifiedBoolean(
+      WALLHACK_FLASH.dynamicDpiCoordinateReportEnable,
+      enabled,
+      "dynamic sensitivity speed reporting",
+    ));
+  }
+
+  /** Read all four curve tables (classic/natural/jump/custom). */
+  async getDynamicSensitivityCurves(): Promise<Record<WallhackCurveMode, WallhackCurvePoint[]>> {
+    await this.open();
+    const curves = {} as Record<WallhackCurveMode, WallhackCurvePoint[]>;
+    for (const mode of ["classic", "natural", "jump", "custom"] as const) {
+      curves[mode] = await this.readCurve(mode);
+    }
+    return curves;
+  }
+
+  /**
+   * Replace the custom curve table (exactly 5 points, speed 0-280 strictly
+   * increasing, gain a multiple of 0.01 in 0.10-6.00). Verified by re-read.
+   */
+  async setCustomCurve(points: readonly WallhackCurvePoint[]): Promise<WallhackCurvePoint[]> {
+    await this.open();
+    await this.send(wallhackBuildCustomCurveWrite(points));
+    const confirmed = await this.readCurve("custom");
+    const wanted = [...points].map((point) => ({ speed: point.speed, gain: Math.round(point.gain * 100) / 100 }));
+    const same = confirmed.length === wanted.length &&
+      confirmed.every((point, index) => point.speed === wanted[index]!.speed && point.gain === wanted[index]!.gain);
+    if (!same) throw new Error("The mouse did not confirm the custom curve.");
+    return confirmed;
+  }
+
+  private async readCurve(mode: WallhackCurveMode): Promise<WallhackCurvePoint[]> {
+    const reply = await this.exchange(wallhackBuildCurveRead(mode), WALLHACK_COMMAND.readFunctionArea);
+    const status = wallhackCurveStatusText(reply);
+    if (status !== "ok") throw new Error(`The mouse refused the ${mode} curve read: ${status}.`);
+    const address = (reply[4]! | (reply[5]! << 8)) & 0xffff;
+    if (address !== WALLHACK_CURVE_ADDRESS[mode]) {
+      throw new Error(`The mouse answered the ${mode} curve read with address ${address}.`);
+    }
+    const length = reply[3]!;
+    const payload = reply.subarray(7, 7 + Math.min(length, reply.length - 7));
+    const points = mode === "custom" ? wallhackDecodeCustomCurve(payload) : wallhackDecodePresetCurve(payload);
+    if (!points) throw new Error(`The mouse returned a malformed ${mode} curve.`);
+    return points;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Button bindings. Needs mouse firmware 53+.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Read the 8 key slots and render the five physical buttons as
+   * OpenMouse `buttonMappings`, with the fixed `buttonOptions` list. The
+   * shared button remapper appears when these are set together with
+   * `setButtonMapping`.
+   */
+  async readButtonBindings(): Promise<{ mappings: Record<string, string>; options: string[] }> {
+    const triplets = await this.readKeySlots();
+    const mappings: Record<string, string> = {};
+    WALLHACK_BUTTON_ORDER.forEach((button, slot) => {
+      mappings[WallhackMouseHidClient.buttonLabel(button)] = wallhackBindingLabel(
+        wallhackDecodeTriplet(triplets[slot] ?? { keyType: 0, codeL: 0, codeH: 0 }),
+      );
+    });
+    return { mappings, options: [...WALLHACK_BUTTON_OPTIONS] };
+  }
+
+  /**
+   * Reassign a physical button ("Left", "Right", "Middle", "Back", "Forward")
+   * to an action label from `buttonOptions` (plus the parametric `Rapid
+   * Fire …`, `Macro …` and `Key …` forms). Verified by re-read.
+   */
+  async setButtonMapping(button: string, action: string): Promise<void> {
+    const slot = WALLHACK_BUTTON_ORDER.indexOf(button.toLowerCase() as (typeof WALLHACK_BUTTON_ORDER)[number]);
+    if (slot < 0) throw new Error(`This mouse has no "${button}" button.`);
+    const binding = wallhackBindingFromLabel(action);
+    const triplet = wallhackEncodeBinding(binding);
+    await this.send(wallhackBuildSetKeys([triplet], slot * 3));
+    const triplets = await this.readKeySlots();
+    const confirmed = triplets[slot];
+    if (!confirmed || !wallhackTripletsEqual(confirmed, triplet)) {
+      throw new Error(`The mouse kept another binding on ${button} instead of ${action}.`);
+    }
+  }
+
+  /** Restore the five physical buttons to left/right/middle/back/forward. */
+  async resetButtonMappings(): Promise<void> {
+    const triplets = await this.readKeySlots();
+    WALLHACK_BUTTON_ORDER.forEach((button, slot) => {
+      triplets[slot] = wallhackEncodeBinding({ kind: "mouseButton", button });
+    });
+    await this.send(wallhackBuildSetKeys(triplets, 0));
+    const confirmed = await this.readKeySlots();
+    const same = triplets.every((triplet, index) => {
+      const other = confirmed[index];
+      return other !== undefined && wallhackTripletsEqual(triplet, other);
+    });
+    if (!same) throw new Error("The mouse did not confirm the button reset.");
+  }
+
+  private async readKeySlots(): Promise<WallhackTriplet[]> {
+    const reply = await this.exchange(wallhackBuildGetKeys(), WALLHACK_COMMAND.getKeys);
+    const triplets = wallhackDecodeKeysReply(reply);
+    if (!triplets || triplets.length < WALLHACK_KEY_SLOTS) {
+      throw new Error("The mouse returned a malformed button table.");
+    }
+    return triplets;
+  }
+
+  private static buttonLabel(button: string): string {
+    return button.charAt(0).toUpperCase() + button.slice(1);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Onboard macros (4 slots, up to 30 steps each). Needs mouse firmware 57+.
+  // ---------------------------------------------------------------------------
+
+  /** Read the four macro slots; empty slots come back as null. */
+  async getMacros(): Promise<(WallhackMacroStep[] | null)[]> {
+    await this.open();
+    const indexBytes = await this.exchange(
+      wallhackBuildGetMacro(wallhackMacroIndexAddress(0), WALLHACK_MACRO_SLOTS * 2),
+      WALLHACK_COMMAND.getMacro,
+    );
+    const indexPayload = wallhackMacroReplyBytes(indexBytes);
+    if (!indexPayload || indexPayload.length < WALLHACK_MACRO_SLOTS * 2) {
+      throw new Error("The mouse returned a malformed macro index.");
+    }
+    const slots: (WallhackMacroStep[] | null)[] = [];
+    for (let slot = 0; slot < WALLHACK_MACRO_SLOTS; slot++) {
+      const address = (indexPayload[slot * 2]! | (indexPayload[slot * 2 + 1]! << 8)) & 0xffff;
+      if (address === 0 || address === 0xffff) {
+        slots.push(null);
+        continue;
+      }
+      const content = await this.exchange(
+        wallhackBuildGetMacro(address, WALLHACK_MACRO_SLOT_BYTES),
+        WALLHACK_COMMAND.getMacro,
+      );
+      const bytes = wallhackMacroReplyBytes(content);
+      const steps = bytes ? wallhackDecodeMacro(bytes) : null;
+      slots.push(steps);
+    }
+    return slots;
+  }
+
+  /**
+   * Store `steps` in macro slot 0-3, allocating device storage the same way
+   * the vendor app does, and verify by re-read. Use `clearMacroSlot` for an
+   * empty macro.
+   */
+  async setMacroSlot(slot: number, steps: readonly WallhackMacroStep[]): Promise<WallhackMacroStep[]> {
+    await this.open();
+    const record = wallhackEncodeMacro(steps);
+    const index = await this.readMacroIndex();
+    for (const block of wallhackMacroWriteBlocks(slot, record, index)) {
+      await this.send(wallhackBuildSetMacro(block.offset, block.bytes));
+    }
+    const slots = await this.getMacros();
+    const confirmed = slots[slot];
+    if (!confirmed || confirmed.length !== steps.length) {
+      throw new Error(`The mouse did not confirm macro slot ${slot + 1}.`);
+    }
+    return confirmed;
+  }
+
+  /** Clear macro slot 0-3 (frees its storage on the device). */
+  async clearMacroSlot(slot: number): Promise<void> {
+    await this.open();
+    const index = await this.readMacroIndex();
+    for (const block of wallhackMacroWriteBlocks(slot, new Uint8Array(0), index)) {
+      await this.send(wallhackBuildSetMacro(block.offset, block.bytes));
+    }
+    const slots = await this.getMacros();
+    if (slots[slot] !== null && slots[slot]!.length !== 0) {
+      throw new Error(`The mouse did not clear macro slot ${slot + 1}.`);
+    }
+  }
+
+  private async readMacroIndex(): Promise<Map<number, number>> {
+    const reply = await this.exchange(
+      wallhackBuildGetMacro(wallhackMacroIndexAddress(0), WALLHACK_MACRO_SLOTS * 2),
+      WALLHACK_COMMAND.getMacro,
+    );
+    const payload = wallhackMacroReplyBytes(reply);
+    if (!payload || payload.length < WALLHACK_MACRO_SLOTS * 2) {
+      throw new Error("The mouse returned a malformed macro index.");
+    }
+    const index = new Map<number, number>();
+    for (let slot = 0; slot < WALLHACK_MACRO_SLOTS; slot++) {
+      index.set(slot, (payload[slot * 2]! | (payload[slot * 2 + 1]! << 8)) & 0xffff);
+    }
+    return index;
   }
 
   async setActiveProfile(profile: number): Promise<number> {
@@ -271,6 +596,16 @@ export class WallhackMouseHidClient {
     const reply = await this.exchange(wallhackBuildRead(address), WALLHACK_COMMAND.readFunctionArea).catch(() => null);
     if (!reply || reply.length < 8) return null;
     return reply[7]!;
+  }
+
+  /** Sleep timer as raw seconds (u16LE at `sleepTime`), or null. */
+  private async readSleepSeconds(): Promise<number | null> {
+    const reply = await this.exchange(wallhackBuildRead(WALLHACK_FLASH.sleepTime, 2), WALLHACK_COMMAND.readFunctionArea)
+      .catch(() => null);
+    if (!reply || reply.length < 9) return null;
+    const seconds = (reply[7]! | (reply[8]! << 8)) & 0xffff;
+    const minutes = Math.round(seconds / 60);
+    return minutes >= 1 && minutes <= 30 ? seconds : null;
   }
 
   /** Read the active DPI stage's value from the DPI-stage block. */

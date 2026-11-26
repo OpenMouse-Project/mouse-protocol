@@ -6,6 +6,12 @@ const globals = globalThis as { window?: { setTimeout: typeof setTimeout } };
 globals.window ??= { setTimeout };
 const EXTRA_READS = new Set(["1:148", "0:152", "0:146", "0:153"]);
 
+function dpiStorageFor(productId = 0x0033) {
+  return { profile: 3, count: 1,
+    stages: Array.from({ length: productId === 0x0054 || productId === 0x0084 ? 5 : 6 },
+      (_, index) => ({ x: index === 0 ? 800 : 0, y: index === 0 ? 800 : 0 })) };
+}
+
 function fakeLunaFury(productId = 0x0033, options: {
   unsupported?: boolean;
   ignoreWrites?: boolean;
@@ -37,15 +43,17 @@ function fakeLunaFury(productId = 0x0033, options: {
       const page = packet[4]!, command = packet[5]!, profile = packet[6]!;
       const key = `${page}:${command}`;
       const reply = new Uint8Array(64);
-      reply[0] = options.unsupported && EXTRA_READS.has(key) ? 0xa2 : 0xa1;
+      // This fixture covers the original extras; onboard controls have a
+      // separate fixture with independent profiles, axes and stage tables.
+      reply[0] = key === "1:141" || key === "0:159" || options.unsupported && EXTRA_READS.has(key) ? 0xa2 : 0xa1;
       reply[4] = page; reply[5] = command;
       let payload: number[] = [profile, 0];
       if (key === "0:133") payload = [3];
       if (key === "0:129") payload = [0, 0, 1, 2];
       if (key === "0:131") payload = [0, 80];
       if (key === "0:135") payload = [profile, 1, 44];
-      if (key === "1:129") payload = [profile, 1, 3, 32, 3, 32];
-      if (key === "1:128" || key === "1:136") payload = [profile, 1];
+      if (key === "1:129") payload = [profile, 1, 3, 32, 3, 32, ...Array(20).fill(0)];
+      if (key === "1:128" || key === "1:130" || key === "1:136") payload = [profile, 1];
       if (key === "1:148") payload = [profile, state.angle & 255];
       if (key === "0:152") payload = [profile, state.lightning, 0, 0];
       if (key === "0:146") payload = [profile, 0, packet[8]!, 0, state.latency[packet[8]!]!, ...Array(14).fill(0)];
@@ -68,6 +76,7 @@ for (const [pid, target] of [[0x0032, 0], [0x0033, 2], [0x0054, 0], [0x0084, 2]]
     assert.equal(status.brand, "LunaFury");
     assert.equal(status.angleTuning, -12);
     assert.deepEqual(status.lunafury, {
+      dpiStorage: dpiStorageFor(pid),
       lightningMode: 1, leftDebounceMs: 3, rightDebounceMs: 7,
       middleDebounceMs: 10, wheelGuard: { enabled: true, windowMs: 200 },
     });
@@ -97,6 +106,7 @@ for (const [pid, target] of [[0x0032, 0], [0x0033, 2], [0x0054, 0], [0x0084, 2]]
     const status = await client.readStatus();
     assert.equal(status.angleTuning, -30);
     assert.deepEqual(status.lunafury, {
+      dpiStorage: dpiStorageFor(pid),
       lightningMode: 2, leftDebounceMs: 15, rightDebounceMs: 0,
       middleDebounceMs: 1, wheelGuard: { enabled: false, windowMs: 100 },
     });
@@ -116,6 +126,7 @@ for (const [pid, target] of [[0x0032, 0], [0x0033, 2], [0x0054, 0], [0x0084, 2]]
     state.latency[2] = 8;
     const status = await new LamzuHidClient(device).readStatus();
     assert.deepEqual(status.lunafury, {
+      dpiStorage: dpiStorageFor(pid),
       lightningMode: 1, leftDebounceMs: 3, rightDebounceMs: 8,
       middleDebounceMs: 10, wheelGuard: { enabled: true, windowMs: 200 },
     });
@@ -139,6 +150,7 @@ for (const [pid, target] of [[0x0032, 0], [0x0033, 2], [0x0054, 0], [0x0084, 2]]
     const status = await new LamzuHidClient(device).readStatus();
     assert.equal(status.angleTuning, -12);
     assert.deepEqual(status.lunafury, {
+      dpiStorage: dpiStorageFor(pid),
       lightningMode: 1, leftDebounceMs: 3, rightDebounceMs: 7,
       middleDebounceMs: 10, wheelGuard: { enabled: true, windowMs: 200 },
     });
@@ -172,6 +184,7 @@ test("LunaFury readback waits past stale profiles and button selectors", async (
   const status = await client.readStatus(true);
   assert.equal(status.angleTuning, 15);
   assert.deepEqual(status.lunafury, {
+    dpiStorage: dpiStorageFor(),
     lightningMode: 2, leftDebounceMs: 4, rightDebounceMs: 8,
     middleDebounceMs: 12, wheelGuard: { enabled: false, windowMs: 100 },
   });
@@ -202,7 +215,9 @@ test("LunaFury exhausted stale replies stay absent and bounded", async () => {
   assert.equal(status.dpi, 800);
   assert.equal(status.batteryPercent, 80);
   assert.equal(status.angleTuning, null);
-  assert.ok(Object.values(status.lunafury!).every((value) => value === undefined));
+  const { dpiStorage, ...controls } = status.lunafury!;
+  assert.deepEqual(dpiStorage, dpiStorageFor());
+  assert.ok(Object.values(controls).every((value) => value === undefined));
   assert.equal(receives, 12, "each optional read keeps its two-attempt limit");
 });
 
@@ -224,7 +239,9 @@ test("unsupported LunaFury controls do not break the base device status", async 
   assert.equal(status.dpi, 800);
   assert.equal(status.batteryPercent, 80);
   assert.equal(status.angleTuning, null);
-  assert.ok(Object.values(status.lunafury!).every((value) => value === undefined));
+  const { dpiStorage, ...controls } = status.lunafury!;
+  assert.deepEqual(dpiStorage, dpiStorageFor());
+  assert.ok(Object.values(controls).every((value) => value === undefined));
 });
 
 test("LunaFury keeps only explicitly reported EL/ES color suffixes", () => {

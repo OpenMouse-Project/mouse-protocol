@@ -39,6 +39,21 @@ export const WE_OFF = {
 export const WE_POLLING_RATES = [125, 250, 500, 1000] as const;
 export type WePollingRate = (typeof WE_POLLING_RATES)[number];
 
+/**
+ * Settings OpenMouse exposes on a WE-series mouse (OP1we/XM2we share one
+ * driver and one list). Vendor-only: macros, profile management, LED
+ * control, debounce and sleep tuning.
+ */
+export type WeExposedFeature =
+  | "battery"
+  | "dpi"
+  | "polling-rate"
+  | "lift-off-distance";
+
+export function weExposedFeatures(): WeExposedFeature[] {
+  return ["battery", "dpi", "polling-rate", "lift-off-distance"];
+}
+
 export type WeLod = "Medium" | "High";
 
 export interface WeDpiStage {

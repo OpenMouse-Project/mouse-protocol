@@ -1,0 +1,87 @@
+{
+  "device": {
+    "vendorId": "0x373b",
+    "productId": "0x1115",
+    "productName": "ATK A9 PLUS 2.0 NK",
+    "connection": "Wired USB",
+    "firmware": [
+      "Mouse 1.30"
+    ],
+    "collections": [
+      {
+        "usagePage": "0x000c",
+        "usage": "0x0001",
+        "inputReports": [
+          "0x05"
+        ],
+        "outputReports": [],
+        "featureReports": []
+      },
+      {
+        "usagePage": "0xff02",
+        "usage": "0x0002",
+        "inputReports": [
+          "0x13"
+        ],
+        "outputReports": [
+          "0x13"
+        ],
+        "featureReports": []
+      },
+      {
+        "usagePage": "0xff02",
+        "usage": "0x0002",
+        "inputReports": [
+          "0x08"
+        ],
+        "outputReports": [
+          "0x08"
+        ],
+        "featureReports": []
+      },
+      {
+        "usagePage": "0xff04",
+        "usage": "0x0002",
+        "inputReports": [],
+        "outputReports": [],
+        "featureReports": [
+          "0x06"
+        ]
+      }
+    ]
+  },
+  "trace": [
+    {
+      "request": "08 10 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3d",
+      "reply": "08 10 00 00 00 02 02 53 00 00 00 00 00 00 00 00 e6"
+    },
+    {
+      "request": "08 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 49",
+      "reply": "08 04 00 00 00 02 64 01 10 9d 00 00 00 00 00 00 35"
+    },
+    {
+      "request": "08 08 00 00 00 06 00 00 00 00 00 00 00 00 00 00 3f",
+      "reply": "08 08 00 00 00 06 01 54 01 54 00 55 00 00 00 00 40"
+    },
+    {
+      "request": "08 08 00 00 0c 04 00 00 00 00 00 00 00 00 00 00 35",
+      "reply": "08 08 00 00 0c 04 1f 1f 00 17 00 00 00 00 00 00 e0"
+    },
+    {
+      "request": "08 12 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3b",
+      "reply": "08 12 00 00 00 02 01 30 00 00 00 00 00 00 00 00 08"
+    },
+    {
+      "request": "08 08 00 00 0a 02 00 00 00 00 00 00 00 00 00 00 39",
+      "reply": "08 08 00 00 0a 02 01 54 00 00 00 00 00 00 00 00 e4"
+    },
+    {
+      "request": "08 08 00 00 a9 0a 00 00 00 00 00 00 00 00 00 00 92",
+      "reply": "08 08 00 00 a9 0a 02 53 00 55 0c 49 00 55 00 55 e9"
+    },
+    {
+      "request": "08 08 00 00 bd 04 00 00 00 00 00 00 00 00 00 00 84",
+      "reply": "08 08 00 00 bd 04 00 55 00 55 00 00 00 00 00 00 da"
+    }
+  ]
+}

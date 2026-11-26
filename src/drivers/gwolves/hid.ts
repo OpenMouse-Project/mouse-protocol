@@ -36,21 +36,18 @@ import {
 } from "@openmouse/protocol/teevolution";
 import { GWOLVES_PRODUCTS, GWOLVES_RECEIVER_MODELS, GWOLVES_VENDOR_ID, type GWolvesProduct } from "./products.ts";
 
-// G-Wolves mice enumerate under their own vendor id (0x33e4) but speak the
-// exact same shared VGN-family wire protocol already implemented
-// independently in this repo for the VGN Dragonfly F2 Master+ and the
-// Pulsar 4K Wireless Receiver — identical opcodes, checksums, EEPROM
-// address map, DPI encoding, and polling-rate encoding. This driver uses
-// its own protocol module (../../gwolves/index.ts) rather than importing
-// vgn's, matching the pattern already established for the Pulsar/VGN case:
-// independent per-brand implementation of a shared algorithm, so a future
-// G-Wolves-specific quirk can diverge without touching another brand's
-// tested code. Confirmed against real hardware 2026-08-21 via a live HID
-// capture (browser sendReport/inputreport patch) while changing DPI, LOD,
-// and polling rate on the official G-Wolves web driver at mouse.fit, then
-// independently reproduced with hidapitester with no browser involved at
-// all. See PROTOCOL-NOTES.md in the PR for the raw captured packets this
-// was verified against.
+// G-Wolves' XVI:0 mice (HTX Ultra generation) speak the brand's own
+// report-5 protocol, implemented independently here for the same reason the
+// Pulsar/VGN case is: an independent per-brand implementation of a wire
+// format that happens to match the shared VGN-family reference design
+// (identical opcodes, checksums, EEPROM address map, DPI and polling-rate
+// encoding), so a future G-Wolves-specific quirk can diverge without
+// touching another brand's tested code. Confirmed against real hardware
+// 2026-08-21 via a live HID capture (browser sendReport/inputreport patch)
+// while changing DPI, LOD, and polling rate on the official G-Wolves web
+// driver at mouse.fit, then independently reproduced with hidapitester with
+// no browser involved at all. See PROTOCOL-NOTES.md in the PR for the raw
+// captured packets this was verified against.
 //
 // This class is intentionally model-agnostic: per-product identity (name,
 // wireless/wired, verified-on-hardware status) lives in ./products.ts, not
@@ -108,7 +105,7 @@ export class GWolvesHidClient {
   // device recognition, so adding a model is purely a data change there.
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== GWOLVES_VENDOR_ID) return false;
-    if (GWOLVES_PRODUCTS.get(device.productId)?.protocol !== "vgn") return false;
+    if (GWOLVES_PRODUCTS.get(device.productId)?.protocol !== "gwolves") return false;
     return device.collections.some((collection) =>
       collection.usagePage === 0xff02
       && collection.inputReports.some((report) => report.reportId === GWOLVES_REPORT_ID && this.reportLength(report) === 16)
@@ -188,10 +185,10 @@ export class GWolvesHidClient {
       ...(keys ? { buttonMappings: teevolutionDecodeButtonMappings(keys, 0, BUTTON_LIMITS.buttons), buttonOptions: BUTTON_LIMITS.actions } : {}),
       firmware: firmware ? [`Mouse ${firmware}`] : [],
       ui: {
-        family: "vgn-f2",
+        family: "gwolves",
         hideUnsupportedPollingRates: true,
         forceShowBattery: false,
-        pollingNote: `${model} supports 125 Hz through 8,000 Hz over its shared VGN-family protocol.`,
+        pollingNote: `${model} supports 125 Hz through 8,000 Hz over its G-Wolves XVI:0 protocol.`,
         defaultDisplayName: `G-Wolves ${model}`,
       },
     };

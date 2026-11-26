@@ -1,0 +1,21 @@
+"area: protocol":
+  - changed-files:
+      - any-glob-to-any-file: ["src/**"]
+"area: drivers":
+  - changed-files:
+      - any-glob-to-any-file: ["src/drivers/**"]
+"area: tests":
+  - changed-files:
+      - any-glob-to-any-file: ["**/*.test.ts", "scripts/*test*"]
+"area: captures":
+  - changed-files:
+      - any-glob-to-any-file: ["captures/**"]
+"area: documentation":
+  - changed-files:
+      - any-glob-to-any-file: ["**/*.md", "**/*.mdx", "docs/**"]
+"area: dependencies":
+  - changed-files:
+      - any-glob-to-any-file: ["**/package.json", "**/package-lock.json", "**/Cargo.toml", "**/Cargo.lock"]
+"area: ci":
+  - changed-files:
+      - any-glob-to-any-file: [".github/**", "build/**", "scripts/**", "**/build.rs", "vite.config.*", "tsconfig*.json"]

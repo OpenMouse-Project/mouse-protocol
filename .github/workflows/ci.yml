@@ -29,16 +29,8 @@ jobs:
       # some other project's bundled CLI cannot block our releases.
       - run: npm audit --omit=dev --audit-level=high
 
-  # The suite is CPU-bound and runs serially (~6 min locally, ~11 min on a
-  # runner), so it is sharded across jobs instead of one long run. Each shard
-  # is a deterministic slice of the tracked test files; see
-  # scripts/ci-test-shard.mjs.
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
 
@@ -48,4 +40,4 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: node scripts/ci-test-shard.mjs ${{ matrix.shard }} 4
+      - run: npm test

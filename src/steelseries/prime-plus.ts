@@ -17,10 +17,11 @@
  *   libratbag, nor the OpenRGB SteelSeries controller sources reachable from
  *   this environment (see corroboration gap below) expose any command for it.
  *   Prime+ is still implemented as its own module/PID/family rather than
- *   folded into a shared "Prime" module, per this rollout's instruction to
- *   add Prime+ only and not touch plain Prime — but the wire protocol
- *   implemented here is not distinguishable from plain Prime's, and a reader
- *   should not infer an OLED command exists just because this module exists.
+ *   folded into a shared "Prime" module; the plain Prime PIDs (`0x182E`,
+ *   `0x182A`, `0x1856`) reuse this codec via `./devices.ts` because the
+ *   wire protocol implemented here is not distinguishable from plain
+ *   Prime's, and a reader should not infer an OLED command exists just
+ *   because this module exists.
  * - rivalcfg `rivalcfg/handlers/multidpi_range.py` (DPI presets: `merge_bytes(
  *   count, selected_preset, ...values)`, `count_mode: "number"`, 2-byte
  *   little-endian DPI values here vs. Aerox 3's 1-byte) and

@@ -463,8 +463,9 @@ same approach `src/mchose/buttons.ts` already takes in this repo. 127 actions
 in total. This was initially recorded as impossible to offer; that was wrong,
 and the MCHOSE driver was the counter-example sitting in the same tree.
 
-**Still NOT offered:** macros (`slot << 16 | 9`), which need the `0x07`
-upload command.
+Macros (`displayIndex << 16 | 9`) are offered as a single `Macro` action.
+`setButtonMapping` resolves it through `incottMacroBindingForButton`, using
+the button's display index so it runs its own buffer.
 
 ### Battery (2026-09-07, DISPROVEN 2026-09-08 — see the top of this document)
 
@@ -814,22 +815,17 @@ exactly the stale-frame bug this queue exists to prevent.
 Per the "record what didn't work" principle, these are open questions no
 capture session has resolved. **Do not resolve these by guessing.**
 
-- **Lift-off hw -> millimetre label mapping — needs a hardware check.** The
-  hw values 0/1/2 round-trip cleanly (confirmed 2026-09-08, see above), but
-  which physical distance each means is unknown. IncottHIDApp claims hardware
-  `0` = 1 mm, `1` = 2 mm, `2` = 0.7 mm (`INCOTT_LOD_WIRE_TO_TENTHS` in
-  `src/incott/index.ts`). The vendor's own device definition
-  (`js/gvarG23-v102.js`) instead pairs `lodUI = [0.7, 1, 2]` with
-  `lodHW = [0, 1, 2]`, i.e. hardware `0` = 0.7 mm — a different mapping.
-  Neither capture session recorded which on-screen label was selected for a
-  given write. **Left unchanged pending a hardware check**: set 0.7 mm in the
-  vendor tool, then read `0x84`/`0x01` (or the packed form) and see which
-  value comes back.
 - **The remaining `0x8f` identity bytes.** Bytes 2-6 are decoded (model,
   receiver, sensor — see the model-identification section at the end of this
   document). Bytes 7-8 (`00 ff` on this device) are still unknown; a firmware
-  version is the obvious candidate but nothing confirms it.
+  version is the obvious candidate but nothing confirms it. One lead: on the
+  Zero 29 only, the vendor reads the shell colour from this area (see "Shell
+  colour: Zero 29 only" below).
 Resolved since this list was written (kept for the record):
+
+- ~~**Lift-off hw -> millimetre label mapping.**~~ Settled on a PAW3950 on
+  2026-09-08 (hardware `2` = 0.7 mm), and per sensor since: see "Lift-off
+  distance mapping" below.
 
 - ~~**DPI per-axis read.**~~ It exists: `09 82 <stage> <axis>`, echoed at
   reply byte 8. The earlier probe saw one value for all three axes because X
@@ -882,10 +878,48 @@ The device contradicts that, so the arrays are not a paired lookup. Recording it
 because it is exactly the kind of plausible-but-wrong inference worth warning the
 next contributor about.
 
-Only the 0.7 mm point was read back directly. Hardware `0` and `1` are 1 mm and
-2 mm in that order; the mapping is a bijection over {0,1,2} and the one claim that
-was testable proved correct, but neither of those two values has been read
-individually.
+That session read only the 0.7 mm point; hardware `0` and `1` (1 mm and 2 mm)
+followed from the bijection. All three points have since been read individually,
+see the hardware read in "The mapping depends on the sensor" below.
+
+### The mapping depends on the sensor
+
+The firmware encoding is the same on both sensors; only the steps offered
+differ. The PAW3395 has no 0.7 mm:
+
+| On screen | PAW3950 wire | PAW3395 wire |
+| --- | --- | --- |
+| 0.7 mm | `2` | not offered |
+| 1 mm | `0` | `0` |
+| 2 mm | `1` | `1` |
+
+The PAW3395 column comes from
+[oexi/incott-driver-desktop@f31980b](https://github.com/oexi/incott-driver-desktop/commit/f31980b)
+("Fix LOD mapping on PAW3395 mice", 2026-11-03, MIT). Its author reports that
+the official Windows desktop driver (Gaming Mouse Driver) sends 1 mm as `0`
+and 2 mm as `1`. The vendor's WebHID configurator, as ported byte-for-byte in
+that project (`src/protocol/device.js`), remaps lift-off only for the PAW3950
+and sends the PAW3395 profile value unchanged (1 mm as `1`, 2 mm as `2`): one
+step off. That off-by-one path is what `lodUI`/`lodHW` describe when read as a
+pair. In [oexi/incott-driver-desktop#7](https://github.com/oexi/incott-driver-desktop/issues/7)
+a G23 owner reports that lift-off changes made through the web-driver mapping
+have no measurable effect, wired or on the 2.4 GHz receiver, while the official
+desktop driver changes the height. As of 2026-11-03 the reporter has not yet
+confirmed the fixed build, and no identity reply was posted.
+
+The PAW3950 column is read point by point on hardware (2026-10-30, a G23
+Pro on the 8K dongle, `captures/incott-lift-off/`): each step was set with
+the vendor port, the port was closed, and the OpenMouse hardware test read
+`0x84`/`0x01` back as `2` for 0.7 mm, `0` for 1 mm and `1` for 2 mm.
+
+Until this change the driver offered 0.7 mm (wire `2`) on every unit,
+including a PAW3395, where that step does not exist. `incottDecodeLiftOffDirect`,
+`incottDecodeLiftOff` and `incottEncodeSetLiftOff` now take the identity
+reply's `sensorId`, and the driver offers only Medium/High on a PAW3395, where
+wire `2` decodes to no value. An unreadable identity keeps the PAW3950 table.
+The PAW3395 column has not been read on hardware by us: every unit tested
+here is a PAW3950. An owner of a non-Pro G23, G23V2 SE or Ghero could confirm
+it the same way.
 
 ## Model identification: SOLVED 2026-09-10 — it is `0x8F`
 
@@ -938,14 +972,40 @@ Model codes, and the names the vendor's `text_en` bundle gives them:
 | `0x09` | `FM23` | Zero 39 (零39) |
 | `0x0E` | `G23V2` | G23V2 |
 
-`0x08` and `0x0E` are both G23V2 — the vendor tests them in one branch. Only
-the `0x0E` row is confirmed against hardware here; the rest are transcribed
-from a dispatch table that is authoritative for models this contributor does
-not own.
+`0x08` and `0x0E` are both G23V2 — the vendor tests them in one branch. The
+`0x0E` row and, since 2026-10-29, the `0x02` row are confirmed against
+hardware (see "A second model on hardware" below); the rest are transcribed
+from a dispatch table that is authoritative for models no contributor here
+owns.
 
 The sensor decides the "Pro" suffix: the vendor appends `Pro` when the sensor
 is `0x3950`, which is how `G23V2Pro` appears for a device whose HID product
 string only ever says `incott 8K wireless mouse`.
+
+### Shell colour: Zero 29 only
+
+`readDps()` has one more branch, transcribed here from the port in
+[oexi/incott-driver-desktop](https://github.com/oexi/incott-driver-desktop)
+(`src/protocol/device.js`, MIT), whose tests diff every report against the
+vendor's original JavaScript:
+
+```js
+if (r[2] === 6) {                     // model code 0x06, Zero 29
+  const i1 = this.iswireless ? 6 : 5;
+  this.isPink = r[i1] === 2;
+}
+```
+
+With `r[n]` being `frame[n+1]`, that is **frame byte 7 behind the receiver,
+frame byte 6 on the cable**, one slot past the sensor byte for the same link,
+and `0x02` means the pink shell: the vendor then swaps in its pink product
+render and button diagrams. No other model code takes this branch, so for
+every other model the identity reply carries no colour as far as the vendor
+knows. A white G23 Pro reads `00` in both positions
+(`09 8f 01 02 00 f1 00 00 00` on the cable, `09 8f 01 02 02 f0 f1 00 02` on
+the dongle).
+
+Not read on a Zero 29 here, and not decoded by `incottDecodeIdentity`.
 
 ### The sensor slot moves with the receiver — corrected 2026-09-11
 
@@ -1023,6 +1083,55 @@ Two independent confirmations:
 - [IncottHIDApp](https://github.com/romkazor/IncottHIDApp)'s compatibility
   table lists Ghero, G23, G24, G23V2, Zero 29 and Zero 39 against the same
   two ids, with three constants in `device.go` and no per-model table.
+
+### A second model on hardware: the original G23 Pro (2026-10-29)
+
+A different contributor ran the OpenMouse hardware test against a white,
+first-generation G23 Pro, once per link. Both reports are in
+`captures/incott-g23-pro/`; every report sent was a query, nothing was
+written.
+
+```
+cable only, no dongle:  09 8f 01 02 00 f1 00 00 00
+dongle only, no cable:  09 8f 01 02 02 f0 f1 00 02
+```
+
+What this confirms:
+
+- **Model code `0x02` is the G23.** Byte 3 read `0x02` on both links, and
+  the wired product string, `incott Esports G23 Pro mouse`, names the same
+  model independently. The decoder already maps it; this is its first
+  hardware sighting.
+- **The sensor slot moves the same way on a second model.** `0xF1` sits at
+  byte 5 with no receiver and at byte 6 behind the 8K receiver (byte 4
+  `0x02`), exactly as the G23V2 captures above show. The dongle-only frame
+  also matches the G23V2's cable-plus-dongle layout, so it is the receiver's
+  presence, not the cable, that shifts the slot. Both decode to "G23 Pro".
+
+Observed on this unit, not yet explained:
+
+- **Byte 8 is not identity data on the dongle.** It read `0x02` on 69 of the
+  70 full 9-byte replies in the wireless report, whatever the command
+  (`09 81 04 1f 00 00 00 00 02`, `09 84 01 02 00 00 00 00 02`, ...). The
+  G23V2's `ff` at the same position in `query-sweep-0x80-0x8f.hex` may be the
+  same kind of per-link trailer rather than part of the identity reply.
+- **The read after the identity reply is shifted by one byte.** In the
+  wireless report, every `0x8F` exchange (4 of 4) returned the correct frame
+  first, and the next `GET_FEATURE`, the transaction queue's discard read
+  before the following command, returned `09 8f 01 02 02 f0 f0 f1 02`: `0xF1`
+  pushed from byte 6 to byte 7. The driver never decodes that read, so the
+  name is unaffected, but anything that did would see no `0xF1` in bytes 5-6
+  and report a PAW3395. Another case for the "Read-only transaction
+  discipline" above.
+- **Stale bytes reach the payload, not only the header.** Over the dongle the
+  `0x85`/`0x02` (Fire Key) reply was `09 85 02 03 0a f1 00 00 02`; over the
+  cable it was `09 85 02 03 0a 00 00 00`. The `0xF1` at byte 5 is left over
+  from the identity reply sent earlier.
+- **Lift-off read hw `2`** on both links, which the app labels "Low". This
+  does not settle the millimetre mapping in "Unresolved unknowns".
+- **No colour.** Nothing in either report identifies the shell colour (this
+  unit is white). Telling whether bytes 7-8 ever do would need a second G23
+  Pro in another colour.
 
 ### Leads recovered from the same source, not yet implemented
 
@@ -1143,7 +1252,7 @@ instrumentation, and `captures/incott-8k-wireless/macro-upload-2026-09-11.hex`
 for the capture and its decode.
 
 There is no macro READ command, so `uploadMacro` is the one writer in this
-driver with nothing to verify against. Binding a button to `Macro <n>` and
+driver with nothing to verify against. Binding a button to `Macro` and
 pressing it is the only confirmation available.
 
 ### The correction this forced
@@ -1161,10 +1270,12 @@ did. The encoder is now pinned byte-for-byte to that capture.
 
 The capture ended with `06 04 09 00 03 00`, binding wire button 4 to
 `0x00030009` — the `fJuji` encoding `slot << 16 | 9`.
-`incottButtonActionLabel` now names these (`Macro 4`) instead of reporting
-raw hex. `incottButtonActionCode` deliberately does NOT reverse them: nothing
-can assign a macro until there is a UI to author one, so an existing macro
-binding reads back correctly and is left alone.
+`incottButtonActionLabel` names these `Macro`. `buttonOptions` offers only
+that single action; `setButtonMapping` resolves it through
+`incottMacroBindingForButton` using the button's display index, which differs
+from its wire index. `incottButtonActionCode` cannot resolve `Macro` without
+that button context. A button can only run its own buffer, so numbered-slot
+choices would offer bindings the hardware silently ignores.
 
 ### Why there is no UI for this either
 

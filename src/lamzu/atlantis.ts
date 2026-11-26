@@ -63,6 +63,14 @@ export const LAMZU_ATLANTIS_COMMAND = PULSAR_COMMAND;
 export const LAMZU_ATLANTIS_WRITE_ACTIVE_PROFILE = 0x0f;
 
 /**
+ * Restoring the factory settings, CompX's ClearSetting. Absent from
+ * `PULSAR_COMMAND` like the profile write above. Sent with no address and no
+ * payload; Scyrox's configurator then waits up to six seconds for the mouse to
+ * echo the command before it re-reads the flash image.
+ */
+export const LAMZU_ATLANTIS_CLEAR_SETTINGS = 0x09;
+
+/**
  * Flash offsets. Everything in `PULSAR_FLASH` matched byte for byte on Lamzu
  * hardware — same firmware family, same layout — so those are inherited rather
  * than re-typed, and only the fields Lamzu's configurator exposes that the
@@ -78,9 +86,26 @@ export const LAMZU_ATLANTIS_FLASH = {
   dpiStageColors: 44,
   buttonActions: 96,
   highPerformance: 185,
+  /**
+   * Sensor angle tuning: a signed degree count at 189 and, at 191, the switch
+   * the vendor configurator sets to 1 before its first angle write. Both are
+   * one-byte sealed fields, named AngleTune and AngleTuneState in Scyrox's
+   * flash map.
+   */
+  angleTune: 189,
+  angleTuneState: 191,
+  /** Where 3955-sensor firmware keeps the DPI stage values (six-byte records,
+   * each with its own checksum). The legacy `dpiValues` fields on those mice
+   * keep holding the factory defaults. */
+  sensor3955DpiValues: 6912,
 } as const;
 
 export const LAMZU_ATLANTIS_STAGE_STRIDE = 4;
+/**
+ * Stride of the 3955-sensor DPI records: 16-bit x, 16-bit y, flags, checksum.
+ * See the layout type below for when a product uses these.
+ */
+export const LAMZU_ATLANTIS_SENSOR3955_STAGE_STRIDE = 6;
 export const LAMZU_ATLANTIS_MAX_DPI_STAGES = 8;
 
 /**
@@ -106,12 +131,27 @@ export const LAMZU_ATLANTIS_MAX_TIMER_SECONDS = 0xff * LAMZU_ATLANTIS_TIMER_STEP
 export const LAMZU_ATLANTIS_SLEEP_OPTIONS = [10, 30, 60, 300, 600, 1800] as const;
 
 /**
- * Which of the two encodings of 1,000 Hz a transport wants. Stored per product
- * rather than derived from the rate ceiling: the 1K receiver tops out at
- * 1,000 Hz like the cable does, so a ceiling test would silently decide its
- * encoding for it, and no 1K receiver has been on hand to check.
+ * Which rate-byte encoding a product speaks. Stored per product rather than
+ * derived from the rate ceiling: the 1K receiver tops out at 1,000 Hz like the
+ * cable does, so a ceiling test would silently decide its encoding for it, and
+ * no 1K receiver has been on hand to check.
+ *
+ * "wired" and "receiver" retain the legacy Lamzu table's two encodings of
+ * 1,000 Hz (see below). "pulsar" is CompX's own encoding — the one
+ * `pulsarEncodePollingRate` implements — where 0x10 and up carry 2-8 kHz.
+ * The F510 4K receiver uses that table too: a 2,000 Hz write captured on an
+ * Atlantis OG V2 4K Nordic carries 0x10, not the legacy table's 0x20.
+ * Scyrox's web configurator independently writes 0x10, 0x20 and 0x40 for
+ * 2,000, 4,000 and 8,000 Hz. The product's rate list still enforces its ceiling.
  */
-export type LamzuAtlantisRateFamily = "wired" | "receiver";
+export type LamzuAtlantisRateFamily = "wired" | "receiver" | "pulsar";
+
+/**
+ * Which flash region a product's DPI stage values live in: the legacy
+ * four-byte fields at `dpiValues`, or the six-byte records at
+ * `sensor3955DpiValues` that CompX's 3955-sensor firmware moved them to.
+ */
+export type LamzuAtlantisDpiLayout = "legacy" | "sensor3955";
 
 export interface LamzuAtlantisProduct {
   model: string;
@@ -119,6 +159,8 @@ export interface LamzuAtlantisProduct {
   wireless: boolean;
   pollingRates: readonly number[];
   rateFamily: LamzuAtlantisRateFamily;
+  /** Which flash region the stage values live in; defaults to "legacy". */
+  dpiLayout?: LamzuAtlantisDpiLayout;
   /** False until this exact product id has been exercised on hardware. */
   verified: boolean;
   /** Per-product sensor limits where they differ from Atlantis defaults. */
@@ -136,10 +178,35 @@ export interface LamzuAtlantisProduct {
   supportsRippleControl?: boolean;
   supportsPerformanceMode?: boolean;
   supportsHyperMode?: boolean;
+  /**
+   * When set, the lift-off byte is a scale of codes 1 to n at these heights in
+   * millimetres, rather than Lamzu's two stops. The status then carries
+   * `liftOffScale`, and the coarse `liftOffDistance` is the nearest stop.
+   */
+  liftOffMillimetres?: readonly number[];
+  /**
+   * When set, the lift-off byte holds one of these codes, each one of the
+   * shared stops, rather than Lamzu's two stops or a 1-to-n scale. The 3950
+   * codes its heights out of order (3, 1, 2 for 0.7, 1 and 2 mm), which only
+   * an explicit table describes. The status lists the keys as
+   * `supportedLiftOffDistances`.
+   */
+  liftOffStopCodes?: Readonly<Partial<Record<"Low" | "Medium" | "High", number>>>;
+  /** The longest debounce the vendor offers, in ms; the client default is 15. */
+  maxDebounceMs?: number;
+  /** Controls below default to off: no Lamzu unit has exercised them. */
+  supportsAngleTuning?: boolean;
+  supportsFactoryReset?: boolean;
+  /**
+   * Whether a sleep write also goes to `performanceTime` (flash 183). Scyrox's
+   * configurator writes every sleep value to both addresses, and a V8S it had
+   * configured held the same byte in each.
+   */
+  mirrorSleepToPerformanceTime?: boolean;
 }
 
 const RATES_WIRED = [125, 250, 500, 1000] as const;
-const RATES_4K = [500, 1000, 2000, 4000] as const;
+const RATES_4K = [125, 250, 500, 1000, 2000, 4000] as const;
 
 /**
  * Six models share these ids — Atlantis OG V2, Atlantis Mini, Atlantis Mini
@@ -150,16 +217,19 @@ const RATES_4K = [500, 1000, 2000, 4000] as const;
  * by making the user pick the model from a list, so this catalog names the
  * family rather than pretending to identify one model.
  *
- * 0xf50f (the mouse on its cable) is confirmed on hardware. The three receiver
- * ids come from Lamzu's shipped device table and nothing more: no receiver has
- * been exercised, so neither their rate lists nor the transport itself is
- * established, and they stay `verified: false` until one is.
+ * 0xf50f (the mouse on its cable) is confirmed on hardware. The 1K receiver
+ * still has only vendor-table evidence. F510 has partial wireless read/write
+ * evidence and a corrected polling-rate family (docs/lamzu-atlantis-testing.md),
+ * but its OpenMouse hardware-test round-trip failed, so it stays unverified.
+ *
+ * 0xf517 was in that table too, but hardware showed it enumerating as a
+ * "Scyrox Turbo 8k dongle" that speaks this same protocol; it moved to
+ * `../scyrox/index.ts`.
  */
 export const LAMZU_ATLANTIS_PRODUCTS: ReadonlyMap<number, LamzuAtlantisProduct> = new Map([
   [0xf50f, { model: "Atlantis", wireless: false, pollingRates: RATES_WIRED, rateFamily: "wired", verified: true }],
   [0xf50d, { model: "Atlantis", wireless: true, pollingRates: RATES_WIRED, rateFamily: "wired", verified: false }],
-  [0xf510, { model: "Atlantis", wireless: true, pollingRates: RATES_4K, rateFamily: "receiver", verified: false }],
-  [0xf517, { model: "Atlantis", wireless: true, pollingRates: RATES_4K, rateFamily: "receiver", verified: false }],
+  [0xf510, { model: "Atlantis", wireless: true, pollingRates: RATES_4K, rateFamily: "pulsar", verified: false }],
 ]);
 
 /**
@@ -176,6 +246,19 @@ export const LAMZU_ATLANTIS_PRODUCTS: ReadonlyMap<number, LamzuAtlantisProduct> 
 export const LAMZU_ATLANTIS_POLLING_RATES = [
   [0x08, 125], [0x04, 250], [0x02, 500], [0x01, 1000],
   [0x10, 1000], [0x20, 2000], [0x40, 4000], [0x80, 8000],
+] as const;
+
+/**
+ * CompX's own rate bytes, the mapping `pulsarEncodePollingRate` implements:
+ * below 0x10 they divide 1,000 Hz exactly as Lamzu's wired family does, and
+ * 0x10 to 0x40 step by 2,000 Hz. Read from Scyrox's web configurator
+ * (scyrox.net, S-center 3.1.0, which encodes `rate <= 1000 ? 1000 / rate :
+ * rate / 2000 * 16`) and confirmed on hardware: a V8S the configurator set to
+ * 4,000 Hz held 0x20 while a decoder using the Lamzu table read it as 2,000.
+ */
+export const LAMZU_ATLANTIS_PULSAR_POLLING_RATES = [
+  [0x08, 125], [0x04, 250], [0x02, 500], [0x01, 1000],
+  [0x10, 2000], [0x20, 4000], [0x40, 8000],
 ] as const;
 
 export type LamzuAtlantisLiftOffDistance = "Low" | "Medium";
@@ -294,8 +377,93 @@ export function lamzuAtlantisDecodeDpiStage(field: Uint8Array): LamzuAtlantisDpi
   };
 }
 
-export function lamzuAtlantisDecodePollingRate(raw: number): number | null {
-  return LAMZU_ATLANTIS_POLLING_RATES.find(([encoded]) => encoded === raw)?.[1] ?? null;
+/**
+ * Encodes one DPI as a legacy stage field, both axes in lockstep: the same
+ * bytes as `pulsarVgnEncodeDpi`, but over the whole ten bits the decoder above
+ * reads (50 to 51,200 DPI) rather than the Pulsar ceiling of 26,000. Each
+ * product's own maxDpi still bounds what a client writes.
+ */
+export function lamzuAtlantisEncodeDpiStage(dpi: number): number[] {
+  const value = dpi / LAMZU_ATLANTIS_DPI_STEP - 1;
+  if (!Number.isInteger(value) || value < 0 || value > 0x3ff) {
+    throw new Error("A legacy DPI stage holds 50 to 51,200 DPI in 50 DPI steps.");
+  }
+  const low = value & 0xff;
+  const high = value >> 8;
+  return lamzuAtlantisSealField([low, low, (high << 2) | (high << 6)]);
+}
+
+/**
+ * The 3955 sensor's two value bands, from the vendor configurator's sensor
+ * table. Below 42,002 DPI the value stores as-is; above, halved, with the
+ * band marker in both nibbles of the flags byte (DPIex 17 = 0x11).
+ */
+const SENSOR3955_DPI_RANGES = [
+  { min: 1, flags: 0x00 },
+  { min: 42002, flags: 0x11 },
+] as const;
+
+/** One doubling per set bit in a flags nibble, exactly as the vendor decodes. */
+function sensor3955BandMultiplier(flags: number): number {
+  let multiplier = 1;
+  if (flags & 0x01) multiplier *= 2;
+  if (flags & 0x02) multiplier *= 2;
+  return multiplier;
+}
+
+/**
+ * Decodes a 3955 DPI record: `[xLo, xHi, yLo, yHi, flags, checksum]`. The
+ * value stores as `dpi / multiplier - 1`, 16 bits per axis, with flags bits
+ * 2-3 carrying x's value bits 16-17, bits 6-7 y's, and bits 0-1 / 4-5 each
+ * axis's band marker.
+ *
+ * Transcribed from the vendor configurator's read routine and checked
+ * against its encoder, which writes 1,600 DPI as `3f 06 3f 06 00 cb`. That is
+ * the encoder's output, not a capture: the vendor tool showed a V8S on 1,600
+ * while the legacy field at 12 said 400, but no OpenMouse build has read this
+ * region from hardware yet.
+ */
+export function lamzuAtlantisDecodeDpiStage3955(field: Uint8Array): LamzuAtlantisDpiStage | null {
+  if (field.length < LAMZU_ATLANTIS_SENSOR3955_STAGE_STRIDE || !lamzuAtlantisFieldIsIntact(field)) return null;
+  const flags = field[4] ?? 0;
+  const decode = (low: number, high: number, extraBits: number, bandFlags: number) =>
+    (((extraBits << 16) | (high << 8) | low) + 1) * sensor3955BandMultiplier(bandFlags);
+  return {
+    x: decode(field[0] ?? 0, field[1] ?? 0, (flags >> 2) & 0x03, flags & 0x03),
+    y: decode(field[2] ?? 0, field[3] ?? 0, (flags >> 6) & 0x03, (flags >> 4) & 0x03),
+  };
+}
+
+/**
+ * Encodes one DPI as a 3955 record, both axes in lockstep the way the vendor
+ * configurator writes them. A stage the vendor app had set to separate x and
+ * y comes back symmetric; asymmetric records are not attempted without
+ * hardware to confirm the flags layout for them.
+ */
+export function lamzuAtlantisEncodeDpiStage3955(dpi: number): number[] {
+  let band = SENSOR3955_DPI_RANGES.length - 1;
+  while (band > 0 && dpi < SENSOR3955_DPI_RANGES[band].min) band -= 1;
+  const range = SENSOR3955_DPI_RANGES[band];
+  const value = Math.floor(dpi / sensor3955BandMultiplier(range.flags)) - 1;
+  const extraBits = value >> 16;
+  const flags = (extraBits << 2) | (extraBits << 6) | range.flags | (range.flags << 4);
+  return lamzuAtlantisSealField([
+    value & 0xff,
+    (value >> 8) & 0xff,
+    value & 0xff,
+    (value >> 8) & 0xff,
+    flags & 0xff,
+  ]);
+}
+
+export function lamzuAtlantisDecodePollingRate(
+  raw: number,
+  family: LamzuAtlantisRateFamily = "wired",
+): number | null {
+  const table = family === "pulsar"
+    ? LAMZU_ATLANTIS_PULSAR_POLLING_RATES
+    : LAMZU_ATLANTIS_POLLING_RATES;
+  return table.find(([encoded]) => encoded === raw)?.[1] ?? null;
 }
 
 /**
@@ -306,6 +474,9 @@ export function lamzuAtlantisEncodePollingRate(
   hertz: number,
   family: LamzuAtlantisRateFamily,
 ): number | null {
+  if (family === "pulsar") {
+    return LAMZU_ATLANTIS_PULSAR_POLLING_RATES.find(([, rate]) => rate === hertz)?.[0] ?? null;
+  }
   const candidates = LAMZU_ATLANTIS_POLLING_RATES.filter(([, rate]) => rate === hertz);
   if (candidates.length === 0) return null;
   const preferred = family === "receiver"
@@ -320,6 +491,43 @@ export function lamzuAtlantisDecodeLiftOffDistance(raw: number): LamzuAtlantisLi
 
 export function lamzuAtlantisEncodeLiftOffDistance(value: string): number | null {
   return LAMZU_ATLANTIS_LIFT_OFF_DISTANCES.find(([, name]) => name === value)?.[0] ?? null;
+}
+
+/**
+ * The status shape for a product whose lift-off byte is a scale of codes 1 to
+ * n (see `liftOffMillimetres`), or null for a code outside it. The heights are
+ * uneven on the 3955 (0.7, 0.9, 1.2, 1.4, 1.6 mm), so every code's height
+ * travels with the scale rather than being interpolated.
+ */
+export function lamzuAtlantisLiftOffScale(
+  code: number,
+  millimetres: readonly number[],
+): NonNullable<MouseStatus["liftOffScale"]> | null {
+  const height = millimetres[code - 1];
+  if (!Number.isInteger(code) || height === undefined) return null;
+  return {
+    value: code,
+    min: 1,
+    max: millimetres.length,
+    millimetres: height,
+    minMillimetres: millimetres[0]!,
+    maxMillimetres: millimetres[millimetres.length - 1]!,
+    millimetresByCode: [...millimetres],
+  };
+}
+
+/** The coarse stop for a lift-off height, on the thresholds the Finalmouse scale uses. */
+export function lamzuAtlantisNearestLiftOffStop(millimetres: number): NonNullable<MouseStatus["liftOffDistance"]> {
+  return millimetres < 1 ? "Low" : millimetres < 1.5 ? "Medium" : "High";
+}
+
+/** The angle-tune byte is a signed degree count. */
+export function lamzuAtlantisDecodeAngleTuning(raw: number): number {
+  return raw >= 0x80 ? raw - 0x100 : raw;
+}
+
+export function lamzuAtlantisEncodeAngleTuning(degrees: number): number {
+  return degrees & 0xff;
 }
 
 export interface LamzuAtlantisBattery {

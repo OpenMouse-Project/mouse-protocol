@@ -18,6 +18,32 @@ export const EGG_VENDOR_ID = 0x3367;
 /** The 2.4 GHz dongle shared by every OP1w/XM2w 4K, v1 and v2. */
 export const EGG_4K_DONGLE_PID = 0x1970;
 
+/**
+ * Settings OpenMouse can read and write on a K26/W26 mouse. Per-device
+ * differences (glass mode, v2 sensor controls, jitter filter) are resolved
+ * by eggExposedFeatures(); polling/LOD/CPI ranges live on the profile.
+ */
+export type EggExposedFeature =
+  | "dpi-stages"
+  | "polling-rate"
+  | "lift-off-distance"
+  | "glass-mode"
+  | "sensor-angle-tuning"
+  | "force-max-fps"
+  | "led-lift-off"
+  | "motion-sync"
+  | "angle-snapping"
+  | "ripple-control"
+  | "slamclick-filter"
+  | "motion-jitter-filter"
+  | "spdt-mode"
+  | "cpi-levels"
+  | "multiclick-filter"
+  | "button-mapping"
+  | "left-handed-mode"
+  | "factory-reset"
+  | "firmware-version";
+
 export type EggSensorFamily = "paw3395" | "paw3950";
 export type EggConfigFamily = "v1" | "v2";
 
@@ -295,6 +321,40 @@ export function eggProfileForPid(pid: number): EggDeviceProfile {
   const profile = EGG_DEVICE_PROFILES.get(pid);
   if (!profile) throw new Error(`Unsupported Endgame Gear product 0x${pid.toString(16)}.`);
   return profile;
+}
+
+/**
+ * Every setting the EggOp1HidClient exposes for one device. Mirrors the
+ * driver's setter surface: v2-only sensor controls, glass mode, and the
+ * motion-jitter filter (absent on 4K v2) are the only per-device branches.
+ * Notably absent: LED zone control, on-board profile management, wireless
+ * pairing/battery — the vendor tools have them, this driver does not.
+ */
+export function eggExposedFeatures(profile: EggDeviceProfile): EggExposedFeature[] {
+  const features: EggExposedFeature[] = [
+    "dpi-stages",
+    "polling-rate",
+    "lift-off-distance",
+    "motion-sync",
+    "angle-snapping",
+    "ripple-control",
+    "slamclick-filter",
+    "spdt-mode",
+    "cpi-levels",
+    "multiclick-filter",
+    "button-mapping",
+    "left-handed-mode",
+    "factory-reset",
+    "firmware-version",
+  ];
+  if (profile.lodGlass !== null) features.push("glass-mode");
+  if (profile.configFamily === "v2") {
+    features.push("sensor-angle-tuning", "force-max-fps", "led-lift-off");
+  }
+  if (!(profile.wireless4k === true && profile.configFamily === "v2")) {
+    features.push("motion-jitter-filter");
+  }
+  return features;
 }
 
 export function eggCpiStep(profile: EggDeviceProfile, cpi: number): number {

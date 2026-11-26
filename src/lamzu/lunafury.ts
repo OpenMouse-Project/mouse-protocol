@@ -6,6 +6,15 @@ export type LunaFuryLightningMode = 0 | 1 | 2;
 export type LunaFuryButton = "left" | "right" | "middle";
 export interface LunaFuryWheelGuard { enabled: boolean; windowMs: number }
 export interface LunaFurySettings {
+  /** Read-only backup metadata, not an ordinary per-game control. */
+  dpiStorage?: import("./lunafury-onboard.js").LunaFuryDpiStorage;
+  /** Current onboard bank's bottom-button binding; not a game-profile setting. */
+  bottomButtonMode?: import("./lunafury-power.js").LunaFuryBottomButtonMode;
+  /** Receiver-global, not an onboard or per-game setting. */
+  receiverLightMode?: import("./lunafury-power.js").LunaFuryReceiverLightMode;
+  buttonPollingRateHz?: import("./lunafury-onboard.js").LunaFuryButtonPollingRate;
+  supportedButtonPollingRates?: readonly import("./lunafury-onboard.js").LunaFuryButtonPollingRate[];
+  separateDpiAxes?: boolean;
   lightningMode?: LunaFuryLightningMode;
   leftDebounceMs?: number;
   rightDebounceMs?: number;

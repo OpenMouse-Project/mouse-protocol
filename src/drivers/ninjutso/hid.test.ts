@@ -4,8 +4,10 @@ import test from "node:test";
 import { NinjutsoHidClient } from "./hid.ts";
 import { NINJUTSO_VENDOR_ID } from "@openmouse/protocol/ninjutso";
 
-function fakeDevice(ignoredCommands = new Set<number>(), productId = 0xe010) {
+function fakeDevice(ignoredCommands = new Set<number>(), productId = 0xe010, busyReadsAfterWrite = 0) {
   const sent: Array<{ reportId: number; payload: Uint8Array }> = [];
+  const writeCommands = new Set([3, 5, 7, 11, 13, 22, 24, 27, 31, 33, 37, 39, 41, 47, 49]);
+  let busyReads = 0;
   let dpi = 1600;
   let polling = 4;
   let lod = 1;
@@ -59,12 +61,17 @@ function fakeDevice(ignoredCommands = new Set<number>(), productId = 0xe010) {
       if (payload[0] === 39) lightSpeed = payload[7]!;
       if (payload[0] === 47) lightBrightness = payload[7]!;
       if (payload[0] === 33) lightColor = [...payload.slice(7, 10)];
+      if (writeCommands.has(payload[0]!)) busyReads = busyReadsAfterWrite;
     },
     receiveFeatureReport: async () => {
       const request = sent.findLast((entry) => entry.reportId === 6)!.payload;
       const command = request[0]!;
       const reply = new Uint8Array(15);
       if (ignoredCommands.has(command)) return new DataView(reply.buffer);
+      if (busyReads > 0) {
+        busyReads--;
+        return new DataView(reply.buffer);
+      }
       reply[1] = command;
       const values: Record<number, number[]> = {
         16: [1],
@@ -151,6 +158,17 @@ test("writes current settings and confirms each one by reading it back", async (
   assert.equal(await client.setNinjutsoActiveDpiStage(2), 2);
   assert.ok(sent.some(({ reportId, payload }) => reportId === 3 && payload[0] === 27));
   assert.ok(sent.some(({ reportId, payload }) => reportId === 3 && payload[0] === 28));
+});
+
+test("waits for the mouse to finish applying a write before confirming it", async () => {
+  const client = new NinjutsoHidClient(fakeDevice(new Set(), 0xe010, 8).device);
+  assert.equal(await client.setPollingRate(2000), 2000);
+  assert.equal(await client.setMotionSync(false), false);
+});
+
+test("still fails a write the mouse never confirms", async () => {
+  const client = new NinjutsoHidClient(fakeDevice(new Set([6])).device);
+  await assert.rejects(client.setPollingRate(2000), /did not answer command 0x6/);
 });
 
 test("reads and writes Sora V3 receiver lighting", async () => {

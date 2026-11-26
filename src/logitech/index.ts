@@ -49,18 +49,30 @@ export const BOLT_PAIRING_SLOTS = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06] as const;
  * - 0xc089 — G102 LIGHTSYNC (wired)
  * - 0xc092 — G203 LIGHTSYNC (wired)
  *
- * G303 / G402 generation:
+ * G302 / G303 / G402 generation:
  * - 0xc07d — G502 / G502 Proteus Core (wired)
  * - 0xc07e — G402 / G402 Hyperion Fury (wired)
+ * - 0xc07f — G302 Daedalus Prime (wired)
  * - 0xc080 — G303 Daedalus Apex (wired)
+ * - 0xc097 — G303 Shroud Edition (USB cable)
+ * - 0xc332 — G502 Proteus Spectrum (wired)
  *
- * G Pro / G502 / G403 HERO generation (HID++ 2.0, DPI feature 0x2202):
+ * G Pro / G502 / G403 / G703 / G900 / G903 generation (HID++ 2.0, DPI feature 0x2202):
+ * - 0xc081 — G900 Chaos Spectrum (wired)
+ * - 0xc082 — G403 Wireless (USB cable)
+ * - 0xc083 — G403 (wired)
  * - 0xc085 — G Pro (wired, 2017)
+ * - 0xc086 — G903 Lightspeed (USB cable)
  * - 0xc087 — G703 (wired)
+ * - 0xc088 — G Pro Wireless (USB cable)
  * - 0xc08b — G502 HERO (wired)
  * - 0xc08c — G Pro Hero (wired)
- * - 0xc08e — G903 HERO (wired)
+ * - 0xc08d — G502 Lightspeed (USB cable)
+ * - 0xc08e — MX518 (Legendary, wired)
  * - 0xc08f — G403 HERO (wired)
+ * - 0xc090 — G703 HERO (USB cable)
+ * - 0xc091 — G903 HERO (USB cable)
+ * - 0xc096 — G705 (USB cable)
  * - 0xc095 — G502 X PLUS (USB cable)
  * - 0xc098 — G502 X LIGHTSPEED (USB cable, direct-connect mode)
  * - 0xc099 — G502 X (wired)
@@ -79,10 +91,15 @@ export const BOLT_PAIRING_SLOTS = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06] as const;
 export const LOGITECH_DIRECT_PRODUCT_IDS = [
   // G203 / G102 generation
   0xc084, 0xc089, 0xc092,
-  // G303 / G402 generation
-  0xc07d, 0xc07e, 0xc080,
-  // G Pro / G502 / G403 HERO / G703 generation
-  0xc085, 0xc087, 0xc08b, 0xc08c, 0xc08e, 0xc08f,
+  // G302 / G303 / G402 generation
+  0xc07d, 0xc07e, 0xc07f, 0xc080, 0xc097,
+  // G502 Proteus Spectrum
+  0xc332,
+  // G Pro / G502 / G403 / G703 / G900 / G903 generation
+  0xc081, 0xc082, 0xc083, 0xc085, 0xc086, 0xc087, 0xc088,
+  0xc08b, 0xc08c, 0xc08d, 0xc08e, 0xc08f,
+  // G703 HERO / G903 HERO / G705
+  0xc090, 0xc091, 0xc096,
   // G Pro X Superlight generation
   0xc094, 0xc09b, 0xc0a0,
   // G PRO 2 / next-gen G Pro family
@@ -134,17 +151,31 @@ export const LOGITECH_PRODUCTS: ReadonlyMap<number, { name: string; wireless: bo
     [0xc084, { name: "G203 PRODIGY", wireless: false, status: "supported" }],
     [0xc089, { name: "G102 LIGHTSYNC", wireless: false, status: "supported" }],
     [0xc092, { name: "G203 LIGHTSYNC", wireless: false, status: "supported" }],
-    // G303 / G402 generation
+    // G302 / G303 / G402 generation
     [0xc07d, { name: "G502 (all variants)", wireless: false, status: "supported" }],
     [0xc07e, { name: "G402 Hyperion Fury", wireless: false, status: "supported" }],
+    [0xc07f, { name: "G302 Daedalus Prime", wireless: false, status: "supported" }],
     [0xc080, { name: "G303 Daedalus Apex", wireless: false, status: "supported" }],
-    // G Pro / G502 / G403 HERO / G703 generation
+    [0xc097, { name: "G303 Shroud Edition", wireless: false, status: "supported" }],
+    // G502 Proteus Spectrum
+    [0xc332, { name: "G502 Proteus Spectrum", wireless: false, status: "supported" }],
+    // G Pro / G502 / G403 / G703 / G900 / G903 generation
+    [0xc081, { name: "G900 Chaos Spectrum", wireless: false, status: "supported" }],
+    [0xc082, { name: "G403 Wireless", wireless: false, status: "supported" }],
+    [0xc083, { name: "G403", wireless: false, status: "supported" }],
     [0xc085, { name: "G Pro (2017)", wireless: false, status: "supported" }],
+    [0xc086, { name: "G903 Lightspeed", wireless: false, status: "supported" }],
     [0xc087, { name: "G703 (wired)", wireless: false, status: "supported" }],
+    [0xc088, { name: "G Pro Wireless", wireless: false, status: "supported" }],
     [0xc08b, { name: "G502 HERO", wireless: false, status: "supported" }],
     [0xc08c, { name: "G Pro Hero", wireless: false, status: "supported" }],
-    [0xc08e, { name: "G903 HERO", wireless: false, status: "supported" }],
+    [0xc08d, { name: "G502 Lightspeed", wireless: false, status: "supported" }],
+    [0xc08e, { name: "MX518 (Legendary)", wireless: false, status: "supported" }],
     [0xc08f, { name: "G403 HERO", wireless: false, status: "supported" }],
+    // HERO-era revisions
+    [0xc090, { name: "G703 HERO", wireless: false, status: "supported" }],
+    [0xc091, { name: "G903 HERO", wireless: false, status: "supported" }],
+    [0xc096, { name: "G705", wireless: false, status: "supported" }],
     // G Pro X Superlight generation
     [0xc094, { name: "G Pro X Superlight", wireless: false, status: "supported" }],
     [0xc09b, { name: "PRO X SUPERLIGHT 2", wireless: false, status: "supported" }],

@@ -1,0 +1,99 @@
+# Per-profile read pages and the write path (2026-10-16)
+
+Second session on the same unit, this time with ROCCAT Swarm installed and
+driving the mouse, observed from a passive node-hid listener on interface 2
+while the Swarm UI was operated. It settles what the earlier captures could
+not: where the settings block lives in the reply stream, and what our
+user-mode writes actually do to the mouse.
+
+## The five `90 00 26` reply pages are the five onboard profiles
+
+Swarm exposes five profile slots ("配置文件组1"…"配置文件组5"). When the
+device page attaches, the mouse streams five `90 00 26` replies, one per
+profile. Fields, aligned on the page's own header `90 00 26 00 00 04 20 00
+92 2c`:
+
+```text
+b10    profile index (01..05)
+b11    that profile's polling code (00=1000 Hz .. 03=125 Hz, same dict as the write)
+b12    00
+b13    00 empty / 01 valid / 02 the profile the UI is editing
+b14-23 five DPI stages, u16 little-endian, 50/unit (e.g. 08 00 = 400 DPI)
+b24    lift-off distance code (06 = Low)
+b25    00
+b26    80 / 06 / 00 (profile-dependent; unresolved)
+b27    LED timeout minutes (0f = 15)
+```
+
+Captured order (1000 Hz era, mouse awake, profiles 2..5 configured, profile 1
+blank):
+
+```text
+90 00 26 00 00 04 20 00 92 2c 02 00 00 02 08 00 10 00 15 00 20 00 40 00 06 00 06 0f ...
+90 00 26 00 00 04 20 00 92 2c 03 00 00 01 08 00 10 00 18 00 20 00 40 00 06 00 00 0f ...
+90 00 26 00 00 04 20 00 92 2c 04 00 00 01 08 00 10 00 18 00 20 00 40 00 06 00 00 05 ...
+90 00 26 00 00 04 20 00 92 2c 05 00 00 01 08 00 10 00 18 00 20 00 40 00 06 00 00 05 ...
+90 00 26 00 00 04 20 00 92 2c 01 00 00 00 00 00 00 00 00 00 00 00 00 00 06 00 00 0f ...
+```
+
+The profile the UI was editing (index 2) carries the stages **400 / 800 /
+1050 / 1600 / 3200** — byte-for-byte the values the UI's own "DPI 切换开关"
+card displays (`400`, `800`, `1050`, `1600`, `3200`). The 1050 is the unit
+owner's own value, not a side effect of any probe.
+
+## UI edits land in these pages (one-session differential)
+
+With the listener running, the UI was used to switch the edited profile's
+polling rate 1000 → 125 Hz. Restarting Swarm re-triggered the stream, and the
+same profile's page changed exactly one byte:
+
+```text
+before:  90 00 26 00 00 04 20 00 92 2c 02 00 00 02 08 00 10 00 15 00 20 00 40 00 ...
+after:   90 00 26 00 00 04 20 00 92 2c 02 03 00 02 08 00 10 00 15 00 20 00 40 00 ...
+```
+
+`b11` 00 → 03 (125 Hz). That identifies the polling field and proves the
+vendor's own write path reaches the mouse.
+
+## Read page vs. write frame: a +5 byte shift
+
+Lining the page up with the SignalRGB plugin's write frame (`Plugins/Roccat/
+Roccat_Kone_Pro_Air_Mouse.js`) puts every established field at write offset
++ 5:
+
+```text
+write frame            10 50 14 00 01 <poll@6> <angle@7> 00 <stages u16 @9..18> <lod@19> 00 80 <led@22> 00 <deb@24>
+read page  90 00 26 00 00 04 20 00 92 2c <prof@10> <poll@11> 00 <state@13> <stages u16 @14..23> <lod@24> 00 <b26@26> <led@27> ...
+```
+
+So the stored settings block is the plugin's layout, five u16 stage slots
+(not two interleaved byte lists), and the page is that block shifted right by
+five bytes behind a ten-byte read header.
+
+## What our own writes did
+
+- Frames sent by hand on interface 2 — the plugin layout with stage 1 set to
+  500 (u16 `0a 00`) and, separately, the two-interleaved-lists shape — were
+  **accepted and echoed** (`50 14 03 00 ec fa`), but a fresh stream after each
+  showed **no profile's stage 1 at 500**. The stored tables were unchanged.
+- On this unit the vendor writes are not visible on any HID interface at all:
+  a listener on interfaces 0/1/2/3 during UI edits captured the UI's read
+  polling loops (`10 71 03`, `10 72 03`, `10 11 03`, `10 50 03`) but no
+  settings write on any of them.
+- The vendor's device DLL (`data\2C8E\2C8E.dll`) is a hidapi fork whose
+  `hid_write` is called in exactly four places, all in the calibration
+  module; there is no settings-write code in it.
+
+Read together: on this unit a settings write from a plain user-mode HID
+handle is acknowledged but not applied, and the vendor applies settings
+through a channel a user-mode capture cannot see. The driver's write frames
+are therefore best described as **unverified on hardware**, not verified.
+
+## Backing files
+
+Raw listener logs from this session (not shipped here): the awake stream, the
+125 Hz differential, and the status probes. The status probe while the mouse
+was asleep answers `90 0a 03 00 ec fa 0d 00` with an all-zero body, versus
+`90 0a 04 00 00 64 …` when awake — the same empty/no-data dichotomy the
+settings echo shows, and why the Swarm device page sits on its loading
+spinner and shows placeholder 0 % battery until the mouse answers.

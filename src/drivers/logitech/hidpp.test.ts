@@ -19,6 +19,7 @@ import {
 import {
   LogitechHidppClient,
   connectionDetailFor,
+  hasLightforceModeControl,
   hasLiftOffControl,
   isPowerOnlyModeStatus,
   isWiredHidppConnection,
@@ -175,13 +176,19 @@ test("an onboard-only mouse is told how to get itself supported", () => {
   assert.doesNotMatch(unknown.message, /format (\d|null)/);
   assert.match(unknown.message, /Copy verification data/);
 });
-test("the G309's mode status is power-only and exposes no surface or LightForce controls", () => {
-  // Model id captured from hardware: 0x8090 V2 with only the power-mode half.
-  assert.equal(isPowerOnlyModeStatus("B03C40B10000"), true);
-  // The G305 reports the same reserved status1 byte.
-  assert.equal(isPowerOnlyModeStatus("407400000000"), true);
-  // Every other model keeps the status1 fields, and unknown/absent ids must
-  // not be silently downgraded.
+test("G309 exposes LightForce mode without lift-off control, while G305 is power-only", () => {
+  const g309 = "B03C40B10000";
+  const g305 = "407400000000";
+  assert.equal(isPowerOnlyModeStatus(g309), false);
+  assert.equal(hasLightforceModeControl(g309, false, false), true);
+  assert.equal(hasLightforceModeControl(g309, false, true), false, "HITS takes precedence");
+
+  assert.equal(isPowerOnlyModeStatus(g305), true);
+  assert.equal(hasLightforceModeControl(g305, false, false), false);
+  assert.equal(hasLightforceModeControl("unknown", false, false), false);
+  assert.equal(hasLightforceModeControl("unknown", true, false), true);
+
+  // Unknown/absent ids must not be silently downgraded.
   assert.equal(isPowerOnlyModeStatus("B03C40B10001"), false);
   assert.equal(isPowerOnlyModeStatus(""), false);
   assert.equal(isPowerOnlyModeStatus(null), false);
@@ -326,6 +333,56 @@ async function resolveIndex(client: LogitechHidppClient): Promise<number | null>
   await driver.resolveDeviceIndex();
   return driver.resolvedDeviceIndex;
 }
+
+test("extended DPI writes zero for unsupported Y axes", async () => {
+  const { client } = harness(LIGHTSPEED_RECEIVER, { 1: "mouse" });
+  const driver = client as unknown as {
+    resolveDpiFeature(): Promise<{ index: number; legacy: boolean }>;
+    getDpiOptions(): Promise<number[]>;
+    ensureHostControl(): Promise<void>;
+    getFeature(featureId: number): Promise<{ index: number; version: number }>;
+    readDpiConfiguration(featureIndex: number): Promise<{ x: number; y: number; lod: number }>;
+    readDpiCapabilities(featureIndex: number): Promise<{ separateAxes: boolean; liftOff: boolean }>;
+    requestLong(featureIndex: number, functionId: number, parameters: number[]): Promise<Uint8Array>;
+  };
+  let configurationReads = 0;
+  let writeParameters: number[] = [];
+  driver.resolveDpiFeature = async () => ({ index: 0x07, legacy: false });
+  driver.getDpiOptions = async () => [800, 1600];
+  driver.ensureHostControl = async () => {};
+  driver.getFeature = async () => ({ index: 0x07, version: 1 });
+  driver.readDpiCapabilities = async () => ({ separateAxes: false, liftOff: false });
+  driver.readDpiConfiguration = async () => {
+    configurationReads += 1;
+    return configurationReads === 1
+      ? { x: 800, y: 0, lod: 3 }
+      : { x: 1600, y: 0, lod: 0 };
+  };
+  driver.requestLong = async (_featureIndex, functionId, parameters) => {
+    assert.equal(functionId, 0x60);
+    writeParameters = parameters;
+    return new Uint8Array();
+  };
+
+  assert.equal(await client.setDpi(1600), 1600);
+  assert.deepEqual(writeParameters, [0x00, 0x06, 0x40, 0x00, 0x00, 0x00]);
+});
+
+test("HID++ rejections identify the feature and function that failed", async () => {
+  const { client, device } = harness(LIGHTSPEED_RECEIVER, { 1: "mouse" });
+  await resolveIndex(client);
+  device.onRequest = (request) => request[1] === 0x07 && request[2] === withSoftwareId(0x60)
+    ? new Uint8Array([request[0], 0xff, request[1], request[2], 0x02, 0, 0])
+    : null;
+  const driver = client as unknown as {
+    requestLong(featureIndex: number, functionId: number, parameters: number[]): Promise<Uint8Array>;
+  };
+
+  await assert.rejects(
+    driver.requestLong(0x07, 0x60, [0, 6, 64, 0, 0, 0]),
+    /invalid argument.*feature 0x07, function 0x60/,
+  );
+});
 
 /**
  * Simulates `readStatus()`'s own retry: clear the already-resolved (and, by
@@ -696,4 +753,103 @@ test("LightForce switch mode is refused on a HITS mouse and nothing is sent to M
   await assert.rejects(client.setLightforceSwitchMode("Hybrid"), /no LightForce switches/);
   const askedForModeStatus = device.probed.some(({ data }) => data[1] === 0x00 && ((data[3] << 8) | data[4]) === 0x8090);
   assert.equal(askedForModeStatus, false, "the mode-status feature is never looked up, let alone written");
+});
+
+test("a Lightspeed Superlight 2 reads the wireless 0x8061 list, not the cable's 1 kHz list", async () => {
+  // Issue #224. Function 0x10 with connection 0 is the wired mask (bits 0-3,
+  // through 1000 Hz). Lightspeed is connection 1 and includes 8000 Hz (bit 6).
+  const FEATURE_INDEX = 0x0b;
+  const { client, device } = harness(LIGHTSPEED_RECEIVER, { 1: "mouse" });
+  await resolveIndex(client);
+  const functions: number[] = [];
+  device.onRequest = (request) => {
+    if (request[1] !== FEATURE_INDEX) return null;
+    const functionId = request[2] & 0xf0;
+    const connection = request[3];
+    functions.push(functionId);
+    if (functionId === 0x20) {
+      return successReply(request[0], FEATURE_INDEX, functionId, [connection === 0x01 ? 6 : 3]);
+    }
+    const mask = connection === 0x01 ? 0x007f : 0x000f;
+    return successReply(request[0], FEATURE_INDEX, functionId, [(mask >> 8) & 0xff, mask & 0xff]);
+  };
+  const driver = client as unknown as {
+    wiredConnection: boolean;
+    readSupportedPollingRates(index: number): Promise<number[]>;
+    readPollingRate(index: number): Promise<number>;
+  };
+
+  driver.wiredConnection = false;
+  assert.deepEqual(
+    await driver.readSupportedPollingRates(FEATURE_INDEX),
+    [125, 250, 500, 1000, 2000, 4000, 8000],
+  );
+  assert.equal(await driver.readPollingRate(FEATURE_INDEX), 8000);
+  driver.wiredConnection = true;
+  assert.deepEqual(await driver.readSupportedPollingRates(FEATURE_INDEX), [125, 250, 500, 1000]);
+  assert.deepEqual(functions, [0x10, 0x20, 0x10]);
+});
+
+test("0x8061 function 0 supplies the Lightspeed rates when function 0x10 stays at 1000 Hz", async () => {
+  const FEATURE_INDEX = 0x0b;
+  const { client, device } = harness(LIGHTSPEED_RECEIVER, { 1: "mouse" });
+  await resolveIndex(client);
+  device.onRequest = (request) => {
+    if (request[1] !== FEATURE_INDEX) return null;
+    const functionId = request[2] & 0xf0;
+    if (functionId === 0x10) {
+      return successReply(request[0], FEATURE_INDEX, functionId, [0x00, 0x0f]);
+    }
+    if (functionId === 0x00 && request[3] === 0x01) {
+      return successReply(request[0], FEATURE_INDEX, functionId, [0x00, 0x7f]);
+    }
+    return new Uint8Array([request[0], 0xff, FEATURE_INDEX, request[2], 0x05]);
+  };
+  const driver = client as unknown as {
+    wiredConnection: boolean;
+    readSupportedPollingRates(index: number): Promise<number[]>;
+  };
+  driver.wiredConnection = false;
+  assert.deepEqual(
+    await driver.readSupportedPollingRates(FEATURE_INDEX),
+    [125, 250, 500, 1000, 2000, 4000, 8000],
+  );
+});
+
+// --- Receiver firmware register (HID++ 1.0 register 0xF1) -------------------
+// Live PRO LIGHTSPEED receiver replies stayed [1, 7, 2] and [2, 0, 17]
+// across a G HUB update from 14.3.19 to 14.4.20. The bytes are useful
+// diagnostics, but do not directly encode the receiver package version.
+
+test("receiver firmware register queries MCU2 without inventing a version", async () => {
+  const device = new FakeHidDevice(LIGHTSPEED_RECEIVER, "PRO LIGHTSPEED Receiver", USB_HIDPP_COLLECTIONS);
+  device.onRequest = (request) => {
+    if (request[0] === 0xff && request[1] === 0x81 && request[2] === 0xf1 && request[3] === 2) {
+      return new Uint8Array([0xff, 0x81, 0xf1, 2, 0, 17]);
+    }
+    return null;
+  };
+  const client = new LogitechHidppClient(device as unknown as HIDDevice);
+  const result = await client.readReceiverFirmware();
+  assert.equal(result.version, null);
+  assert.deepEqual(result.raw, [2, 0, 17]);
+  const sent = device.probed.at(-1);
+  assert.deepEqual([...(sent?.data ?? [])], [0xff, 0x81, 0xf1, 2, 0, 0]);
+});
+
+test("receiver firmware register can query MCU1 independently", async () => {
+  const device = new FakeHidDevice(LIGHTSPEED_RECEIVER, "PRO LIGHTSPEED Receiver", USB_HIDPP_COLLECTIONS);
+  device.onRequest = () => new Uint8Array([0xff, 0x81, 0xf1, 1, 7, 2]);
+  const client = new LogitechHidppClient(device as unknown as HIDDevice);
+  const result = await client.readReceiverFirmware(1);
+  assert.equal(result.version, null);
+  assert.deepEqual(result.raw, [1, 7, 2]);
+  assert.deepEqual([...(device.probed.at(-1)?.data ?? [])], [0xff, 0x81, 0xf1, 1, 0, 0]);
+});
+
+test("receiver firmware register rejects the HID++ error promptly", async () => {
+  const device = new FakeHidDevice(LIGHTSPEED_RECEIVER, "PRO LIGHTSPEED Receiver", USB_HIDPP_COLLECTIONS);
+  device.onRequest = () => new Uint8Array([0xff, 0x8f, 0x81, 0xf1, 0x03, 0]);
+  const client = new LogitechHidppClient(device as unknown as HIDDevice);
+  await assert.rejects(client.readReceiverFirmware(), /HID\+\+ error 0x3/);
 });

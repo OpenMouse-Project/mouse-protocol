@@ -1,14 +1,23 @@
 export * from "../compx/codec.js";
 export * from "./atlantis.js";
 export * from "./lunafury.js";
+export * from "./lunafury-power.js";
+export * from "./lunafury-onboard.js";
+export * from "./lunafury-buttons.js";
 export * from "./magnetic.js";
 export interface LamzuProduct {
   model: string;
   wireless: boolean;
   pollingRates: readonly number[];
-  brand?: "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "RAWM";
+  brand?: "Lamzu" | "CRDRAKO" | "Attack Shark" | "LunaFury" | "RAWM" | "Vancer";
   /** Left and right buttons are magnetic switches (Leviathan V4 GT). */
   magnetic?: boolean;
+  /**
+   * False when the vendor configurator hides a control the firmware still
+   * answers, so the driver neither reads nor offers it.
+   */
+  separateDpiAxes?: boolean;
+  hyperMode?: boolean;
   uiFamily?: string;
   mouseTarget?: number;
   maxDpi?: number;
@@ -31,6 +40,20 @@ export const LUNAFURY_PRODUCT_IDS = [0x0032, 0x0033, 0x0054, 0x0084] as const;
 // same CompX platform: wired 125-1000, 8K receiver 125-8000, DPIMax 42000.
 // Only the R5 Ultra has been seen on hardware.
 export const ATTACKSHARK_PRODUCT_IDS = [0x0046, 0x0047, 0x0021, 0x0022, 0x003a, 0x003b] as const;
+// Vancer x Arbiter Studio Akitsu Medium 3950, cable and 8K receiver, both
+// tested on hardware. Ids, rates and flags come from the Arbiter Web HUB device
+// table (webapp.arbiterstudio.com/Config/env-models.json, inspected
+// 2026-10-11). The rest of the Akitsu line is left out until someone can test
+// it. See docs/vancer-akitsu.md.
+export const VANCER_PRODUCT_IDS = [0x0066, 0x0067] as const;
+const RATES_VANCER_WIRED = [500, 1000] as const;
+const RATES_VANCER_8K = [500, 1000, 2000, 4000, 8000] as const;
+// Whole minutes from 1 to 30, the range of the Web HUB's sleep slider.
+const SLEEP_VANCER: readonly number[] = Array.from({ length: 30 }, (_, index) => (index + 1) * 60);
+// The Web HUB sets DPIXYEnable and HyperModeEnable to 0 for the Akitsu.
+const VANCER: Partial<LamzuProduct> = {
+  brand: "Vancer", maxDpiStages: 5, sleepOptions: SLEEP_VANCER, separateDpiAxes: false, hyperMode: false,
+};
 export const LAMZU_PRODUCTS: ReadonlyMap<number, LamzuProduct> = new Map([
   // RAWM's Leviathan V4 GT answers the same page-command framing. Product ids
   // come from the V4 GT's web hub; not yet tried on hardware.
@@ -98,6 +121,8 @@ export const LAMZU_PRODUCTS: ReadonlyMap<number, LamzuProduct> = new Map([
     brand: "Attack Shark", model: "R8", wireless: true,
     pollingRates: RATES_8K_FULL, maxDpi: 42000, uiFamily: "attack-shark",
   }],
+  [0x0066, { ...VANCER, model: "Akitsu Medium 3950", wireless: false, pollingRates: RATES_VANCER_WIRED }],
+  [0x0067, { ...VANCER, model: "Akitsu Medium 3950", wireless: true, pollingRates: RATES_VANCER_8K }],
 ]);
 /**
  * Lamzu's own vendor id, introduced with the Inca 8K. Every earlier Lamzu
@@ -133,19 +158,24 @@ export const LAMZU_VENDOR_IDS: readonly number[] = [LAMZU_VENDOR_ID, LAMZU_INCA_
  * The Paro Aurora (released mid-2025, PAW3950) is also entered here from that
  * table, under the same vendor id and protocol flags as the Inca
  * (`IsNewProtocol`: 1, `IsCompx`: 0, `DPIMax` 30000 — the driver default, so
- * no `maxDpi` override). Its three ids are `PIDWired` 0x0007 (125-1000),
- * `_1KDongle` 0x000d (125-1000) and `_8KDongle` 0x000e (500-8000). None of
- * them has been exercised on hardware yet — issue #167 — so a wrong rate list
- * is the failure mode, not a dead device.
+ * no `maxDpi` override). Its wired id is `PIDWired` 0x0007 (125-1000) and its
+ * dedicated dongle ids are `_1KDongle` 0x000d (125-1000) and `_8KDongle` 0x000e (500-8000).
+ *
+ * 0x0001 is the shared "LAMZU Aurora 8K Receiver" (`_8KDongleIDVD` in the Aurora
+ * device table), verified on hardware. The receiver answers the CompX pairing query
+ * (target 0x01 page 0x00 cmd 0x8b arg 0x02) to identify which mouse is paired to it.
+ * 0x0003 is the shared "LAMZU Aurora 1K Receiver" (`_1KDongleIDVD` in that table).
  *
  * Deliberately absent: 0x000a and 0x0002, which Aurora lists as
  * `DeviceBLPID` and `Receiver4K8KBLPID` — the DFU bootloader identities the
  * mouse and dongle take while flashing firmware. They never speak this
  * protocol and must not be offered in the picker. The Paro's own bootloader
- * ids, 0x0008 (`DeviceBLPID`) and 0x0004 (`_1KDongleIDVD`), are excluded for
+ * ids, 0x0008 (`DeviceBLPID`) and 0x0004 (`Receiver1KBLPID`), are excluded for
  * the same reason; its 8K dongle shares 0x0002 with the Inca.
  */
 export const LAMZU_INCA_PRODUCTS: ReadonlyMap<number, LamzuProduct> = new Map([
+  [0x0001, { model: "Aurora 8K Receiver", wireless: true, pollingRates: RATES_8K }],
+  [0x0003, { model: "Aurora 1K Receiver", wireless: true, pollingRates: RATES_1K }],
   [0x0009, { model: "Inca 8K", wireless: false, pollingRates: RATES_1K }],
   [0x000f, { model: "Inca 8K", wireless: true, pollingRates: RATES_1K }],
   [0x0010, { model: "Inca 8K", wireless: true, pollingRates: RATES_8K }],

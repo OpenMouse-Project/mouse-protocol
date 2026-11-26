@@ -1152,7 +1152,7 @@ export function validateDpiStagePlan(
     }
     if (legacyScalar) {
       if (stage.x !== stage.y) return `Slot ${index + 1} must use the same X and Y DPI.`;
-      if (stage.lod !== 0) return `Slot ${index + 1} cannot store lift-off distance.`;
+      // Lift-off is not stored here and the writer ignores it, so UI defaults must not fail the flash.
     } else if (!Number.isInteger(stage.lod) || stage.lod < 1 || stage.lod > 3) {
       // 0 is the "unused stage" marker on formats with per-stage lift-off.
       return `Slot ${index + 1} has an invalid lift-off level.`;
