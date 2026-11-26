@@ -12,20 +12,37 @@ import { HITSCAN_PRODUCTS, HITSCAN_XVI_PRODUCTS } from "@openmouse/protocol/hits
 import { ORBITAL_DEVICES } from "@openmouse/protocol/orbital";
 import { MCHOSE_V3_PRODUCT_IDS } from "@openmouse/protocol/mchose";
 import { KEYCHRON_8K_NORDIC_PRODUCT_IDS } from "@openmouse/protocol/keychron";
+import { PULSAR_PRO_PRODUCT_IDS } from "@openmouse/protocol/pulsar";
 import {
   DELUX_M600_PRO_WIRED_PID,
   DELUX_M800_MINI_WIRELESS_PID,
   DELUX_OEM_VENDOR_ID,
 } from "@openmouse/protocol/delux";
 import { COOLERMASTER_PRODUCT_IDS } from "@openmouse/protocol/coolermaster";
+import {
+  REDGEAR_X13_VENDOR_ID,
+  REDGEAR_X13_PRODUCT_ID,
+  REDGEAR_X13_USAGE_PAGE,
+  REDGEAR_X13_USAGE,
+} from "../redgear/index.ts";
+
+test("Redgear picker filter uses the protocol identity constants", () => {
+  assert.equal(VENDOR_ID.redgear, REDGEAR_X13_VENDOR_ID);
+  assert.deepEqual(
+    SUPPORTED_HID_FILTERS.filter((filter) => filter.vendorId === REDGEAR_X13_VENDOR_ID),
+    [{ vendorId: REDGEAR_X13_VENDOR_ID, productId: REDGEAR_X13_PRODUCT_ID,
+      usagePage: REDGEAR_X13_USAGE_PAGE, usage: REDGEAR_X13_USAGE }],
+  );
+});
 
 const DEVICES_DIR = dirname(fileURLToPath(import.meta.url));
 
 const REPORT_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 0x09, 0x0e, 0x0f, 0x10, 0x11, 0x20, 0x51, 0xa1, 0xb3, 0xb4, 0xb5];
-const USAGE_PAGES = [0x01, 0x0a, 0x0c, 0x8c, 0xFF07, 0xff, 0xff00, 0xff01, 0xff02, 0xff05, 0xff0a, 0xff1c, 0xff42, 0xff43, 0xff55, 0xff60, 0xffa0, 0xffc0, 0xffc1, 0xffc2, 0xffff];
+const USAGE_PAGES = [0x01, 0x08, 0x0a, 0x0c, 0x8c, 0xFF07, 0xff, 0xff00, 0xff01, 0xff02, 0xff05, 0xff0a, 0xff1c, 0xff42, 0xff43, 0xff55, 0xff60, 0xffa0, 0xffc0, 0xffc1, 0xffc2, 0xffff];
 // Usage 4 is the Corsair config collection; 0x61 is VIA raw HID; 0xc7 is
-// Ryunix telemetry; 0x0e is Rapoo's 0xBA configuration channel.
-const USAGES = [0, 1, 0x0202, 0x0212, 2, 4, 0x0e, 0x10, 0x61, 0xc7];
+// Ryunix telemetry; 0x0e is Rapoo's 0xBA configuration channel; 0x4b on the
+// LED page is the Thermaltake Iris config collection.
+const USAGES = [0, 1, 0x0202, 0x0212, 2, 4, 0x0e, 0x10, 0x4b, 0x61, 0xc7];
 
 function report(reportId: number, byteLength = 16): HIDReportInfo {
   return { reportId, items: [{ reportSize: 8, reportCount: byteLength }] } as unknown as HIDReportInfo;
@@ -61,6 +78,8 @@ function collection(
  */
 function collectionShapes(): HIDCollectionInfo[][] {
   const shapes: HIDCollectionInfo[][] = [[]];
+  // Native descriptor of the X13 Pro: report 3, 39 payload bytes + report ID.
+  shapes.push([{ ...collection(0xff00, 1), featureReports: [report(3, 39)] } as HIDCollectionInfo]);
   // Dareu's receiver exposes a service collection beside its report-8 command
   // channel; retain both so strict multi-collection drivers are exercisable.
   shapes.push([
@@ -123,6 +142,8 @@ function candidateProductIds(): number[] {
     // The Keychron 8K Nordic driver claims its ids out of the 4K family's
     // shared collection, so the probe needs them to reach it.
     ...KEYCHRON_8K_NORDIC_PRODUCT_IDS,
+    // Pro ids live in the codec package, outside the driver source scan.
+    ...PULSAR_PRO_PRODUCT_IDS,
     // The Cooler Master driver matches on an id allowlist, but its only
     // product id (0x0101) is defined in src/coolermaster/ and appears as no
     // literal under src/drivers/, so the source scan below would not find it.

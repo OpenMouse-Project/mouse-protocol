@@ -1,0 +1,72 @@
+# Macro loop modes, captured 2026-09-14
+#
+# Taken the same way as macro-upload-2026-09-11.hex: Incott's own configurator
+# at incott.net/mouse/ instrumented with tools/hid-probes/vendor-macro-capture.js
+# (IncottHub). The SAME ten-step macro was saved three times, once per loop
+# mode, to buffer 3 (the Forward button), and the mouse was watched running
+# each one. All three behave as their names say on this unit.
+#
+# WHY THIS EXISTS. The 2026-09-11 capture only ever showed loop 1 with a
+# single cycle, so the other two wire values came from reading the vendor's
+# `juji_to_hw` rather than from hardware, and no capture showed a repeat count
+# above 1 at all. These three pin the whole mapping.
+#
+# THE OFF-BY-ONE. The vendor's exported macro file numbers the modes from 1:
+#
+#     looptype:1  lpUntilKeyRelease   ->  wire byte 1 = 0
+#     looptype:2  lpUntilAnyKey       ->  wire byte 1 = 1
+#     looptype:3  lpCycle             ->  wire byte 1 = 2
+#
+# so a `looptype:` read straight off an exported file would shift every mode
+# one place. Bytes 2..3 are the repeat count, LE16, and are sent as 1 in the
+# two modes that do not use them.
+#
+# The macro, identical in all three (V, L, A+D overlapping, I — "vladi"):
+#     item[0]:V,53,true    item[5]:D,43,true
+#     item[1]:V,350,false  item[6]:A,70,false
+#     item[2]:L,84,true    item[7]:D,1,false
+#     item[3]:L,31,false   item[8]:I,55,true
+#     item[4]:A,70,true    item[9]:I,0,false
+#
+# ---------------------------------------------------------------------------
+# Only the differing bytes are reproduced below: chunks 2-8 are all zeros and
+# chunk 9 (the trailer) is byte-identical in all three runs, including the uid
+# — the vendor reuses one uid per macro across re-saves.
+
+# --- looptype 3, "cycle 3 times" -------------------------------------------
+TX feature id=0x09  07 0a 00 20 03 00 00 00
+TX OUTPUT  id=0x09  03 02 03 00 01 19 35 00 81 19 5e 01 01 0f 54 00 81 0f 1f 00 01 04 46 00 01 07 2b 00 81 04 46 00
+#                   ^^ ^^ ^^ ^^  buffer 3, loop 2 (cycle), 3 cycles
+TX feature id=0x09  07 0a 01 20 03 00 00 00
+TX OUTPUT  id=0x09  81 07 01 00 01 0c 37 00 81 0c 00 00 00 00 ... (zeros to 32)
+
+# --- looptype 1, "while held" ----------------------------------------------
+TX feature id=0x09  07 0a 00 20 03 00 00 00
+TX OUTPUT  id=0x09  03 00 01 00 01 19 35 00 81 19 5e 01 01 0f 54 00 81 0f 1f 00 01 04 46 00 01 07 2b 00 81 04 46 00
+#                   ^^ ^^ ^^ ^^  buffer 3, loop 0 (until key release), count unused
+
+# --- looptype 2, "until a key is pressed" ----------------------------------
+TX feature id=0x09  07 0a 00 20 03 00 00 00
+TX OUTPUT  id=0x09  03 01 01 00 01 19 35 00 81 19 5e 01 01 0f 54 00 81 0f 1f 00 01 04 46 00 01 07 2b 00 81 04 46 00
+#                   ^^ ^^ ^^ ^^  buffer 3, loop 1 (until any key), count unused
+
+# --- the trailer and the binding, identical in all three -------------------
+TX feature id=0x09  07 0a 09 20 03 00 00 00
+TX OUTPUT  id=0x09  4d 61 63 72 6f 34 00 00 00 00 00 00 00 00 00 00 ac 00 00 00 10 00 e8 e8 70 19 d9 9f 14 00 0a 00
+#                   "Macro4"                                        ac=172=(10+1)*4+128   uid   14=20  0a=10 steps
+TX feature id=0x09  06 04 09 00 03 00 00 00      wire button 4 -> 0x00030009 = macro slot 3
+
+# ---------------------------------------------------------------------------
+# THE TIMING, which is the other thing these confirm
+#
+#     +8423ms  header 0
+#     +8505ms  chunk 0      ~85 ms after its header
+#     +8509ms  header 1     ~4 ms after the chunk
+#     +8591ms  chunk 1
+#
+# The gap sits BETWEEN a header and its chunk, not after the pair, and the
+# vendor never lets anything else onto the device in that window — it has no
+# background polling. A driver that does poll has to make each header/chunk
+# pair one indivisible operation; queueing the two halves separately lets a
+# refresh land between them, and since nothing acknowledges a chunk, the loss
+# is silent. See IncottHidClient.uploadMacro and IncottTransactionQueue.sendChunk.

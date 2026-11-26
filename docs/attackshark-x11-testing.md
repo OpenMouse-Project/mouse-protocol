@@ -44,8 +44,9 @@ listed only the Delux M600 Pro (`0x20`), so a genuine X11 stayed
 failure in #161. #174 adds `0x55`: same receiver, protocol and rebuilt
 transport as the verified M600 Pro, resolving to the receiver's documented
 56-byte DPI frame (`x11UsesShortDpiReport` returns the long form for
-`0xfa60`). Models whose frame shape is not established (R1 `0x10`, X3
-`0x4d`/`0x4e`, X6 `0x85`) stay read-only.
+`0xfa60`). Models whose frame shape is not established (R1 `0x10`, X3 Max `0x4e`,
+X3 Pro `0x01`, X6 `0x85`) stay read-only. The X3 (`0x4d`) has its own
+protocol, see `docs/attackshark-x3-testing.md`.
 
 ## Observed facts
 

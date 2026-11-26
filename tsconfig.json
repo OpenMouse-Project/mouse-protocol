@@ -19,6 +19,7 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "paths": {
+      "@openmouse/protocol/redgear": ["./src/redgear/index.ts"],
       "@openmouse/protocol": ["./src/index.ts"],
       "@openmouse/protocol/atk": ["./src/atk/index.ts"],
       "@openmouse/protocol/endgame-gear-we": ["./src/endgame-gear/wireless.ts"],
@@ -52,9 +53,11 @@
       "@openmouse/protocol/bytech": ["./src/bytech/index.ts"],
       "@openmouse/protocol/rapoo": ["./src/rapoo/index.ts"],
       "@openmouse/protocol/fater": ["./src/fater/index.ts"],
+      "@openmouse/protocol/thermaltake": ["./src/thermaltake/index.ts"],
       "@openmouse/protocol/coolermaster": ["./src/coolermaster/index.ts"],
       "@openmouse/protocol/ajazz": ["./src/ajazz/index.ts"],
-      "@openmouse/protocol/hitscan": ["./src/hitscan/index.ts"]
+      "@openmouse/protocol/hitscan": ["./src/hitscan/index.ts"],
+      "@openmouse/protocol/xiaomi": ["./src/xiaomi/index.ts"]
     }
   },
   "include": ["src/**/*"],

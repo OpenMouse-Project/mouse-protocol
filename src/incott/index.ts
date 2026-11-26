@@ -427,13 +427,31 @@ export const INCOTT_BUTTON_ACTIONS: ReadonlyArray<readonly [string, number]> = [
   ),
 ];
 
-/** Macro loop modes, in wire order. */
+/**
+ * Macro loop modes, in wire order.
+ *
+ * All three are captured, not inferred: the vendor tool was recorded saving
+ * the same ten-step macro three times, once per mode, and the mouse was
+ * watched running each (2026-09-14). Its own UI numbers them from 1
+ * (`looptype:1/2/3` in an exported macro) while the wire takes 0/1/2, so the
+ * two are off by one and reading the export as the wire value would shift
+ * every mode by one place.
+ *
+ *     looptype 1  lpUntilKeyRelease  ->  byte 1 = 0   repeats while held
+ *     looptype 2  lpUntilAnyKey      ->  byte 1 = 1   repeats until a key
+ *     looptype 3  lpCycle            ->  byte 1 = 2   repeats bytes 2..3 times
+ */
 export const INCOTT_MACRO_LOOP_MODES = ["untilKeyRelease", "untilAnyKey", "cycle"] as const;
 export type IncottMacroLoop = (typeof INCOTT_MACRO_LOOP_MODES)[number];
 
 /** One key event in a macro: a press or a release, then a delay. */
 export interface IncottMacroStep {
-  /** HID keyboard usage code. */
+  /**
+   * What the step presses: a standard HID keyboard usage code, or one of
+   * `INCOTT_MACRO_MOUSE_KEYS` for a mouse button. The vendor's own key table
+   * carries both in one list, which is why a macro can click as well as type
+   * — and click macros are the common case.
+   */
   key: number;
   /** True for a key-down event, false for key-up. */
   press: boolean;
@@ -452,11 +470,50 @@ export interface IncottMacro {
   uid: number;
 }
 
+/**
+ * Mouse buttons as macro steps. The vendor keeps keyboard keys and mouse
+ * buttons in a single table (`vkPOS` in its `define` bundle), so a macro step
+ * takes either — and the codes are the same ones the button action words use
+ * (`0x00F00001` is a left click). Nothing else in the table falls outside the
+ * HID keyboard range.
+ */
+export const INCOTT_MACRO_MOUSE_KEYS = {
+  left: 0xf0,
+  right: 0xf1,
+  middle: 0xf2,
+} as const;
+
+/**
+ * Display name for a macro step's key, or null when it is a code this driver
+ * has no name for. Mouse buttons first, since they sit outside the keyboard
+ * range and are the ones a click macro is built from.
+ */
+export function incottMacroKeyLabel(key: number): string | null {
+  if (key === INCOTT_MACRO_MOUSE_KEYS.left) return "Left click";
+  if (key === INCOTT_MACRO_MOUSE_KEYS.right) return "Right click";
+  if (key === INCOTT_MACRO_MOUSE_KEYS.middle) return "Middle click";
+  for (const [label, usage] of KEY_USAGES) {
+    if (usage === key) return label;
+  }
+  return null;
+}
+
 /** A macro buffer is always this long, in ten 32-byte chunks. */
 export const INCOTT_MACRO_BUFFER_BYTES = 320;
 export const INCOTT_MACRO_CHUNK_BYTES = 32;
 export const INCOTT_MACRO_CHUNK_COUNT = INCOTT_MACRO_BUFFER_BYTES / INCOTT_MACRO_CHUNK_BYTES;
 export const INCOTT_MACRO_BUFFER_COUNT = 10;
+/**
+ * Milliseconds to wait between announcing a chunk and sending it.
+ *
+ * The vendor waits exactly this long (`await mySleep80` inside its `setJuJi`
+ * loop), which reads as the device needing the gap to get ready for the
+ * output report. It is not the queue's generic settle delay and must not be
+ * shortened to match it: nothing acknowledges a chunk, so a chunk the device
+ * was not ready for is lost silently, leaving whatever the buffer held before
+ * in its place.
+ */
+export const INCOTT_MACRO_CHUNK_SETTLE_MS = 80;
 /** Steps occupy bytes 4..287 at four bytes each, so 71 fit. */
 export const INCOTT_MACRO_MAX_STEPS = 71;
 
@@ -468,7 +525,7 @@ export const INCOTT_MACRO_MAX_STEPS = 71;
  *     [1]        loop mode (0 until key release, 1 until any key, 2 cycle)
  *     [2..3]     cycle count, LE16
  *     [4+4n]     event flags: bit 0 always set, bit 7 set for a RELEASE
- *     [5+4n]     HID keyboard usage code
+ *     [5+4n]     HID keyboard usage, or a mouse button (INCOTT_MACRO_MOUSE_KEYS)
  *     [6..7+4n]  delay after the event, LE16 milliseconds
  *     [288..293] the ASCII name "Macro" followed by '1' + buffer id
  *     [304..307] (steps + 1) * 4 + 128, LE32
@@ -543,10 +600,8 @@ export function incottEncodeMacroBuffer(macro: IncottMacro): Uint8Array {
  * The 8-byte header announcing one chunk of a macro buffer:
  * `09 07 0a <chunk index> 20 <buffer id>`.
  *
- * See `incottEncodeMacroBuffer` for why nothing sends this yet. Note the
- * vendor slices its own payload as `mda.slice(i * 32, i * 64)`, which yields
- * an EMPTY chunk for `i = 0` and over-long ones after — visibly a bug in its
- * own uploader, and not reproduced here.
+ * The vendor pairs each header with `mda.slice(i * 32, i * 32 + 32)`, which
+ * is what this splits into as well — see `incottMacroChunks`.
  */
 export function incottEncodeMacroChunkHeader(chunkIndex: number, bufferId: number): Uint8Array {
   if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= INCOTT_MACRO_CHUNK_COUNT) {
@@ -598,8 +653,56 @@ export function incottButtonActionCode(label: string): number | null {
   for (const [name, value] of INCOTT_BUTTON_ACTIONS) {
     if (name === label) return value;
   }
+  // "Macro" alone cannot be resolved here: which buffer it means depends on
+  // the button being written, so `IncottHidClient.setButtonMapping` handles it.
   return null;
 }
+
+/**
+ * The macro buffer a button runs is its own DISPLAY-ORDER index — buffers are
+ * not free-standing slots a button can be pointed at.
+ *
+ * HARDWARE-CONFIRMED 2026-09-14, after the opposite assumption shipped and did
+ * nothing. The vendor's apply loop uses one `i` for all three writes:
+ *
+ *     await this.setJuJi(i, b);                  // upload to buffer i
+ *     let code = this.kf_hw(pf.key[i], i);       // i << 16 | 9
+ *     await this.setMsK(dvar.key[i].matrix, code);
+ *
+ * Its own capture agrees: buffer 3, code 0x00030009, written to matrix 4 —
+ * Forward is display index 3 and wire index 4. Uploading the same macro to
+ * buffer 0 and binding Forward to 0x00000009 is accepted by the device and
+ * silently never fires.
+ *
+ * Note this is the DISPLAY index, not the wire index the binding is written
+ * to: Forward is 3 here and 4 there (see `INCOTT_BUTTON_WIRE_INDEX`). Getting
+ * the two the wrong way round is the obvious trap.
+ */
+export function incottMacroSlotForButton(button: IncottButtonName): number {
+  return INCOTT_BUTTON_NAMES.indexOf(button);
+}
+
+/** The binding that makes a button run its own macro buffer. */
+export function incottMacroBindingForButton(button: IncottButtonName): number {
+  return ((incottMacroSlotForButton(button) << 16) | INCOTT_BUTTON_MACRO_MARKER) >>> 0;
+}
+
+/**
+ * The buffer a macro binding points at, or null when the code is not a macro
+ * binding at all.
+ */
+export function incottMacroSlotFromBinding(code: number): number | null {
+  if ((code & 0xffff) !== INCOTT_BUTTON_MACRO_MARKER) return null;
+  const slot = code >>> 16;
+  return slot < INCOTT_MACRO_BUFFER_COUNT ? slot : null;
+}
+
+/**
+ * The single action label offered for macros. There is deliberately no
+ * "Macro 1".."Macro 10" list: a button can only run the buffer with its own
+ * index, so a per-slot choice would offer combinations the hardware ignores.
+ */
+export const INCOTT_MACRO_ACTION_LABEL = "Macro";
 
 /**
  * How many DPI stages the cycle uses by default — and the value this driver

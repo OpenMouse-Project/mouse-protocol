@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { INCOTT_PRODUCT_ID, INCOTT_PRODUCT_ID_WIRED, INCOTT_REPORT_ID, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../../incott/index.ts";
+import { INCOTT_MACRO_CHUNK_SETTLE_MS, INCOTT_PRODUCT_ID, INCOTT_PRODUCT_ID_WIRED, INCOTT_REPORT_ID, INCOTT_USAGE_PAGE, INCOTT_VENDOR_ID } from "../../incott/index.ts";
 import {
   IncottHidClient,
   IncottTransactionQueue,
@@ -1529,6 +1529,90 @@ test("uploadMacro interleaves ten headers with ten 32-byte output reports", asyn
   assert.deepEqual(rejoined.slice(0, 8), [0x03, 0x01, 0x01, 0x00, 0x01, 0x0f, 0x7c, 0x00]);
 });
 
+test("uploadMacro stops before sending a chunk whose header failed", async () => {
+  const { device, outputs } = fakeDevice();
+  const sendFeatureReport = device.sendFeatureReport.bind(device);
+  const failure = new Error("macro header failed");
+  let headers = 0;
+  device.sendFeatureReport = async (reportId, data) => {
+    if (++headers === 2) throw failure;
+    return sendFeatureReport(reportId, data);
+  };
+  const client = new IncottHidClient(device, fast);
+  await assert.rejects(
+    () => client.uploadMacro({ bufferId: 0, loop: "cycle", cycles: 1, uid: 0, steps: [] }),
+    (error: unknown) => error === failure,
+  );
+  assert.equal(headers, 2, "no later chunk headers are sent");
+  assert.equal(outputs.length, 1, "only the chunk with a successful header is sent");
+  // A rejected upload must not poison the transaction queue.
+  assert.ok(await client.getFireKey());
+});
+
+test("uploadMacro waits the vendor's 80 ms between each header and its chunk", async () => {
+  // Load-bearing, not cosmetic: nothing acknowledges a chunk, so one sent
+  // before the device is ready is dropped in silence and that slice of the
+  // buffer keeps what it held before — a short macro then replays the tail of
+  // the longer one it was meant to replace.
+  const { device } = fakeDevice();
+  const waits: number[] = [];
+  const client = new IncottHidClient(device, {
+    settleMs: 0,
+    attempts: 3,
+    sleep: async (ms: number) => { waits.push(ms); },
+  });
+  await client.uploadMacro({
+    bufferId: 0, loop: "cycle", cycles: 1, uid: 1,
+    steps: [{ key: 0x04, press: true, delayMs: 10 }],
+  });
+  assert.equal(
+    waits.filter((ms) => ms === INCOTT_MACRO_CHUNK_SETTLE_MS).length,
+    10,
+    "one 80 ms gap per chunk",
+  );
+});
+
+test("nothing can interleave between a chunk header and its chunk", async () => {
+  // The app polls the mouse in the background. A header and its chunk queued
+  // as two entries look ordered but are not: awaiting the header yields to
+  // the event loop, so a refresh queued meanwhile runs between them and the
+  // device gets a feature query where it is waiting for an output report.
+  // Nothing acknowledges a chunk, so that damage is silent — a macro whose
+  // steps arrive intact while its loop mode quietly does not.
+  const { device } = fakeDevice();
+  const timeline: string[] = [];
+  const record = {
+    ...device,
+    sendFeatureReport: async (reportId: number, data: BufferSource) => {
+      const bytes = new Uint8Array(ArrayBuffer.isView(data)
+        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+        : new Uint8Array(data as ArrayBuffer));
+      timeline.push(bytes[0] === 0x07 ? "header" : "feature");
+      return device.sendFeatureReport(reportId, data);
+    },
+    sendReport: async (reportId: number, data: BufferSource) => {
+      timeline.push("chunk");
+      return device.sendReport!(reportId, data);
+    },
+  } as unknown as HIDDevice;
+
+  const client = new IncottHidClient(record, fast);
+  const upload = client.uploadMacro({
+    bufferId: 0, loop: "untilKeyRelease", cycles: 1, uid: 1,
+    steps: [{ key: 0x04, press: true, delayMs: 10 }],
+  });
+  // A background read, started while the upload is in flight.
+  const poll = client.getFireKey();
+  await Promise.all([upload, poll]);
+
+  timeline.forEach((entry, index) => {
+    if (entry === "header") {
+      assert.equal(timeline[index + 1], "chunk", `a ${timeline[index + 1]} cut in after a chunk header`);
+    }
+  });
+  assert.equal(timeline.filter((entry) => entry === "header").length, 10);
+});
+
 test("uploadMacro fails clearly on a transport with no output-report support", async () => {
   const { device } = fakeDevice();
   delete (device as unknown as { sendReport?: unknown }).sendReport;
@@ -1554,4 +1638,34 @@ test("readStatus keeps the full ceiling when identity cannot be read", async () 
   const { device } = fakeDevice({ state: { identity: null } });
   const status = await new IncottHidClient(device, fast).readStatus();
   assert.equal(status.ui?.dpiStageEditor?.maxDpi, 45000);
+});
+
+test("one Macro action is offered, not a slot per buffer", async () => {
+  // A button can only run the buffer with its own index, so a numbered list
+  // would offer combinations the device ignores.
+  const { device } = fakeDevice();
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.ok(status.buttonOptions?.includes("Macro"));
+  assert.equal(status.buttonOptions?.includes("Macro 1"), false);
+});
+
+test("Macro binds a button to the buffer carrying its own display index", async () => {
+  const { device, state } = fakeDevice();
+  const client = new IncottHidClient(device, fast);
+  await client.setButtonMapping("Forward", "Macro");
+  // Forward is display index 3 and wire index 4: the binding names 3 and is
+  // written at 4. Hardware-confirmed — naming 0 there never fires.
+  assert.equal(state.buttons[4], 0x00030009);
+  const status = await client.readStatus();
+  assert.equal(status.buttonMappings?.Forward, "Macro");
+});
+
+test("a macro binding pointing at another button's buffer is reported, not shown as working", async () => {
+  // Forward is display index 3, so a binding naming buffer 0 was written by
+  // something with the model wrong and will not fire.
+  const { device } = fakeDevice({
+    state: { buttons: [0x00f00001, 0x00f10001, 0x00f20001, 0x00f30001, 0x00000009, 0x00030007] },
+  });
+  const status = await new IncottHidClient(device, fast).readStatus();
+  assert.equal(status.buttonMappings?.Forward, "Macro (buffer 0)");
 });

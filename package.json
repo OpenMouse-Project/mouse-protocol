@@ -18,9 +18,17 @@
     "CONTRIBUTING.md"
   ],
   "exports": {
+    "./redgear": {
+      "types": "./dist/redgear/index.d.ts",
+      "import": "./dist/redgear/index.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./aula": {
+      "types": "./dist/aula/index.d.ts",
+      "import": "./dist/aula/index.js"
     },
     "./bytech": {
       "types": "./dist/bytech/index.d.ts",
@@ -210,6 +218,10 @@
       "types": "./dist/ryunix/index.d.ts",
       "import": "./dist/ryunix/index.js"
     },
+    "./instant": {
+      "types": "./dist/instant/index.d.ts",
+      "import": "./dist/instant/index.js"
+    },
     "./amkette": {
       "types": "./dist/amkette/index.d.ts",
       "import": "./dist/amkette/index.js"
@@ -226,9 +238,17 @@
       "types": "./dist/fater/index.d.ts",
       "import": "./dist/fater/index.js"
     },
+    "./thermaltake": {
+      "types": "./dist/thermaltake/index.d.ts",
+      "import": "./dist/thermaltake/index.js"
+    },
     "./ajazz": {
       "types": "./dist/ajazz/index.d.ts",
       "import": "./dist/ajazz/index.js"
+    },
+    "./ajazz/aj200p": {
+      "types": "./dist/ajazz/aj200p.d.ts",
+      "import": "./dist/ajazz/aj200p.js"
     },
     "./coolermaster": {
       "types": "./dist/coolermaster/index.d.ts",
@@ -241,6 +261,14 @@
     "./hitscan": {
       "types": "./dist/hitscan/index.d.ts",
       "import": "./dist/hitscan/index.js"
+    },
+    "./roccat": {
+      "types": "./dist/roccat/index.d.ts",
+      "import": "./dist/roccat/index.js"
+    },
+    "./xiaomi": {
+      "types": "./dist/xiaomi/index.d.ts",
+      "import": "./dist/xiaomi/index.js"
     }
   },
   "scripts": {
