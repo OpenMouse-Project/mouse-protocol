@@ -40,6 +40,7 @@ export * as instant from "./instant/index.js";
 export * as ryunix from "./ryunix/index.js";
 export * as amkette from "./amkette/index.js";
 export * as redragon from "./redragon/index.js";
+export * as sinowealth from "./sinowealth/index.js";
 export * as utechsmart from "./utechsmart/index.js";
 export * as delux from "./delux/index.js";
 export * as bytech from "./bytech/index.js";

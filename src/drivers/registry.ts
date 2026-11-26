@@ -136,8 +136,10 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   // Same Holtek VID/config collection as Redragon; disjoint by PID 0xfc55.
   { brand: "UtechSmart", supports: (device) => UtechsmartVenusHidClient.isSupported(device), create: (device) => new UtechsmartVenusHidClient(device), score: () => 9 },
   // Shares SinoWealth's 0x258a with the Glorious classic line; disjoint by
-  // product id, and the client refuses a settings block that is not the
-  // M690 PRO's.
+  // product id, and the client refuses a settings block that belongs to no
+  // bank-framing device it knows (M690 PRO, Cosmic Byte Kilonova 3335IC).
+  // The registry label stays the M690 PRO's brand; a Kilonova wearing it
+  // briefly before its own status arrives is the GearHub situation below.
   { brand: "Redragon", supports: (device) => RedragonM690ProHidClient.isSupported(device), create: (device) => new RedragonM690ProHidClient(device), score: () => 9 },
   // Shares Compx/Areson's 0x25a7 with AttackSharkHidClient; disjoint by
   // product id (0xfa7e/0xfab0) and usage page (0xff02/0xff01 vs 0xffff).

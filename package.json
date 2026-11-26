@@ -178,6 +178,10 @@
       "types": "./dist/redragon/index.d.ts",
       "import": "./dist/redragon/index.js"
     },
+    "./sinowealth": {
+      "types": "./dist/sinowealth/index.d.ts",
+      "import": "./dist/sinowealth/index.js"
+    },
     "./utechsmart": {
       "types": "./dist/utechsmart/index.d.ts",
       "import": "./dist/utechsmart/index.js"
