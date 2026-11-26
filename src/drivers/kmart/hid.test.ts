@@ -53,15 +53,21 @@ test("Kmart recognizes only the vendor feature collection", () => {
   assert.equal(KmartHidClient.isSupported({ ...hid, collections: [{ usagePage: 1, usage: 2, children: [], featureReports: [] }] } as unknown as HIDDevice), false);
 });
 
-test("Kmart status reports battery, polling and the remembered stage DPI", async () => {
+test("Kmart status reports battery and polling, and no DPI until a stage was written", async () => {
   const client = new KmartHidClient(device().hid);
   const status = await client.readStatus();
   assert.equal(status.brand, "Kmart");
   assert.equal(status.batteryPercent, 88);
   assert.equal(status.batteryState, "Discharging");
   assert.equal(status.pollingRateHz, 125);
-  assert.equal(status.dpi, 1600);
+  assert.equal(status.dpi, 0, "the mouse cannot report its DPI, so none is invented");
+  assert.equal(status.ui?.settingsReady, true);
+  assert.match(status.ui?.statusNote ?? "", /first DPI change writes all six stages/);
   assert.equal(status.connectionType, "Wireless");
+  await client.setDpi(1200);
+  const after = await client.readStatus();
+  assert.equal(after.dpi, 1200);
+  assert.equal(after.ui?.statusNote, undefined);
 });
 
 test("Kmart polling writes verify against read-back", async () => {
@@ -97,17 +103,22 @@ test("Kmart DPI writes keep the device's enabled-stage count", async () => {
   assert.deepEqual([...dpiWrite.slice(6, 8)], [0x34, 0x0f]);
 });
 
-test("Kmart wired PID is not gated on the link byte and reports USB", async () => {
+test("Kmart wired PID reads status but stays read-only until verified", async () => {
   const wired = device({ productId: 0x5b2e, asleep: true });
   const client = new KmartHidClient(wired.hid);
   assert.equal(KmartHidClient.isSupported(wired.hid), true);
-  assert.equal(await client.setPollingRate(1000), 1000);
-  assert.equal((await client.readStatus()).connectionType, "Wired");
+  const status = await client.readStatus();
+  assert.equal(status.connectionType, "Wired");
+  assert.equal(status.ui?.settingsReady, false);
+  await assert.rejects(() => client.setPollingRate(1000), /not verified yet/);
+  await assert.rejects(() => client.setDpi(1200), /not verified yet/);
+  assert.equal(wired.writes.some((report) => report[4] === 0x01), false, "nothing was written");
 });
 
 test("Kmart readStatus reports an asleep receiver without throwing", async () => {
   const status = await new KmartHidClient(device({ asleep: true }).hid).readStatus();
   assert.equal(status.connectionDetail, "2.4 GHz receiver (mouse asleep)");
+  assert.equal(status.ui?.settingsReady, false);
 });
 
 test("Kmart readStatus does not present an unknown polling interval as 125 Hz", async () => {

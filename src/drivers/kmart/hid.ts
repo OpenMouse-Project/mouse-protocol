@@ -1,7 +1,7 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import {
   KMART_COMMAND, KMART_DPI_STAGE_COUNT, KMART_PMW3325_DPI_VALUES, KMART_POLLING_RATES, KMART_PRODUCT_IDS,
-  KMART_RECEIVER_PRODUCT_ID, KMART_REPORT_ID, KMART_SENSOR_PMW3325, KMART_USAGE, KMART_USAGE_PAGE,
+  KMART_RECEIVER_PRODUCT_ID, KMART_REPORT_ID, KMART_WIRED_PRODUCT_ID, KMART_SENSOR_PMW3325, KMART_USAGE, KMART_USAGE_PAGE,
   KMART_VENDOR_ID, kmartDecodeStatus, kmartDpiStagesData, kmartPayload, kmartPollingInterval, kmartRequest,
   type KmartStatus,
 } from "@openmouse/protocol/kmart";
@@ -29,6 +29,8 @@ export class KmartHidClient {
   private queue: Promise<unknown> = Promise.resolve();
   private sequence = 0;
   private stages: number[] = [...DEFAULT_STAGES];
+  /** The mouse cannot report its DPI table; only stages this session wrote are known. */
+  private stagesWritten = false;
 
   constructor(device: HIDDevice) { this.device = device; }
 
@@ -62,12 +64,22 @@ export class KmartHidClient {
       if (status.pollingRateHz === null) throw new Error("Kmart reported an unrecognised polling interval.");
       const receiver = this.device.productId === KMART_RECEIVER_PRODUCT_ID;
       const stage = Math.min(status.activeStage, this.stages.length - 1);
+      const asleep = receiver && !status.linked;
+      const note = !receiver
+        ? "Changes over the USB cable are not verified yet; connect through the 2.4 GHz receiver to change settings."
+        : asleep
+          ? "The mouse is asleep. Move it to change settings."
+          : status.sensor !== KMART_SENSOR_PMW3325
+            ? "This sensor has no verified DPI table, so only the polling rate can be changed."
+            : this.stagesWritten
+              ? undefined
+              : `This mouse cannot report its DPI stages, so no DPI is shown until you set one. The first DPI change writes all six stages: the active one to your choice and the others to ${DEFAULT_STAGES.join(", ")} DPI.`;
       return {
         brand: "Kmart",
         name: "Kmart Wireless Gaming Mouse",
         batteryPercent: status.batteryPercent,
         batteryState: status.chargeState === 1 ? "Charging" : status.chargeState === 2 ? "Full" : "Discharging",
-        dpi: this.stages[stage]!,
+        dpi: this.stagesWritten ? this.stages[stage]! : 0,
         pollingRateHz: status.pollingRateHz,
         supportedPollingRates: this.getSupportedPollingRates(),
         activeProfile: null,
@@ -82,6 +94,8 @@ export class KmartHidClient {
           hideSignalCard: true,
           hideSleepCard: true,
           defaultDisplayName: "Kmart Wireless Gaming Mouse",
+          settingsReady: receiver && !asleep,
+          ...(note ? { statusNote: note } : {}),
         },
       };
     });
@@ -91,6 +105,7 @@ export class KmartHidClient {
   async setDpi(dpi: number): Promise<number> {
     if (!KMART_PMW3325_DPI_VALUES.includes(dpi)) throw new RangeError(`DPI ${dpi} is not supported by this mouse.`);
     return this.run(async () => {
+      this.requireVerifiedPath();
       const status = await this.requireLinked();
       if (status.sensor !== KMART_SENSOR_PMW3325) {
         throw new Error(`Kmart sensor 0x${status.sensor.toString(16)} has no verified DPI table.`);
@@ -102,7 +117,14 @@ export class KmartHidClient {
       const stages = [...this.stages];
       stages[stage] = dpi;
       await this.write(KMART_COMMAND.dpiStages, kmartDpiStagesData(stages, stage, enabled));
+      // The DPI values cannot be read back; the stage layout can, so a write
+      // the mouse rejected or garbled is not recorded as the new table.
+      const confirmed = await this.queryStatus();
+      if (confirmed.activeStage !== stage || confirmed.enabledStageCount !== enabled) {
+        throw new Error("Kmart DPI-stage write did not persist.");
+      }
       this.stages = stages;
+      this.stagesWritten = true;
       return dpi;
     });
   }
@@ -110,12 +132,20 @@ export class KmartHidClient {
   async setPollingRate(rate: number): Promise<number> {
     const interval = kmartPollingInterval(rate);
     return this.run(async () => {
+      this.requireVerifiedPath();
       await this.requireLinked();
       await this.write(KMART_COMMAND.pollingInterval, [interval]);
       const confirmed = (await this.queryStatus()).pollingRateHz;
       if (confirmed !== rate) throw new Error("Kmart polling-rate write did not persist.");
       return rate;
     });
+  }
+
+  /** Writes were verified through the receiver only; the cable stays read-only until tested. */
+  private requireVerifiedPath(): void {
+    if (this.device.productId === KMART_WIRED_PRODUCT_ID) {
+      throw new Error("Changes over the USB cable are not verified yet; connect through the 2.4 GHz receiver.");
+    }
   }
 
   private async requireLinked(): Promise<KmartStatus> {
