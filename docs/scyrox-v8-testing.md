@@ -28,6 +28,77 @@ UI strings), including a screenshot of it connected to the same mouse.
   (byte 6: `01` awake, `00` asleep). While it reads `00`, every other command
   goes unanswered.
 
+## Wired V8 (0xf5f6)
+
+- Device: "SCYROX V8", VID/PID `0x3554:0xf5f6`, release `0x0220`, mouse
+  firmware v2.20. Same collection layout as the dongle: `0xff02:2` with
+  report 8 on interface 1, plus `0xff05`, `0xff03`, `0x000c:1`, `0x0001:0x80`
+  and `0xff04:2`; interface 0 a keyboard, interface 2 the mouse.
+- `ScyroxHidClient.readStatus` through node-hid on Windows: "Scyrox V8",
+  one stage at 1,600 DPI, 1,000 Hz, battery 45% / 3,829 mV charging,
+  profile 1, debounce 0 ms, sleep 300 s, motion sync and angle snapping on,
+  ripple off, performance off, 20K on, firmware "Mouse v2.20".
+- Polling rate round trip: 1,000 → 2,000 Hz (read back 2,000), then
+  2,000 → 1,000 Hz (read back 1,000).
+- Handshake (command `0x01`): a bare request fails with status 1; the
+  configurator's payload (four random bytes, four zeros) is answered with
+  payload `84 bf 7a f2 3e 01 02`: CID `0x3e`, MID `0x01` (V8), type `0x02`
+  (wired 1K).
+
+## V6 identification
+
+The configurator (S-center 3.1.0, `cfg.json`) lists only five Scyrox
+product ids: wired `0xF5F6` and `0xF515`, wireless `0xF5F4`, `0xF5F7` and
+`0xF517`. It tells models apart by the handshake's MID, not by product id,
+and gives the V8 (MID 1, 10, 11) and the V6 (MID 2, 12, 13) the same 3950
+sensor, 30,000 DPI ceiling and controls. `ScyroxHidClient` therefore sends
+the handshake on the V8 entries and names the mouse "Scyrox V6" for a V6
+MID. `0xF5F4` (sensor unknown) is not claimed.
+
+- **Unanswered or refused handshake:** the client keeps the catalog's
+  "Scyrox V8" and asks again on a full read at least 30 s later. A mouse
+  asleep behind the dongle is still named once it wakes, and a silent mouse
+  costs one timeout per interval, not one per read. The first reply settles
+  it for the connection.
+- **Key bytes:** the handshake sends fixed key bytes (`4f 4d 53 01`) rather
+  than the configurator's random ones, so captured traces are reproducible.
+- **Connection type:** the reply's type byte is used too. A wired mouse
+  reporting type 3 (wired 8K) is offered the 8K rate list instead of the
+  wired 1K default.
+
+### Writes wait for the handshake
+
+The 3950 entries' extra writes (the lift-off stop table, angle tuning, the
+30 ms Key Response Time and Restore) were tested on a V8 and a V6. The
+client offers them once the handshake has named the mouse either model. A
+mouse that has not answered yet gets the shared Atlantis controls only.
+
+### V6 on hardware
+
+The V6 was first checked read-only: identification and a full read. It was
+then used and tested with the same controls as the V8 (see "Verified writes
+on the V8 and V6"), which worked as they do on the V8.
+
+The read-only check used a Scyrox V6 on the "SCYROX 8K Dongle" (`0x3554:0xf5f7`, release `0x0216`,
+dongle version `02 16`), read through node-hid on Windows with a read-only
+build of `ScyroxHidClient` that refuses every command but 0x01, 0x03, 0x04,
+0x08, 0x0e, 0x12 and 0x1d:
+
+- Same product id and collection layout as the V8's dongle.
+- Handshake payload `e0 ec fc 6b 3e 02 05`: CID `0x3e`, MID 2 (V6), type 5
+  (wireless 8K). The client named it "Scyrox V6".
+- Firmware `02 24`, v2.24, the version the configurator's V6 upgrade tool
+  ships.
+- `readStatus`: three stages 500/800/1,600 with stage 2 active, 1,000 Hz,
+  battery 75% / 4,013 mV discharging, profile 1, debounce 0 ms, sleep 300 s,
+  motion sync, angle snapping, ripple control and performance on, 20K off,
+  firmware "Mouse v2.24". Every field carried its seal.
+- The raw flash agrees field by field: rate `01 54`, three stages `03 52`,
+  active stage `02 53`, 20K `00 55`, legacy stages `09 09 00 43`,
+  `0f 0f 00 37` and `1f 1f 00 17` (500, 800, 1,600 DPI), sleep `1e 37` at 173
+  and 183, performance `01 54` at 181. The 3955 region at 6912 reads `ff`, as
+  on the V8, confirming the legacy layout.
+
 ## Protocol family
 
 The V8 speaks the same CompX report-8 flash protocol as the V8S, and every
@@ -95,28 +166,58 @@ differences, which the catalog follows:
 
 - Lift-off: the 3950 offers three heights coded 3, 1 and 2 for 0.7, 1 and
   2 mm. That order fits neither the Atlantis two-stop write nor the 1-to-n
-  scale the V8S uses, so lift-off is not offered (`supportsLiftOffDistance:
-  false`, no `liftOffMillimetres`).
-- Angle tuning: the configurator shows it only when 189 and 191 are sealed,
-  and both read `ff`, so `supportsAngleTuning` stays off.
-- Key response time: the configurator allows up to 30 ms on the V8; the
-  Atlantis client offers 0-15 ms.
+  scale the V8S uses, so the catalog gives it an explicit stop table
+  (`liftOffStopCodes: { Low: 3, Medium: 1, High: 2 }`) and no
+  `liftOffMillimetres`. A byte outside the table reads as no stop
+  (`liftOffDistance: null`). The three stops stay on offer, so choosing one
+  writes a known code over it.
+- Angle tuning: the configurator shows it only when 189 and 191 are sealed.
+  On the first V8 dump both read `ff`. A later read found them sealed (angle
+  0, on), and the angle round trip below was verified on that V8, so
+  `supportsAngleTuning` is on for an identified V8.
+- Key response time: the configurator allows up to 30 ms on the V8
+  (`maxDebounceMs: 30`); the Atlantis client's default ceiling is 15 ms.
+- Restore: the configurator's Restore button, command `0x09`, as on the
+  V8S (`supportsFactoryReset`).
 - Sleep: 173 and 183 held the same value, as the configurator's Scyrox sleep
   setter writes them, so `mirrorSleepToPerformanceTime` stays on.
 - SensorMode at 185 is left alone (`supportsHyperMode: false`), as on the
   V8S.
 - The 20K switch at flash 8 is shown for the V8 too (`FpsScanShow: true`) and
-  read `00 55`.
+  read `00 55`. The configurator greys it out until Competitive Mode
+  (performance mode, flash 181) is on, so on Scyrox the two are linked:
+  - 20K on turns performance mode on first.
+  - Performance mode off turns 20K off first.
+  - If the second write of a pair does not take, the first is put back.
+  - Other Atlantis products keep the two switches separate.
+
+The lift-off stop table, angle tuning, the 30 ms ceiling and Restore are
+offered only once the handshake names the mouse a V8 or a V6 (see "Writes
+wait for the handshake").
+
+## Verified writes on the V8 and V6
+
+On the V8 behind its 8K dongle, each was written, read back and restored:
+
+- the polling rate
+- lift-off
+- the DPI stage colour
+- the angle
+- debounce
+
+The V6 behind the 8K dongle was used and tested with the same controls, and
+they worked as on the V8.
 
 ## Not yet verified
 
-- DPI, lift-off, angle tuning, sleep, debounce, the 20K switch, profiles,
-  buttons and Restore were never written to the V8. Only the polling rate
-  was, as a round trip ending on the rate read first.
+- Sleep, the 20K switch and its link to performance mode, profiles, buttons
+  and Restore have not been written to a V8 or V6.
 - The sleep reading: the flash held 180 (30 minutes), while the configurator
   screenshot showed "1min", likely its default before the device read.
-- Whether the V6 enumerates with the same dongle id. It would read the same
-  fields (same sensor, same ceiling) but be named "Scyrox V8".
+- The V6 on its cable (expected `0xf5f6`).
+- A wired 8K Scyrox (handshake type 3); the rate list it gets comes from the
+  configurator's type table.
+- What `0xF5F4` is. The configurator lists it as a wireless mouse id.
 - The 4,000 and 8,000 Hz bytes on the V8: the configurator offers them, but
   neither has been read from this mouse.
 

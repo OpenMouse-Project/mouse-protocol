@@ -184,6 +184,16 @@ export interface LamzuAtlantisProduct {
    * `liftOffScale`, and the coarse `liftOffDistance` is the nearest stop.
    */
   liftOffMillimetres?: readonly number[];
+  /**
+   * When set, the lift-off byte holds one of these codes, each one of the
+   * shared stops, rather than Lamzu's two stops or a 1-to-n scale. The 3950
+   * codes its heights out of order (3, 1, 2 for 0.7, 1 and 2 mm), which only
+   * an explicit table describes. The status lists the keys as
+   * `supportedLiftOffDistances`.
+   */
+  liftOffStopCodes?: Readonly<Partial<Record<"Low" | "Medium" | "High", number>>>;
+  /** The longest debounce the vendor offers, in ms; the client default is 15. */
+  maxDebounceMs?: number;
   /** Controls below default to off: no Lamzu unit has exercised them. */
   supportsAngleTuning?: boolean;
   supportsFactoryReset?: boolean;
