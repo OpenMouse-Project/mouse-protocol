@@ -242,7 +242,6 @@ export function sinowealthWithKilonovaStageDpi(block: Uint8Array, stage: number,
     throw new Error(`Kilonova DPI ${dpi} is not supported.`);
   }
   const index = (dpi / 100) - 1;
-  if (index < 0 || index > 0xffff) throw new Error(`Kilonova DPI ${dpi} is out of range.`);
   const next = Uint8Array.from(block.subarray(0, SINOWEALTH_CONFIG_LENGTH));
   const offset = KILONOVA_STAGE_DPI_OFFSETS[stage]!;
   next[offset] = index & 0xff;

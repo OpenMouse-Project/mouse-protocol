@@ -64,18 +64,22 @@ ffffff034240ff000000ff000000ffffff0000ffffffffff0000000000000000
   app (the browser cannot read report 5's short answers, so the bank is the
   browser-viable footprint — see `src/drivers/redragon/m690-pro-hid.ts`).
 - Byte 10 is 0x04: in the M690 PRO's polling-code map that is 1000 Hz. The
-  rate was not measured (Windows refuses the input interface while a mouse
-  session holds it), so nothing decodes it for this device yet.
+  rate was not measured in this session (Windows refuses the input interface
+  while a mouse session holds it); the driver decodes the low nibble as
+  1..4 = 125/250/500/1000 Hz.
+
+## Decoded settings
+
+- Byte 11 (0x36) holds the stage count and the active stage. The stage
+  table is six little-endian words from 0x0d (`03 00 07 00 0f 00 1f 00 3f 00
+  9f 00`), each `DPI / 100 - 1`: 400, 800, 1600, 3200, 6400 and 16000 DPI,
+  in steps of 100 from 400 to 16000. This is not the M690 PRO's label list.
+- This capture session was read-only. The DPI, active-stage and polling
+  writes were added afterwards and confirmed working on the contributor's
+  own Kilonova (PR #249); they are not part of this capture.
 
 ## Hypotheses (not implemented)
 
-- The bytes after the model byte may follow the M690 PRO's meaning (stage
-  table at 0x0d, colours at 0x2d, effects at 0x45): byte 11 is 0x36, which
-  would read as "5 stages, stage 2 active" on the M690 PRO. The stage bytes
-  that follow (`00 07 00 0f 00 1f 00 3f 00 9f`) do not name that list's
-  1..24 positions (159, 255 are impossible positions), so the mapping or
-  the offsets differ. Nothing is decoded and nothing is written until a
-  toggle-diff capture of the vendor's software says otherwise.
 - The zero-payload button bank may keep the M690 PRO's four-byte slot grid
   at the factory defaults; configuring the vendor's own settings would show
   the slots. Not decoded yet.
@@ -85,9 +89,14 @@ ffffff034240ff000000ff000000ffffff0000ffffffffff0000000000000000
 `RedragonM690ProHidClient` recognizes `258a:002f` by shape (unchanged), and
 its settings-block check now resolves a profile. On a Kilonova 3335IC it
 reports the device as "Cosmic Byte Kilonova 3335IC", keeps battery and link
-(when the transport can read report 5, it behind OpenMouse Bridge in a
-browser), hides the settings grid and refuses every write path, instead of
-refusing the device the way it refuses a truly foreign bank.
+(when the transport can read report 5, in a browser only behind OpenMouse
+Bridge), and reads the DPI stages, active stage and polling rate.
+
+It writes only those: the DPI stages (400 to 16000 in steps of 100), the
+active stage and the polling rate. Each write changes only the decoded bytes
+(0x0a low nibble, 0x0b high nibble, 0x0d-0x18), and the settings block is
+read back and must match. Button mapping, lighting and any change outside
+those fields are refused.
 
 ## What would unlock the rest
 

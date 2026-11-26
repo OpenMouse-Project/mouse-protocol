@@ -119,6 +119,8 @@ class NotM690ProError extends Error {
   }
 }
 
+const KILONOVA_LIMITED = "OpenMouse can change only the Cosmic Byte Kilonova 3335IC's DPI stages, active stage and polling rate.";
+
 /**
  * Redragon M690 PRO (`258a:002e` cable, `258a:002f` 2.4 GHz receiver) WebHID
  * control.
@@ -148,9 +150,10 @@ class NotM690ProError extends Error {
  * Kilonova 3335IC's dongle presents the same collections and answers the same
  * framing with its own footprints: byte 9 of its settings block is 0x11 (the
  * M690 PRO's is 0x13) and identify answers "2315" ("2945"). Its bank layout
- * differs from the M690 PRO's where decoding matters, so recognize-and-read
- * applies: link, battery and identity, no decoded settings, no writes (one
- * receiver verified, docs/kilonova-3335ic.md; the Kilonova's cable id is not
+ * differs from the M690 PRO's where decoding matters, so it
+ * gets its own codec: identity, link, battery, DPI stages and polling rate are
+ * read, and only the DPI stages, active stage and polling rate are written
+ * (one receiver, docs/kilonova-3335ic.md; the Kilonova's cable id is not
  * known).
  */
 export class RedragonM690ProHidClient {
@@ -376,32 +379,29 @@ export class RedragonM690ProHidClient {
 
   /** Snaps to the nearest vendor DPI value, writes it, and returns that value. */
   async setDpiStageValue(stage: number, dpi: number): Promise<number> {
-    if (this.kilonova) {
-      const label = redragonM690ProNearestDpi(dpi);
-      await this.writeBlocks((block) => sinowealthWithKilonovaStageDpi(block, stage, label), (block) => block);
-      return label;
-    }
     const label = redragonM690ProNearestDpi(dpi);
-    await this.writeConfig((block) => redragonM690ProWithStageDpi(block, stage, label));
-    return label;
+    const kilonovaDpi = Math.min(16000, Math.max(400, Math.round(dpi / 100) * 100));
+    await this.writeConfig(
+      (block) => redragonM690ProWithStageDpi(block, stage, label),
+      (block) => sinowealthWithKilonovaStageDpi(block, stage, kilonovaDpi),
+    );
+    return this.kilonova ? kilonovaDpi : label;
   }
 
   /** Selects the active DPI stage (0-based), as the mouse's DPI buttons do. */
   async setActiveDpiStage(stage: number): Promise<number> {
-    if (this.kilonova) {
-      await this.writeBlocks((block) => sinowealthWithKilonovaActiveStage(block, stage), (block) => block);
-      return stage;
-    }
-    await this.writeConfig((block) => redragonM690ProWithActiveStage(block, stage));
+    await this.writeConfig(
+      (block) => redragonM690ProWithActiveStage(block, stage),
+      (block) => sinowealthWithKilonovaActiveStage(block, stage),
+    );
     return stage;
   }
 
   async setPollingRate(hz: number): Promise<number> {
-    if (this.kilonova) {
-      await this.writeBlocks((block) => sinowealthWithKilonovaPollingRate(block, hz), (block) => block);
-      return hz;
-    }
-    await this.writeConfig((block) => redragonM690ProWithPollingRate(block, hz));
+    await this.writeConfig(
+      (block) => redragonM690ProWithPollingRate(block, hz),
+      (block) => sinowealthWithKilonovaPollingRate(block, hz),
+    );
     return hz;
   }
 
@@ -461,15 +461,6 @@ export class RedragonM690ProHidClient {
    * unable to click.
    */
   async setButtonMapping(button: string, action: string): Promise<void> {
-    // Try to detect kilonova if not identified
-    if (!this.kilonova) {
-      try {
-        await this.identify();
-      } catch {}
-    }
-    if (this.kilonova) {
-      throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
-    }
     await this.writeButtons((block) => {
       const next = redragonM690ProWithButtonAction(block, button, action);
       if (!Object.values(redragonM690ProDecodeButtons(next)).includes("Left click")) {
@@ -595,8 +586,16 @@ export class RedragonM690ProHidClient {
     return await this.readBlock(this.product().buttonsCommand, REDRAGON_M690_PRO_BUTTONS_LENGTH);
   }
 
-  private async writeConfig(change: (block: Uint8Array) => Uint8Array): Promise<void> {
-    await this.writeBlocks(change, (block) => block);
+  /**
+   * Writes the settings block. The codec is picked inside the queued write,
+   * after the device is identified: `change` for the M690 PRO,
+   * `changeKilonova` for a Kilonova 3335IC (refused when absent).
+   */
+  private async writeConfig(
+    change: (block: Uint8Array) => Uint8Array,
+    changeKilonova?: (block: Uint8Array) => Uint8Array,
+  ): Promise<void> {
+    await this.writeBlocks(change, (block) => block, changeKilonova);
   }
 
   private async writeButtons(change: (block: Uint8Array) => Uint8Array): Promise<void> {
@@ -611,66 +610,25 @@ export class RedragonM690ProHidClient {
   private async writeBlocks(
     changeConfig: (block: Uint8Array) => Uint8Array,
     changeButtons: (block: Uint8Array) => Uint8Array,
+    changeKilonova?: (block: Uint8Array) => Uint8Array,
   ): Promise<void> {
     await this.run(async () => {
       await this.prepare();
-      // Also detect Kilonova if not already detected
-      if (!this.kilonova) {
-        try {
-          const b = await this.readBlock(this.product().configCommand, 32).catch(() => null);
-          if (b && b.length > 9 && b[9] === 0x11 && (b[0] === 0x08 || b[1] === 0x08)) {
-            this.kilonova = true;
-          }
-        } catch {}
-      }
       if (this.kilonova) {
-        // Kilonova: only allow DPI/polling changes if the change only touches known bytes
+        if (!changeKilonova) throw new Error(KILONOVA_LIMITED);
         await this.ensureLinked();
-        const originalConfig = await this.readConfig();
-        const config = changeConfig(originalConfig.slice());
-        const originalButtons = await this.readButtons().catch(() => null);
-        const buttons = originalButtons ? changeButtons(originalButtons.slice()) : originalButtons;
-        if (originalButtons && buttons && !sameBytes(originalButtons.subarray(0, Math.min(originalButtons.length, buttons.length)), buttons.subarray(0, Math.min(originalButtons.length, buttons.length)))) {
-          throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
+        const original = await this.readConfig();
+        const config = changeKilonova(original.slice());
+        // Only the decoded fields may change: polling (0x0a low nibble), active
+        // stage (0x0b high nibble) and the stage DPI table (0x0d-0x18).
+        for (let i = 0; i < SINOWEALTH_CONFIG_LENGTH; i++) {
+          if (original[i] === config[i]) continue;
+          const allowed = i === 0x0a ? (original[i]! & 0xf0) === (config[i]! & 0xf0)
+            : i === 0x0b ? (original[i]! & 0x0f) === (config[i]! & 0x0f)
+              : i >= 0x0d && i <= 0x18;
+          if (!allowed) throw new Error(KILONOVA_LIMITED);
         }
-        // Check if buttons would be changed via the passed change function by comparing original vs result
-        // For Kilonova, any button change is refused
-        let buttonsChanged = false;
-        if (originalButtons) {
-          const testButtons = changeButtons(originalButtons.slice());
-          if (!sameBytes(originalButtons.subarray(0, testButtons.length), testButtons.subarray(0, originalButtons.length))) {
-            buttonsChanged = true;
-          }
-        }
-        if (buttonsChanged) {
-          throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
-        }
-        // Check if only DPI/polling bytes changed (0x0a low nibble, 0x0b, and DPI stages 0x0d-0x18)
-        let onlyDpiPolling = true;
-        for (let i = 0; i < config.length; i++) {
-          if (originalConfig[i] !== config[i]) {
-            // Allow changes to: 0x0a (polling in low nibble), 0x0b (active stage), DPI stage areas
-            if (i === 0x0a) {
-              // Only low nibble can change for polling
-              if ((originalConfig[i] & 0xf0) !== (config[i] & 0xf0)) { onlyDpiPolling = false; break; }
-            } else if (i === 0x0b) {
-              // Only high nibble changes for active stage
-              if ((originalConfig[i] & 0x0f) !== (config[i] & 0x0f)) { onlyDpiPolling = false; break; }
-            } else if (i >= 0x0d && i <= 0x18) {
-              // DPI stage bytes allowed
-            } else {
-              onlyDpiPolling = false;
-              break;
-            }
-          }
-        }
-        if (!onlyDpiPolling) {
-          throw new Error("The Cosmic Byte Kilonova 3335IC is read-only in OpenMouse: its settings layout is not decoded, so nothing here can be changed.");
-        }
-        if (onlyDpiPolling && sameBytes(originalConfig.subarray(0, SINOWEALTH_CONFIG_LENGTH), config.subarray(0, SINOWEALTH_CONFIG_LENGTH))) {
-          // No config changes and no button changes
-          return;
-        }
+        if (sameBytes(original.subarray(0, SINOWEALTH_CONFIG_LENGTH), config.subarray(0, SINOWEALTH_CONFIG_LENGTH))) return;
         await this.sendBlock(redragonM690ProEncodeBlockWrite(config, SINOWEALTH_CONFIG_LENGTH));
         const configBack = await this.readConfig();
         if (!sameBytes(configBack.subarray(0, SINOWEALTH_CONFIG_LENGTH), config.subarray(0, SINOWEALTH_CONFIG_LENGTH))) {

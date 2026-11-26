@@ -439,11 +439,30 @@ test("recognizes the Cosmic Byte Kilonova 3335IC and reads its DPI from the bank
   assert.equal(fake.blockWrites.length, 0);
 });
 
-test("refuses to write to the Kilonova 3335IC instead of guessing its layout", async () => {
+test("refuses Kilonova 3335IC changes outside DPI and polling", async () => {
   const fake = new FakeM690Pro(REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID, { config: KILONOVA_RECEIVER_CONFIG, battery: 0x46 });
   const mouse = client(fake);
-  await assert.rejects(mouse.setButtonMapping("Left (1)", "Disabled"), /read-only/);
+  await assert.rejects(mouse.setButtonMapping("Left (1)", "Disabled"), /can change only/);
   assert.equal(fake.blockWrites.length, 0);
+});
+
+test("Kilonova DPI writes use its own 100-step range, even as the first call on a new client", async () => {
+  for (const [requested, written] of [[400, 400], [1700, 1700], [1749, 1700], [16000, 16000], [99999, 16000]] as const) {
+    const fake = new FakeM690Pro(REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID, { config: KILONOVA_RECEIVER_CONFIG, battery: 0x46 });
+    assert.equal(await client(fake).setDpiStageValue(1, requested), written);
+    assert.equal(fake.blockWrites.length, 1);
+    assert.equal((await client(fake).readStatus()).dpiStages?.[1], written);
+  }
+});
+
+test("Kilonova active stage and polling writes pick the Kilonova codec on a new client", async () => {
+  const fake = new FakeM690Pro(REDRAGON_M690_PRO_RECEIVER_PRODUCT_ID, { config: KILONOVA_RECEIVER_CONFIG, battery: 0x46 });
+  assert.equal(await client(fake).setActiveDpiStage(5), 5);
+  assert.equal(await client(fake).setPollingRate(500), 500);
+  const status = await client(fake).readStatus();
+  assert.equal(status.activeDpiStage, 5);
+  assert.equal(status.dpi, 16000);
+  assert.equal(status.pollingRateHz, 500);
 });
 
 test("the Kilonova 3335IC keeps the M690 PRO battery caveat in a browser transport", async () => {

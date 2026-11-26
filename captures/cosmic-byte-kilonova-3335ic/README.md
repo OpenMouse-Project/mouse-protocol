@@ -19,4 +19,4 @@ truncated; the banks end where their content ends (the settings bank ends in
 the family's `a5 00` marker), and repeated polls are omitted.
 
 Decoding notes and open questions: `docs/kilonova-3335ic.md`. The driver's
-read-only treatment of this device is `src/drivers/redragon/m690-pro-hid.ts`.
+handling of this device is `src/drivers/redragon/m690-pro-hid.ts`.
