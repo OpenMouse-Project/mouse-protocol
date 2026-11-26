@@ -16,6 +16,28 @@ import {
   X11_DPI_STEP,
   X11_DPI_VALUES,
 } from "../../compx/x11-dpi.ts";
+import {
+  buildX3Burst,
+  buildX3MacroChunks,
+  defaultX3Settings,
+  X3_BUTTON_OPTIONS,
+  X3_BUTTON_SLOT,
+  X3_FACTORY_BUTTONS,
+  X3_MACRO_GAP_MS,
+  x3ActionLabel,
+  x3ParseActionLabel,
+  type X3MacroEvent,
+  parseX3Battery,
+  X3_DPI_MAX,
+  X3_DPI_MIN,
+  X3_DPI_STEP,
+  X3_MAX_STAGES,
+  X3_RECEIVER_GAP_MS,
+  X3_WIRED_GAP_MS,
+  type X3PollingHz,
+  type X3Rgb,
+  type X3Settings,
+} from "../../compx/x3-config.ts";
 
 // Attack Shark mice ship from multiple OEMs with different VIDs and protocols:
 //
@@ -339,7 +361,36 @@ const x11LastReceiverWriteAt = new Map<number, number>();
 export function resetAttackSharkX11RuntimeState(): void {
   x11RuntimeStates.clear();
   x11LastReceiverWriteAt.clear();
+  x3States.clear();
 }
+
+const X3_MODEL_ID = 0x4d;
+const X3_PIDS: ReadonlySet<number> = new Set([0xfa60, 0xfa61]);
+const X3_POLLING_RATES: X3PollingHz[] = [125, 250, 500, 1000];
+const X3_SLEEP_STEP_S = 30;
+const X3_LOD = ["Low", "High"] as const;
+
+interface X3State {
+  settings: X3Settings;
+  battery: { percent: number; voltageMv: number; charging: boolean } | null;
+}
+
+const x3States = new Map<number, X3State>();
+
+function x3StateFor(productId: number): X3State {
+  let state = x3States.get(productId);
+  if (!state) {
+    state = { settings: defaultX3Settings(), battery: null };
+    x3States.set(productId, state);
+  }
+  return state;
+}
+
+export function resetAttackSharkX3State(): void {
+  x3States.clear();
+}
+
+const rgbToHex = (c: X3Rgb): string => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 
 /**
  * If the granted devices include an X11-family unit that no driver could
@@ -464,7 +515,13 @@ export class AttackSharkHidClient {
   private batteryPercent: number | null = null;
   private listening = false;
 
-  constructor(device: HIDDevice, options: { batteryWaitMs?: number; receiverWriteGapMs?: number } = {}) {
+  private readonly x3BurstGapMs: number | undefined;
+
+  constructor(
+    device: HIDDevice,
+    options: { batteryWaitMs?: number; receiverWriteGapMs?: number; x3BurstGapMs?: number } = {},
+  ) {
+    this.x3BurstGapMs = options.x3BurstGapMs;
     this.device = device;
     this.family = detectFamily(device);
     this.batteryWaitMs = options.batteryWaitMs ?? X11_BATTERY_WAIT_MS;
@@ -507,6 +564,15 @@ export class AttackSharkHidClient {
       && X11_DPI_PIDS.has(this.device.productId);
   }
 
+  private get x3Active(): boolean {
+    return this.family === "1d57-x11"
+      && X3_PIDS.has(this.device.productId)
+      && this.receiverModelId === X3_MODEL_ID
+      && (this.nativeConfig
+        || x11ConfigReportBytes(this.device) !== null
+        || x11RebuiltConfigCollection(this.device));
+  }
+
   static isSupported(device: HIDDevice): boolean {
     return detectFamily(device) !== null;
   }
@@ -526,6 +592,22 @@ export class AttackSharkHidClient {
       packet = new Uint8Array(data.length + 1);
       packet[0] = event.reportId;
       packet.set(data, 1);
+    }
+    if (packet[0] === BATTERY_REPORT_ID && packet[1] === 0x10 && this.x3Active) {
+      const battery = parseX3Battery(packet);
+      if (battery) {
+        const entry = { percent: battery.percent, voltageMv: Math.round(battery.voltage * 1000), charging: battery.charging };
+        x3StateFor(this.device.productId).battery = entry;
+        if (this.lastStatus) {
+          this.lastStatus = {
+            ...this.lastStatus,
+            batteryPercent: entry.percent,
+            batteryVoltageMv: entry.voltageMv,
+            batteryState: entry.charging ? "Charging" : "Discharging",
+          };
+        }
+      }
+      return;
     }
     if (packet[0] === BATTERY_REPORT_ID && X11_RECEIVER_MODELS.has(packet[1])) {
       x11RuntimeFor(this.device.productId).modelId = packet[1];
@@ -604,6 +686,7 @@ export class AttackSharkHidClient {
   }
 
   getSupportedPollingRates(): number[] {
+    if (this.x3Active) return [...X3_POLLING_RATES];
     if (this.family === "1d57") return POLLING_RATES_1D57.map(([, hz]) => hz);
     if (this.family === "25a7") return [...POLLING_CODES_25A7.keys()];
     // Native transport: the X11 exposes the same 0x06 polling command the
@@ -616,6 +699,9 @@ export class AttackSharkHidClient {
     // 25a7 devices expose up to 8 DPI slots per profile.
     // The actual values are read dynamically in readStatus(); we return a
     // standard set of supported DPI steps so the UI can offer them.
+    if (this.x3Active) {
+      return Array.from({ length: (X3_DPI_MAX - X3_DPI_MIN) / X3_DPI_STEP + 1 }, (_, i) => X3_DPI_MIN + i * X3_DPI_STEP);
+    }
     if (this.family === "25a7") {
       return [400, 800, 1200, 1600, 2400, 3200, 6400, 12000, 26000];
     }
@@ -627,6 +713,7 @@ export class AttackSharkHidClient {
 
   async readStatus(): Promise<MouseStatus> {
     await this.open();
+    if (this.x3Active) return this.readX3Status();
 
     let pollingRateHz = 0;
     let dpi = 0;
@@ -730,6 +817,13 @@ export class AttackSharkHidClient {
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
+    if (this.x3Active) {
+      if (!X3_POLLING_RATES.includes(pollingRateHz as X3PollingHz)) {
+        throw new Error(`This mouse does not support ${pollingRateHz} Hz.`);
+      }
+      await this.applyX3((s) => { s.pollingHz = pollingRateHz as X3PollingHz; });
+      return pollingRateHz;
+    }
     if (this.family === "1d57-x11") {
       if (!this.x11ConfigReachable) {
         throw new Error(
@@ -862,6 +956,7 @@ export class AttackSharkHidClient {
 
   /** Sets the active stage's DPI, preserving the other five. */
   async setDpi(dpi: number, _dpiY?: number): Promise<number> {
+    if (this.x3Active) return this.setDpiStageValue(x3StateFor(this.device.productId).settings.activeStage, dpi);
     this.requireX11Dpi();
     const state = x11DpiStateFor(this.device.productId);
     const value = nearestX11Dpi(dpi);
@@ -873,6 +968,13 @@ export class AttackSharkHidClient {
 
   /** Edits one stage's DPI. `stage` is 0-based, matching the shared UI contract. */
   async setDpiStageValue(stage: number, dpi: number): Promise<number> {
+    if (this.x3Active) {
+      await this.applyX3((s) => {
+        this.requireX3Stage(s, stage);
+        s.dpiStages[stage] = dpi;
+      });
+      return dpi;
+    }
     this.requireX11Dpi();
     if (!Number.isInteger(stage) || stage < 0 || stage >= X11_DPI_STAGE_COUNT) {
       throw new RangeError(`This mouse has no DPI stage ${stage + 1}.`);
@@ -887,6 +989,13 @@ export class AttackSharkHidClient {
 
   /** Selects the active stage. `stage` is 0-based, matching the shared UI contract. */
   async setActiveDpiStage(stage: number): Promise<number> {
+    if (this.x3Active) {
+      await this.applyX3((s) => {
+        this.requireX3Stage(s, stage);
+        s.activeStage = stage;
+      });
+      return stage;
+    }
     this.requireX11Dpi();
     if (!Number.isInteger(stage) || stage < 0 || stage >= X11_DPI_STAGE_COUNT) {
       throw new RangeError(`This mouse has no DPI stage ${stage + 1}.`);
@@ -905,6 +1014,10 @@ export class AttackSharkHidClient {
   }
 
   async setAngleSnapping(enabled: boolean): Promise<boolean> {
+    if (this.x3Active) {
+      await this.applyX3((s) => { s.angleSnap = enabled; });
+      return enabled;
+    }
     this.requireX11Dpi();
     x11DpiStateFor(this.device.productId).angleSnap = enabled;
     await this.writeX11Dpi();
@@ -913,10 +1026,212 @@ export class AttackSharkHidClient {
   }
 
   async setRippleControl(enabled: boolean): Promise<boolean> {
+    if (this.x3Active) {
+      await this.applyX3((s) => { s.ripple = enabled; });
+      return enabled;
+    }
     this.requireX11Dpi();
     x11DpiStateFor(this.device.productId).rippleControl = enabled;
     await this.writeX11Dpi();
     if (this.lastStatus) this.lastStatus = { ...this.lastStatus, rippleControl: enabled };
+    return enabled;
+  }
+
+  private requireX3(): void {
+    if (!this.x3Active) throw new Error("This setting is only available on the Attack Shark X3.");
+  }
+
+  private requireX3Stage(s: X3Settings, stage: number): void {
+    if (!Number.isInteger(stage) || stage < 0 || stage >= s.dpiStages.length) {
+      throw new RangeError(`This mouse has no DPI stage ${stage + 1}.`);
+    }
+  }
+
+  private async applyX3(change: (settings: X3Settings) => void): Promise<void> {
+    const state = x3StateFor(this.device.productId);
+    const next = structuredClone(state.settings);
+    change(next);
+    const burst = buildX3Burst(next);
+    const gap = this.x3BurstGapMs ?? (this.isWireless() ? X3_RECEIVER_GAP_MS : X3_WIRED_GAP_MS);
+    await this.run(async () => {
+      for (const report of burst) {
+        const payload = new Uint8Array(report.length - 1);
+        payload.set(report.subarray(1));
+        await this.device.sendFeatureReport(report[0], payload);
+        await this.delay(gap);
+      }
+    });
+    state.settings = next;
+    if (this.lastStatus) this.lastStatus = { ...this.lastStatus, ...this.x3Fields(next) };
+  }
+
+  private x3Fields(s: X3Settings): Partial<MouseStatus> {
+    const count = Math.min(s.dpiStages.length, X3_MAX_STAGES);
+    return {
+      dpi: s.dpiStages[s.activeStage] ?? 0,
+      dpiStages: [...s.dpiStages],
+      dpiStageColors: s.stageColors.slice(0, count).map(rgbToHex),
+      activeDpiStage: s.activeStage,
+      pollingRateHz: s.pollingHz,
+      liftOffDistance: X3_LOD[s.lod],
+      rippleControl: s.ripple,
+      angleSnapping: s.angleSnap,
+      motionSync: s.motionSync,
+      sleepTimeout: s.sleepMinutes * 60,
+      debounceMs: s.debounceMs,
+      ...this.x3Buttons(s),
+    };
+  }
+
+  private x3Buttons(s: X3Settings): Partial<MouseStatus> {
+    const buttonMappings: Record<string, string> = {};
+    const fixedButtons: string[] = [];
+    for (const [name, slot] of Object.entries(X3_BUTTON_SLOT)) {
+      const label = x3ActionLabel(s.buttons[slot]);
+      buttonMappings[name] = label ?? "Custom (read-only)";
+      if (!label) fixedButtons.push(name);
+    }
+    return { buttonMappings, buttonOptions: [...X3_BUTTON_OPTIONS], fixedButtons };
+  }
+
+  private readX3Status(): MouseStatus {
+    const state = x3StateFor(this.device.productId);
+    const battery = state.battery;
+    return this.lastStatus = {
+      brand: this.deviceBrand(),
+      name: this.displayName(),
+      ui: {
+        family: "attackshark",
+        settingsReady: true,
+        hideUnsupportedPollingRates: true,
+        hideProcessingCard: false,
+        showAdvancedSection: true,
+        forceShowBattery: this.isWireless(),
+        dpiStageEditor: {
+          maxStages: X3_MAX_STAGES,
+          countEditable: true,
+          minDpi: X3_DPI_MIN,
+          maxDpi: X3_DPI_MAX,
+          stepDpi: X3_DPI_STEP,
+        },
+      },
+      batteryPercent: battery?.percent ?? null,
+      batteryVoltageMv: battery?.voltageMv ?? null,
+      batteryState: battery ? (battery.charging ? "Charging" : "Discharging") : "Unknown",
+      ...this.x3Fields(state.settings),
+      supportedPollingRates: [...X3_POLLING_RATES],
+      supportedLiftOffDistances: [...X3_LOD],
+      activeProfile: null,
+      connectionType: this.isWireless() ? "Wireless" : "Wired",
+      firmware: [],
+    } as MouseStatus;
+  }
+
+  getButtonOptions(): string[] {
+    return [...X3_BUTTON_OPTIONS];
+  }
+
+  async setButtonMapping(button: string, action: string): Promise<void> {
+    this.requireX3();
+    const index = X3_BUTTON_SLOT[button];
+    if (index === undefined) throw new RangeError(`Unknown X3 button: ${button}`);
+    const slot = x3ParseActionLabel(action);
+    if (!slot) throw new RangeError(`${action} is not an X3 button action.`);
+    await this.applyX3((s) => { s.buttons[index] = slot; });
+  }
+
+  async resetButtonMappings(): Promise<void> {
+    this.requireX3();
+    await this.applyX3((s) => { s.buttons = X3_FACTORY_BUTTONS.map((b) => [...b] as unknown as X3Settings["buttons"][number]); });
+  }
+
+  async uploadMacro(macro: { slot?: number; events: readonly X3MacroEvent[] }): Promise<void> {
+    this.requireX3();
+    const chunks = buildX3MacroChunks(macro.events, macro.slot ?? 2);
+    await this.run(async () => {
+      for (const chunk of chunks) {
+        await this.device.sendFeatureReport(chunk[0], chunk.slice(1));
+        await this.delay(this.x3BurstGapMs ?? X3_MACRO_GAP_MS);
+      }
+    });
+  }
+
+  async setDpiStageCount(count: number): Promise<number> {
+    this.requireX3();
+    await this.applyX3((s) => {
+      if (!Number.isInteger(count) || count < 1 || count > X3_MAX_STAGES) {
+        throw new RangeError(`This mouse has 1 to ${X3_MAX_STAGES} DPI stages.`);
+      }
+      const last = s.dpiStages[s.dpiStages.length - 1] ?? 800;
+      s.dpiStages = Array.from({ length: count }, (_, i) => s.dpiStages[i] ?? last);
+      s.activeStage = Math.min(s.activeStage, count - 1);
+    });
+    return count;
+  }
+
+  async setDpiStageColor(stage: number, color: string): Promise<string> {
+    this.requireX3();
+    const match = /^#([0-9a-f]{6})$/i.exec(color);
+    if (!match) throw new TypeError("DPI stage colour must be #rrggbb.");
+    const rgb = [0, 2, 4].map((i) => parseInt(match[1].slice(i, i + 2), 16)) as unknown as X3Rgb;
+    await this.applyX3((s) => {
+      this.requireX3Stage(s, stage);
+      s.stageColors[stage] = rgb;
+    });
+    return color.toLowerCase();
+  }
+
+  getSleepOptions(): number[] {
+    return Array.from({ length: 60 }, (_, i) => (i + 1) * X3_SLEEP_STEP_S);
+  }
+
+  async setSleepTimeout(seconds: number): Promise<number> {
+    this.requireX3();
+    if (!Number.isInteger(seconds) || seconds % X3_SLEEP_STEP_S !== 0) {
+      throw new RangeError("Sleep time must be a multiple of 30 seconds.");
+    }
+    await this.applyX3((s) => { s.sleepMinutes = seconds / 60; });
+    return seconds;
+  }
+
+  async setDeepSleepTimeout(minutes: number): Promise<number> {
+    this.requireX3();
+    await this.applyX3((s) => { s.deepSleepMinutes = minutes; });
+    return minutes;
+  }
+
+  getDeepSleepTimeout(): number {
+    return x3StateFor(this.device.productId).settings.deepSleepMinutes;
+  }
+
+  getDebounceMaxMs(): number {
+    return 50;
+  }
+
+  getDebounceOptions(): number[] {
+    return Array.from({ length: 25 }, (_, i) => (i + 1) * 2);
+  }
+
+  async setDebounceTime(ms: number): Promise<number> {
+    this.requireX3();
+    if (!Number.isInteger(ms) || ms < 2 || ms > 50 || ms % 2 !== 0) {
+      throw new RangeError("Debounce time must be an even 2 to 50 ms.");
+    }
+    await this.applyX3((s) => { s.debounceMs = ms; });
+    return ms;
+  }
+
+  async setLiftOffDistance(lod: NonNullable<MouseStatus["liftOffDistance"]>): Promise<string> {
+    this.requireX3();
+    const index = (X3_LOD as readonly string[]).indexOf(lod);
+    if (index < 0) throw new RangeError("Lift-off distance must be Low (1 mm) or High (2 mm).");
+    await this.applyX3((s) => { s.lod = index as 0 | 1; });
+    return lod;
+  }
+
+  async setMotionSync(enabled: boolean): Promise<boolean> {
+    this.requireX3();
+    await this.applyX3((s) => { s.motionSync = enabled; });
     return enabled;
   }
 

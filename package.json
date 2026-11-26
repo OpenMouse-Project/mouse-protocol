@@ -26,6 +26,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./aula": {
+      "types": "./dist/aula/index.d.ts",
+      "import": "./dist/aula/index.js"
+    },
     "./bytech": {
       "types": "./dist/bytech/index.d.ts",
       "import": "./dist/bytech/index.js"
@@ -69,6 +73,10 @@
     "./lamzu": {
       "types": "./dist/lamzu/index.d.ts",
       "import": "./dist/lamzu/index.js"
+    },
+    "./leobog": {
+      "types": "./dist/leobog/index.d.ts",
+      "import": "./dist/leobog/index.js"
     },
     "./mchose": {
       "types": "./dist/mchose/index.d.ts",
@@ -214,6 +222,10 @@
       "types": "./dist/ryunix/index.d.ts",
       "import": "./dist/ryunix/index.js"
     },
+    "./instant": {
+      "types": "./dist/instant/index.d.ts",
+      "import": "./dist/instant/index.js"
+    },
     "./amkette": {
       "types": "./dist/amkette/index.d.ts",
       "import": "./dist/amkette/index.js"
@@ -257,6 +269,10 @@
     "./roccat": {
       "types": "./dist/roccat/index.d.ts",
       "import": "./dist/roccat/index.js"
+    },
+    "./xiaomi": {
+      "types": "./dist/xiaomi/index.d.ts",
+      "import": "./dist/xiaomi/index.js"
     }
   },
   "scripts": {

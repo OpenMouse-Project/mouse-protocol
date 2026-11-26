@@ -556,3 +556,4 @@ export function keychronDecodeKeycodeReply(response: Uint8Array): number {
   return ((response[4] ?? 0) << 8) | (response[5] ?? 0);
 }
 
+export { KEYCHRON_RECEIVER_KEYS, KEYCHRON_RECEIVER_MODIFIERS } from "./receiver-keys.ts";

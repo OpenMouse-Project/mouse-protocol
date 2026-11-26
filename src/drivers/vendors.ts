@@ -24,6 +24,7 @@ import {
   ROCCAT_VENDOR_ID,
 } from "../roccat/index.ts";
 import { GLORIOUS_CORE2_PRODUCTS, GLORIOUS_CORE2_USAGE_PAGE, GLORIOUS_CORE2_VENDOR_ID } from "../glorious-core2/index.ts";
+import { SC380_PRO_RECEIVER_ID, SC380_PRO_USAGE, SC380_PRO_USAGE_PAGE, SC380_PRO_VENDOR_ID } from "../aula/index.ts";
 import { GLORIOUS_SINOWEALTH_PRODUCTS } from "../glorious-sinowealth/index.ts";
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { HITSCAN_PRODUCTS, HITSCAN_VENDOR_ID, HITSCAN_XVI_PRODUCTS } from "@openmouse/protocol/hitscan";
@@ -37,6 +38,12 @@ import {
 } from "@openmouse/protocol/gearhub";
 import { GWOLVES_PRODUCTS } from "./gwolves/products.ts";
 import { LAMZU_INCA_PRODUCTS, LAMZU_INCA_VENDOR_ID } from "@openmouse/protocol/lamzu";
+import {
+  LEOBOG_GM3_PRODUCT_IDS,
+  LEOBOG_GM3_USAGE,
+  LEOBOG_GM3_USAGE_PAGE,
+  LEOBOG_GM3_VENDOR_ID,
+} from "../leobog/index.ts";
 import {
   MCHOSE_CONFIG_USAGE,
   MCHOSE_CONFIG_USAGE_PAGE,
@@ -177,11 +184,18 @@ import {
   COOLERMASTER_VENDOR_ID,
 } from "@openmouse/protocol/coolermaster";
 import { AJAZZ_AK820_WIRED_PID } from "../ajazz/ak820.ts";
+import {
+  INSTANT_PRODUCT_IDS,
+  INSTANT_USAGE,
+  INSTANT_USAGE_PAGE,
+  INSTANT_VENDOR_ID,
+} from "@openmouse/protocol/instant";
 import { AJ200P_PRODUCTS, AJ200P_USAGE, AJ200P_USAGE_PAGE, AJ200P_VENDOR_ID } from "../ajazz/aj200p.ts";
 
 export const VENDOR_ID = {
   ajazzAj200p: AJ200P_VENDOR_ID,
   redgear: REDGEAR_X13_VENDOR_ID,
+  sades: INSTANT_VENDOR_ID,
   coolermaster: COOLERMASTER_VENDOR_ID,
   ajazz: 0x1a2c,
   vaxee: VAXEE_VENDOR_ID,
@@ -199,6 +213,7 @@ export const VENDOR_ID = {
   lamzu: 0x373e,
   lunafury: 0x373e,
   vancer: 0x373e,
+  leobog: LEOBOG_GM3_VENDOR_ID,
   bytech: 0x372e,
   lamzuInca: LAMZU_INCA_VENDOR_ID,
   attackshark: 0x373e,
@@ -255,6 +270,7 @@ export const VENDOR_ID = {
   hitscan: HITSCAN_VENDOR_ID,
   roccat: ROCCAT_VENDOR_ID,
   thermaltake: THERMALTAKE_VENDOR_ID,
+  xiaomi: 0x2717,
 } as const;
 
 /**
@@ -346,6 +362,21 @@ export const REDRAGON_M719_PRO_HID_FILTERS: HIDDeviceFilter[] = REDRAGON_M719_PR
     usage: REDRAGON_M719_PRO_NOTIFY_USAGE,
   },
 ]);
+
+/**
+ * LEOBOG GM3 (SinoWealth): the wired mouse and 2.4 GHz receiver expose the
+ * report-9 battery query on the 0xFF02:0x0002 vendor collection.
+ */
+// 258a:0138 is also the AULA SC380 Pro receiver, whose identical filter is
+// listed in SUPPORTED_HID_FILTERS already, so only the cable id is added here.
+export const LEOBOG_GM3_HID_FILTERS: HIDDeviceFilter[] = LEOBOG_GM3_PRODUCT_IDS
+  .filter((productId) => productId !== SC380_PRO_RECEIVER_ID)
+  .map((productId) => ({
+  vendorId: LEOBOG_GM3_VENDOR_ID,
+  productId,
+  usagePage: LEOBOG_GM3_USAGE_PAGE,
+  usage: LEOBOG_GM3_USAGE,
+}));
 
 /** Holtek config collection `0xFFA0:0x01` on USB interface 2 of the M724 and M612. */
 export const REDRAGON_HID_FILTERS: HIDDeviceFilter[] = [...REDRAGON_PRODUCT_IDS].map((productId) => ({
@@ -982,9 +1013,32 @@ export const KMART_HID_FILTERS: HIDDeviceFilter[] = KMART_PRODUCT_IDS.map((produ
   vendorId: KMART_VENDOR_ID, productId, usagePage: KMART_USAGE_PAGE, usage: KMART_USAGE,
 }));
 
+/**
+ * Xiaomi Mi Gaming Mouse, wired (0x5009) and wireless (0x500b). No HID
+ * descriptor has been captured, so the usage page is unknown; the driver
+ * selects its collection by shape (any collection with input and output
+ * reports).
+ */
+export const XIAOMI_HID_FILTERS: HIDDeviceFilter[] = [0x5009, 0x500b].map((productId) => ({
+  vendorId: VENDOR_ID.xiaomi,
+  productId,
+}));
+
 export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
+  {
+    vendorId: SC380_PRO_VENDOR_ID,
+    productId: SC380_PRO_RECEIVER_ID,
+    usagePage: SC380_PRO_USAGE_PAGE,
+    usage: SC380_PRO_USAGE,
+  },
   ...[...AJ200P_PRODUCTS.keys()].map((productId) => ({ vendorId: AJ200P_VENDOR_ID, productId, usagePage: AJ200P_USAGE_PAGE, usage: AJ200P_USAGE })),
   { vendorId: VENDOR_ID.redgear, productId: REDGEAR_X13_PRODUCT_ID, usagePage: REDGEAR_X13_USAGE_PAGE, usage: REDGEAR_X13_USAGE },
+  ...[...INSTANT_PRODUCT_IDS].map((productId) => ({
+    vendorId: INSTANT_VENDOR_ID,
+    productId,
+    usagePage: INSTANT_USAGE_PAGE,
+    usage: INSTANT_USAGE,
+  })),
   ...VAXEE_HID_FILTERS,
   ...KMART_HID_FILTERS,
   ...ASUS_HID_FILTERS,
@@ -992,6 +1046,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...REDRAGON_HID_FILTERS,
   ...REDRAGON_M690_PRO_HID_FILTERS,
   ...REDRAGON_M719_PRO_HID_FILTERS,
+  ...LEOBOG_GM3_HID_FILTERS,
   ...FATER_HID_FILTERS,
   ...THERMALTAKE_HID_FILTERS,
   ...MOTOSPEED_HID_FILTERS,
@@ -1130,4 +1185,5 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   // 64-byte feature report 0 for control.hitscan.com).
   ...[...new Set([...HITSCAN_PRODUCTS.keys(), ...HITSCAN_XVI_PRODUCTS.keys()])]
     .map((productId) => ({ vendorId: VENDOR_ID.hitscan, productId })),
+  ...XIAOMI_HID_FILTERS,
 ];
