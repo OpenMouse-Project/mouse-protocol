@@ -67,7 +67,36 @@ test("Kmart status reports battery and polling, and no DPI until a stage was wri
   await client.setDpi(1200);
   const after = await client.readStatus();
   assert.equal(after.dpi, 1200);
-  assert.equal(after.ui?.statusNote, undefined);
+  assert.match(after.ui?.statusNote ?? "", /last sent.*cannot report it back/);
+});
+
+test("Kmart presents a DPI the mouse ignored only as sent, never as confirmed", async () => {
+  const client = new KmartHidClient(device({ ignoreWrites: true }).hid);
+  await client.setDpi(1200);
+  const status = await client.readStatus();
+  assert.equal(status.dpi, 1200);
+  assert.match(status.ui?.statusNote ?? "", /last sent.*cannot report it back/);
+});
+
+test("Kmart forgets the remembered DPI when a later write cannot be confirmed", async () => {
+  const fake = device();
+  const client = new KmartHidClient(fake.hid);
+  await client.setDpi(1200);
+  const receive = fake.hid.receiveFeatureReport.bind(fake.hid);
+  let failNext = false;
+  (fake.hid as unknown as { receiveFeatureReport: typeof receive }).receiveFeatureReport = async (id) => {
+    if (failNext) { failNext = false; throw new Error("unplugged"); }
+    return receive(id);
+  };
+  const send = fake.hid.sendFeatureReport.bind(fake.hid);
+  (fake.hid as unknown as { sendFeatureReport: typeof send }).sendFeatureReport = async (id, data) => {
+    await send(id, data);
+    if (new Uint8Array(data as ArrayBuffer)[1] === KMART_COMMAND.dpiStages) failNext = true;
+  };
+  await assert.rejects(() => client.setDpi(1600));
+  const status = await client.readStatus();
+  assert.equal(status.dpi, 0, "neither the old nor the new table is shown as current");
+  assert.match(status.ui?.statusNote ?? "", /no DPI is shown until you set one/);
 });
 
 test("Kmart polling writes verify against read-back", async () => {

@@ -72,7 +72,7 @@ export class KmartHidClient {
           : status.sensor !== KMART_SENSOR_PMW3325
             ? "This sensor has no verified DPI table, so only the polling rate can be changed."
             : this.stagesWritten
-              ? undefined
+              ? "The DPI shown is the value OpenMouse last sent; this mouse cannot report it back to confirm."
               : `This mouse cannot report its DPI stages, so no DPI is shown until you set one. The first DPI change writes all six stages: the active one to your choice and the others to ${DEFAULT_STAGES.join(", ")} DPI.`;
       return {
         brand: "Kmart",
@@ -116,9 +116,12 @@ export class KmartHidClient {
       const stage = Math.min(status.activeStage, enabled - 1);
       const stages = [...this.stages];
       stages[stage] = dpi;
+      // Until the layout reads back, the mouse may hold either table, so
+      // neither is shown as current if this write fails part-way.
+      this.stagesWritten = false;
       await this.write(KMART_COMMAND.dpiStages, kmartDpiStagesData(stages, stage, enabled));
-      // The DPI values cannot be read back; the stage layout can, so a write
-      // the mouse rejected or garbled is not recorded as the new table.
+      // DPI values cannot be read back, so this only catches a garbled or
+      // rejected stage layout; the DPI shown afterwards is what was sent.
       const confirmed = await this.queryStatus();
       if (confirmed.activeStage !== stage || confirmed.enabledStageCount !== enabled) {
         throw new Error("Kmart DPI-stage write did not persist.");
