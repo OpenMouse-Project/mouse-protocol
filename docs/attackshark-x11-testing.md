@@ -116,8 +116,50 @@ handshake is unverified on the Delux M600 Pro sharing the receiver.
   Pro sibling measured 3.5–3.8x on a 4x swipe; nothing equivalent exists for
   `0x55`).
 - Wired path (`1d57:fa55`, 52-byte DPI form) untested on a genuine X11.
+- Bluetooth transport has no test coverage in OpenMouse.
 - Whether settings persist across power cycles was not tested.
 - The receiver write-spacing freeze (writes <1 s apart freeze the link until
   replug) was measured on the M600 Pro sibling and is enforced for all X11
   receiver writes; not re-measured on the X11.
-- Lift-off distance, debounce, sleep, lighting: no packets captured.
+- The vendor panel for this X11 does not offer lift-off distance or motion
+  sync. The DPI writer retains the other sensor bits during edits.
+
+## Windows receiver settings
+
+A later Windows capture from a genuine X11 receiver (`1d57:fa60`, model
+`0x55`, firmware `0x0113`) showed polling writes at 125, 250, 500, and 1000 Hz,
+active DPI stage changes, angle snapping and ripple control, 4/8/12 ms
+debounce writes, normal sleep, a side-button remap, and a three-page macro
+that presses and releases A. A follow-up verified browser read-back of the
+side-button map and lighting mode and receiver acknowledgments for the
+macro upload and binding.
+
+| Report | Driver coverage and evidence |
+| --- | --- |
+| `0x04` | DPI stages, values, colors, active stage, angle snapping, and ripple control. Stage-count and color edits reuse the observed table layout and are covered by offline tests. |
+| `0x05` | Normal and deep sleep, debounce, lighting effects, color, speed, and brightness. The two sleep timers and the LED fields share a packet. Deep sleep and the broader lighting options come from the reference protocol and have offline coverage. |
+| `0x06` | All four polling rates, with receiver acknowledgment before the driver updates its cached rate. |
+| `0x08` | Button maps and keyboard shortcuts. The codec handles both the Windows receiver's write-order response and the documented permuted response. |
+| `0x09` | Upload and assign an onboard macro. The recorded sample used one fixed playback pass. Repeat modes and extended action delays come from the reference protocol. Macro definitions are kept in the browser library. |
+| `0x0b` | Firmware version. The driver also listens for battery and active DPI stage changes on input report `0x03`. |
+
+The receiver needed about 520 ms before the first readiness read on Windows.
+Repeated scans were associated with a pointer freeze. OpenMouse can request an
+explicit settings scan and keep regular status refreshes passive. Scans require
+receiver model `0x55`, use a gap of two seconds between requests, and stop at
+the first missing or invalid reply. The driver reads DPI, polling, and firmware
+before optional controls so a missing reply for an optional block still leaves
+those settings available. Confirmed receiver writes use at least one second
+between configuration reports. The driver leaves unrelated settings intact
+when it has a valid report to edit.
+
+The current captures cover profile 1. Switching onboard profiles, reading
+back existing macro contents, and wake-up controls still need device-specific
+validation. Additional lighting modes listed in the reference have no
+confirmed effect on this model.
+
+Protocol references include
+[attack-shark-x11-driver by HarukaYamamoto0](https://github.com/HarukaYamamoto0/attack-shark-x11-driver)
+and
+[SharkX11 by Miguel Sanz and contributors](https://github.com/vasfvitor/attackshark-x11).
+Both reference projects publish their work under the MIT license.

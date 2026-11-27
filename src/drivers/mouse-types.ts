@@ -14,6 +14,12 @@ export interface MouseUiHints {
   family?: string;
   /** When false, core settings grid stays hidden. Default true. */
   settingsReady?: boolean;
+  /** The confirmed X11 firmware returned an editable button table. */
+  x11MacroBindings?: boolean;
+  /** This X11 can load its configuration on request. */
+  x11ConfigurationAvailable?: boolean;
+  /** This connection has seen a live X11 receiver message and can load once on connect. */
+  x11AutoReadReady?: boolean;
   /**
    * DPI and polling in this status were read from the mouse rather than filled
    * in, so they are worth reporting even while `settingsReady` hides the grid.
@@ -129,6 +135,8 @@ export interface MouseLighting {
   brightness?: number | null;
   /** Brightness percentages the device accepts. */
   brightnessLevels?: readonly number[];
+  /** Effects that use the brightness picker. Omission shows it for every effect. */
+  brightnessModes?: readonly MouseLightingMode[];
   /** True when the mouse cannot report the effect back (Razer effect writes). */
   writeOnly?: boolean;
   /** Driver-specific per-LED zone id when this is a directly painted RGB cell. */
@@ -151,7 +159,9 @@ export type MouseLightingMode =
   | "Cycling Flash"
   | "YOYO Ball"
   | "Single Flash"
-  | "Breathing Loop";
+  | "Breathing Loop"
+  | "Static DPI"
+  | "Breathing DPI";
 
 export interface AtkStoredButton {
   id: "left" | "right" | "middle" | "back" | "forward" | "bottom";
@@ -446,6 +456,8 @@ export interface MouseStatus {
   ninjutsoSlamClick?: "Low" | "Medium" | "High" | null;
   debounceMs?: number | null;
   sleepTimeout?: number | null;
+  /** Deep sleep duration in minutes, on devices with a separate timer. */
+  deepSleepMinutes?: number;
   angleSnapping?: boolean | null;
   rippleControl?: boolean | null;
   slamclickFilter?: boolean | null;
