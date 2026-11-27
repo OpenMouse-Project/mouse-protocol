@@ -1245,7 +1245,7 @@ export class AttackSharkHidClient {
   private async editX11Buttons(change: (actions: X11ButtonAction[]) => void, upload?: () => Promise<void>): Promise<void> {
     await this.exclusive(async () => {
       const current = await this.readX11Buttons() ?? (this.x11ButtonsFromDisk ? null : this.x11LastButtons);
-      if (!current) throw new Error("Wake the mouse to read its button settings, or use Reset to default to load the X11 factory mapping.");
+      if (!current) throw new Error("Wake the mouse to read its button map, or use Reset to default.");
       const actions = [...current];
       change(actions);
       if (!Object.values(X11_BUTTON_SLOTS).some((slot) => actions[slot][0] === 0x02)) {
@@ -1592,6 +1592,7 @@ export class AttackSharkHidClient {
       await this.exclusive(async () => {
         await this.sendX11Confirmed(buildX11ButtonReport(X11_FACTORY_BUTTON_ACTIONS));
         this.x11LastButtons = [...X11_FACTORY_BUTTON_ACTIONS];
+        this.x11ButtonsFromDisk = false;
       });
       return;
     }

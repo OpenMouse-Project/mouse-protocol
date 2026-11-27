@@ -65,6 +65,16 @@ test("X11 A press/release matches the captured macro pages and checksum", () => 
   assert.deepEqual(pages[2].slice(0, 12), bytes("09 0c 07 02 00 00 00 00 00 00 00 8d"));
 });
 
+test("X11 checksum includes the final action byte of a 50-unit macro", () => {
+  const events = Array.from({ length: 50 }, (_, index) => ({
+    usage: 4, down: index % 2 === 0, delayMs: 10,
+  }));
+  const [first, , third] = buildX11MacroReports(7, events);
+  assert.equal(first[29], 50);
+  // 25 press/release pairs at 0x8a each, plus repeat count 1 and unit count 50.
+  assert.deepEqual(third.slice(4, 12), bytes("81 04 01 04 81 04 0d ad"));
+});
+
 test("X11 macro writes a valid UTF-8 name and includes it in the checksum", () => {
   const name = "é".repeat(9) + "日本";
   const [first, , third] = buildX11MacroReports(7, [

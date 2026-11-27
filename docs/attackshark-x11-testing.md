@@ -143,6 +143,13 @@ macro upload and binding.
 | `0x09` | Upload and assign an onboard macro. The recorded sample used one fixed playback pass. Repeat modes and extended action delays come from the reference protocol. Macro definitions are kept in the browser library. |
 | `0x0b` | Firmware version. The driver also listens for battery and active DPI stage changes on input report `0x03`. |
 
+Static inspection of the Windows vendor app (version `1.0.0.2`) confirmed
+that its macro writer sums logical payload offsets 3 through 128 inclusive.
+The final action byte at logical offset 128 goes to offset 9 of the third
+feature report and contributes to its checksum. The short receiver capture
+had a zero there. An offline 50-unit regression test exercises that byte with
+a nonzero value. A 50-unit upload on hardware remains untested.
+
 The receiver needed about 520 ms before the first readiness read on Windows.
 Repeated scans were associated with a pointer freeze. OpenMouse can request an
 explicit settings scan and keep regular status refreshes passive. Scans require

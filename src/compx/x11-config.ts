@@ -181,7 +181,7 @@ export function buildX11MacroReports(
   pages[2].set(actions.slice(94), 4);
   const sum = pages[0].subarray(4).reduce((total, byte) => total + byte, 0)
     + pages[1].subarray(4).reduce((total, byte) => total + byte, 0)
-    + pages[2].subarray(4, 9).reduce((total, byte) => total + byte, 0);
+    + pages[2].subarray(4, 10).reduce((total, byte) => total + byte, 0);
   new DataView(pages[2].buffer).setUint16(10, sum);
   return pages;
 }

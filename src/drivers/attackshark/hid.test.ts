@@ -197,7 +197,7 @@ test("native X11 adapter writes polling over 0x06 and DPI over 0x04", async () =
 // A native adapter in front of a genuine X11 receiver (1d57:fa60, firmware
 // 0x0107), answering the 0xa0 read handshake with the reports it returned on
 // hardware: three of six stages enabled, 1,000 Hz.
-function nativeX11WithReadBack(options: { asleep?: boolean; writeResult?: number } = {}) {
+function nativeX11WithReadBack(options: { asleep?: boolean; writeResult?: number; unreadableReport?: number } = {}) {
   const hex = (text: string) => text.split(" ").map((byte) => parseInt(byte, 16));
   const reports = new Map<number, number[]>([
     [0x04, hex("04 38 01 00 01 07 20 20 0c 0e 0f 12 75 81 01 01 00 00 00 00 00 01 00 00 02 ff 00 00 00 ff 00 00 "
@@ -240,7 +240,7 @@ function nativeX11WithReadBack(options: { asleep?: boolean; writeResult?: number
     receiveFeatureReport(reportId: number) {
       // Without a staged request the firmware returns stale buffer bytes.
       const reply = reportId === 0xa0
-        ? [0xa0, staged === null || options.asleep ? 0 : 1, 0, 0, 0, 0, 0, 0]
+        ? [0xa0, staged === null || options.asleep || staged === options.unreadableReport ? 0 : 1, 0, 0, 0, 0, 0, 0]
         : reportId === staged ? reports.get(reportId)! : [0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x15, 0x00];
       if (reportId !== 0xa0) {
         if (reportId !== staged) staleReads++;
@@ -396,6 +396,34 @@ test("reopening the X11 from a saved settings snapshot is passive", async () => 
   assert.deepEqual(cached.lighting, live.lighting);
   assert.equal(cached.pollingRateHz, live.pollingRateHz);
   assert.deepEqual(second.sent, []);
+});
+
+test("X11 button reset allows remapping after a restored snapshot when the map cannot be read", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const options: { unreadableReport?: number } = {};
+  const { device, sent, announce } = nativeX11WithReadBack(options);
+  const clientOptions = { batteryWaitMs: 0, receiverWriteGapMs: 0, x11QueryWaitMs: 50 };
+  const client = new AttackSharkHidClient(device, clientOptions);
+  await client.open();
+  announce(0x55);
+  await client.readX11Configuration();
+  const snapshot = client.serializeX11Settings();
+  assert.ok(snapshot);
+  await client.close();
+
+  const reopened = new AttackSharkHidClient(device, clientOptions);
+  await reopened.open();
+  assert.equal(reopened.restoreX11Settings(snapshot), true);
+  options.unreadableReport = 0x08;
+  sent.length = 0;
+  await assert.rejects(reopened.setButtonMapping("Forward", "Volume Up"), /Reset to default/);
+  assert.deepEqual(sent.map(({ reportId }) => reportId), [0xa0]);
+
+  await reopened.resetButtonMappings();
+  await reopened.setButtonMapping("Forward", "Volume Up");
+  assert.deepEqual(sent.map(({ reportId }) => reportId), [0xa0, 0x08, 0xa0, 0x08]);
+  assert.equal((await reopened.readStatus()).buttonMappings?.Forward, "Volume Up");
 });
 
 test("a named X11 edit keeps the mouse's disabled stages and colours", async () => {
