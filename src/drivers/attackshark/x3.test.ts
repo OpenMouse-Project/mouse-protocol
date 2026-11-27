@@ -239,6 +239,13 @@ test("a mouse reporting an unknown model id never writes through the X3 path", a
 
 async function named(id: number) {
   const device = fakeDevice(0xfa60);
+  if (id === 0x55) {
+    const send = device.unit.sendFeatureReport.bind(device.unit);
+    device.unit.sendFeatureReport = async (reportId, data) => {
+      await send(reportId, data);
+      if (reportId === 0x04 || reportId === 0x06) device.push([0x03, id, 0x50, 0x00, reportId]);
+    };
+  }
   const client = new AttackSharkHidClient(device.unit, { batteryWaitMs: 0, x3BurstGapMs: 0 });
   await client.open();
   device.push([0x03, id, 0x50, 0x00, 0x06]);

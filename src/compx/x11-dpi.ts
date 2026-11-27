@@ -160,7 +160,7 @@ function checksum(buffer: Uint8Array): number {
  * Build the full report buffer including its leading report id byte. Callers
  * hand this to `sendFeatureReport(X11_DPI_REPORT_ID, buffer.subarray(1))`.
  */
-export function buildX11DpiReport(config: X11DpiConfig): Uint8Array {
+export function buildX11DpiReport(config: X11DpiConfig): Uint8Array<ArrayBuffer> {
   const buffer = new Uint8Array(56);
   const base = config.base && config.base.length >= 52
     && config.base[0] === X11_DPI_REPORT_ID && config.base[1] === 0x38
@@ -188,27 +188,30 @@ export function buildX11DpiReport(config: X11DpiConfig): Uint8Array {
   buffer[0] = X11_DPI_REPORT_ID;
   buffer[1] = 0x38;
   buffer[2] = 0x01;
-  buffer[3] = config.angleSnap ? 0x01 : 0x00;
-  buffer[4] = config.rippleControl ? 0x01 : 0x00;
+  buffer[3] = (buffer[3] & 0xf0) | (config.angleSnap ? 0x01 : 0x00);
+  buffer[4] = (buffer[4] & 0xf0) | (config.rippleControl ? 0x01 : 0x00);
   buffer[5] = config.enabledMask ?? (base ? base[5] : 0x3f);
 
   // Bits 6 and 7 belong to the unused stage slots; keep whatever is there.
-  let mask = buffer[6] & 0xc0;
+  let mask = buffer[6];
+  let mirroredMask = buffer[7];
   for (let i = 0; i < X11_DPI_STAGE_COUNT; i++) {
     const dpi = config.stages[i] ?? X11_DPI_DEFAULT_STAGES[i] ?? 800;
-    if (base && dpi === 0) {
-      mask |= buffer[6] & (0x01 << i);
-      continue;
-    }
-    buffer[8 + i] = encodeX11DpiByte(dpi);
-    if (dpi > 12000) mask |= 0x01 << i;
+    if (base && dpi === 0) continue;
+    const bit = 1 << i;
+    const encoded = encodeX11DpiByte(dpi);
     const high = (dpi >= 10100 && dpi <= 12000) || (dpi >= 20100 && dpi <= 22000);
+    if (base && buffer[8 + i] === encoded && Boolean(mask & bit) === (dpi > 12000)
+      && (buffer[16 + i] === 1) === high) continue;
+    mask = (mask & ~bit) | (dpi > 12000 ? bit : 0);
+    mirroredMask = (mirroredMask & ~bit) | (dpi > 12000 ? bit : 0);
+    buffer[8 + i] = encoded;
     buffer[16 + i] = high ? 0x01 : 0x00;
   }
   buffer[6] = mask;
-  buffer[7] = mask;
+  buffer[7] = mirroredMask;
   buffer[24] = config.activeStage;
-  buffer[49] = 0x02;
+  if (!base) buffer[49] = 0x02;
 
   const sum = checksum(buffer);
   buffer[50] = (sum >> 8) & 0xff;
@@ -262,8 +265,8 @@ export function decodeX11DpiReport(data: Uint8Array): X11DpiReadBack | null {
   return {
     stages,
     activeStage,
-    angleSnap: buffer[3] === 0x01,
-    rippleControl: buffer[4] === 0x01,
+    angleSnap: (buffer[3] & 0x0f) === 0x01,
+    rippleControl: (buffer[4] & 0x0f) === 0x01,
     enabledMask: buffer[5],
     base: buffer.slice(0, Math.min(buffer.length, 56)),
   };
