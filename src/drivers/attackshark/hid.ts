@@ -415,6 +415,7 @@ interface X11RuntimeState {
   /** True once the 0xa0 read-back has worked over this transport. */
   readBackWorks: boolean;
   pollingRateKnown: boolean;
+  buttonRevision: number;
 }
 
 const x11RuntimeStates = new Map<number, X11RuntimeState>();
@@ -430,6 +431,7 @@ function x11RuntimeFor(productId: number): X11RuntimeState {
       firmwareVersion: null,
       readBackWorks: false,
       pollingRateKnown: false,
+      buttonRevision: 0,
     };
     x11RuntimeStates.set(productId, state);
   }
@@ -614,7 +616,7 @@ export class AttackSharkHidClient {
   private x11Ack: { reportId: number; finish: (result: number) => void } | null = null;
   private x11LastPower: ReturnType<typeof decodeX11PowerReport> = null;
   private x11LastButtons: X11ButtonAction[] | null = null;
-  private x11ButtonsFromDisk = false;
+  private x11ButtonRevision: number | null = null;
   private lastStatus: MouseStatus | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private exclusiveQueue: Promise<unknown> = Promise.resolve();
@@ -736,9 +738,10 @@ export class AttackSharkHidClient {
         runtime.readBackWorks = false;
         runtime.firmwareVersion = null;
         runtime.pollingRateKnown = false;
+        runtime.buttonRevision++;
         this.x11LastPower = null;
         this.x11LastButtons = null;
-        this.x11ButtonsFromDisk = false;
+        this.x11ButtonRevision = null;
       }
       runtime.modelId = packet[1];
       if (packet[1] === X11_MODEL_ID && (packet[2] === 0x10 || packet[2] === 0x40)) {
@@ -888,7 +891,6 @@ export class AttackSharkHidClient {
       if (!state.base) Object.assign(state, rawDpi);
       this.x11LastPower = rawPower;
       this.x11LastButtons = rawButtons;
-      this.x11ButtonsFromDisk = true;
       const runtime = x11RuntimeFor(this.device.productId);
       // Display cached DPI, but require a live read before rewriting the table.
       runtime.readBackWorks = true;
@@ -1229,13 +1231,14 @@ export class AttackSharkHidClient {
   }
 
   private async readX11Buttons(scan = false): Promise<X11ButtonAction[] | null> {
+    const runtime = x11RuntimeFor(this.device.productId);
+    const revision = runtime.buttonRevision;
     try {
       const report = await this.queryX11Report(X11_BUTTON_REPORT_ID, undefined, scan);
       const decoded = report && decodeX11ButtonReport(report);
-      if (decoded) {
-        this.x11LastButtons = decoded;
-        this.x11ButtonsFromDisk = false;
-      }
+      if (!decoded || runtime.buttonRevision !== revision) return null;
+      this.x11LastButtons = decoded;
+      this.x11ButtonRevision = revision;
       return decoded;
     } catch {
       return null;
@@ -1244,19 +1247,28 @@ export class AttackSharkHidClient {
 
   private async editX11Buttons(change: (actions: X11ButtonAction[]) => void, upload?: () => Promise<void>): Promise<void> {
     await this.exclusive(async () => {
-      const current = await this.readX11Buttons() ?? (this.x11ButtonsFromDisk ? null : this.x11LastButtons);
+      const runtime = x11RuntimeFor(this.device.productId);
+      const current = await this.readX11Buttons()
+        ?? (this.x11ButtonRevision === runtime.buttonRevision ? this.x11LastButtons : null);
       if (!current) throw new Error("Wake the mouse to read its button map, or use Reset to default.");
       const actions = [...current];
       change(actions);
       if (!Object.values(X11_BUTTON_SLOTS).some((slot) => actions[slot][0] === 0x02)) {
         throw new Error("Keep Left Click assigned to at least one mouse button.");
       }
-      const report = buildX11ButtonReport(actions);
       if (upload) await upload();
-      await this.sendX11Confirmed(report);
-      this.x11LastButtons = actions;
-      this.x11ButtonsFromDisk = false;
+      await this.writeX11Buttons(actions);
     });
+  }
+
+  private async writeX11Buttons(actions: X11ButtonAction[]): Promise<void> {
+    const runtime = x11RuntimeFor(this.device.productId);
+    // Invalidate previous live maps even if the receiver applies a write
+    // without acknowledging it. A snapshot never has a live revision.
+    const revision = ++runtime.buttonRevision;
+    await this.sendX11Confirmed(buildX11ButtonReport(actions));
+    this.x11LastButtons = actions;
+    this.x11ButtonRevision = revision;
   }
 
   async assignX11Macro(button: string, events: readonly X11MacroEvent[], playback = 0, repeats = 1, name = ""): Promise<void> {
@@ -1589,11 +1601,7 @@ export class AttackSharkHidClient {
 
   async resetButtonMappings(): Promise<void> {
     if (this.x11ReadBack) {
-      await this.exclusive(async () => {
-        await this.sendX11Confirmed(buildX11ButtonReport(X11_FACTORY_BUTTON_ACTIONS));
-        this.x11LastButtons = [...X11_FACTORY_BUTTON_ACTIONS];
-        this.x11ButtonsFromDisk = false;
-      });
+      await this.exclusive(() => this.writeX11Buttons([...X11_FACTORY_BUTTON_ACTIONS]));
       return;
     }
     this.requireX3();
@@ -1694,6 +1702,10 @@ export class AttackSharkHidClient {
   }
 
   getDeepSleepTimeout(): number {
+    if (this.x11ReadBack) {
+      if (!this.x11LastPower) throw new Error("Load X11 settings to read its deep sleep timeout.");
+      return this.x11LastPower.deepSleepMinutes;
+    }
     return x3StateFor(this.device.productId).settings.deepSleepMinutes;
   }
 

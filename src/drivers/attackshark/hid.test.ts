@@ -426,6 +426,46 @@ test("X11 button reset allows remapping after a restored snapshot when the map c
   assert.equal((await reopened.readStatus()).buttonMappings?.Forward, "Volume Up");
 });
 
+test("X11 rejects a cached button map after another client writes a newer one", async () => {
+  resetAttackSharkX11DpiState();
+  resetAttackSharkX11RuntimeState();
+  const receiver: { unreadableReport?: number } = {};
+  const { device, sent, announce } = nativeX11WithReadBack(receiver);
+  const options = { batteryWaitMs: 0, receiverWriteGapMs: 0, x11QueryWaitMs: 50 };
+  const first = new AttackSharkHidClient(device, options);
+  const second = new AttackSharkHidClient(device, options);
+  await first.open();
+  await second.open();
+  announce(0x55);
+
+  await first.resetButtonMappings();
+  await second.setButtonMapping("Back", "Volume Down");
+  receiver.unreadableReport = 0x08;
+  sent.length = 0;
+  await assert.rejects(first.setButtonMapping("Forward", "Volume Up"), /read its button map/);
+  assert.deepEqual(sent.map(({ reportId }) => reportId), [0xa0]);
+
+  receiver.unreadableReport = undefined;
+  await first.setButtonMapping("Forward", "Volume Up");
+  const status = await first.readStatus();
+  assert.equal(status.buttonMappings?.Back, "Volume Down");
+  assert.equal(status.buttonMappings?.Forward, "Volume Up");
+});
+
+test("X11 deep sleep getter follows power reads and confirmed writes", async () => {
+  resetAttackSharkX11RuntimeState();
+  const { device, announce } = nativeX11WithReadBack();
+  const client = new AttackSharkHidClient(device, { batteryWaitMs: 0, receiverWriteGapMs: 0, x11QueryWaitMs: 50 });
+  await client.open();
+  announce(0x55);
+
+  assert.throws(() => client.getDeepSleepTimeout(), /Load X11 settings/);
+  await client.readX11Configuration();
+  assert.equal(client.getDeepSleepTimeout(), 10);
+  await client.setDeepSleepTimeout(37);
+  assert.equal(client.getDeepSleepTimeout(), 37);
+});
+
 test("a named X11 edit keeps the mouse's disabled stages and colours", async () => {
   resetAttackSharkX11DpiState();
   resetAttackSharkX11RuntimeState();
